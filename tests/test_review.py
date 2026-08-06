@@ -15,6 +15,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from doit import review
 
@@ -161,21 +162,9 @@ def test_parse_duration_minutes():
     assert review.parse_duration_minutes('') is None
 
 
-def test_bare_review_shows_help_rather_than_running(capsys):
-    """cli-design.md: no args shows help, at every level of the tree."""
-    assert review.main([]) == 0
+def test_nudge_every_rejects_an_unparsable_duration():
+    """A bad value is a usage error, which typer.BadParameter is what earns."""
+    result = CliRunner().invoke(review.app, ['nudge-every', 'soon'])
 
-    out = capsys.readouterr().out
-    assert 'doit review due' in out
-    assert 'overdue-item' not in out, 'help lists the verbs; it never reads the register'
-
-
-def test_unknown_verb_is_a_usage_error(capsys):
-    """Exit 2 distinguishes "you typed it wrong" from "it ran and failed"."""
-    assert review.main(['nonsense']) == 2
-    assert 'Unknown' in capsys.readouterr().err
-
-
-def test_done_without_an_id_is_a_usage_error(capsys):
-    assert review.main(['done']) == 2
-    assert 'Usage' in capsys.readouterr().err
+    assert result.exit_code == 2
+    assert 'expected a duration' in result.output

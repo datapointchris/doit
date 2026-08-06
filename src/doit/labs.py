@@ -27,7 +27,9 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Annotated
 
+import typer
 import yaml
 from pytermstyle import CYAN
 from pytermstyle import GREEN
@@ -35,11 +37,6 @@ from pytermstyle import RESET
 from pytermstyle import YELLOW
 from pytermstyle import clip
 from pytermstyle import header
-from pytermstyle import help_end
-from pytermstyle import help_header
-from pytermstyle import help_row
-from pytermstyle import help_section
-from pytermstyle import help_usage
 
 from doit.cadence import is_due
 from doit.cadence import overdue_days
@@ -426,56 +423,68 @@ def cmd_flash(subject: str | None = None) -> int:
     return 0
 
 
-def show_help() -> int:
-    help_header('doit labs', 'Hands-on practice Labs.')
-    help_usage('doit labs <verb> [ARGS]')
-
-    help_section('Commands')
-    help_row('doit labs due', '', "What's due to practice now")
-    help_row('doit labs list', '', 'Every Lab and its schedule status')
-    help_row('doit labs list', '--json', 'The same, as JSON')
-    help_row('doit labs show', '<id>', 'Open a Lab to read while you work in another pane')
-    help_row('doit labs pick', '', 'Pick a Lab interactively (fzf)')
-    help_row('doit labs flash', '[<x>]', 'Quick recall drill from tool examples (all, or one tool/tag)')
-    help_row('doit labs done', '<id>', 'Mark a Lab practiced (advances its schedule)')
-    help_row('doit labs new', '<name>', 'Scaffold a new Lab and open it in $EDITOR')
-    help_row('doit labs edit', '<id>', 'Edit an existing Lab in $EDITOR')
-
-    help_end()
-    return 0
+app = typer.Typer(name='labs', no_args_is_help=True, help='Hands-on practice Labs.')
 
 
-def needs_argument(usage: str) -> int:
-    print(f'Usage: {usage}', file=sys.stderr)
-    return 2
+@app.command('due')
+def due_command() -> None:
+    """What's due to practice now."""
+    raise typer.Exit(cmd_due())
 
 
-def main(args: list[str]) -> int:
-    if not args:
-        return show_help()
-    verb, rest = args[0], args[1:]
-    if verb in ('help', '-h', '--help'):
-        return show_help()
-    if verb == 'due':
-        return cmd_due()
-    if verb == 'nudge':
-        return cmd_nudge()
-    if verb == 'list':
-        return cmd_list('--json' in rest)
-    if verb == 'pick':
-        return cmd_pick()
-    if verb == 'flash':
-        return cmd_flash(rest[0] if rest else None)
-    if verb == '__render':
-        return cmd_render_preview(rest[0]) if rest else 1
-    if verb == 'show':
-        return cmd_show(rest[0]) if rest else needs_argument('doit labs show <id>')
-    if verb == 'done':
-        return cmd_done(rest[0]) if rest else needs_argument('doit labs done <id>')
-    if verb == 'new':
-        return cmd_new(' '.join(rest)) if rest else needs_argument('doit labs new <name>')
-    if verb == 'edit':
-        return cmd_edit(rest[0]) if rest else needs_argument('doit labs edit <id>')
-    print(f'Unknown: doit labs {verb}', file=sys.stderr)
-    show_help()
-    return 2
+@app.command('list')
+def list_command(
+    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
+) -> None:
+    """Every Lab and its schedule status."""
+    raise typer.Exit(cmd_list(as_json))
+
+
+@app.command('show')
+def show_command(lab_id: Annotated[str, typer.Argument(help='The Lab to open.')]) -> None:
+    """Open a Lab to read while you work in another pane."""
+    raise typer.Exit(cmd_show(lab_id))
+
+
+@app.command('pick')
+def pick_command() -> None:
+    """Pick a Lab interactively (fzf)."""
+    raise typer.Exit(cmd_pick())
+
+
+@app.command('flash')
+def flash_command(
+    subject: Annotated[str | None, typer.Argument(help='One tool or tag; omit to drill everything.')] = None,
+) -> None:
+    """Quick recall drill from tool examples."""
+    raise typer.Exit(cmd_flash(subject))
+
+
+@app.command('done')
+def done_command(lab_id: Annotated[str, typer.Argument(help='The Lab to mark practiced.')]) -> None:
+    """Mark a Lab practiced, advancing its schedule."""
+    raise typer.Exit(cmd_done(lab_id))
+
+
+@app.command('new')
+def new_command(name: Annotated[list[str], typer.Argument(help='The new Lab name.')]) -> None:
+    """Scaffold a new Lab and open it in $EDITOR."""
+    raise typer.Exit(cmd_new(' '.join(name)))
+
+
+@app.command('edit')
+def edit_command(lab_id: Annotated[str, typer.Argument(help='The Lab to edit.')]) -> None:
+    """Edit an existing Lab in $EDITOR."""
+    raise typer.Exit(cmd_edit(lab_id))
+
+
+@app.command('nudge', hidden=True)
+def nudge_command() -> None:
+    """The startup nudge, called by the review nudge rather than by hand."""
+    raise typer.Exit(cmd_nudge())
+
+
+@app.command('__render', hidden=True)
+def render_command(lab_id: Annotated[str, typer.Argument()]) -> None:
+    """Render one Lab body, for the fzf preview pane in `pick`."""
+    raise typer.Exit(cmd_render_preview(lab_id))

@@ -19,10 +19,18 @@ classifiers = [
 # dotfiles. menu-dashboard needs StrEnum (3.11), so 3.12 is already headroom.
 requires-python = ">=3.12"
 
-# The house palette and help grammar, so doit's screens match every other CLI on
-# PATH, plus pyyaml for the hand-edited registers. pyselfupdate arrives with the
-# release that needs updating.
-dependencies = ["pytermstyle", "pyyaml"]
+# typer owns the command tree, matching syncer/indy/relate/ypl/dectl — the bare-
+# shows-help rule, exit 2 on a usage error, and `completion` all come from it
+# rather than being hand-rolled at every node.
+#
+# pytermstyle stays for the palette in command *output*, which is shared with the
+# bash and Go CLIs through its counterparts. Its help_* helpers are deliberately
+# unused: they render the full typeable invocation that typer's help omits, but a
+# local help renderer would diverge from the other five typer CLIs, and that
+# defect is filed to be fixed once for all of them.
+#
+# pyselfupdate arrives with the release that needs updating.
+dependencies = ["typer>=0.15.0", "pytermstyle", "pyyaml"]
 
 [project.scripts]
 doit = "doit.cli:main"

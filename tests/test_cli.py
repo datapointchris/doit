@@ -1,39 +1,56 @@
+"""Tests for the command tree itself, not for what any command does.
+
+What is asserted here is the machine contract: the version line, help on a bare
+invocation at every level, and exit 2 for a usage error. Those come from typer
+rather than from code in this repo, so these are the tests that would catch the
+tree being wired up in a way that loses them.
+"""
+
 import pytest
+from typer.testing import CliRunner
 
 from doit import __version__
-from doit.cli import main
+from doit.cli import app
+
+runner = CliRunner()
 
 
-def test_version_flag_prints_the_version(capsys, monkeypatch):
-    for flag in ('-V', '--version'):
-        monkeypatch.setattr('sys.argv', ['doit', flag])
-        assert main() == 0
-        assert capsys.readouterr().out.strip() == f'doit {__version__}'
+@pytest.mark.parametrize('flag', ['-V', '--version'])
+def test_version_flag_prints_one_line(flag):
+    result = runner.invoke(app, [flag])
+
+    assert result.exit_code == 0
+    assert result.output.strip() == f'doit {__version__}'
 
 
-@pytest.mark.parametrize('argv', [[], ['help'], ['-h'], ['--help']])
-def test_bare_and_help_invocations_print_usage(capsys, monkeypatch, argv):
-    monkeypatch.setattr('sys.argv', ['doit', *argv])
-    assert main() == 0
-    assert 'doit review' in capsys.readouterr().out
+@pytest.mark.parametrize('argv', [[], ['review'], ['labs']])
+def test_every_node_shows_help_bare(argv):
+    """cli-design.md: no args shows help, at every level of the tree."""
+    result = runner.invoke(app, argv)
+
+    assert 'Usage:' in result.output
+    assert 'Options' in result.output
 
 
-def test_unknown_command_is_a_usage_error(capsys, monkeypatch):
-    """Exit 2, not 0: a caller has to tell "you typed it wrong" from a real run.
+def test_root_help_lists_the_namespaces():
+    result = runner.invoke(app, ['--help'])
 
-    Collapsing it into 0 is worse than collapsing it into 1 — it tells a script
-    the command succeeded.
-    """
-    monkeypatch.setattr('sys.argv', ['doit', 'nonsense'])
-
-    assert main() == 2
-
-    captured = capsys.readouterr()
-    assert 'Unknown command: nonsense' in captured.err
-    assert 'doit review' in captured.out, 'the usage that follows is still data'
+    assert result.exit_code == 0
+    assert 'review' in result.output
+    assert 'labs' in result.output
 
 
-def test_review_dispatches_to_its_own_tree(capsys, monkeypatch):
-    monkeypatch.setattr('sys.argv', ['doit', 'review'])
-    assert main() == 0
-    assert 'doit review done' in capsys.readouterr().out
+@pytest.mark.parametrize('argv', [['nonsense'], ['review', 'nonsense'], ['labs', 'nonsense']])
+def test_unknown_command_exits_2(argv):
+    """A caller has to tell "you typed it wrong" from "it ran and failed"."""
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 2
+
+
+@pytest.mark.parametrize('argv', [['review', 'done'], ['labs', 'show'], ['labs', 'done']])
+def test_missing_required_argument_exits_2(argv):
+    """The hand-rolled `needs_argument` helper this replaced returned 2 by hand."""
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 2

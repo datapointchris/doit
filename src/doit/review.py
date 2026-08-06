@@ -23,18 +23,15 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Annotated
 
+import typer
 import yaml
 from pytermstyle import CYAN
 from pytermstyle import GREEN
 from pytermstyle import RESET
 from pytermstyle import YELLOW
 from pytermstyle import header
-from pytermstyle import help_end
-from pytermstyle import help_header
-from pytermstyle import help_row
-from pytermstyle import help_section
-from pytermstyle import help_usage
 
 from doit.cadence import is_due
 from doit.cadence import overdue_days
@@ -269,58 +266,55 @@ def parse_duration_minutes(dur: str) -> int | None:
     return count * 60 if unit == 'h' else count
 
 
-def cmd_nudge_every(dur: str) -> int:
-    """Set how often the startup nudge may fire (e.g. 4h, 90m, 4)."""
-    minutes = parse_duration_minutes(dur)
-    if minutes is None or minutes <= 0:
-        print('Usage: doit review nudge-every <duration>  (e.g. 4h, 90m, 4)', file=sys.stderr)
-        return 2
+def write_nudge_interval(minutes: int) -> int:
+    """Record how often the startup nudge may fire."""
     NUDGE_INTERVAL.parent.mkdir(parents=True, exist_ok=True)
     NUDGE_INTERVAL.write_text(f'{minutes}\n')
     print(f'Nudge interval set to {minutes} minutes.')
     return 0
 
 
-def show_help() -> int:
-    help_header('doit review', "What's due to revisit.")
-    help_usage('doit review <verb> [ARGS]')
-
-    help_section('Commands')
-    help_row('doit review due', '', "What's due now, most overdue first")
-    help_row('doit review list', '', 'Every registered item and its status')
-    help_row('doit review list', '--json', 'The same, as JSON')
-    help_row('doit review done', '<id>', 'Mark an item done (advances its due date)')
-    help_row('doit review edit', '', 'Edit the register in $EDITOR')
-    help_row('doit review nudge-every', '<dur>', 'Set the startup-nudge interval (e.g. 4h)')
-
-    help_end()
-    return 0
+app = typer.Typer(name='review', no_args_is_help=True, help="What's due to revisit, on a cadence.")
 
 
-def main(args: list[str]) -> int:
-    if not args:
-        return show_help()
-    verb, rest = args[0], args[1:]
-    if verb in ('help', '-h', '--help'):
-        return show_help()
-    if verb == 'due':
-        return cmd_due()
-    if verb == 'list':
-        return cmd_list('--json' in rest)
-    if verb == 'nudge':
-        return cmd_nudge()
-    if verb == 'nudge-every':
-        if not rest:
-            print('Usage: doit review nudge-every <duration>  (e.g. 4h, 90m, 4)', file=sys.stderr)
-            return 2
-        return cmd_nudge_every(rest[0])
-    if verb == 'edit':
-        return cmd_edit()
-    if verb == 'done':
-        if not rest:
-            print('Usage: doit review done <id>', file=sys.stderr)
-            return 2
-        return cmd_done(rest[0])
-    print(f'Unknown: doit review {verb}', file=sys.stderr)
-    show_help()
-    return 2
+@app.command('due')
+def due_command() -> None:
+    """What's due now, most overdue first."""
+    raise typer.Exit(cmd_due())
+
+
+@app.command('list')
+def list_command(
+    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
+) -> None:
+    """Every registered item and its status."""
+    raise typer.Exit(cmd_list(as_json))
+
+
+@app.command('done')
+def done_command(item_id: Annotated[str, typer.Argument(help='The register id to mark done.')]) -> None:
+    """Mark an item done, advancing its due date."""
+    raise typer.Exit(cmd_done(item_id))
+
+
+@app.command('edit')
+def edit_command() -> None:
+    """Edit the register in $EDITOR."""
+    raise typer.Exit(cmd_edit())
+
+
+@app.command('nudge-every')
+def nudge_every_command(
+    duration: Annotated[str, typer.Argument(help='How often, e.g. 4h, 90m, or a bare number of hours.')],
+) -> None:
+    """Set the startup-nudge interval."""
+    minutes = parse_duration_minutes(duration)
+    if minutes is None or minutes <= 0:
+        raise typer.BadParameter('expected a duration like 4h, 90m, or a bare number of hours')
+    raise typer.Exit(write_nudge_interval(minutes))
+
+
+@app.command('nudge', hidden=True)
+def nudge_command() -> None:
+    """The startup nudge, called by the shell gate rather than by hand."""
+    raise typer.Exit(cmd_nudge())

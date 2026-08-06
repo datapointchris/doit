@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from doit import labs
 
@@ -162,15 +163,6 @@ def test_load_flashcards_unknown_subject_empty():
     assert labs.load_flashcards('nonexistent') == []
 
 
-def test_bare_labs_shows_help_rather_than_running(capsys):
-    """cli-design.md: no args shows help, at every level of the tree."""
-    assert labs.main([]) == 0
-
-    out = capsys.readouterr().out
-    assert 'doit labs due' in out
-    assert 'scheduled-lab' not in out, 'help lists the verbs; it never reads the deck'
-
-
 def test_new_writes_straight_into_the_deck(tmp_path, monkeypatch):
     """One directory, not a source and an installed copy.
 
@@ -188,13 +180,12 @@ def test_new_writes_straight_into_the_deck(tmp_path, monkeypatch):
     assert 'find-files-fast' in labs.load_labs()
 
 
-def test_show_without_an_id_is_a_usage_error(capsys):
-    assert labs.main(['show']) == 2
-    assert 'Usage' in capsys.readouterr().err
+def test_a_bare_argument_is_no_longer_a_lab_id():
+    """`menu labs <arg>` meant "a Lab id, or failing that a tool name".
 
+    That overload is gone: a Lab is `show <id>`, and an unrecognised word is a
+    typo rather than a tool subject to federate on.
+    """
+    result = CliRunner().invoke(labs.app, ['scheduled-lab'])
 
-def test_unknown_verb_is_a_usage_error(capsys):
-    """A bare argument used to mean "a Lab id, or else a tool name". It cannot
-    now: an unknown verb is a typo, and `doit find` owns tool subjects."""
-    assert labs.main(['nonsense']) == 2
-    assert 'Unknown' in capsys.readouterr().err
+    assert result.exit_code == 2
