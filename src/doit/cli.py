@@ -7,6 +7,7 @@ from pytermstyle import help_section
 from pytermstyle import help_usage
 
 from doit import __version__
+from doit import labs
 from doit import review
 
 TAGLINE = 'What to do now, and everything that decides it.'
@@ -16,6 +17,7 @@ TAGLINE = 'What to do now, and everything that decides it.'
 # see cli-design.md, "No args shows help. Always."
 COMMANDS = {
     'review': review.main,
+    'labs': labs.main,
 }
 
 
@@ -25,6 +27,7 @@ def usage() -> None:
 
     help_section('Commands')
     help_row('doit review', '', "What's due to revisit, on a cadence")
+    help_row('doit labs', '', 'Hands-on practice that is due')
 
     help_end()
 
