@@ -9,7 +9,6 @@ overdue days are derived from today and a committed state file would rot.
 """
 
 import json
-import re
 from datetime import date
 from datetime import timedelta
 from pathlib import Path
@@ -140,7 +139,7 @@ def test_nudge_clips_long_commands_rather_than_wrapping(tmp_path, monkeypatch, c
 
     assert review.cmd_nudge() == 0
 
-    rows = [re.sub(r'\033\[[0-9;]*m', '', line) for line in nudge_lines(capsys)]
+    rows = nudge_lines(capsys)
     assert all(len(row) <= 60 for row in rows), rows
 
 

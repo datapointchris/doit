@@ -19,26 +19,21 @@ classifiers = [
 # dotfiles. menu-dashboard needs StrEnum (3.11), so 3.12 is already headroom.
 requires-python = ">=3.12"
 
-# typer owns the command tree, matching syncer/indy/relate/ypl/dectl — the bare-
-# shows-help rule, exit 2 on a usage error, and `completion` all come from it
-# rather than being hand-rolled at every node.
+# typer owns the command tree and rich renders everything, matching
+# syncer/indy/relate/ypl/dectl. rich is declared rather than leaned on as typer's
+# transitive dependency, because doit uses Console directly and a reader should
+# not have to check typer's pins to learn that.
 #
-# pytermstyle stays for the palette in command *output*, which is shared with the
-# bash and Go CLIs through its counterparts. Its help_* helpers are deliberately
-# unused: they render the full typeable invocation that typer's help omits, but a
-# local help renderer would diverge from the other five typer CLIs, and that
-# defect is filed to be fixed once for all of them.
+# Not pytermstyle: a standalone CLI standardizes on rich's display semantics, and
+# pytermstyle is for the in-repo dotfiles apps sharing a palette with colors.sh.
+# See ~/dev/standards/cli-design.md § "Python CLIs are typer, and their help is
+# rich's".
 #
 # pyselfupdate arrives with the release that needs updating.
-dependencies = ["typer>=0.15.0", "pytermstyle", "pyyaml"]
+dependencies = ["typer>=0.15.0", "rich>=13.0.0", "pyyaml"]
 
 [project.scripts]
 doit = "doit.cli:main"
-
-[tool.uv.sources]
-# Pinned to a tag rather than tracking main, so a push to pytermstyle cannot
-# change what a release of this builds against.
-pytermstyle = { git = "https://github.com/datapointchris/pytermstyle", tag = "v0.1.1" }
 
 [tool.ruff]
 line-length = 140

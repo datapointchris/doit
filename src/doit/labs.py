@@ -24,19 +24,13 @@ import json
 import os
 import random
 import subprocess
-import sys
 from datetime import date
 from pathlib import Path
 from typing import Annotated
 
 import typer
 import yaml
-from pytermstyle import CYAN
-from pytermstyle import GREEN
-from pytermstyle import RESET
-from pytermstyle import YELLOW
-from pytermstyle import clip
-from pytermstyle import header
+from rich.text import Text
 
 from doit.cadence import is_due
 from doit.cadence import overdue_days
@@ -44,6 +38,8 @@ from doit.cadence import parse_cadence
 from doit.cadence import status_label
 from doit.paths import xdg_data_home
 from doit.paths import xdg_state_home
+from doit.render import console
+from doit.render import error_console
 from doit.state import load_state
 from doit.state import save_state
 
@@ -185,11 +181,16 @@ def render_row(row: dict) -> None:
     else:
         meta = 'on demand'
         status = '—'
-    print(f'  {YELLOW}{row["id"]:<24}{RESET}  {status}  ·  {meta}')
-    print(f'      {row["title"]}')
+    line = Text('  ')
+    line.append(f'{row["id"]:<24}', style='yellow')
+    line.append(f'  {status}  ·  {meta}')
+    console.print(line)
+    console.print(Text(f'      {row["title"]}'))
     if row['tags']:
-        print(f'      {CYAN}#{" #".join(row["tags"])}{RESET}')
-    print()
+        tags = Text('      ')
+        tags.append(f'#{" #".join(row["tags"])}', style='cyan')
+        console.print(tags)
+    console.print()
 
 
 def render_body(path: Path, *, for_preview: bool) -> None:
@@ -201,7 +202,9 @@ def render_body(path: Path, *, for_preview: bool) -> None:
     try:
         subprocess.run(args, input=body, text=True, check=False)
     except FileNotFoundError:
-        # bat absent: fall back to raw text so the Lab is still readable.
+        # bat absent: fall back to raw text so the Lab is still readable. Plain
+        # print, because a Lab body is markdown full of brackets and backticks
+        # that rich would read as markup and rewrap.
         print(body)
 
 
@@ -210,7 +213,11 @@ def cmd_show(lab_id: str) -> int:
     if lab_id not in labs:
         return unknown_lab(lab_id)
     render_body(labs[lab_id]['path'], for_preview=False)
-    print(f'\n{CYAN}Work through it in your other pane, then:{RESET}  doit labs done {lab_id}')
+    console.print()
+    hint = Text()
+    hint.append('Work through it in your other pane, then:', style='cyan')
+    hint.append(f'  doit labs done {lab_id}')
+    console.print(hint)
     return 0
 
 
@@ -225,14 +232,14 @@ def cmd_render_preview(lab_id: str) -> int:
 def cmd_due() -> int:
     if not load_labs():
         return warn_no_labs()
-    header('Labs — due to practice')
+    console.rule('[cyan]Labs — due to practice', align='left')
     due = [r for r in statuses() if is_due_row(r)]
     if due:
         for row in due:
             render_row(row)
-        print(f'Practice one:  {CYAN}doit labs show <id>{RESET}   ·   mark done:  {CYAN}doit labs done <id>{RESET}')
+        console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   mark done:  [cyan]doit labs done <id>[/]')
         return 0
-    print(f'{GREEN}✓{RESET} No Labs due. Browse them all with {CYAN}doit labs list{RESET}.')
+    console.print('[green]✓[/] No Labs due. Browse them all with [cyan]doit labs list[/].')
     return 0
 
 
@@ -241,14 +248,17 @@ def cmd_list(as_json: bool = False) -> int:
     # (the dashboard) filters on `overdue`/`scheduled` itself. An empty deck is
     # an empty list, not the prose hint: --json must always be parsable.
     if as_json:
+        # Plain print, never the rich console: a Console soft-wraps at terminal
+        # width, which would put newlines inside JSON strings and hand a consumer
+        # a parse error instead of data.
         print(json.dumps(statuses(), indent=2))
         return 0
     if not load_labs():
         return warn_no_labs()
-    header('Labs — full deck')
+    console.rule('[cyan]Labs — full deck', align='left')
     for row in statuses():
         render_row(row)
-    print(f'Practice one:  {CYAN}doit labs show <id>{RESET}   ·   pick interactively:  {CYAN}doit labs pick{RESET}')
+    console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   pick interactively:  [cyan]doit labs pick[/]')
     return 0
 
 
@@ -267,10 +277,11 @@ def cmd_nudge() -> int:
     sample = ', '.join(row['id'] for row in due[:NUDGE_SAMPLE])
     if len(due) > NUDGE_SAMPLE:
         sample += ', …'
-    label = f'Labs · {len(due)} due'
-    tail = '   ↳ doit labs show <id>'
-    sample = clip(sample, len(f'  {label}   {tail}'))
-    print(f'  {CYAN}{label}{RESET}   {sample}{CYAN}{tail}{RESET}')
+    line = Text('  ')
+    line.append(f'Labs · {len(due)} due', style='cyan')
+    line.append(f'   {sample}')
+    line.append('   ↳ doit labs show <id>', style='cyan')
+    console.print(line, no_wrap=True, overflow='ellipsis')
     return 0
 
 
@@ -283,10 +294,11 @@ def cmd_done(lab_id: str) -> int:
     state[lab_id] = today
     save_state(STATE, state)
     cadence = labs[lab_id]['cadence']
-    if cadence:
-        print(f'{GREEN}✓{RESET} Marked {lab_id!r} practiced ({today}). Due again in {parse_cadence(cadence)}d.')
-    else:
-        print(f'{GREEN}✓{RESET} Marked {lab_id!r} practiced ({today}).')
+    done = Text.from_markup('[green]✓[/] Marked ')
+    done.append(lab_id, style='yellow')
+    due_again = f' Due again in {parse_cadence(cadence)}d.' if cadence else ''
+    done.append(f' practiced ({today}).{due_again}')
+    console.print(done)
     return 0
 
 
@@ -312,7 +324,7 @@ def cmd_pick() -> int:
             check=False,
         )
     except FileNotFoundError:
-        print(f'fzf not found. Use {CYAN}doit labs list{RESET} then {CYAN}doit labs show <id>{RESET}.')
+        error_console.print('fzf not found. Use [cyan]doit labs list[/] then [cyan]doit labs show <id>[/].')
         return 1
     selected = result.stdout.strip()
     if not selected:
@@ -328,15 +340,15 @@ def slugify(name: str) -> str:
 def cmd_new(name: str) -> int:
     slug = slugify(name)
     if not slug:
-        print('A Lab needs a name with at least one letter or digit.', file=sys.stderr)
+        error_console.print('A Lab needs a name with at least one letter or digit.')
         return 2
     target = LABS_DIR / f'{slug}.md'
     if target.exists():
-        print(f'Lab already exists: {target}')
+        error_console.print(Text(f'Lab already exists: {target}'))
         return 1
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(TEMPLATE.format(title=name))
-    print(f'{GREEN}✓{RESET} Created {target}')
+    console.print(Text.from_markup('[green]✓[/] Created ') + Text(str(target)))
     open_editor(target)
     return 0
 
@@ -354,14 +366,18 @@ def open_editor(path: Path) -> None:
 
 
 def unknown_lab(lab_id: str) -> int:
-    print(f'No Lab {lab_id!r}.')
-    print(f'See what is available with {CYAN}doit labs list{RESET}, or create it with {CYAN}doit labs new {lab_id}{RESET}.')
+    error_console.print(Text(f'No Lab {lab_id!r}.'))
+    hint = Text('See what is available with ')
+    hint.append('doit labs list', style='cyan')
+    hint.append(', or create it with ')
+    hint.append(f'doit labs new {lab_id}', style='cyan')
+    error_console.print(hint)
     return 1
 
 
 def warn_no_labs() -> int:
-    print(f'No Labs yet in {LABS_DIR}.')
-    print(f'Create your first with {CYAN}doit labs new <name>{RESET}.')
+    console.print(Text(f'No Labs yet in {LABS_DIR}.'))
+    console.print('Create your first with [cyan]doit labs new <name>[/].')
     return 0
 
 
@@ -394,32 +410,37 @@ def cmd_flash(subject: str | None = None) -> int:
     self-mark. Ephemeral (no schedule) — the daily warm-up next to the Labs."""
     cards = load_flashcards(subject)
     if not cards:
-        if subject:
-            print(f'No examples to drill for {subject!r}.')
-        else:
-            print(f'No registry examples found at {REGISTRY}.')
+        message = f'No examples to drill for {subject!r}.' if subject else f'No registry examples found at {REGISTRY}.'
+        console.print(Text(message))
         return 0
     random.shuffle(cards)
     cards = cards[:FLASH_SESSION]
-    header('Flashcards — recall the command')
+    console.rule('[cyan]Flashcards — recall the command', align='left')
     correct = 0
     answered = 0
     for i, card in enumerate(cards, 1):
-        print(f'  {YELLOW}{i}/{len(cards)}{RESET}  [{card["tool"]}]')
-        print(f'  {card["prompt"]}')
+        # Text, not markup: a tool name sits inside square brackets here, which
+        # rich would otherwise read as a style tag and swallow.
+        counter = Text('  ')
+        counter.append(f'{i}/{len(cards)}', style='yellow')
+        counter.append(f'  [{card["tool"]}]')
+        console.print(counter)
+        console.print(Text(f'  {card["prompt"]}'))
         try:
-            if input(f'  {CYAN}Enter to reveal · q to quit ❯ {RESET}').strip().lower() == 'q':
+            if console.input('  [cyan]Enter to reveal · q to quit ❯ [/]').strip().lower() == 'q':
                 break
-            print(f'  {GREEN}$ {card["answer"]}{RESET}')
-            got = input('  got it? [y/N] ❯ ').strip().lower()
+            answer = Text('  ')
+            answer.append(f'$ {card["answer"]}', style='green')
+            console.print(answer)
+            got = console.input(r'  got it? \[y/N] ❯ ').strip().lower()
         except EOFError:
             break
         answered += 1
         if got == 'y':
             correct += 1
-        print()
+        console.print()
     if answered:
-        print(f'{GREEN}✓{RESET} Recalled {correct}/{answered}.')
+        console.print(f'[green]✓[/] Recalled {correct}/{answered}.')
     return 0
 
 

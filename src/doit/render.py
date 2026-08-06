@@ -1,17 +1,30 @@
-"""doit's startup-nudge renderers.
+"""doit's shared console and its startup-nudge renderers.
 
-The house palette, section header and help grammar live in ``pytermstyle``
-— shared with every Python app, and with the bash and Go CLIs through its
-counterparts. What is left here is specific to the nudge: it is an interrupt you
-did not ask for, so it trades every browse-time field (description, tags,
-cadence, last-done) for one line per item, and every line is clipped to the
-terminal rather than wrapped.
+A nudge is an interrupt you did not ask for, so it trades every browse-time field
+(description, tags, cadence, last-done) for one line per item, and every line is
+clipped to the terminal rather than wrapped. A wrapped row is two rows, which is
+how the nudge grew the first time.
+
+Clipping and column widths are rich's: `no_wrap` plus `overflow='ellipsis'`
+replaces arithmetic against `shutil.get_terminal_size`, and rich measures
+printable width, so styling cannot shift a later column.
+
+Lines carrying content from a register, a Lab or a command are built as `Text`
+rather than markup strings — `Text.append` does not parse `[...]`, so a bracket
+in a description cannot be swallowed as a style tag.
 """
 
-from pytermstyle import CYAN
-from pytermstyle import RESET
-from pytermstyle import YELLOW
-from pytermstyle import clip
+from rich.console import Console
+from rich.text import Text
+
+# highlight=False: rich's automatic highlighter colours anything that looks like
+# a number, path or URL, which turns a register id into a surprise.
+console = Console(highlight=False)
+
+# Everything that is not data. stdout carries the answer a caller parses; a
+# diagnostic written there is what turns `doit review list --json` into a broken
+# parse rather than a readable warning.
+error_console = Console(stderr=True, highlight=False)
 
 # Wide enough for "overdue 999d", the longest status_label, plus a space.
 STATUS_WIDTH = 13
@@ -19,28 +32,26 @@ STATUS_WIDTH = 13
 
 def nudge_header(title: str, count: int) -> None:
     """Print a one-line nudge heading (``Review · 6 due``)."""
-    print(f'{CYAN}{title} · {count} due{RESET}')
+    console.print(f'[cyan]{title} · {count} due[/]')
 
 
 def nudge_width(names: list[str]) -> int:
-    """The name-column width for a set of nudge rows.
-
-    Measured on the uncolored names for the same reason ``flush_rows`` does it:
-    a format-string field width counts escape bytes and would shove every later
-    column right by the length of the color escape.
-    """
+    """The name-column width for a set of nudge rows."""
     return max((len(name) for name in names), default=0) + 2
 
 
 def nudge_row(name: str, status: str, command: str, width: int) -> None:
     """Print one due item as a single line, clipping rather than wrapping.
 
-    Only the command is clipped — the name and status are the identity of the
-    row, so losing them to a narrow pane would defeat the point.
+    Only the command is at risk of being clipped — the name and status come
+    first, so a narrow pane eats the trailing command rather than the identity of
+    the row.
     """
-    pad = ' ' * max(width - len(name), 0)
-    status = status.ljust(STATUS_WIDTH)
-    if not command:
-        return print(f'  {YELLOW}{name}{RESET}{pad}{status}'.rstrip())
-    command = clip(command, len(f'  {name}{pad}{status}↳ '))
-    return print(f'  {YELLOW}{name}{RESET}{pad}{status}{CYAN}↳ {command}{RESET}')
+    line = Text('  ')
+    line.append(name.ljust(width), style='yellow')
+    if command:
+        line.append(status.ljust(STATUS_WIDTH))
+        line.append(f'↳ {command}', style='cyan')
+    else:
+        line.append(status)
+    console.print(line, no_wrap=True, overflow='ellipsis')

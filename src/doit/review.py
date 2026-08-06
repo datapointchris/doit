@@ -27,11 +27,7 @@ from typing import Annotated
 
 import typer
 import yaml
-from pytermstyle import CYAN
-from pytermstyle import GREEN
-from pytermstyle import RESET
-from pytermstyle import YELLOW
-from pytermstyle import header
+from rich.text import Text
 
 from doit.cadence import is_due
 from doit.cadence import overdue_days
@@ -39,6 +35,7 @@ from doit.cadence import parse_cadence
 from doit.cadence import status_label
 from doit.paths import xdg_config_home
 from doit.paths import xdg_state_home
+from doit.render import console
 from doit.render import nudge_header
 from doit.render import nudge_row
 from doit.render import nudge_width
@@ -115,16 +112,21 @@ def render_item(row: dict) -> None:
     meta = f'every {row["cadence"]}'
     if row['last']:
         meta += f' · last {row["last"]}'
-    print(f'  {YELLOW}{row["id"]:<20}{RESET}  {status_label(row["overdue"])}  ·  {meta}')
-    print(f'      {row["desc"]}')
+    line = Text('  ')
+    line.append(f'{row["id"]:<20}', style='yellow')
+    line.append(f'  {status_label(row["overdue"])}  ·  {meta}')
+    console.print(line)
+    console.print(Text(f'      {row["desc"]}'))
     if row['command']:
-        print(f'      {CYAN}↳ {row["command"]}{RESET}')
-    print()
+        command = Text('      ')
+        command.append(f'↳ {row["command"]}', style='cyan')
+        console.print(command)
+    console.print()
 
 
 def warn_no_register() -> None:
-    print(f'No review register at {REGISTER}.')
-    print(f'Add items there, or create one with {CYAN}doit review edit{RESET}.')
+    console.print(Text(f'No review register at {REGISTER}.'))
+    console.print('Add items there, or create one with [cyan]doit review edit[/].')
 
 
 def cmd_due() -> int:
@@ -133,20 +135,23 @@ def cmd_due() -> int:
         return 0
     rows = statuses()
     if not rows:
-        print('The review register has no items yet.')
+        console.print('The review register has no items yet.')
         return 0
 
-    header("Review — what's due")
+    console.rule("[cyan]Review — what's due", align='left')
     due = [row for row in rows if is_due(row['overdue'])]
     if due:
         for row in due:
             render_item(row)
-        print(f'Mark one done:  {CYAN}doit review done <id>{RESET}')
+        console.print('Mark one done:  [cyan]doit review done <id>[/]')
         return 0
 
-    print(f'{GREEN}✓{RESET} All caught up.')
+    console.print('[green]✓[/] All caught up.')
     soonest = rows[0]  # sorted desc, so the least-overdue (soonest) is first
-    print(f'  Next up: {YELLOW}{soonest["id"]}{RESET} in {-soonest["overdue"]}d.')
+    up_next = Text('  Next up: ')
+    up_next.append(soonest['id'], style='yellow')
+    up_next.append(f' in {-soonest["overdue"]}d.')
+    console.print(up_next)
     return 0
 
 
@@ -156,12 +161,15 @@ def cmd_list(as_json: bool = False) -> int:
     # missing register is an empty list, not the prose hint: --json must always
     # be parseable.
     if as_json:
+        # Plain print, never the rich console: a Console soft-wraps at terminal
+        # width, which would put newlines inside JSON strings and hand a consumer
+        # a parse error instead of data.
         print(json.dumps(statuses(), indent=2))
         return 0
     if load_items() is None:
         warn_no_register()
         return 0
-    header('Review — full register')
+    console.rule('[cyan]Review — full register', align='left')
     for row in statuses():
         render_item(row)
     return 0
@@ -173,15 +181,18 @@ def cmd_done(item_id: str) -> int:
         warn_no_register()
         return 1
     if item_id not in items:
-        print(f'No such item: {item_id}')
-        print(f'See what is registered with {CYAN}doit review list{RESET}.')
+        console.print(Text(f'No such item: {item_id}'))
+        console.print('See what is registered with [cyan]doit review list[/].')
         return 1
     today = date.today().isoformat()
     state = load_state(STATE)
     state[item_id] = today
     save_state(STATE, state)
     days = parse_cadence(items[item_id].get('cadence', ''))
-    print(f'{GREEN}✓{RESET} Marked {item_id!r} done ({today}). Due again in {days}d.')
+    done = Text.from_markup('[green]✓[/] Marked ')
+    done.append(item_id, style='yellow')
+    done.append(f' done ({today}). Due again in {days}d.')
+    console.print(done)
     return 0
 
 
@@ -238,13 +249,13 @@ def cmd_nudge() -> int:
     for row in shown:
         nudge_row(row['id'], status_label(row['overdue']), row['command'], width)
     if len(due) > len(shown):
-        print(f'  +{len(due) - len(shown)} more  ·  {CYAN}doit review due{RESET}')
+        console.print(f'  +{len(due) - len(shown)} more  ·  [cyan]doit review due[/]')
     # After the roster, expand any items carrying live content (e.g. the
     # neglected tool `toolbox remind` picks) so the roster stays scannable.
-    print()
+    console.print()
     for row in shown:
         run_show(row)
-    print(f'Done:  {CYAN}doit review done <id>{RESET}')
+    console.print('Done:  [cyan]doit review done <id>[/]')
     return 0
 
 
@@ -270,7 +281,7 @@ def write_nudge_interval(minutes: int) -> int:
     """Record how often the startup nudge may fire."""
     NUDGE_INTERVAL.parent.mkdir(parents=True, exist_ok=True)
     NUDGE_INTERVAL.write_text(f'{minutes}\n')
-    print(f'Nudge interval set to {minutes} minutes.')
+    console.print(f'Nudge interval set to {minutes} minutes.')
     return 0
 
 

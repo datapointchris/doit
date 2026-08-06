@@ -6,7 +6,6 @@ replaces the env-before-import dance the dotfiles version needed when this was a
 uv single-file script loaded by path.
 """
 
-import re
 from pathlib import Path
 
 import pytest
@@ -87,8 +86,8 @@ def test_nudge_clips_rather_than_wraps_on_a_narrow_pane(tmp_path, monkeypatch, c
 
     assert labs.cmd_nudge() == 0
 
-    plain = re.sub(r'\033\[[0-9;]*m', '', capsys.readouterr().out).rstrip('\n')
-    assert len(plain) <= 60, plain
+    line = capsys.readouterr().out.rstrip('\n')
+    assert len(line) <= 60, line
 
 
 def test_nudge_is_silent_when_nothing_is_due(tmp_path, monkeypatch, capsys):
