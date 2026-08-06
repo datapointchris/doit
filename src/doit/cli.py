@@ -15,6 +15,7 @@ from doit import dashboard
 from doit import labs
 from doit import pursuits
 from doit import review
+from doit import workflows
 
 TAGLINE = 'What to do now, and everything that decides it.'
 
@@ -30,6 +31,7 @@ app.command('dashboard')(dashboard.dashboard_command)
 app.add_typer(pursuits.app, name='pursuits')
 app.add_typer(review.app, name='review')
 app.add_typer(labs.app, name='labs')
+app.add_typer(workflows.app, name='workflows')
 
 
 def version_callback(asked: bool) -> None:

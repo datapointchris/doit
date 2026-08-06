@@ -36,6 +36,10 @@ from doit.cadence import is_due
 from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
 from doit.cadence import status_label
+from doit.cards import first_heading
+from doit.cards import render_body
+from doit.cards import slugify
+from doit.cards import split_frontmatter
 from doit.paths import xdg_data_home
 from doit.paths import xdg_state_home
 from doit.render import console
@@ -85,39 +89,6 @@ LAB=$(mktemp -d) && cd "$LAB"
    - Why: the reason it works.
    - Alternative: another way to reach the same result.
 """
-
-
-def split_frontmatter(text: str) -> tuple[dict, str]:
-    """(frontmatter dict, body) for a Lab file's text.
-
-    The frontmatter carries only `tags` and an optional `cadence`; the Lab's
-    title is its first `# ` heading, not a frontmatter field — same convention as
-    the workflow cards, and it keeps markdownlint happy (no duplicate H1).
-    """
-    if not text.startswith('---'):
-        return {}, text
-    parts = text.split('---', 2)
-    if len(parts) < 3:
-        return {}, text
-    return (yaml.safe_load(parts[1]) or {}), parts[2].lstrip('\n')
-
-
-def parse_frontmatter(path: Path) -> dict:
-    """The YAML frontmatter of a Lab file as a dict (empty if there is none)."""
-    return split_frontmatter(path.read_text())[0]
-
-
-def strip_frontmatter(text: str) -> str:
-    """The Lab body with its leading YAML frontmatter block removed."""
-    return split_frontmatter(text)[1]
-
-
-def first_heading(body: str) -> str:
-    """The first level-1 markdown heading (`# ...`) in a Lab body, or ''."""
-    for line in body.splitlines():
-        if line.startswith('# '):
-            return line[2:].strip()
-    return ''
 
 
 def load_labs() -> dict:
@@ -191,21 +162,6 @@ def render_row(row: dict) -> None:
         tags.append(f'#{" #".join(row["tags"])}', style='cyan')
         console.print(tags)
     console.print()
-
-
-def render_body(path: Path, *, for_preview: bool) -> None:
-    """Render a Lab's markdown body (frontmatter stripped) through bat."""
-    body = strip_frontmatter(path.read_text()).lstrip('\n')
-    args = ['bat', '--style=plain', '--language=markdown', '--color=always']
-    if for_preview:
-        args.append('--paging=never')
-    try:
-        subprocess.run(args, input=body, text=True, check=False)
-    except FileNotFoundError:
-        # bat absent: fall back to raw text so the Lab is still readable. Plain
-        # print, because a Lab body is markdown full of brackets and backticks
-        # that rich would read as markup and rewrap.
-        print(body)
 
 
 def cmd_show(lab_id: str) -> int:
@@ -330,11 +286,6 @@ def cmd_pick() -> int:
     if not selected:
         return 0
     return cmd_show(selected.split('\t', 1)[0])
-
-
-def slugify(name: str) -> str:
-    slug = name.strip().lower().replace(' ', '-')
-    return ''.join(c for c in slug if c.isalnum() or c == '-')
 
 
 def cmd_new(name: str) -> int:

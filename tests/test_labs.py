@@ -99,44 +99,6 @@ def test_nudge_is_silent_when_nothing_is_due(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == ''
 
 
-def test_strip_frontmatter_removes_block():
-    text = '---\ntitle: X\ntags: [a]\n---\n\n# Heading\nbody\n'
-    assert labs.strip_frontmatter(text).startswith('# Heading')
-    assert 'title: X' not in labs.strip_frontmatter(text)
-
-
-def test_strip_frontmatter_passthrough_without_block():
-    text = '# Heading\nbody\n'
-    assert labs.strip_frontmatter(text) == text
-
-
-def test_parse_frontmatter(tmp_path):
-    f = tmp_path / 'x.md'
-    f.write_text('---\ntags: [a, b]\ncadence: 1w\n---\n# H\n')
-    meta = labs.parse_frontmatter(f)
-    assert meta['tags'] == ['a', 'b']
-    assert meta['cadence'] == '1w'
-
-
-def test_parse_frontmatter_none_when_absent(tmp_path):
-    f = tmp_path / 'x.md'
-    f.write_text('# H\nno frontmatter\n')
-    assert labs.parse_frontmatter(f) == {}
-
-
-def test_first_heading_is_the_title():
-    assert labs.first_heading('# The Title\n\ntext\n## Sub\n') == 'The Title'
-
-
-def test_first_heading_empty_when_none():
-    assert labs.first_heading('no heading here\n') == ''
-
-
-def test_slugify():
-    assert labs.slugify('Find Files Fast!') == 'find-files-fast'
-    assert labs.slugify('  rg/search  ') == 'rgsearch'
-
-
 def test_load_flashcards_all():
     cards = labs.load_flashcards()
     # fd (2 examples) + rg (1); the no-examples tool contributes nothing.
