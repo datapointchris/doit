@@ -1,0 +1,38 @@
+[
+  {
+    "id": "never-done-item",
+    "cadence": "1w",
+    "desc": "Has never been marked done",
+    "command": "",
+    "show": "",
+    "last": null,
+    "overdue": null
+  },
+  {
+    "id": "overdue-item",
+    "cadence": "1w",
+    "desc": "Past its due date",
+    "command": "echo overdue",
+    "show": "",
+    "last": "2026-07-01",
+    "overdue": 16
+  },
+  {
+    "id": "due-today-item",
+    "cadence": "2w",
+    "desc": "Due exactly today",
+    "command": "",
+    "show": "",
+    "last": "2026-07-10",
+    "overdue": 0
+  },
+  {
+    "id": "not-yet-due-item",
+    "cadence": "4w",
+    "desc": "Not due for a while",
+    "command": "",
+    "show": "",
+    "last": "2026-07-24",
+    "overdue": -28
+  }
+]

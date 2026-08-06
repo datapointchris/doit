@@ -1,0 +1,29 @@
+[
+  {
+    "id": "overdue-lab",
+    "title": "An Overdue Lab",
+    "tags": ["demo"],
+    "cadence": "2w",
+    "last": "2026-07-01",
+    "overdue": 9,
+    "scheduled": true
+  },
+  {
+    "id": "not-yet-due-lab",
+    "title": "A Lab Not Yet Due",
+    "tags": ["demo"],
+    "cadence": "2mo",
+    "last": "2026-07-20",
+    "overdue": -56,
+    "scheduled": true
+  },
+  {
+    "id": "ondemand-lab",
+    "title": "An On-Demand Lab",
+    "tags": ["demo"],
+    "cadence": "",
+    "last": null,
+    "overdue": null,
+    "scheduled": false
+  }
+]

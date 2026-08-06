@@ -32,12 +32,12 @@ def test_every_node_shows_help_bare(argv):
     assert 'Options' in result.output
 
 
-def test_root_help_lists_the_namespaces():
+@pytest.mark.parametrize('command', ['next', 'log', 'skip', 'dashboard', 'pursuits', 'review', 'labs'])
+def test_root_help_lists_every_command(command):
     result = runner.invoke(app, ['--help'])
 
     assert result.exit_code == 0
-    assert 'review' in result.output
-    assert 'labs' in result.output
+    assert command in result.output
 
 
 @pytest.mark.parametrize('argv', [['nonsense'], ['review', 'nonsense'], ['labs', 'nonsense']])

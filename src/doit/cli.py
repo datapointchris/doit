@@ -11,6 +11,7 @@ from typing import Annotated
 import typer
 
 from doit import __version__
+from doit import dashboard
 from doit import labs
 from doit import pursuits
 from doit import review
@@ -24,6 +25,7 @@ app = typer.Typer(name='doit', no_args_is_help=True, help=TAGLINE)
 app.command('next')(pursuits.next_command)
 app.command('log')(pursuits.log_command)
 app.command('skip')(pursuits.skip_command)
+app.command('dashboard')(dashboard.dashboard_command)
 
 app.add_typer(pursuits.app, name='pursuits')
 app.add_typer(review.app, name='review')

@@ -1,0 +1,58 @@
+{
+  "current_section": {
+    "id": 5,
+    "name": "A Current Section",
+    "is_current": true,
+    "progress": {"total_items": 42, "completed_items": 6, "in_progress_items": 0, "skipped_items": 1, "abandoned_items": 0},
+    "items": [
+      {"id": 1, "position": 1000, "resource": {"id": 900, "title": "A Started Resource", "status_id": 2}},
+      {"id": 2, "position": 2000, "resource": {"id": 901, "title": "The Next Resource", "status_id": 1}},
+      {"id": 3, "position": 3000, "resource": {"id": 902, "title": "A Completed Resource", "status_id": 3}},
+      {"id": 4, "position": 4000, "resource": {"id": 995, "title": "A Resource In Progress", "status_id": 2}},
+      {"id": 5, "position": 5000, "resource": {"id": 903, "title": "The One After Next", "status_id": 1}}
+    ]
+  },
+  "tracks": [
+    {
+      "display_name": "First Track",
+      "percentage": 20,
+      "progress": {"total_items": 61, "completed_items": 2},
+      "current_unit": {"id": 1, "name": "Unit 1: The First Unit"}
+    },
+    {
+      "display_name": "Second Track",
+      "percentage": null,
+      "progress": {"total_items": 22, "completed_items": 2},
+      "current_unit": null
+    }
+  ],
+  "track_focus": [
+    {
+      "track_id": 1,
+      "display_name": "First Track",
+      "unit_name": "Unit 1: The First Unit",
+      "resource": {"id": 800, "title": "What To Open On First Track", "status_id": 1},
+      "started": false,
+      "progress": {"total_items": 61, "completed_items": 2}
+    },
+    {
+      "track_id": 3,
+      "display_name": "Third Track",
+      "unit_name": "Unit 2: Already Underway",
+      "resource": {"id": 801, "title": "Already Open On Third Track", "status_id": 2},
+      "started": true,
+      "progress": {"total_items": 30, "completed_items": 9}
+    },
+    {
+      "track_id": 4,
+      "display_name": "Fourth Track",
+      "unit_name": "Unit 9: Nothing Left",
+      "resource": null,
+      "started": false,
+      "progress": {"total_items": 12, "completed_items": 12}
+    }
+  ],
+  "in_progress_resources": [
+    {"id": 995, "title": "A Resource In Progress", "url": "https://example.com/r"}
+  ]
+}

@@ -1,0 +1,228 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-07-24T15:00:00-04:00",
+  "tasks": {
+    "items": [
+      {
+        "id": 1,
+        "name": "Renew passport",
+        "notes": null,
+        "category": "chore",
+        "priority": 1
+      },
+      {
+        "id": 2,
+        "name": "Call dentist",
+        "notes": null,
+        "category": "chore",
+        "priority": 2
+      },
+      {
+        "id": 3,
+        "name": "Fix the garage door",
+        "notes": "sticks halfway",
+        "category": "home",
+        "priority": 3
+      },
+      {
+        "id": 4,
+        "name": "Rotate the tyres",
+        "notes": null,
+        "category": "car",
+        "priority": 4
+      }
+    ],
+    "total": 12
+  },
+  "habits": {
+    "due_today": [
+      {
+        "id": 1,
+        "name": "Stretch",
+        "category_id": 2,
+        "category": {
+          "id": 2,
+          "name": "Health"
+        },
+        "is_current": true
+      },
+      {
+        "id": 2,
+        "name": "Read",
+        "category_id": 3,
+        "category": {
+          "id": 3,
+          "name": "Momentum"
+        },
+        "is_current": true
+      },
+      {
+        "id": 3,
+        "name": "Journal",
+        "category_id": 3,
+        "category": {
+          "id": 3,
+          "name": "Momentum"
+        },
+        "is_current": true
+      }
+    ],
+    "completed_today": [
+      {
+        "id": 90,
+        "name": "Exercise",
+        "category_id": 2,
+        "category": {
+          "id": 2,
+          "name": "Health"
+        },
+        "complete_date": "2026-07-24T12:00:00Z"
+      }
+    ],
+    "current_total": 4
+  },
+  "project_items": {
+    "next": [
+      {
+        "id": "019f0000-0000-7000-8000-000000000001",
+        "title": "An actionable item",
+        "notes": "what it actually means",
+        "projects": [
+          {
+            "id": "p1",
+            "name": "A Project"
+          }
+        ],
+        "completed": false,
+        "archived": false
+      },
+      {
+        "id": "019f0000-0000-7000-8000-000000000002",
+        "title": "A second item",
+        "notes": null,
+        "projects": [
+          {
+            "id": "p1",
+            "name": "A Project"
+          },
+          {
+            "id": "p2",
+            "name": "Another Project"
+          }
+        ],
+        "completed": false,
+        "archived": false
+      }
+    ],
+    "next_total": 5,
+    "blocked": [
+      {
+        "id": "019f0000-0000-7000-8000-000000000003",
+        "title": "A blocked item",
+        "completed": false,
+        "archived": false
+      }
+    ],
+    "blocked_total": 1
+  },
+  "countdowns": {
+    "items": [
+      {
+        "id": 1,
+        "name": "Lease renewal",
+        "notes": null,
+        "due_date": "2026-08-05"
+      }
+    ],
+    "total": 2
+  },
+  "events": {
+    "items": [
+      {
+        "id": 1,
+        "name": "A Concert",
+        "date": "2026-08-14T20:00:00Z",
+        "venue": "A Venue",
+        "attending": true
+      }
+    ],
+    "total": 1
+  },
+  "warnings": [],
+  "books": {
+    "reading": [
+      {
+        "id": 10,
+        "title": "A Book In Progress",
+        "author": "First Author",
+        "ownership": "owned",
+        "progress": "reading"
+      },
+      {
+        "id": 11,
+        "title": "Another In Progress",
+        "author": "Second Author",
+        "ownership": "owned",
+        "progress": "reading"
+      }
+    ],
+    "next_up": [
+      {
+        "id": 20,
+        "title": "The Next One",
+        "author": "Third Author",
+        "ownership": "owned",
+        "progress": "unread"
+      },
+      {
+        "id": 21,
+        "title": "The One After",
+        "author": "Fourth Author",
+        "ownership": "owned",
+        "progress": "unread"
+      },
+      {
+        "id": 22,
+        "title": "Third In Queue",
+        "author": "Fifth Author",
+        "ownership": "owned",
+        "progress": "unread"
+      },
+      {
+        "id": 23,
+        "title": "Fourth In Queue",
+        "author": "Sixth Author",
+        "ownership": "owned",
+        "progress": "unread"
+      }
+    ],
+    "next_up_total": 40
+  },
+  "articles": {
+    "current": {
+      "id": 5,
+      "title": "\n\tAn Article Being Read\n  ",
+      "url": "https://example.com/a",
+      "is_current": true
+    },
+    "unread": [
+      {
+        "id": 6,
+        "title": "The Next Article"
+      },
+      {
+        "id": 7,
+        "title": "Another Queued Article"
+      },
+      {
+        "id": 8,
+        "title": "A Third Queued Article"
+      },
+      {
+        "id": 9,
+        "title": "A Fourth Queued Article"
+      }
+    ],
+    "unread_total": 60
+  }
+}
