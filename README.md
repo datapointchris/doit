@@ -11,15 +11,16 @@ next, what is due to revisit, what to practice, and the reference for actually d
 ## What it will do
 
 ```bash
-doit                  # what to do now, drawn from weights you declared
+doit next             # what to do now, drawn from weights you declared
 doit dashboard        # every lane, unranked — what is outstanding across everything
-doit review           # what is due to revisit, on a cadence
-doit labs             # hands-on practice that is due
-doit workflows        # the reference cards
+doit review due       # what is due to revisit, on a cadence
+doit labs due         # hands-on practice that is due
+doit workflows list   # the reference cards
 doit log              # record what actually happened
 ```
 
-Bare `doit` is the weighted draw rather than a picker, because the whole point is that it tells you.
+Bare `doit` prints help, and so does every namespace under it — you can walk down one token at a
+time and never hit a cryptic error.
 
 ## Sources are configuration
 
