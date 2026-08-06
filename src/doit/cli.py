@@ -9,6 +9,9 @@ only assembles them.
 from typing import Annotated
 
 import typer
+from pyselfupdate import Config
+from pyselfupdate import notify
+from pyselfupdate.typercmd import add_update_command
 
 from doit import __version__
 from doit import content
@@ -25,6 +28,12 @@ TAGLINE = 'What to do now, and everything that decides it.'
 
 app = typer.Typer(name='doit', no_args_is_help=True, help=TAGLINE)
 
+# Notify-only, per ~/dev/standards/release.md: one check per 24h, one line to
+# stderr, and `doit update` is the only thing that writes anything. The notice
+# and the command share this one config so they cannot advertise a release the
+# command then refuses.
+UPDATE_CONFIG = Config(tool='doit', owner='datapointchris')
+
 # The draw and the two things you do to what it just offered sit at the root:
 # they act on the answer, while `pursuits` manages the file that produced it.
 app.command('next')(pursuits.next_command)
@@ -37,6 +46,7 @@ app.command('launch')(find.launch_command)
 app.command('show')(find.show_command)
 app.command('shell-init')(shell.shell_init_command)
 app.command('completion')(shell.completion_command)
+add_update_command(app, UPDATE_CONFIG)
 
 # What the fzf preview pane calls, not what you type.
 app.command('__preview', hidden=True)(find.preview_command)
@@ -60,6 +70,7 @@ def version_callback(asked: bool) -> None:
 
 @app.callback()
 def root(
+    ctx: typer.Context,
     version: Annotated[
         bool | None,
         typer.Option('--version', '-V', callback=version_callback, is_eager=True, help='Show the installed version and exit.'),
@@ -72,6 +83,12 @@ def root(
     `doit.content.ensure_cloned` for why a failure only warns.
     """
     content.ensure_cloned()
+
+    # `update` runs its own check, so notifying too would ask the releases API
+    # twice for one command and let the notice contradict what `--check` just
+    # printed. Every other path is gated locally before it reaches the network.
+    if ctx.invoked_subcommand != 'update':
+        notify(UPDATE_CONFIG)
 
 
 def main() -> None:

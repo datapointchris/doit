@@ -29,8 +29,9 @@ requires-python = ">=3.12"
 # See ~/dev/standards/cli-design.md § "Python CLIs are typer, and their help is
 # rich's".
 #
-# pyselfupdate arrives with the release that needs updating.
-dependencies = ["typer>=0.15.0", "rich>=13.0.0", "pyyaml"]
+# The [typer] extra is the ready-made `doit update`; safekeep declines it only
+# because it is argparse. Resolved from PyPI, where the name was free.
+dependencies = ["typer>=0.15.0", "rich>=13.0.0", "pyyaml", "pyselfupdate[typer]>=0.2.2"]
 
 [project.scripts]
 doit = "doit.cli:main"
@@ -121,6 +122,18 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.6.0",
 ]
+
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+branch = "main"
+commit_message = "build(release): {version}"
+# The package name is hardcoded because python-semantic-release sets no
+# $PACKAGE_NAME; the variable form silently no-ops and ships a stale uv.lock.
+build_command = """
+    pip install uv
+    uv lock --upgrade-package doit
+    git add uv.lock
+"""
 
 [build-system]
 requires = ["uv_build>=0.9.13,<0.10.0"]

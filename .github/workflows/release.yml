@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # python-semantic-release decides the version from the commit types, writes it
+  # into pyproject.toml, tags, and creates the GitHub release.
+  #
+  # There is no publish job. doit is installed from this repo with uv, and the
+  # tag is what an install resolves against. The cards and Labs ship separately
+  # in doit-content, which is why authoring one needs no release here.
+  version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: python-semantic-release/python-semantic-release@v9
+        id: release
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
