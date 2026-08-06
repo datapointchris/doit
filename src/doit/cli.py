@@ -16,6 +16,7 @@ from doit import find
 from doit import labs
 from doit import pursuits
 from doit import review
+from doit import sources
 from doit import workflows
 
 TAGLINE = 'What to do now, and everything that decides it.'
@@ -41,6 +42,7 @@ app.add_typer(review.app, name='review')
 app.add_typer(labs.app, name='labs')
 app.add_typer(workflows.app, name='workflows')
 app.add_typer(find.index_app, name='index')
+app.add_typer(sources.app, name='sources')
 
 
 def version_callback(asked: bool) -> None:

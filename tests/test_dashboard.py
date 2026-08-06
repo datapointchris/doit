@@ -15,6 +15,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from doit import dashboard
+from doit import sources
 from doit.cli import app as cli_app
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'dashboard'
@@ -26,8 +27,8 @@ def fixture(name: str):
     return json.loads((FIXTURE_DIR / name).read_text())
 
 
-def ok(name: str):
-    return dashboard.JsonResult(payload=fixture(name), exit_code=0)
+def ok(name: str, source: str = ''):
+    return sources.Result(source=source, payload=fixture(name), exit_code=0)
 
 
 def all_results() -> dict:
@@ -40,14 +41,21 @@ def all_results() -> dict:
 
 
 def lanes_by_name(results: dict) -> dict:
-    lanes = dashboard.build_lanes(results, TODAY, dashboard.LANE_NAMES)
-    return {lane.name: lane for lane in lanes}
+    """Every lane, built at a fixed date.
+
+    The builders are called directly rather than through the adapters, because
+    an adapter reads today's date and these fixtures are pinned to one.
+    """
+    built = [build(results, TODAY) for _, build in dashboard.ICB_LANES]
+    built.append(dashboard.build_learning_lane(results, TODAY))
+    built.append(dashboard.build_maintenance_lane(results, TODAY))
+    return {lane.name: lane for lane in built}
 
 
 def test_every_lane_builds_from_fixtures():
     lanes = lanes_by_name(all_results())
 
-    assert list(lanes) == dashboard.LANE_NAMES
+    assert set(lanes) == set(dashboard.LANE_NAMES)
     assert all(lane.available for lane in lanes.values())
 
 
@@ -89,7 +97,7 @@ def test_habits_grid_keeps_a_completed_habit_in_place():
     payload = fixture('icb-overview.json')
     stretch = payload['habits']['due_today'].pop(0)
     payload['habits']['completed_today'].append(stretch)
-    results = {'icb': dashboard.JsonResult(payload=payload, exit_code=0)}
+    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
     after = dashboard.build_habits_lane(results, TODAY)
 
     assert [cell.text for cell in after.grid] == [cell.text for cell in before.grid]
@@ -180,7 +188,7 @@ def test_learning_track_focus_is_not_repeated_from_the_section():
     payload = fixture('learning-overview.json')
     payload['track_focus'][0]['resource'] = {'id': 901, 'title': 'The Next Resource', 'status_id': 1}
     results = all_results()
-    results['learning'] = dashboard.JsonResult(payload=payload, exit_code=0)
+    results['learning'] = sources.Result(source='icb', payload=payload, exit_code=0)
 
     lane = dashboard.build_learning_lane(results, TODAY)
 
@@ -256,7 +264,7 @@ def test_projects_lane_survives_an_icb_that_omits_membership():
     payload = fixture('icb-overview.json')
     for item in payload['project_items']['next']:
         del item['projects']
-    results = {'icb': dashboard.JsonResult(payload=payload, exit_code=0)}
+    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
 
     lane = dashboard.build_projects_lane(results, TODAY)
 
@@ -273,7 +281,7 @@ def test_totals_come_from_the_backend_not_the_row_count():
 
 def test_lane_is_unavailable_when_its_backend_is_missing():
     results = all_results()
-    results['icb'] = dashboard.JsonResult(failure=dashboard.BackendFailure.NOT_INSTALLED)
+    results['icb'] = sources.Result(source='icb', failure=sources.Failure.NOT_INSTALLED)
 
     lanes = lanes_by_name(results)
 
@@ -284,7 +292,7 @@ def test_lane_is_unavailable_when_its_backend_is_missing():
 
 def test_maintenance_renders_what_it_has_when_one_backend_is_missing():
     results = all_results()
-    results['labs'] = dashboard.JsonResult(failure=dashboard.BackendFailure.NOT_INSTALLED)
+    results['labs'] = sources.Result(source='icb', failure=sources.Failure.NOT_INSTALLED)
 
     lane = dashboard.build_maintenance_lane(results, TODAY)
 
@@ -297,7 +305,7 @@ def test_section_warning_degrades_only_its_own_lane():
     payload = fixture('icb-overview.json')
     payload['warnings'] = [{'section': 'books', 'message': 'books: API request failed (500)'}]
     results = all_results()
-    results['icb'] = dashboard.JsonResult(payload=payload, exit_code=0)
+    results['icb'] = sources.Result(source='icb', payload=payload, exit_code=0)
 
     lanes = lanes_by_name(results)
 
@@ -308,7 +316,7 @@ def test_section_warning_degrades_only_its_own_lane():
 def test_newer_schema_version_is_reported_rather_than_half_read():
     payload = fixture('icb-overview.json')
     payload['schema_version'] = dashboard.ICB_SCHEMA_VERSION + 1
-    results = {'icb': dashboard.JsonResult(payload=payload, exit_code=0)}
+    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
 
     lane = dashboard.build_tasks_lane(results, TODAY)
 
@@ -316,122 +324,10 @@ def test_newer_schema_version_is_reported_rather_than_half_read():
     assert 'newer than this dashboard' in lane.reason
 
 
-def test_backend_reason_exit_two_means_version_skew():
-    """Exit 2 is reserved for usage errors across these CLIs, so a rejected
-    `overview` is an old binary rather than a runtime failure."""
-    result = dashboard.JsonResult(
-        exit_code=2,
-        stderr='error: unknown command "overview" for "icb"',
-        failure=dashboard.BackendFailure.FAILED,
-    )
-
-    assert dashboard.backend_reason('icb', result) == 'installed icb predates `overview` — reinstall it'
-
-
-def test_backend_reason_uses_the_first_stderr_line():
-    result = dashboard.JsonResult(
-        exit_code=1,
-        stderr='error: not logged in — run `icb auth login`\nUsage:\n  icb overview [flags]',
-        failure=dashboard.BackendFailure.FAILED,
-    )
-
-    assert dashboard.backend_reason('icb', result) == 'error: not logged in — run `icb auth login`'
-
-
-def test_backend_reason_reports_the_timeout_actually_used():
-    result = dashboard.JsonResult(failure=dashboard.BackendFailure.TIMED_OUT, timeout=0.25)
-
-    assert dashboard.backend_reason('icb', result) == 'icb timed out after 0.25s'
-
-
-def test_backends_for_selects_only_what_the_lanes_need():
-    assert dashboard.backends_for(['tasks']) == ['icb']
-    assert dashboard.backends_for(['maintenance']) == ['review', 'labs']
-    assert sorted(dashboard.backends_for(['tasks', 'learning'])) == ['icb', 'learning']
-
-
-def test_lanes_as_json_shape():
-    lanes = dashboard.build_lanes(all_results(), TODAY, dashboard.LANE_NAMES)
-
-    payload = json.loads(dashboard.lanes_as_json(lanes, TODAY))
-
-    assert [lane['name'] for lane in payload['lanes']] == dashboard.LANE_NAMES
-    tasks = payload['lanes'][0]
-    assert set(tasks) == {
-        'name',
-        'title',
-        'meta',
-        'status',
-        'reason',
-        'rows',
-        'grid',
-        'total',
-        'hints',
-    }
-    assert tasks['status'] == 'ok'
-    assert set(tasks['rows'][0]) == {'label', 'text', 'note', 'urgency'}
-
-
-def test_lanes_as_json_carries_the_habits_grid():
-    lanes = dashboard.build_lanes(all_results(), TODAY, ['habits'])
-
-    payload = json.loads(dashboard.lanes_as_json(lanes, TODAY))
-    habits = payload['lanes'][0]
-
-    assert habits['rows'] == []
-    assert habits['grid'][0] == {'text': 'Exercise', 'done': True, 'handle': ''}
-
-
 def test_cap_for_gives_tasks_more_room_but_focus_still_wins():
     assert dashboard.cap_for('tasks', dashboard.ROW_CAP) == 5
     assert dashboard.cap_for('upcoming', dashboard.ROW_CAP) == dashboard.ROW_CAP
     assert dashboard.cap_for('tasks', dashboard.FOCUSED_ROW_CAP) == dashboard.FOCUSED_ROW_CAP
-
-
-def test_lanes_as_json_keeps_unavailable_lanes():
-    results = all_results()
-    results['learning'] = dashboard.JsonResult(failure=dashboard.BackendFailure.NOT_INSTALLED)
-    lanes = dashboard.build_lanes(results, TODAY, dashboard.LANE_NAMES)
-
-    payload = json.loads(dashboard.lanes_as_json(lanes, TODAY))
-    learning = next(lane for lane in payload['lanes'] if lane['name'] == 'learning')
-
-    assert learning['status'] == 'unavailable'
-    assert 'not installed' in learning['reason']
-
-
-def test_run_json_reports_a_missing_command():
-    result = dashboard.run_json(['definitely-not-a-real-binary-xyz'], timeout=5)
-
-    assert result.failure is dashboard.BackendFailure.NOT_INSTALLED
-
-
-def test_run_json_reports_a_timeout():
-    result = dashboard.run_json(['/bin/sh', '-c', 'sleep 2'], timeout=0.2)
-
-    assert result.failure is dashboard.BackendFailure.TIMED_OUT
-    assert result.timeout == 0.2
-
-
-def test_run_json_reports_unreadable_output():
-    result = dashboard.run_json(['/bin/sh', '-c', 'echo not json'], timeout=5)
-
-    assert result.failure is dashboard.BackendFailure.UNREADABLE
-
-
-def test_run_json_reports_a_nonzero_exit():
-    result = dashboard.run_json(['/bin/sh', '-c', 'echo boom >&2; exit 3'], timeout=5)
-
-    assert result.failure is dashboard.BackendFailure.FAILED
-    assert result.exit_code == 3
-    assert result.stderr == 'boom'
-
-
-def test_run_json_parses_a_payload():
-    result = dashboard.run_json(['/bin/sh', '-c', 'echo \'{"a": 1}\''], timeout=5)
-
-    assert result.failure is None
-    assert result.payload == {'a': 1}
 
 
 def test_round_robin_interleaves_groups():
@@ -507,9 +403,29 @@ def test_clip():
     assert dashboard.clip('a much longer string', 10) == 'a much lo…'
 
 
-def test_an_unknown_lane_is_a_usage_error():
-    """The lane names are a closed set, so a typo is caught before any backend runs."""
+def test_an_unmatched_lane_is_reported(monkeypatch, tmp_path):
+    """`--lane` is not validated against a closed set.
+
+    A conforming source contributes lanes doit has never heard of, so rejecting
+    an unknown name would reject the whole point. An unmatched name is reported
+    instead.
+    """
+    monkeypatch.setattr(sources, 'SOURCES', tmp_path / 'none.yml')
     result = CliRunner().invoke(cli_app, ['dashboard', '--lane', 'nonsense'])
 
-    assert result.exit_code == 2
-    assert 'unknown lane' in result.output
+    assert result.exit_code == 0
+    assert 'nonsense' in result.output
+
+
+def test_a_due_note_renders_rather_than_raising(capsys):
+    """rich refuses a style argument when appending a Text.
+
+    Only a due or overdue note carries one, so this raised for exactly the rows
+    that matter most — and no lane in the fixtures happened to produce one until
+    a conforming source did.
+    """
+    rows = [dashboard.Row('now', 'Lights to evening scene', '18:40', dashboard.Urgency.OVERDUE)]
+
+    dashboard.render_rows(rows, 80)
+
+    assert '18:40' in capsys.readouterr().out

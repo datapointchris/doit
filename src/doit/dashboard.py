@@ -34,32 +34,28 @@ Not to be confused with `forge brief`, which is the dev brief across *repos* for
 a coding session. Same plumbing, different audience — see ~/dev/vision.md.
 """
 
-import json
 import math
 import shutil
-import subprocess
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
-from dataclasses import field
 from datetime import date
 from datetime import datetime
-from enum import StrEnum
 from typing import Annotated
 
 import typer
 from rich.text import Text
 
 from doit import labs
+from doit import lanes as lanemodel
 from doit import review
+from doit import sources
+from doit.lanes import GridCell
+from doit.lanes import Lane as LaneView
+from doit.lanes import Row
+from doit.lanes import Urgency
+from doit.lanes import unavailable
 from doit.render import console
 
-# One call per external backend, run concurrently. `icb overview` and `learning
-# overview` are composites on their side precisely so this stays one call each.
-BACKENDS = {
-    'icb': ['icb', 'overview', '--json'],
-    'learning': ['learning', 'overview', '--json'],
-}
+NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'}
 
 # doit's own lanes, read in-process. These are not sources: the source registry
 # exists so doit need not know which *other* apps are installed, and doit does
@@ -76,11 +72,6 @@ LOCAL_BACKENDS = {
     'review': review.statuses,
     'labs': labs.statuses,
 }
-
-# Generous against a measured happy path of well under a second. Because the
-# backends run in parallel this is also the worst-case total, not a per-backend
-# penalty.
-BACKEND_TIMEOUT_SECONDS = 5.0
 
 # The dashboard is a glance: three rows a lane, or ten when you asked for that
 # one lane specifically. Grids are exempt — see LaneView.
@@ -118,136 +109,7 @@ QUEUE_ROWS = 3
 RELATIVE_DAYS_LIMIT = 90
 
 
-class BackendFailure(StrEnum):
-    NOT_INSTALLED = 'not-installed'
-    TIMED_OUT = 'timed-out'
-    FAILED = 'failed'
-    UNREADABLE = 'unreadable'
-
-
-class Urgency(StrEnum):
-    """How hard a row's note should push. Colour is derived from this, never
-    from matching the note text, so wording and emphasis stay independent."""
-
-    NONE = 'none'
-    DUE = 'due'
-    OVERDUE = 'overdue'
-
-
-NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'}
-
-
-@dataclass(frozen=True)
-class JsonResult:
-    """What one backend call produced — facts only, no interpretation."""
-
-    payload: object | None = None
-    exit_code: int | None = None
-    stderr: str = ''
-    failure: BackendFailure | None = None
-    timeout: float | None = None
-
-
-@dataclass(frozen=True)
-class Row:
-    label: str
-    text: str
-    note: str = ''
-    urgency: Urgency = Urgency.NONE
-
-
-@dataclass(frozen=True)
-class GridCell:
-    text: str
-    done: bool
-    # What you would type to act on this cell. Blank when there is nothing left
-    # to do, so a finished row does not offer a handle it does not need.
-    handle: str = ''
-
-
-@dataclass
-class LaneView:
-    """One lane's rendered model.
-
-    `rows` are the capped, ranked things to act on. `grid` is exempt from the
-    cap: it is a complete set that is only useful whole (the habits for today).
-    """
-
-    name: str
-    title: str
-    meta: str = ''
-    rows: list[Row] = field(default_factory=list)
-    grid: list[GridCell] = field(default_factory=list)
-    total: int = 0
-    hints: list[str] = field(default_factory=list)
-    reason: str = ''
-    available: bool = True
-
-
-def run_json(command: list[str], timeout: float) -> JsonResult:
-    try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
-    except FileNotFoundError:
-        return JsonResult(failure=BackendFailure.NOT_INSTALLED)
-    except subprocess.TimeoutExpired:
-        return JsonResult(failure=BackendFailure.TIMED_OUT, timeout=timeout)
-
-    stderr = completed.stderr.strip()
-    if completed.returncode != 0:
-        return JsonResult(exit_code=completed.returncode, stderr=stderr, failure=BackendFailure.FAILED)
-    try:
-        return JsonResult(payload=json.loads(completed.stdout), exit_code=0, stderr=stderr)
-    except json.JSONDecodeError:
-        return JsonResult(exit_code=0, stderr=stderr, failure=BackendFailure.UNREADABLE)
-
-
-def first_line(text: str) -> str:
-    return text.strip().splitlines()[0] if text.strip() else ''
-
-
-def backend_reason(name: str, result: JsonResult | None) -> str:
-    """Turn a failed call into one actionable line."""
-    if result is None:
-        return f'{name} was not queried'
-    if result.failure is BackendFailure.NOT_INSTALLED:
-        return f'{name} is not installed on this machine'
-    if result.failure is BackendFailure.TIMED_OUT:
-        return f'{name} timed out after {result.timeout:g}s'
-    if result.failure is BackendFailure.UNREADABLE:
-        return f'{name} returned unreadable --json output'
-    if result.failure is BackendFailure.FAILED:
-        # Exit 2 is reserved for usage errors across these CLIs, so a rejected
-        # `overview` means the installed binary predates the command.
-        if result.exit_code == 2:
-            return f'installed {name} predates `overview` — reinstall it'
-        return first_line(result.stderr) or f'{name} exited {result.exit_code}'
-    return ''
-
-
-def read_local(read: Callable[[], object]) -> JsonResult:
-    """One of doit's own lanes, without the round trip through a subprocess.
-
-    A raising backend degrades its lane rather than the snapshot, the same way a
-    failing subprocess does — the caller cannot tell the two apart, which is the
-    point.
-    """
-    try:
-        return JsonResult(payload=read(), exit_code=0)
-    except (OSError, ValueError) as error:
-        return JsonResult(exit_code=1, stderr=str(error), failure=BackendFailure.FAILED)
-
-
-def fetch_backends(names: list[str], timeout: float) -> dict[str, JsonResult]:
-    commands = {name: BACKENDS[name] for name in names if name in BACKENDS}
-    results = {name: read_local(LOCAL_BACKENDS[name]) for name in names if name in LOCAL_BACKENDS}
-    if not commands:
-        return results
-    with ThreadPoolExecutor(max_workers=len(commands)) as pool:
-        futures = {name: pool.submit(run_json, command, timeout) for name, command in commands.items()}
-        return results | {name: future.result() for name, future in futures.items()}
-
-
-def icb_context(results: dict[str, JsonResult], sections: tuple[str, ...]) -> tuple[dict | None, str]:
+def icb_context(results: dict[str, sources.Result], sections: tuple[str, ...]) -> tuple[dict | None, str]:
     """The icb payload plus any reason the given sections are degraded.
 
     A payload is refused outright only when the call failed or its schema is
@@ -256,7 +118,7 @@ def icb_context(results: dict[str, JsonResult], sections: tuple[str, ...]) -> tu
     """
     result = results.get('icb')
     if result is None or result.payload is None:
-        return None, backend_reason('icb', result)
+        return None, sources.reason('icb', result)
 
     payload = result.payload
     if not isinstance(payload, dict):
@@ -270,10 +132,6 @@ def icb_context(results: dict[str, JsonResult], sections: tuple[str, ...]) -> tu
         if warning.get('section') in sections:
             return payload, warning.get('message', '')
     return payload, ''
-
-
-def unavailable(name: str, title: str, reason: str) -> LaneView:
-    return LaneView(name=name, title=title, reason=reason, available=False)
 
 
 def plural(count: int, noun: str) -> str:
@@ -296,7 +154,7 @@ def describe(title: str, detail: str) -> str:
     return f'{title} — {detail}' if detail else title
 
 
-def build_tasks_lane(results: dict[str, JsonResult], today: date) -> LaneView:
+def build_tasks_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     payload, reason = icb_context(results, ('tasks',))
     if payload is None:
         return unavailable('tasks', 'TASKS', reason)
@@ -318,7 +176,7 @@ def build_tasks_lane(results: dict[str, JsonResult], today: date) -> LaneView:
     )
 
 
-def build_habits_lane(results: dict[str, JsonResult], today: date) -> LaneView:
+def build_habits_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     payload, reason = icb_context(results, ('habits',))
     if payload is None:
         return unavailable('habits', 'HABITS', reason)
@@ -353,7 +211,7 @@ def habit_category(habit: dict) -> str:
     return (habit.get('category') or {}).get('name', '')
 
 
-def build_books_lane(results: dict[str, JsonResult], today: date) -> LaneView:
+def build_books_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     payload, reason = icb_context(results, ('books',))
     if payload is None:
         return unavailable('books', 'BOOKS', reason)
@@ -381,7 +239,7 @@ def build_books_lane(results: dict[str, JsonResult], today: date) -> LaneView:
     )
 
 
-def build_articles_lane(results: dict[str, JsonResult], today: date) -> LaneView:
+def build_articles_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     payload, reason = icb_context(results, ('articles',))
     if payload is None:
         return unavailable('articles', 'ARTICLES', reason)
@@ -404,7 +262,7 @@ def build_articles_lane(results: dict[str, JsonResult], today: date) -> LaneView
     )
 
 
-def build_projects_lane(results: dict[str, JsonResult], today: date) -> LaneView:
+def build_projects_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     payload, reason = icb_context(results, ('project_items',))
     if payload is None:
         return unavailable('projects', 'PROJECTS', reason)
@@ -439,7 +297,7 @@ def project_item_row(label: str, item: dict) -> Row:
     return Row(label, describe(item.get('title', ''), item.get('notes', '')), projects)
 
 
-def build_upcoming_lane(results: dict[str, JsonResult], today: date) -> LaneView:
+def build_upcoming_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     payload, reason = icb_context(results, ('countdowns', 'events'))
     if payload is None:
         return unavailable('upcoming', 'UPCOMING', reason)
@@ -471,10 +329,10 @@ def build_upcoming_lane(results: dict[str, JsonResult], today: date) -> LaneView
     )
 
 
-def build_learning_lane(results: dict[str, JsonResult], today: date) -> LaneView:
+def build_learning_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     result = results.get('learning')
     if result is None or not isinstance(result.payload, dict):
-        return unavailable('learning', 'LEARNING', backend_reason('learning', result))
+        return unavailable('learning', 'LEARNING', sources.reason('learning', result))
 
     payload = result.payload
     section = payload.get('current_section') or {}
@@ -536,7 +394,7 @@ def track_rows(focuses: list[dict], seen: set) -> list[Row]:
     return rows
 
 
-def build_maintenance_lane(results: dict[str, JsonResult], today: date) -> LaneView:
+def build_maintenance_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     review = results.get('review')
     labs = results.get('labs')
 
@@ -554,7 +412,7 @@ def build_maintenance_lane(results: dict[str, JsonResult], today: date) -> LaneV
                 review_due += 1
                 ranked.append(maintenance_row('review', item.get('desc') or item.get('id', ''), item))
     else:
-        reasons.append(backend_reason('doit review', review))
+        reasons.append(sources.reason('doit review', review))
 
     labs_items = labs.payload if labs else None
     if isinstance(labs_items, list):
@@ -563,7 +421,7 @@ def build_maintenance_lane(results: dict[str, JsonResult], today: date) -> LaneV
                 labs_due += 1
                 ranked.append(maintenance_row('lab', item.get('title') or item.get('id', ''), item))
     else:
-        reasons.append(backend_reason('doit labs', labs))
+        reasons.append(sources.reason('doit labs', labs))
 
     if len(reasons) == 2:
         return unavailable('maintenance', 'MAINTENANCE', '; '.join(reasons))
@@ -671,35 +529,76 @@ def day_urgency(due: str, today: date) -> Urgency:
     return Urgency.NONE
 
 
-LANE_BUILDERS = (
-    ('tasks', ('icb',), build_tasks_lane),
-    ('habits', ('icb',), build_habits_lane),
-    ('learning', ('learning',), build_learning_lane),
-    ('books', ('icb',), build_books_lane),
-    ('articles', ('icb',), build_articles_lane),
-    ('maintenance', ('review', 'labs'), build_maintenance_lane),
-    ('projects', ('icb',), build_projects_lane),
-    ('upcoming', ('icb',), build_upcoming_lane),
+# Which builder answers which lane, and which source's model it reads. This is
+# doit's knowledge of apps that predate the lane contract, and it shrinks by one
+# entry every time an app starts emitting lanes itself.
+ICB_LANES = (
+    ('tasks', build_tasks_lane),
+    ('habits', build_habits_lane),
+    ('books', build_books_lane),
+    ('articles', build_articles_lane),
+    ('projects', build_projects_lane),
+    ('upcoming', build_upcoming_lane),
 )
 
-LANE_NAMES = [name for name, _, _ in LANE_BUILDERS]
+LOCAL_LANES = ('maintenance',)
+
+# Every lane doit can name today. A conforming source contributes lanes that are
+# not in this list, which is the point — it is a convenience for `--lane`, not a
+# closed set the renderer relies on.
+LANE_NAMES = [name for name, _ in ICB_LANES] + ['learning', *LOCAL_LANES]
 
 
-def backends_for(lane_names: list[str]) -> list[str]:
-    """Only the backends the selected lanes actually need, so `--lane tasks`
-    makes exactly one call."""
-    needed = []
-    for name, backends, _ in LANE_BUILDERS:
-        if name not in lane_names:
-            continue
-        for backend in backends:
-            if backend not in needed:
-                needed.append(backend)
-    return needed
+def icb_adapter(result: sources.Result) -> list[LaneView]:
+    """icb's overview model, as lanes. Unregistered the day icb emits them."""
+    today = date.today()
+    return [build({'icb': result}, today) for _, build in ICB_LANES]
 
 
-def build_lanes(results: dict[str, JsonResult], today: date, lane_names: list[str]) -> list[LaneView]:
-    return [build(results, today) for name, _, build in LANE_BUILDERS if name in lane_names]
+def learning_adapter(result: sources.Result) -> list[LaneView]:
+    """learning's overview model, as one lane."""
+    return [build_learning_lane({'learning': result}, date.today())]
+
+
+sources.register_adapter('icb', icb_adapter)
+sources.register_adapter('learning', learning_adapter)
+
+
+def read_local(read: Callable[[], object]) -> sources.Result:
+    """One of doit's own lanes, without a round trip through a subprocess.
+
+    A raising backend degrades its lane rather than the snapshot, the same way a
+    failing subprocess does — the caller cannot tell the two apart.
+    """
+    try:
+        return sources.Result(source='local', payload=read(), exit_code=0)
+    except (OSError, ValueError) as error:
+        return sources.Result(source='local', exit_code=1, stderr=str(error), failure=sources.Failure.FAILED)
+
+
+def local_lanes() -> list[LaneView]:
+    """doit's own lanes. Always built: they read doit's own state, and a
+    dashboard that needs configuring before it can show your own register would
+    be configuration for its own sake."""
+    results = {name: read_local(read) for name, read in LOCAL_BACKENDS.items()}
+    return [build_maintenance_lane(results, date.today())]
+
+
+def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneView]:
+    """Every lane, in the order sources.yml declares its sources.
+
+    Order is config's, not a constant here — that is what makes it yours to
+    change. doit's own lanes come last because nothing in the file governs them.
+    """
+    configured = list(registry.sources.values())
+    results = sources.fetch(configured)
+    collected: list[LaneView] = []
+    for source in configured:
+        collected.extend(sources.lanes_from(source, results[source.id]))
+    collected.extend(local_lanes())
+    if wanted:
+        collected = [lane for lane in collected if lane.name in wanted]
+    return collected
 
 
 def terminal_width() -> int:
@@ -786,7 +685,14 @@ def render_rows(rows: list[Row], width: int) -> None:
             continue
         line.append(fitted(row.text, text_width, pad=True))
         line.append(' ')
-        line.append(fitted(row.note, note_width), style=NOTE_STYLES[row.urgency])
+        # Styled on the Text itself: rich refuses a style argument when what is
+        # being appended is already a Text, and only a due or overdue note
+        # carries one — so this raised for exactly the rows that matter most.
+        note = fitted(row.note, note_width)
+        style = NOTE_STYLES[row.urgency]
+        if style:
+            note.stylize(style)
+        line.append(note)
         console.print(line, no_wrap=True, overflow='ellipsis')
 
 
@@ -834,42 +740,34 @@ def render_trailer(lane: LaneView) -> None:
     console.print(line)
 
 
-def lanes_as_json(lanes: list[LaneView], today: date) -> str:
-    payload = {
-        'generated_at': datetime.now().isoformat(timespec='seconds'),
-        'lanes': [
-            {
-                'name': lane.name,
-                'title': lane.title,
-                'meta': lane.meta,
-                'status': 'ok' if lane.available else 'unavailable',
-                'reason': lane.reason or None,
-                'rows': [{'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency)} for row in lane.rows],
-                'grid': [{'text': cell.text, 'done': cell.done, 'handle': cell.handle} for cell in lane.grid],
-                'total': lane.total,
-                'hints': lane.hints,
-            }
-            for lane in lanes
-        ],
-    }
-    return json.dumps(payload, indent=2)
+def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
+    registry = sources.load()
+    if registry.problems:
+        for problem in registry.problems:
+            console.print(Text(f'sources.yml: {problem}', style='yellow'))
+    if not registry.sources:
+        console.print(Text(f'No sources configured in {sources.SOURCES}.'))
+        console.print('Write one with [cyan]doit sources example[/], then edit it.')
 
+    offered = collect(registry, None)
+    collected = [found for found in offered if found.name in lane] if lane else offered
+    # `--lane` is not checked against a closed set: a conforming source
+    # contributes lanes doit has never heard of, so the only honest check is
+    # whether the name matched anything that actually came back.
+    unmatched = [name for name in lane or [] if name not in {found.name for found in offered}]
+    if unmatched:
+        console.print(Text(f'No lane named {", ".join(unmatched)}.', style='yellow'))
+        console.print(f'  Configured sources offered: {", ".join(found.name for found in offered) or "nothing"}')
 
-def cmd_dashboard(lane: list[str] | None, as_json: bool, timeout: float) -> int:
-    lane_names = lane or LANE_NAMES
     # Asking for one lane means you want to see it, not glance at it.
     row_cap = FOCUSED_ROW_CAP if lane else ROW_CAP
-
-    results = fetch_backends(backends_for(lane_names), timeout)
-    today = date.today()
-    lanes = build_lanes(results, today, lane_names)
 
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
-        print(lanes_as_json(lanes, today))
+        print(lanemodel.dumps(collected, datetime.now()))
     else:
-        render_lanes(lanes, today, row_cap)
+        render_lanes(collected, date.today(), row_cap)
     # A read-only glance always succeeds: degradation is shown per lane, and a
     # consumer of --json checks lanes[].status rather than the exit code.
     return 0
@@ -881,13 +779,6 @@ def dashboard_command(
         typer.Option('--lane', help=f'Show only this lane (repeatable): {", ".join(LANE_NAMES)}'),
     ] = None,
     as_json: Annotated[bool, typer.Option('--json', help='Output the lane model as JSON to stdout.')] = False,
-    timeout: Annotated[
-        float,
-        typer.Option('--timeout', help='Seconds to wait for each backend.'),
-    ] = BACKEND_TIMEOUT_SECONDS,
 ) -> None:
     """Every lane — what is outstanding across everything."""
-    unknown = [name for name in lane or [] if name not in LANE_NAMES]
-    if unknown:
-        raise typer.BadParameter(f'unknown lane(s) {", ".join(unknown)}; choose from {", ".join(LANE_NAMES)}')
-    raise typer.Exit(cmd_dashboard(lane, as_json, timeout))
+    raise typer.Exit(cmd_dashboard(lane, as_json))
