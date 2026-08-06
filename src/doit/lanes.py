@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
 from enum import StrEnum
+from typing import TypeGuard
 
 # Bump only for a breaking reshape. Additive fields are free, because every
 # reader below treats an absent field as its empty value.
@@ -103,7 +104,7 @@ def unavailable(name: str, title: str, reason: str) -> Lane:
     return Lane(name=name, title=title, reason=reason, available=False)
 
 
-def is_lane_document(payload: object) -> bool:
+def is_lane_document(payload: object) -> TypeGuard[dict]:
     """Whether a source's output is already in the contract.
 
     The test is structural rather than a version check, because a source that
@@ -156,7 +157,6 @@ def from_document(payload: object) -> list[Lane]:
     """
     if not is_lane_document(payload):
         return []
-    assert isinstance(payload, dict)
     return [lane_from(lane) for lane in payload['lanes'] if isinstance(lane, dict) and lane.get('name')]
 
 

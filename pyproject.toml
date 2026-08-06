@@ -75,6 +75,11 @@ analyzeUnannotatedFunctions = true
 
 [tool.bandit]
 exclude_dirs = ["tests"]
+# doit's whole job is running other CLIs and drawing at random, so the subprocess
+# and PRNG checks fire on the design rather than on a defect. Same set safekeep
+# and syncer carry for the same reason. The one call that reaches a shell is
+# suppressed at its line instead, because there it is a real question.
+skips = ["B311", "B404", "B603", "B607"]
 
 [tool.codespell]
 check-filenames = true

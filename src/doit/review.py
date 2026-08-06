@@ -220,7 +220,9 @@ def run_show(row: dict) -> None:
     # header and item list we just printed.
     sys.stdout.flush()
     with contextlib.suppress(subprocess.TimeoutExpired):
-        subprocess.run(cmd, shell=True, timeout=10, check=False)
+        # shell=True is the feature, not an oversight: a register entry is hand-
+        # authored config and may hold a pipeline, so it has to reach a shell.
+        subprocess.run(cmd, shell=True, timeout=10, check=False)  # nosec B602
 
 
 def cmd_nudge() -> int:
