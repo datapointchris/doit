@@ -12,6 +12,7 @@ import typer
 
 from doit import __version__
 from doit import dashboard
+from doit import find
 from doit import labs
 from doit import pursuits
 from doit import review
@@ -27,11 +28,19 @@ app.command('next')(pursuits.next_command)
 app.command('log')(pursuits.log_command)
 app.command('skip')(pursuits.skip_command)
 app.command('dashboard')(dashboard.dashboard_command)
+app.command('find')(find.find_command)
+app.command('launch')(find.launch_command)
+
+# The composite view and the fzf preview renderer. Hidden because they are what
+# a picker calls, not what you type.
+app.command('__show', hidden=True)(find.show_command)
+app.command('__preview', hidden=True)(find.preview_command)
 
 app.add_typer(pursuits.app, name='pursuits')
 app.add_typer(review.app, name='review')
 app.add_typer(labs.app, name='labs')
 app.add_typer(workflows.app, name='workflows')
+app.add_typer(find.index_app, name='index')
 
 
 def version_callback(asked: bool) -> None:
