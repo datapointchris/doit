@@ -65,7 +65,13 @@ def root(
         typer.Option('--version', '-V', callback=version_callback, is_eager=True, help='Show the installed version and exit.'),
     ] = None,
 ) -> None:
-    """Root callback, hosting the app-level options."""
+    """Root callback, hosting the app-level options.
+
+    The content clone happens here so a new machine needs no setup step anyone
+    has to remember. It is one `exists()` once the checkout is there — see
+    `doit.content.ensure_cloned` for why a failure only warns.
+    """
+    content.ensure_cloned()
 
 
 def main() -> None:

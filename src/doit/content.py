@@ -10,9 +10,14 @@ verb for a tool updating *itself*, one spelling everywhere. The content and the
 binary are two different things to bring up to date, and giving them one word
 would make "did you update?" an ambiguous question.
 
-Nothing here knows the remote. The checkout does, because it is a checkout —
-asking git where it came from is one call, and a URL written into this file is a
-URL that goes stale in a repo nobody thought to grep.
+doit clones it on first use, so a new machine needs no setup step that can be
+forgotten — which is the whole reason the remote is named here rather than left
+to the checkout. `sync` afterwards asks git where it came from, so a fork or a
+moved remote keeps working without this constant being right forever.
+
+The clone happens once. Every later invocation costs one `Path.exists()`, because
+a tool that touched the network on every command would be one you stopped
+running.
 """
 
 import os
@@ -29,6 +34,10 @@ from doit.render import error_console
 
 CONTENT_DIR = Path(os.environ.get('DOIT_CONTENT_DIR') or xdg_data_home() / 'doit')
 
+# Where the cards come from on a machine that has none yet. Overridable so a
+# fork, a mirror, or a test can point somewhere else without patching code.
+CONTENT_REMOTE = os.environ.get('DOIT_CONTENT_REMOTE') or 'https://github.com/datapointchris/doit-content.git'
+
 
 def git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(['git', *args], cwd=cwd, capture_output=True, text=True, check=False)
@@ -43,6 +52,30 @@ def remote_url(path: Path) -> str:
     return result.stdout.strip() if result.returncode == 0 else ''
 
 
+def ensure_cloned() -> bool:
+    """Clone the content on a machine that has none. True if it is there now.
+
+    Called on every invocation, so the common path is one `exists()` and no
+    process spawn. A failure is a warning rather than an error: doit's other
+    halves — the draw, the dashboard, the register — do not need cards, and
+    refusing to run because a clone failed would be the tail wagging the dog.
+    """
+    if is_checkout(CONTENT_DIR):
+        return True
+    if CONTENT_DIR.exists() and any(CONTENT_DIR.iterdir()):
+        # Something is already there that git did not put there. Adopting it
+        # would mean deciding whose files win, which is not doit's call.
+        return False
+    error_console.print(Text(f'Fetching cards and Labs into {CONTENT_DIR}…'), soft_wrap=True)
+    CONTENT_DIR.parent.mkdir(parents=True, exist_ok=True)
+    result = git('clone', '--quiet', CONTENT_REMOTE, str(CONTENT_DIR))
+    if result.returncode != 0:
+        error_console.print(Text(f'  could not clone {CONTENT_REMOTE}:'), soft_wrap=True)
+        error_console.print(Text(f'  {(result.stderr or result.stdout).strip().splitlines()[0]}'), soft_wrap=True)
+        return False
+    return True
+
+
 def explain_missing() -> int:
     """Say what to clone and where, rather than guessing a remote.
 
@@ -52,9 +85,8 @@ def explain_missing() -> int:
     # soft_wrap: a path rich has wrapped mid-way is a path you cannot copy, and
     # the whole point of this message is the command underneath it.
     error_console.print(Text(f'No content checkout at {CONTENT_DIR}.'), soft_wrap=True)
-    error_console.print('Clone it there once:')
-    error_console.print(Text(f'  git clone <your-doit-content-repo> {CONTENT_DIR}', style='cyan'), soft_wrap=True)
-    error_console.print('  Cards land in `workflows/`, Labs in `labs/`.')
+    error_console.print('doit clones it on first run; if that failed, do it by hand:')
+    error_console.print(Text(f'  git clone {CONTENT_REMOTE} {CONTENT_DIR}', style='cyan'), soft_wrap=True)
     return 1
 
 

@@ -97,3 +97,51 @@ def test_content_status_reports_uncommitted_work(tmp_path, monkeypatch, capsys):
     assert 'uncommitted' in out
     # git collapses an untracked directory to the directory itself.
     assert 'workflows/' in out
+
+
+def test_content_is_cloned_on_first_use(tmp_path, monkeypatch):
+    """A new machine needs no setup step anyone has to remember."""
+    upstream = tmp_path / 'upstream'
+    upstream.mkdir()
+    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=upstream, check=True)
+    (upstream / 'workflows').mkdir()
+    (upstream / 'workflows' / 'a-card.md').write_text('# A Card\n')
+    subprocess.run(['git', 'add', '-A'], cwd=upstream, check=True)
+    subprocess.run(['git', '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'seed'], cwd=upstream, check=True)
+
+    target = tmp_path / 'content'
+    monkeypatch.setattr(content, 'CONTENT_DIR', target)
+    monkeypatch.setattr(content, 'CONTENT_REMOTE', str(upstream))
+
+    assert content.ensure_cloned() is True
+    assert (target / 'workflows' / 'a-card.md').exists()
+
+
+def test_an_existing_checkout_is_not_re_cloned(tmp_path, monkeypatch):
+    """The common path is one exists() and no process spawn."""
+    target = tmp_path / 'content'
+    (target / '.git').mkdir(parents=True)
+    monkeypatch.setattr(content, 'CONTENT_DIR', target)
+    monkeypatch.setattr(content, 'CONTENT_REMOTE', 'file:///nowhere-that-exists')
+
+    assert content.ensure_cloned() is True
+
+
+def test_a_non_empty_directory_is_left_alone(tmp_path, monkeypatch):
+    """Files git did not put there are not doit's to adopt or overwrite."""
+    target = tmp_path / 'content'
+    target.mkdir()
+    (target / 'mine.md').write_text('# Mine\n')
+    monkeypatch.setattr(content, 'CONTENT_DIR', target)
+
+    assert content.ensure_cloned() is False
+    assert (target / 'mine.md').exists()
+
+
+def test_a_failed_clone_warns_rather_than_stopping_doit(tmp_path, monkeypatch, capsys):
+    """The draw, the dashboard and the register need no cards."""
+    monkeypatch.setattr(content, 'CONTENT_DIR', tmp_path / 'content')
+    monkeypatch.setattr(content, 'CONTENT_REMOTE', str(tmp_path / 'not-a-repo'))
+
+    assert content.ensure_cloned() is False
+    assert 'could not clone' in capsys.readouterr().err
