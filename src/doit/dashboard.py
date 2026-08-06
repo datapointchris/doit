@@ -31,7 +31,7 @@ own due-ness, and the day this file imports the cadence module is the day the
 dashboard starts re-deriving a schedule a backend already computed.
 
 Not to be confused with `forge brief`, which is the dev brief across *repos* for
-a coding session. Same plumbing, different audience — see ~/dev/vision.md.
+a coding session. Same plumbing, different audience.
 """
 
 import math

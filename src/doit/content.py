@@ -5,10 +5,10 @@ inside doit. It is a git checkout under `$XDG_DATA_HOME/doit/`, which means
 writing a card and having a card are the same act on every machine — the tldr
 model, where pages live upstream and the client fetches them.
 
-Not `doit update`: [cli-design.md](~/dev/standards/cli-design.md) reserves that
-verb for a tool updating *itself*, one spelling everywhere. The content and the
-binary are two different things to bring up to date, and giving them one word
-would make "did you update?" an ambiguous question.
+Not `doit update`: that verb is reserved for a tool updating *itself*, one
+spelling everywhere. The content and the binary are two different things to
+bring up to date, and giving them one word would make "did you update?" an
+ambiguous question.
 
 doit clones it on first use, so a new machine needs no setup step that can be
 forgotten — which is the whole reason the remote is named here rather than left

@@ -28,10 +28,10 @@ TAGLINE = 'What to do now, and everything that decides it.'
 
 app = typer.Typer(name='doit', no_args_is_help=True, help=TAGLINE)
 
-# Notify-only, per ~/dev/standards/release.md: one check per 24h, one line to
-# stderr, and `doit update` is the only thing that writes anything. The notice
-# and the command share this one config so they cannot advertise a release the
-# command then refuses.
+# Notify-only by house rule: one check per 24h, one line to stderr, and
+# `doit update` is the only thing that writes anything. The notice and the
+# command share this one config so they cannot advertise a release the command
+# then refuses.
 UPDATE_CONFIG = Config(tool='doit', owner='datapointchris')
 
 # The draw and the two things you do to what it just offered sit at the root:

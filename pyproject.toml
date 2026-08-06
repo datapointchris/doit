@@ -26,8 +26,6 @@ requires-python = ">=3.12"
 #
 # Not pytermstyle: a standalone CLI standardizes on rich's display semantics, and
 # pytermstyle is for the in-repo dotfiles apps sharing a palette with colors.sh.
-# See ~/dev/standards/cli-design.md § "Python CLIs are typer, and their help is
-# rich's".
 #
 # The [typer] extra is the ready-made `doit update`; safekeep declines it only
 # because it is argparse. Resolved from PyPI, where the name was free.
