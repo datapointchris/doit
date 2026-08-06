@@ -1,0 +1,15 @@
+# Fixture register for tests/test_review.py. Three items covering the three
+# schedule states: never done, overdue, and not yet due.
+
+items:
+  never-done:
+    description: Has never been marked done
+    cadence: 1w
+  overdue-item:
+    description: Was done long enough ago to be overdue
+    cadence: 1w
+    command: echo overdue
+  fresh-item:
+    description: Was done today, so it is not due again for a while
+    cadence: 4w
+    show: echo fresh

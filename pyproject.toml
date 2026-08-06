@@ -20,9 +20,9 @@ classifiers = [
 requires-python = ">=3.12"
 
 # The house palette and help grammar, so doit's screens match every other CLI on
-# PATH. Nothing else yet by design — pyyaml arrives with the first config
-# reader, pyselfupdate with the release that needs updating.
-dependencies = ["pytermstyle"]
+# PATH, plus pyyaml for the hand-edited registers. pyselfupdate arrives with the
+# release that needs updating.
+dependencies = ["pytermstyle", "pyyaml"]
 
 [project.scripts]
 doit = "doit.cli:main"
