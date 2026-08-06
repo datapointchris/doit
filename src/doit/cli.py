@@ -12,11 +12,20 @@ import typer
 
 from doit import __version__
 from doit import labs
+from doit import pursuits
 from doit import review
 
 TAGLINE = 'What to do now, and everything that decides it.'
 
 app = typer.Typer(name='doit', no_args_is_help=True, help=TAGLINE)
+
+# The draw and the two things you do to what it just offered sit at the root:
+# they act on the answer, while `pursuits` manages the file that produced it.
+app.command('next')(pursuits.next_command)
+app.command('log')(pursuits.log_command)
+app.command('skip')(pursuits.skip_command)
+
+app.add_typer(pursuits.app, name='pursuits')
 app.add_typer(review.app, name='review')
 app.add_typer(labs.app, name='labs')
 

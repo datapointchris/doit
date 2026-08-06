@@ -1,0 +1,30 @@
+# Fixture register for tests/apps/test_menu_next.py. Deliberately covers one of
+# each shape: a hard cadence, a plain weight, a paused entry, and a term that has
+# already ended.
+pursuits:
+  chores:
+    description: The maintenance list
+    weight: 25
+    cadence: 1w
+
+  read-library:
+    description: Read what is on the shelf
+    weight: 30
+
+  read-longform:
+    description: Shares a prefix with read-library, to test ambiguity
+    weight: 5
+
+  study-computer-science:
+    description: Work the CS track
+    weight: 35
+
+  paused-thing:
+    description: Kept in the file, out of the draw
+    weight: 50
+    paused: true
+
+  expired-thing:
+    description: Its term has ended
+    weight: 60
+    until: 2020-01-01
