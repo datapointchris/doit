@@ -20,11 +20,10 @@ resolves it to the underlying resource instead of spending a row on it.
 
 This is a renderer, nothing more. Every backend speaks `--json` and owns its own
 domain rules (which book is next, which habit is due today, when a Lab is
-overdue); the dashboard only lays out what they return. That is why it imports
-nothing from the rest of doit and knows no app's semantics — including doit's
-own: `review` and `labs` are queried over `--json` like any other source, not
-called in-process, because the uniformity is the contract the source registry
-is built on.
+overdue); the dashboard only lays out what they return. That is why it knows no app's
+semantics. It reads doit's own review and labs lanes in-process rather than
+shelling back out to itself — those return the same rows their `--json` prints,
+so the backend still owns due-ness and nothing here re-derives a schedule.
 
 `is_due_row` below therefore mirrors `doit.cadence.is_due` rather than importing
 it. Inside one package that reads as removable duplication. It is not: backends
@@ -39,6 +38,7 @@ import json
 import math
 import shutil
 import subprocess
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from dataclasses import field
@@ -50,15 +50,31 @@ from typing import Annotated
 import typer
 from rich.text import Text
 
+from doit import labs
+from doit import review
 from doit.render import console
 
-# One call per backend, run concurrently. `icb overview` and `learning overview`
-# are composites on their side precisely so this stays one call each.
+# One call per external backend, run concurrently. `icb overview` and `learning
+# overview` are composites on their side precisely so this stays one call each.
 BACKENDS = {
     'icb': ['icb', 'overview', '--json'],
     'learning': ['learning', 'overview', '--json'],
-    'review': ['doit', 'review', 'list', '--json'],
-    'labs': ['doit', 'labs', 'list', '--json'],
+}
+
+# doit's own lanes, read in-process. These are not sources: the source registry
+# exists so doit need not know which *other* apps are installed, and doit does
+# know its own modules.
+#
+# They were subprocesses — `doit review list --json` — on the grounds that
+# uniformity over `--json` was the contract. It cost two full interpreter starts
+# per dashboard (0.73s of 0.98s CPU on the maintenance lane) to read a local YAML
+# file and a directory of markdown already reachable from here. The contract that
+# actually matters is unaffected: these functions return the exact rows the
+# `--json` output prints, so the backend still owns due-ness and the dashboard
+# still never re-derives a cadence.
+LOCAL_BACKENDS = {
+    'review': review.statuses,
+    'labs': labs.statuses,
 }
 
 # Generous against a measured happy path of well under a second. Because the
@@ -208,11 +224,27 @@ def backend_reason(name: str, result: JsonResult | None) -> str:
     return ''
 
 
+def read_local(read: Callable[[], object]) -> JsonResult:
+    """One of doit's own lanes, without the round trip through a subprocess.
+
+    A raising backend degrades its lane rather than the snapshot, the same way a
+    failing subprocess does — the caller cannot tell the two apart, which is the
+    point.
+    """
+    try:
+        return JsonResult(payload=read(), exit_code=0)
+    except (OSError, ValueError) as error:
+        return JsonResult(exit_code=1, stderr=str(error), failure=BackendFailure.FAILED)
+
+
 def fetch_backends(names: list[str], timeout: float) -> dict[str, JsonResult]:
-    commands = {name: BACKENDS[name] for name in names}
-    with ThreadPoolExecutor(max_workers=max(1, len(commands))) as pool:
+    commands = {name: BACKENDS[name] for name in names if name in BACKENDS}
+    results = {name: read_local(LOCAL_BACKENDS[name]) for name in names if name in LOCAL_BACKENDS}
+    if not commands:
+        return results
+    with ThreadPoolExecutor(max_workers=len(commands)) as pool:
         futures = {name: pool.submit(run_json, command, timeout) for name, command in commands.items()}
-        return {name: future.result() for name, future in futures.items()}
+        return results | {name: future.result() for name, future in futures.items()}
 
 
 def icb_context(results: dict[str, JsonResult], sections: tuple[str, ...]) -> tuple[dict | None, str]:

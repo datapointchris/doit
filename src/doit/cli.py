@@ -31,9 +31,9 @@ app.command('dashboard')(dashboard.dashboard_command)
 app.command('find')(find.find_command)
 app.command('launch')(find.launch_command)
 
-# The composite view and the fzf preview renderer. Hidden because they are what
-# a picker calls, not what you type.
-app.command('__show', hidden=True)(find.show_command)
+app.command('show')(find.show_command)
+
+# What the fzf preview pane calls, not what you type.
 app.command('__preview', hidden=True)(find.preview_command)
 
 app.add_typer(pursuits.app, name='pursuits')

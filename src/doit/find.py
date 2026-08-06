@@ -1,10 +1,11 @@
 """Search the federated index, then hand you off to whoever owns the answer.
 
 `doit find` is one motion: fuzzy-match a line, press Enter, get everything known
-about that subject assembled from every collection that has it. `doit launch`
-is the other direction — your areas and your own tools, for when the question is
-"what can I even run here" rather than "where is the thing I already have in
-mind".
+about that subject assembled from every collection that has it. `doit show` is
+that same composite when you already know the name — it is what `menu labs <tool>`
+used to do, and it is a command rather than a picker callback because knowing the
+name is the common case. `doit launch` is the other direction: your areas and your
+own tools, for when the question is "what can I even run here".
 
 fzf is shelled out to rather than reimplemented. It is already the picker
 everywhere else on this machine, and a Python reimplementation would be a worse
