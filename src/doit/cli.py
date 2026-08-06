@@ -11,11 +11,13 @@ from typing import Annotated
 import typer
 
 from doit import __version__
+from doit import content
 from doit import dashboard
 from doit import find
 from doit import labs
 from doit import pursuits
 from doit import review
+from doit import shell
 from doit import sources
 from doit import workflows
 
@@ -33,6 +35,8 @@ app.command('find')(find.find_command)
 app.command('launch')(find.launch_command)
 
 app.command('show')(find.show_command)
+app.command('shell-init')(shell.shell_init_command)
+app.command('completion')(shell.completion_command)
 
 # What the fzf preview pane calls, not what you type.
 app.command('__preview', hidden=True)(find.preview_command)
@@ -43,6 +47,7 @@ app.add_typer(labs.app, name='labs')
 app.add_typer(workflows.app, name='workflows')
 app.add_typer(find.index_app, name='index')
 app.add_typer(sources.app, name='sources')
+app.add_typer(content.app, name='content')
 
 
 def version_callback(asked: bool) -> None:
