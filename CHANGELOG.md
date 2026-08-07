@@ -1,6 +1,36 @@
 # CHANGELOG
 
 
+## v0.6.0 (2026-08-07)
+
+### Documentation
+
+- Name whose problem the missing projects handle is
+  ([`d642565`](https://github.com/datapointchris/doit/commit/d64256542752aa68bb23ba328dbf31fab4408b8b))
+
+The comment said `doit next` prints the item's view command in full. It did for about an hour. A
+  project item's id is a UUID, which is unusable as something a person retypes, so the register line
+  that produced it is gone and the draw is as bare as the lane.
+
+That is icb's gap rather than this renderer's, and it is filed: project items and projects are the
+  only icb resources without the short integer every other one carries. The handle comes back here
+  when the number exists.
+
+### Features
+
+- **dashboard**: Give project item rows a handle
+  ([`7c891c7`](https://github.com/datapointchris/doit/commit/7c891c7b95742507baa88fd177436907a3ecc81b))
+
+Projects was the only lane whose rows carried no command, because an item's only id was a UUID and
+  the invocation ran to sixty columns of hex nobody could retype. Items carry a short number now and
+  icb takes it, so the row names the thing it shows and the verb comes out of the hint.
+
+view_handle takes the field to read, because project items are the one resource whose handle is not
+  its id. An item created in todoui while the API was unreachable has no number until its create is
+  pushed, and falls back to no handle at all — the existing rule that a handle which would fail is
+  worse than none.
+
+
 ## v0.5.0 (2026-08-07)
 
 ### Features
