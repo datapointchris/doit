@@ -121,6 +121,7 @@ KNOWN_FIELDS = {
     'id',
     'context',
     'detail',
+    'view',
     'on_log',
 }
 
@@ -149,6 +150,7 @@ TEMPLATE = """\
 #
 #   context      where it lives — one path or several, joined
 #   detail       the field to take a one-sentence gist from, usually notes
+#   view         command that opens the item in full, {id} substituted
 
 pursuits:
   chores:
@@ -159,6 +161,7 @@ pursuits:
     label: name
     id: id
     context: category
+    view: icb tasks view {id}
     on_log: icb tasks complete {id}
 
   read-library:
@@ -218,6 +221,8 @@ def load_pursuits(path: Path | None = None) -> dict:
             raise RegisterError(f'{name}: on_log needs resolve — there is no item to act on without it')
         if (config.get('context') or config.get('detail')) and not config.get('label'):
             raise RegisterError(f'{name}: context and detail read fields off the resolved row, so they need label')
+        if config.get('view') and not config.get('resolve'):
+            raise RegisterError(f'{name}: view needs resolve — there is no item to look at without it')
     return pursuits
 
 
@@ -438,9 +443,23 @@ def resolve_one(name: str, config: dict) -> dict | None:
         'id': None if identifier is None else str(identifier),
         'context': row_context(row, config.get('context')),
         'detail': first_sentence(str(dig(row, config['detail']) or '')) if config.get('detail') else '',
+        'view': view_command(config.get('view'), identifier),
         'backend': shlex.split(config['resolve'])[0],
         'raw': row,
     }
+
+
+def view_command(template: str | None, identifier) -> str:
+    """The command that opens the offered item, with its id filled in.
+
+    Empty when the template wants an id the backend did not give, because a
+    command printed with a hole in it reads as something you could run.
+    """
+    if not template:
+        return ''
+    if '{id}' in template and identifier is None:
+        return ''
+    return template.format(id='' if identifier is None else identifier)
 
 
 def row_context(row: dict, paths) -> str:
@@ -540,28 +559,34 @@ def render_row(index: int, name: str, state: dict, resolved: dict, pin: bool, wi
 
 
 def render_context(detail: dict, width: int) -> None:
-    """The second line: where the offered item lives and what it is about.
+    """The lines under the title: where the offered item lives, and how to open it.
 
     A title names an item and nothing else. Which repo it lands in, which effort
     it serves and why it is worth the next hour are all on the row the backend
     already returned — dropping them means going back and asking a second time to
     find out whether to pick the thing that was just offered.
 
-    One line rather than two, and aligned under the title: the draw is five
+    Context and gist share one line, aligned under the title: the draw is five
     entries you scan, and a paragraph under each turns it into a document you
-    read. What does not fit is clipped, because the sentence starts with the gist.
+    read. The view command earns its own, because a clipped command is not a
+    command — this is where a project item's sixty-column UUID invocation fits
+    and the dashboard's three-row glance cannot.
     """
+    indent = ' ' * (width + CONTINUATION_INDENT)
     context = detail.get('context') or ''
     about = detail.get('detail') or ''
-    if not context and not about:
-        return
-    line = Text(' ' * (width + CONTINUATION_INDENT))
-    if context:
-        line.append(context, style='cyan')
-    if context and about:
-        line.append(' — ')
-    line.append(about)
-    console.print(line, no_wrap=True, overflow='ellipsis')
+    if context or about:
+        line = Text(indent)
+        if context:
+            line.append(context, style='cyan')
+        if context and about:
+            line.append(' — ')
+        line.append(about)
+        console.print(line, no_wrap=True, overflow='ellipsis')
+    if detail.get('view'):
+        line = Text(indent)
+        line.append(f'↳ {detail["view"]}', style='cyan')
+        console.print(line, no_wrap=True, overflow='ellipsis')
 
 
 def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:

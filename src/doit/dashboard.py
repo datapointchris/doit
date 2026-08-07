@@ -40,6 +40,7 @@ from collections.abc import Callable
 from datetime import date
 from datetime import datetime
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import typer
 from rich.text import Text
@@ -167,6 +168,30 @@ def clean(text: str) -> str:
     return ' '.join((text or '').split())
 
 
+def view_handle(command: str, item: dict) -> str:
+    """What to type to see one row in full.
+
+    Every backend here has a `view` verb, and it is the right one for a glance:
+    it is the read, so a dashboard never puts a write in front of you, and it is
+    uniform across the namespaces so the column means one thing everywhere. Empty
+    when the backend gave no id, because a handle that would fail is worse than
+    no handle — it reads as something you can run.
+    """
+    identifier = item.get('id')
+    return f'{command} {identifier}' if identifier else ''
+
+
+def source_host(url: str) -> str:
+    """The site an article came from.
+
+    Three hundred unread titles say what to read and nothing about where it is or
+    who wrote it, and the host is the one field that separates a vendor blog post
+    from a paper without opening either.
+    """
+    host = urlsplit(url or '').netloc
+    return host.removeprefix('www.')
+
+
 def describe(title: str, detail: str) -> str:
     """A row's own words plus the gist of whatever note the backend carries,
     because a bare title like "Glove 80" names a thing without saying what to do
@@ -189,8 +214,17 @@ def build_tasks_lane(results: dict[str, sources.Result], today: date) -> LaneVie
     items = section.get('items') or []
     total = section.get('total', len(items))
     # `p3` rather than a bare `3`: in a gutter that elsewhere holds words, a lone
-    # numeral reads as a row number.
-    rows = [Row(f'p{task.get("priority", "")}', task.get('name', ''), task.get('category', '')) for task in items]
+    # numeral reads as a row number. The priority is not the id, so without the
+    # handle there is nothing on the row you could act on.
+    rows = [
+        Row(
+            f'p{task.get("priority", "")}',
+            describe(task.get('name', ''), task.get('notes', '')),
+            task.get('category', ''),
+            handle=view_handle('icb tasks view', task),
+        )
+        for task in items
+    ]
     return LaneView(
         name='tasks',
         title='TASKS',
@@ -247,8 +281,8 @@ def build_books_lane(results: dict[str, sources.Result], today: date) -> LaneVie
     next_up = section.get('next_up') or []
 
     rows = round_robin(
-        [Row('reading', clean(book.get('title', '')), clean(book.get('author', ''))) for book in reading],
-        [Row('next', clean(book.get('title', '')), clean(book.get('author', ''))) for book in next_up[:QUEUE_ROWS]],
+        [book_row('reading', book) for book in reading],
+        [book_row('next', book) for book in next_up[:QUEUE_ROWS]],
     )
     # The queue size comes from the backend's own total, never from the handful
     # of rows built here — icb's --limit would otherwise decide what the heading
@@ -265,6 +299,10 @@ def build_books_lane(results: dict[str, sources.Result], today: date) -> LaneVie
     )
 
 
+def book_row(label: str, book: dict) -> Row:
+    return Row(label, clean(book.get('title', '')), clean(book.get('author', '')), handle=view_handle('icb books view', book))
+
+
 def build_articles_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     payload, reason = icb_context(results, ('articles',))
     if payload is None:
@@ -275,8 +313,8 @@ def build_articles_lane(results: dict[str, sources.Result], today: date) -> Lane
     unread = section.get('unread') or []
     unread_total = section.get('unread_total', len(unread))
 
-    rows = [Row('reading', clean(current.get('title', '')))] if current else []
-    rows += [Row('next', clean(article.get('title', ''))) for article in unread[:QUEUE_ROWS]]
+    rows = [article_row('reading', current)] if current else []
+    rows += [article_row('next', article) for article in unread[:QUEUE_ROWS]]
     return LaneView(
         name='articles',
         title='ARTICLES',
@@ -285,6 +323,15 @@ def build_articles_lane(results: dict[str, sources.Result], today: date) -> Lane
         total=unread_total + (1 if current else 0),
         hints=['icb articles list'],
         reason=reason,
+    )
+
+
+def article_row(label: str, article: dict) -> Row:
+    return Row(
+        label,
+        clean(article.get('title', '')),
+        source_host(article.get('url', '')),
+        handle=view_handle('icb articles view', article),
     )
 
 
@@ -307,7 +354,13 @@ def build_projects_lane(results: dict[str, sources.Result], today: date) -> Lane
         meta=f'{next_total} next · {blocked_total} blocked',
         rows=rows,
         total=next_total + blocked_total,
-        hints=['icb projects items list'],
+        # The only lane whose rows carry no handle. An item's id is a UUID, so
+        # `icb projects items view <id>` runs to sixty columns and would be
+        # ellipsised into something that looks copyable and is not — leaving the
+        # title too narrow to read into the bargain. The verb goes in the hint
+        # instead, and `doit next` prints it in full for the item it draws,
+        # having a line to spend on one.
+        hints=['icb projects items list', 'icb projects items view <id>'],
         reason=reason,
     )
 
@@ -334,17 +387,21 @@ def build_upcoming_lane(results: dict[str, sources.Result], today: date) -> Lane
     countdowns = payload.get('countdowns') or {}
     events = payload.get('events') or {}
 
+    # An event's venue is where it is, which is most of what you want from a row
+    # about somewhere you have to be; a countdown has only its notes.
     entries = []
     for countdown in countdowns.get('items') or []:
-        entries.append((countdown.get('due_date', ''), countdown.get('name', '')))
+        text = describe(countdown.get('name', ''), countdown.get('notes', ''))
+        entries.append((countdown.get('due_date', ''), text, view_handle('icb countdowns view', countdown)))
     for event in events.get('items') or []:
-        entries.append((event_date(event.get('date', '')), event.get('name', '')))
+        text = describe(event.get('name', ''), event.get('venue') or event.get('notes', ''))
+        entries.append((event_date(event.get('date', '')), text, view_handle('icb events view', event)))
     entries.sort(key=lambda entry: entry[0])
 
     # The gutter always answers "how far away", the note always answers "which
     # day". Which kind of entry it is says nothing about what you would do next,
-    # so it does not earn the column.
-    rows = [Row(relative_day(due, today), name, calendar_day(due), day_urgency(due, today)) for due, name in entries]
+    # so it does not earn the column — the handle names it anyway.
+    rows = [Row(relative_day(due, today), text, calendar_day(due), day_urgency(due, today), handle) for due, text, handle in entries]
     countdown_total = countdowns.get('total', 0)
     event_total = events.get('total', 0)
     return LaneView(
@@ -379,17 +436,17 @@ def build_learning_lane(results: dict[str, sources.Result], today: date) -> Lane
     seen = set()
     for resource in payload.get('in_progress_resources') or []:
         seen.add(resource.get('id'))
-        started.append(Row('open', resource.get('title', '')))
+        started.append(resource_row('open', resource))
     for item in section.get('items') or []:
         resource = item.get('resource') or {}
         if resource.get('id') in seen:
             continue
         if resource.get('status_id') == LEARNING_IN_PROGRESS:
             seen.add(resource.get('id'))
-            started.append(Row('open', resource.get('title', '')))
+            started.append(resource_row('open', resource))
         elif resource.get('status_id') == LEARNING_NOT_STARTED:
             seen.add(resource.get('id'))
-            unstarted.append(Row('start', resource.get('title', '')))
+            unstarted.append(resource_row('start', resource))
 
     # Interleaved, not appended: the tracks are the streams most easily crowded
     # out, and they are the reason the lane spans more than the current section.
@@ -402,6 +459,13 @@ def build_learning_lane(results: dict[str, sources.Result], today: date) -> Lane
         total=len(rows),
         hints=['learning overview'],
     )
+
+
+def resource_row(label: str, resource: dict, note: str = '') -> Row:
+    """One openable resource. The handle is the read verb rather than the URL the
+    resource carries: a link is not something you type, and `view` prints it
+    along with everything else the row had no room for."""
+    return Row(label, resource.get('title', ''), note, handle=view_handle('learning resources view', resource))
 
 
 def track_rows(focuses: list[dict], seen: set) -> list[Row]:
@@ -419,7 +483,7 @@ def track_rows(focuses: list[dict], seen: set) -> list[Row]:
         seen.add(resource.get('id'))
         progress = focus.get('progress') or {}
         note = f'{focus.get("display_name", "")} {progress.get("completed_items", 0)}/{progress.get("total_items", 0)}'
-        rows.append(Row('open' if focus.get('started') else 'start', resource.get('title', ''), note))
+        rows.append(resource_row('open' if focus.get('started') else 'start', resource, note))
     return rows
 
 
@@ -731,21 +795,24 @@ def render_rows(rows: list[Row], width: int) -> None:
         line.append(row.label.ljust(LABEL_WIDTH), style='yellow')
         line.append(' ')
         line.append(fitted(row.text, text_width, pad=True))
-        if handle_width:
-            line.append(' ')
-            handle = fitted(handle_text(row), handle_width, pad=True)
-            handle.stylize('cyan')
-            line.append(handle)
+        # Note before handle, so a row reads what it is, how urgent it is, then
+        # what to type — the order `nudge_row` and `doit review due` already use.
+        # Between the two, the command split every title from its own qualifier.
         if note_width:
             line.append(' ')
             # Styled on the Text itself: rich refuses a style argument when what
             # is being appended is already a Text, and only a due or overdue note
             # carries one — so this raised for exactly the rows that matter most.
-            note = fitted(row.note, note_width)
+            note = fitted(row.note, note_width, pad=True)
             style = NOTE_STYLES[row.urgency]
             if style:
                 note.stylize(style)
             line.append(note)
+        if handle_width:
+            line.append(' ')
+            handle = fitted(handle_text(row), handle_width)
+            handle.stylize('cyan')
+            line.append(handle)
         # Padded up to the last column that has anything in it, then trimmed, so
         # a line ends where its content does rather than in trailing spaces.
         line.rstrip()

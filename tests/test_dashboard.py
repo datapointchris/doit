@@ -229,6 +229,38 @@ def test_maintenance_lane_ranks_by_how_late_a_row_actually_is():
     assert lane.rows[-1].note == 'never run', 'never run is the least urgent state, not the most'
 
 
+def test_every_lane_that_can_name_a_handle_does():
+    """A row you can read and not act on sends you hunting for the thing it named.
+
+    Projects is the deliberate exception — its ids are UUIDs, so the invocation
+    would be ellipsised into something that looks copyable and is not.
+    """
+    lanes = lanes_by_name(all_results())
+
+    for name in ('tasks', 'books', 'articles', 'upcoming', 'learning'):
+        assert all(row.handle for row in lanes[name].rows), f'{name} has a row with nothing to act on'
+    assert not any(row.handle for row in lanes['projects'].rows)
+    assert 'icb projects items view <id>' in lanes['projects'].hints, 'the verb goes in the hint instead'
+    # Maintenance is the one lane whose handle is the register's to supply, so a
+    # review entry that declares no command has none to show.
+    assert all(row.handle for row in lanes['maintenance'].rows if row.label == 'lab')
+
+
+def test_a_handle_is_the_read_verb_not_a_write():
+    lanes = lanes_by_name(all_results())
+
+    assert lanes['tasks'].rows[0].handle.startswith('icb tasks view ')
+    assert lanes['books'].rows[0].handle.startswith('icb books view ')
+    assert lanes['articles'].rows[0].handle.startswith('icb articles view ')
+    assert lanes['learning'].rows[0].handle.startswith('learning resources view ')
+
+
+def test_a_row_whose_backend_gave_no_id_offers_no_handle():
+    # A handle that would fail reads as something you can run.
+    assert dashboard.view_handle('icb tasks view', {'name': 'no id here'}) == ''
+    assert dashboard.view_handle('icb tasks view', {'id': 422}) == 'icb tasks view 422'
+
+
 def test_maintenance_rows_carry_the_command_that_does_them():
     """A row naming a thing to revisit and withholding the command that revisits
     it is a row you can read and cannot act on."""
@@ -257,6 +289,23 @@ def test_maintenance_shows_both_kinds_when_every_row_is_equally_urgent():
 
     assert lane.meta == '5 reviews · 5 labs due'
     assert [row.label for row in lane.rows[:4]] == ['review', 'lab', 'review', 'lab']
+
+
+def test_an_article_row_says_where_it_came_from():
+    """Three hundred unread titles say what to read and nothing about where it is."""
+    lane = lanes_by_name(all_results())['articles']
+
+    assert lane.rows[0].note == 'example.com'
+    assert dashboard.source_host('https://www.postgresqltutorial.com/x') == 'postgresqltutorial.com'
+    assert dashboard.source_host('') == '', 'an article saved without a URL simply has no source'
+
+
+def test_an_event_row_says_where_it_is():
+    # The venue is most of what a row about somewhere you have to be is for, and
+    # it was dropped entirely.
+    lane = lanes_by_name(all_results())['upcoming']
+
+    assert 'A Concert — A Venue' in {row.text for row in lane.rows}
 
 
 def test_upcoming_lane_uses_one_distance_format_and_names_the_day():
