@@ -168,7 +168,7 @@ def clean(text: str) -> str:
     return ' '.join((text or '').split())
 
 
-def view_handle(command: str, item: dict) -> str:
+def view_handle(command: str, item: dict, key: str = 'id') -> str:
     """What to type to see one row in full.
 
     Every backend here has a `view` verb, and it is the right one for a glance:
@@ -176,8 +176,11 @@ def view_handle(command: str, item: dict) -> str:
     uniform across the namespaces so the column means one thing everywhere. Empty
     when the backend gave no id, because a handle that would fail is worse than
     no handle — it reads as something you can run.
+
+    `key` exists for project items, whose id is a UUID that would run to sixty
+    columns. They carry a short `number` alongside it, and `icb` takes either.
     """
-    identifier = item.get('id')
+    identifier = item.get(key)
     return f'{command} {identifier}' if identifier else ''
 
 
@@ -354,12 +357,7 @@ def build_projects_lane(results: dict[str, sources.Result], today: date) -> Lane
         meta=f'{next_total} next · {blocked_total} blocked',
         rows=rows,
         total=next_total + blocked_total,
-        # The only lane whose rows carry no handle, and the reason is icb's, not
-        # this renderer's: an item's id is a UUID, so the command runs to sixty
-        # columns of hex nobody can retype. The verb goes in the hint instead.
-        # Restore the handle when project items get the short number every other
-        # icb resource already has — filed under `todoui` in icb.
-        hints=['icb projects items list', 'icb projects items view <id>'],
+        hints=['icb projects items list'],
         reason=reason,
     )
 
@@ -375,7 +373,12 @@ def project_item_row(label: str, item: dict) -> Row:
     """
     projects = [project.get('name', '') for project in item.get('projects') or []]
     where = join_context([item.get('repo'), *projects])
-    return Row(label, describe(item.get('title', ''), item.get('notes', '')), where)
+    return Row(
+        label,
+        describe(item.get('title', ''), item.get('notes', '')),
+        where,
+        handle=view_handle('icb projects items view', item, key='number'),
+    )
 
 
 def build_upcoming_lane(results: dict[str, sources.Result], today: date) -> LaneView:

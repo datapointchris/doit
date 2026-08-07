@@ -232,15 +232,13 @@ def test_maintenance_lane_ranks_by_how_late_a_row_actually_is():
 def test_every_lane_that_can_name_a_handle_does():
     """A row you can read and not act on sends you hunting for the thing it named.
 
-    Projects is the deliberate exception — its ids are UUIDs, so the invocation
-    would be ellipsised into something that looks copyable and is not.
+    Projects was the one exception for as long as an item's only id was a UUID.
+    It carries a short number now, so there is no lane left without a handle.
     """
     lanes = lanes_by_name(all_results())
 
-    for name in ('tasks', 'books', 'articles', 'upcoming', 'learning'):
+    for name in ('tasks', 'books', 'articles', 'upcoming', 'learning', 'projects'):
         assert all(row.handle for row in lanes[name].rows), f'{name} has a row with nothing to act on'
-    assert not any(row.handle for row in lanes['projects'].rows)
-    assert 'icb projects items view <id>' in lanes['projects'].hints, 'the verb goes in the hint instead'
     # Maintenance is the one lane whose handle is the register's to supply, so a
     # review entry that declares no command has none to show.
     assert all(row.handle for row in lanes['maintenance'].rows if row.label == 'lab')
@@ -253,6 +251,7 @@ def test_a_handle_is_the_read_verb_not_a_write():
     assert lanes['books'].rows[0].handle.startswith('icb books view ')
     assert lanes['articles'].rows[0].handle.startswith('icb articles view ')
     assert lanes['learning'].rows[0].handle.startswith('learning resources view ')
+    assert lanes['projects'].rows[0].handle.startswith('icb projects items view ')
 
 
 def test_a_row_whose_backend_gave_no_id_offers_no_handle():
@@ -337,6 +336,30 @@ def test_projects_lane_says_where_the_work_lands():
     assert lane.rows[0].note == 'A Project', 'an errand carries no repo'
     assert lane.rows[1].note == 'somerepo · A Project · Another Project', 'picking one project would be arbitrary'
     assert lane.rows[2].note == 'somerepo', 'a repo with no membership still says where to go'
+
+
+def test_projects_lane_rows_carry_a_handle_you_can_type():
+    """The one lane that used to have no handle, because an item's only id was a
+    UUID sixty columns wide. Items carry a short number now and icb takes it."""
+    lane = lanes_by_name(all_results())['projects']
+
+    assert [row.handle for row in lane.rows] == [
+        'icb projects items view 101',
+        'icb projects items view 102',
+        'icb projects items view 103',
+    ]
+
+
+def test_projects_lane_row_without_a_number_has_no_handle():
+    """An item created in todoui while the API was unreachable has no number
+    until its create is pushed. A handle that would fail is worse than none."""
+    payload = fixture('icb-overview.json')
+    del payload['project_items']['next'][0]['number']
+    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+
+    lane = dashboard.build_projects_lane(results, TODAY)
+
+    assert lane.rows[0].handle == ''
 
 
 def test_projects_lane_survives_an_icb_that_omits_membership():

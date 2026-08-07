@@ -85,6 +85,7 @@
     "next": [
       {
         "id": "019f0000-0000-7000-8000-000000000001",
+        "number": 101,
         "title": "An actionable item",
         "notes": "what it actually means. Then a second paragraph of reasoning, rejected alternatives and pre-flight checks.",
         "projects": [
@@ -98,6 +99,7 @@
       },
       {
         "id": "019f0000-0000-7000-8000-000000000002",
+        "number": 102,
         "title": "A second item",
         "notes": null,
         "repo": "somerepo",
@@ -119,6 +121,7 @@
     "blocked": [
       {
         "id": "019f0000-0000-7000-8000-000000000003",
+        "number": 103,
         "title": "A blocked item",
         "repo": "somerepo",
         "completed": false,
