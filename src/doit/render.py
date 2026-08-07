@@ -1,4 +1,4 @@
-"""doit's shared console and its startup-nudge renderers.
+"""doit's shared console, its text shaping, and its startup-nudge renderers.
 
 A nudge is an interrupt you did not ask for, so it trades every browse-time field
 (description, tags, cadence, last-done) for one line per item, and every line is
@@ -14,6 +14,8 @@ rather than markup strings — `Text.append` does not parse `[...]`, so a bracke
 in a description cannot be swallowed as a style tag.
 """
 
+import re
+
 from rich.console import Console
 from rich.text import Text
 
@@ -28,6 +30,40 @@ error_console = Console(stderr=True, highlight=False)
 
 # Wide enough for "overdue 999d", the longest status_label, plus a space.
 STATUS_WIDTH = 13
+
+# A sentence ends at punctuation the next character does not continue. Matching
+# the following space rather than the punctuation alone is what keeps `execute.go`
+# and `os.Exit(1)` from being read as two sentences apiece.
+SENTENCE_END = re.compile(r'[.!?](?=\s)')
+
+
+def join_context(parts) -> str:
+    """The facts that place an item, joined into one qualifier.
+
+    An item is placed by more than one fact — the repo it lands in and the effort
+    it serves — and which of them a backend carries varies row by row. Blanks drop
+    out so a missing one leaves no dangling separator, and repeats drop out
+    because a repo whose project shares its name is placed once, not twice.
+    """
+    seen = []
+    for part in parts:
+        text = str(part or '').strip()
+        if text and text not in seen:
+            seen.append(text)
+    return ' · '.join(seen)
+
+
+def first_sentence(text: str) -> str:
+    """The opening sentence of a stored note, collapsed onto one line.
+
+    Notes run to paragraphs — the reasoning, the alternatives that were rejected,
+    what to check before starting. Clipping that at a column boundary spends the
+    width on the middle of a word somewhere in the second paragraph. Taking the
+    first sentence spends it on the gist and stops where the writer stopped.
+    """
+    collapsed = ' '.join((text or '').split())
+    ended = SENTENCE_END.search(collapsed)
+    return collapsed[: ended.end()] if ended else collapsed
 
 
 def nudge_header(title: str, count: int) -> None:

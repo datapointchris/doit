@@ -239,6 +239,19 @@ def test_dig_dead_ends_to_none():
     assert pursuits.dig({'a': {}}, 'a.b.c') is None
 
 
+def test_dig_indexes_a_list_with_a_numeric_key():
+    # Membership arrives as an array, so the name of the work an item belongs to
+    # is unreachable without this.
+    document = {'projects': [{'name': 'First'}, {'name': 'Second'}]}
+    assert pursuits.dig(document, 'projects.0.name') == 'First'
+    assert pursuits.dig(document, 'projects.1.name') == 'Second'
+
+
+@pytest.mark.parametrize('path', ['projects.9.name', 'projects.name'])
+def test_dig_dead_ends_rather_than_raising_on_a_bad_list_key(path):
+    assert pursuits.dig({'projects': [{'name': 'First'}]}, path) is None
+
+
 def test_resolve_one_reads_plain_lines_when_no_label_is_named():
     resolved = pursuits.resolve_one('p', {'resolve': 'printf "first line\\nsecond\\n"'})
     assert resolved['label'] == 'first line'
@@ -269,6 +282,59 @@ def test_resolve_one_accepts_a_single_object_where_a_list_would_do(tmp_path):
     resolved = pursuits.resolve_one('build', config)
     assert resolved['label'] == 'Ship the CLI'
     assert resolved['id'] == 'abc'
+
+
+def test_resolve_one_carries_where_the_item_lives_and_what_it_is_about(tmp_path):
+    payload = tmp_path / 'items.json'
+    payload.write_text(
+        json.dumps(
+            [
+                {
+                    'title': 'Give cobracmd a usage-error exit code of 2',
+                    'repo': 'goselfupdate',
+                    'notes': 'Cobra returns flag-parse failures as ordinary errors. Fix belongs in cobracmd.',
+                    'projects': [{'name': 'CLI machine contract conformance'}],
+                }
+            ]
+        )
+    )
+    config = {
+        'resolve': f'cat {payload}',
+        'label': 'title',
+        'context': ['repo', 'projects.0.name'],
+        'detail': 'notes',
+    }
+
+    resolved = pursuits.resolve_one('build', config)
+
+    assert resolved['context'] == 'goselfupdate · CLI machine contract conformance'
+    assert resolved['detail'] == 'Cobra returns flag-parse failures as ordinary errors.', 'the gist, not the whole note'
+
+
+def test_resolve_one_takes_a_single_context_path_as_well_as_several(tmp_path):
+    payload = tmp_path / 'tasks.json'
+    payload.write_text(json.dumps([{'name': 'Trim Dingo Nails', 'category': 'Dingo'}]))
+    config = {'resolve': f'cat {payload}', 'label': 'name', 'context': 'category'}
+
+    assert pursuits.resolve_one('tasks', config)['context'] == 'Dingo'
+
+
+def test_resolve_one_skips_a_context_field_the_row_does_not_carry(tmp_path):
+    # An errand has no repo. The note reads as the projects alone, never as a
+    # leading separator with nothing in front of it.
+    payload = tmp_path / 'items.json'
+    payload.write_text(json.dumps([{'title': 'Glove 80', 'repo': None, 'projects': [{'name': 'Sell Unused Shite'}]}]))
+    config = {'resolve': f'cat {payload}', 'label': 'title', 'context': ['repo', 'projects.0.name']}
+
+    assert pursuits.resolve_one('build', config)['context'] == 'Sell Unused Shite'
+
+
+def test_context_and_detail_without_a_label_are_refused(tmp_path):
+    # Both read fields off a parsed row, and there is no row without `label` —
+    # the resolver falls back to reading plain lines.
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    resolve: echo hi\n    context: repo\n')
+    with pytest.raises(pursuits.RegisterError, match='label'):
+        pursuits.load_pursuits(path)
 
 
 def test_resolve_one_reports_a_failing_backend_rather_than_dying():
@@ -365,6 +431,43 @@ def test_the_log_hint_keeps_its_optional_argument(sandbox, monkeypatch, capsys):
     assert pursuits.cmd_next(False, False, True) == 0
 
     assert 'doit log <pursuit> [note]' in capsys.readouterr().out
+
+
+def test_a_drawn_row_says_where_the_item_lives_and_what_it_is_about(monkeypatch, capsys):
+    monkeypatch.setenv('COLUMNS', '200')
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    resolved = {
+        'chores': {
+            'label': 'Give cobracmd a usage-error exit code of 2',
+            'context': 'goselfupdate · CLI machine contract conformance',
+            'detail': 'Cobra returns flag-parse failures as ordinary errors.',
+        }
+    }
+
+    pursuits.render_row(1, 'chores', state, resolved, False, 6)
+
+    printed = capsys.readouterr().out
+    assert 'goselfupdate · CLI machine contract conformance' in printed
+    assert 'Cobra returns flag-parse failures as ordinary errors.' in printed
+
+
+def test_a_row_with_nothing_extra_to_say_stays_one_line(capsys):
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+
+    pursuits.render_row(1, 'chores', state, {'chores': {'label': 'Trim Dingo Nails'}}, False, 6)
+
+    assert len(capsys.readouterr().out.strip().splitlines()) == 1
+
+
+def test_a_backend_that_failed_gets_no_continuation_line(capsys):
+    # The row already says the backend is unavailable; a second line under it
+    # would be context for an item that was never resolved.
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    resolved = {'chores': {'error': 'exited 1', 'backend': 'icb', 'context': 'stale', 'detail': 'stale'}}
+
+    pursuits.render_row(1, 'chores', state, resolved, False, 6)
+
+    assert len(capsys.readouterr().out.strip().splitlines()) == 1
 
 
 def test_format_elapsed_switches_unit_rather_than_format():

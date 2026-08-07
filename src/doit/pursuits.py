@@ -75,6 +75,8 @@ from doit.paths import xdg_config_home
 from doit.paths import xdg_state_home
 from doit.render import console
 from doit.render import error_console
+from doit.render import first_sentence
+from doit.render import join_context
 
 REGISTER = Path(os.environ.get('DOIT_PURSUITS') or xdg_config_home() / 'doit' / 'pursuits.yml')
 JOURNAL_DIR = Path(os.environ.get('DOIT_JOURNAL_DIR') or xdg_state_home() / 'doit')
@@ -94,6 +96,12 @@ DRAW_SIZE = 5
 # produces ("never done") so the resolved item starts at one column on every row.
 STATUS_COLUMN = 18
 
+# Everything a row prints before its resolved title: two spaces of indent, the
+# index and its space, then the name column, two spaces, the status column and
+# two more. Only the name column varies, so the rest is a constant the
+# continuation line adds to it to sit directly under the title.
+CONTINUATION_INDENT = 8 + STATUS_COLUMN
+
 # A resolver is one network call to a product CLI. They run concurrently and only
 # for what was actually drawn, so this is the whole wait, not a per-pursuit one.
 RESOLVE_TIMEOUT_SECONDS = 5.0
@@ -111,6 +119,8 @@ KNOWN_FIELDS = {
     'items',
     'label',
     'id',
+    'context',
+    'detail',
     'on_log',
 }
 
@@ -132,6 +142,13 @@ TEMPLATE = """\
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
 # and `items` when the list is nested inside the document.
+#
+# A title alone rarely says enough to pick something, so two more fields put the
+# rest of the resolved row on screen. Both take dotted paths, and a number in one
+# indexes a list (`projects.0.name`):
+#
+#   context      where it lives — one path or several, joined
+#   detail       the field to take a one-sentence gist from, usually notes
 
 pursuits:
   chores:
@@ -141,6 +158,7 @@ pursuits:
     resolve: icb tasks todo --limit 3 --json
     label: name
     id: id
+    context: category
     on_log: icb tasks complete {id}
 
   read-library:
@@ -148,6 +166,7 @@ pursuits:
     weight: 30
     resolve: icb books list --progress reading --json
     label: title
+    context: author
 
   study-computer-science:
     description: Work the CS track rather than reading about working it
@@ -155,6 +174,7 @@ pursuits:
     resolve: learning overview --json
     items: in_progress_resources
     label: title
+    detail: notes
 """
 
 
@@ -196,6 +216,8 @@ def load_pursuits(path: Path | None = None) -> dict:
             raise RegisterError(f'{name}: until must be a date (YYYY-MM-DD)')
         if config.get('on_log') and not config.get('resolve'):
             raise RegisterError(f'{name}: on_log needs resolve — there is no item to act on without it')
+        if (config.get('context') or config.get('detail')) and not config.get('label'):
+            raise RegisterError(f'{name}: context and detail read fields off the resolved row, so they need label')
     return pursuits
 
 
@@ -338,9 +360,20 @@ def write_names_cache(pursuits: dict) -> None:
 
 
 def dig(document, path: str):
-    """Follow a dotted path into a JSON document, returning None if it dead-ends."""
+    """Follow a dotted path into a JSON document, returning None if it dead-ends.
+
+    A numeric key indexes a list, so `projects.0.name` reaches into the array a
+    backend returns for a many-to-many membership. Without it the only reachable
+    fields are the row's own scalars, which is exactly the context an item does
+    not carry — what it belongs to lives one level down.
+    """
     current = document
     for key in path.split('.'):
+        if isinstance(current, list):
+            if not key.isdigit() or int(key) >= len(current):
+                return None
+            current = current[int(key)]
+            continue
         if not isinstance(current, dict) or key not in current:
             return None
         current = current[key]
@@ -403,9 +436,22 @@ def resolve_one(name: str, config: dict) -> dict | None:
         'pursuit': name,
         'label': str(row.get(label_field, '')).strip(),
         'id': None if identifier is None else str(identifier),
+        'context': row_context(row, config.get('context')),
+        'detail': first_sentence(str(dig(row, config['detail']) or '')) if config.get('detail') else '',
         'backend': shlex.split(config['resolve'])[0],
         'raw': row,
     }
+
+
+def row_context(row: dict, paths) -> str:
+    """Where the resolved item lives, from the fields the register names.
+
+    Several paths rather than one: an item is placed by more than one fact, and a
+    path that dead-ends drops out rather than contributing an empty segment.
+    """
+    if isinstance(paths, str):
+        paths = [paths]
+    return join_context(dig(row, path) for path in paths or [])
 
 
 def resolve_all(names: list[str], pursuits: dict) -> dict[str, dict]:
@@ -488,6 +534,33 @@ def render_row(index: int, name: str, state: dict, resolved: dict, pin: bool, wi
     if text:
         line.append('  ')
         line.append(text, style='green')
+    console.print(line, no_wrap=True, overflow='ellipsis')
+    if not detail.get('error'):
+        render_context(detail, width)
+
+
+def render_context(detail: dict, width: int) -> None:
+    """The second line: where the offered item lives and what it is about.
+
+    A title names an item and nothing else. Which repo it lands in, which effort
+    it serves and why it is worth the next hour are all on the row the backend
+    already returned — dropping them means going back and asking a second time to
+    find out whether to pick the thing that was just offered.
+
+    One line rather than two, and aligned under the title: the draw is five
+    entries you scan, and a paragraph under each turns it into a document you
+    read. What does not fit is clipped, because the sentence starts with the gist.
+    """
+    context = detail.get('context') or ''
+    about = detail.get('detail') or ''
+    if not context and not about:
+        return
+    line = Text(' ' * (width + CONTINUATION_INDENT))
+    if context:
+        line.append(context, style='cyan')
+    if context and about:
+        line.append(' — ')
+    line.append(about)
     console.print(line, no_wrap=True, overflow='ellipsis')
 
 
