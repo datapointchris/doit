@@ -1,6 +1,47 @@
 # CHANGELOG
 
 
+## v0.2.0 (2026-08-07)
+
+### Chores
+
+- **lint**: Disable SC1091/SC1090 from the forge toolchain
+  ([`953973f`](https://github.com/datapointchris/doit/commit/953973f06c995dc54e82fde090faf086c83d5acb))
+
+### Documentation
+
+- Name the verb that syncs content, not the one that updates doit
+  ([`bbc2666`](https://github.com/datapointchris/doit/commit/bbc266604b6fcf8d591c88437e4168da1040754f))
+
+`doit update` updates the binary; the content checkout is `doit content sync`. Five places said the
+  first while meaning the second, which content.py's own docstring had already called out as the
+  ambiguity to avoid.
+
+Also say that the content path is resolved rather than assumed to be a real directory, so a machine
+  that authors cards can point it at a checkout kept where its git lives. Pointing it there is the
+  installing layer's job — doit only ever opens the path it is given.
+
+### Features
+
+- Pull the cards in the background on every run
+  ([`2d75ce7`](https://github.com/datapointchris/doit/commit/2d75ce7fe7ea9c32fd745088f161818a8cffb609))
+
+`content sync` was a verb you had to remember, so cards went stale between the times anyone thought
+  of it. The pull now runs on every invocation, detached and never waited on, so a command costs the
+  same whether or not there was anything to fetch.
+
+Not on a timer: nothing waits on it, so there is nothing to ration.
+
+Three things make that safe. `--ff-only` refuses rather than merging and git declines to overwrite a
+  modified file, so an unfinished card is never the price of a sync. An atomic mkdir lock keeps two
+  commands started together from colliding on git's index.lock, whose error reads like an
+  unreachable remote. And the commands fzf and completion drive are exempt, because a preview pane
+  redraws on every keystroke.
+
+A detached pull has nowhere to print, so it leaves git's stderr in a log the next command reports —
+  cards that quietly stopped updating read as cards that stopped changing.
+
+
 ## v0.1.0 (2026-08-06)
 
 ### Chores
