@@ -354,12 +354,11 @@ def build_projects_lane(results: dict[str, sources.Result], today: date) -> Lane
         meta=f'{next_total} next · {blocked_total} blocked',
         rows=rows,
         total=next_total + blocked_total,
-        # The only lane whose rows carry no handle. An item's id is a UUID, so
-        # `icb projects items view <id>` runs to sixty columns and would be
-        # ellipsised into something that looks copyable and is not — leaving the
-        # title too narrow to read into the bargain. The verb goes in the hint
-        # instead, and `doit next` prints it in full for the item it draws,
-        # having a line to spend on one.
+        # The only lane whose rows carry no handle, and the reason is icb's, not
+        # this renderer's: an item's id is a UUID, so the command runs to sixty
+        # columns of hex nobody can retype. The verb goes in the hint instead.
+        # Restore the handle when project items get the short number every other
+        # icb resource already has — filed under `todoui` in icb.
         hints=['icb projects items list', 'icb projects items view <id>'],
         reason=reason,
     )
