@@ -1,6 +1,32 @@
 # CHANGELOG
 
 
+## v0.4.0 (2026-08-07)
+
+### Features
+
+- **dashboard**: Give a row the command that does it
+  ([`a77df7a`](https://github.com/datapointchris/doit/commit/a77df7a699154f7116b9d8c5edb8c28b9e06c3f2))
+
+Every maintenance row named an intent and withheld the act. "Re-index indy so semantic search stays
+  current" does not tell you to run `indy index`, and the register has carried that command all
+  along — `doit review due` and the startup nudge both print it. The lane dropped it in favour of
+  the description alone, so the one view meant to be glanced at was the one you could not act from.
+
+A Row gains `handle`, the field a GridCell has had since the beginning and for the same reason: what
+  you would type to act on this. Labs carry no command of their own, being documents rather than
+  jobs, so the handle is the verb that opens one.
+
+The lane also promised sixteen labs and showed none. A never-run review and a never-run lab rank
+  identically, reviews were collected first, and a stable sort over the merged list put all fourteen
+  reviews above all sixteen labs — the row cap then cut before a lab could ever appear. Each kind
+  now ranks within itself and the two interleave, which is what round_robin already exists in this
+  file to do.
+
+Column widths collapse into one rule: what the content needs, bounded by a share of the line,
+  nothing when a lane has no commands at all.
+
+
 ## v0.3.0 (2026-08-07)
 
 ### Features
