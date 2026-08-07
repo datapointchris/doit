@@ -15,8 +15,8 @@ derived not stored. A Lab with no `cadence:` is practice-on-demand and never
 shows as due.
 
 There is one Labs directory, not a source and an installed copy. It is a git
-checkout that `doit update` pulls, so authoring writes straight to the file the
-reader reads — which is why nothing here resolves a second path or links one
+checkout that `doit content sync` pulls, so authoring writes straight to the file
+the reader reads — which is why nothing here resolves a second path or links one
 into the other.
 """
 

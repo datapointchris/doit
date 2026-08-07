@@ -34,7 +34,9 @@ One that runs and fails shows its error. A lane is never silently dropped.
 ## Content
 
 Cards, Labs, and the register are content, not code — they live in their own repo, cloned into
-`$XDG_DATA_HOME/doit/` and updated by `doit update`. It stays a git checkout at the installed path,
-so writing a card works on any machine and no release stands between writing one and having it.
+`$XDG_DATA_HOME/doit/` and updated by `doit content sync`. It stays a git checkout at the installed
+path, so writing a card works on any machine and no release stands between writing one and having
+it. A machine that authors cards can point that path at a checkout of its own; doit resolves it
+either way and never needs to know which it got.
 Personal registers (`pursuits.yml`, the review register) stay in `$XDG_CONFIG_HOME/doit/` and are
 never in this repo.

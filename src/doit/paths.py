@@ -1,13 +1,13 @@
 """XDG base-directory resolution, defined here once so every part of doit agrees
 on where content, config and state live.
 
-Content — the cards and Labs — belongs under the data dir, where ``doit update``
-keeps a checkout of the content repo. Hand-edited files doit only ever reads
-(pursuits, the review register, sources) belong under the config dir: they are
-personal, and both of doit's repos are public. State doit writes belongs under
-the state dir, and anything a recompute can rebuild under the cache dir. Whether
-the state dir replicates across machines is arranged by the sync layer, not
-here — these functions only ever resolve local paths.
+Content — the cards and Labs — belongs under the data dir, where ``doit content
+sync`` keeps a checkout of the content repo. Hand-edited files doit only ever
+reads (pursuits, the review register, sources) belong under the config dir: they
+are personal, and both of doit's repos are public. State doit writes belongs
+under the state dir, and anything a recompute can rebuild under the cache dir.
+Whether the state dir replicates across machines is arranged by the sync layer,
+not here — these functions only ever resolve local paths.
 """
 
 import os

@@ -20,7 +20,10 @@ next run. Repeating a few is the correct direction to be wrong in; the alternati
 ## Content, config, and state are three different things
 
 - **Content** — cards and Labs. Their own repo, cloned into `$XDG_DATA_HOME/doit/`, updated by
-  `doit update`. Authored often, so it must never need a release of this repo to change.
+  `doit content sync`. Authored often, so it must never need a release of this repo to change.
+  That path is resolved, never assumed to be a real directory: a machine that authors cards points
+  it at a checkout kept where its git lives, so writing a card and reading it stay one file. Making
+  that so is the installing layer's job — doit only ever opens the path it is given.
 - **Config** — `pursuits.yml`, the review register, `sources.yml`. `$XDG_CONFIG_HOME/doit/`,
   hand-edited, and only ever *read* here so comments and layout survive. Never in either repo: it is
   personal, and both repos are public.
