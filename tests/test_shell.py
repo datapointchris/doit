@@ -7,6 +7,7 @@ machine at once rather than where it was written.
 
 import shutil
 import subprocess
+import time
 
 import pytest
 from typer.testing import CliRunner
@@ -145,3 +146,136 @@ def test_a_failed_clone_warns_rather_than_stopping_doit(tmp_path, monkeypatch, c
 
     assert content.ensure_cloned() is False
     assert 'could not clone' in capsys.readouterr().err
+
+
+def git_in(cwd, *args):
+    subprocess.run(['git', '-c', 'user.email=t@t', '-c', 'user.name=t', *args], cwd=cwd, check=True)
+
+
+def settled(predicate, seconds=10.0):
+    """Wait for the detached pull, which by design is never waited on."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+@pytest.fixture
+def synced(tmp_path, monkeypatch):
+    """An upstream, a checkout of it, and the stamp/log pointed somewhere safe."""
+    upstream = tmp_path / 'upstream'
+    upstream.mkdir()
+    subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=upstream, check=True)
+    (upstream / 'workflows').mkdir()
+    (upstream / 'workflows' / 'a-card.md').write_text('# A Card\n')
+    git_in(upstream, 'add', '-A')
+    git_in(upstream, 'commit', '-qm', 'seed')
+
+    checkout = tmp_path / 'content'
+    subprocess.run(['git', 'clone', '-q', str(upstream), str(checkout)], check=True)
+
+    monkeypatch.setattr(content, 'CONTENT_DIR', checkout)
+    monkeypatch.setattr(content, 'SYNC_LOG', tmp_path / 'state' / 'content-sync.log')
+    monkeypatch.setattr(content, 'SYNC_LOCK', tmp_path / 'state' / 'content-sync.log.lock')
+    return upstream, checkout
+
+
+def test_a_card_written_upstream_arrives_without_anyone_running_sync(synced):
+    """The verb exists, but nobody has to remember it."""
+    upstream, checkout = synced
+    (upstream / 'workflows' / 'later.md').write_text('# Later\n')
+    git_in(upstream, 'add', '-A')
+    git_in(upstream, 'commit', '-qm', 'a second card')
+
+    assert content.autosync() is True
+    assert settled(lambda: (checkout / 'workflows' / 'later.md').exists())
+
+
+def test_every_run_pulls_rather_than_waiting_for_a_timer(synced):
+    """Nothing waits on the pull, so there is nothing to ration."""
+    assert content.autosync() is True
+    assert settled(lambda: not content.SYNC_LOCK.exists())
+
+    assert content.autosync() is True
+
+
+def test_a_pull_already_in_flight_is_not_started_twice(synced):
+    """Two doit commands at once would otherwise collide on git's index.lock,
+    and the loser's error reads like the remote being unreachable."""
+    content.SYNC_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    content.SYNC_LOCK.mkdir()
+
+    assert content.autosync() is False
+
+
+def test_a_lock_left_by_a_killed_pull_does_not_stop_syncing_forever(synced, monkeypatch):
+    content.SYNC_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    content.SYNC_LOCK.mkdir()
+    monkeypatch.setattr(content, 'STALE_LOCK_SECONDS', 0)
+
+    assert content.autosync() is True
+
+
+def test_an_fzf_preview_does_not_pull_on_every_keystroke(synced):
+    """`__preview` and `__render` redraw as the selection moves, and completion
+    fires on every TAB — a pull behind each is a pull every few milliseconds."""
+    assert content.autosync(argv=['doit', '__preview', 'a-card']) is False
+    assert content.autosync(argv=['doit', 'workflows', '__render', 'a-card']) is False
+    assert content.autosync(argv=['doit', 'pursuits', 'names']) is False
+
+    assert content.autosync(argv=['doit', 'next']) is True
+
+
+def test_an_unfinished_card_is_not_the_price_of_a_background_sync(synced):
+    """`--ff-only` is what makes this safe to point at a checkout you author in.
+
+    The installed path can be a symlink to the checkout cards are written in, so
+    a sync that clobbered a modified file would lose work that was never
+    committed anywhere.
+    """
+    upstream, checkout = synced
+    (upstream / 'workflows' / 'a-card.md').write_text('# A Card, upstream\n')
+    git_in(upstream, 'add', '-A')
+    git_in(upstream, 'commit', '-qm', 'upstream edit')
+
+    mine = checkout / 'workflows' / 'a-card.md'
+    mine.write_text('# A Card, half written\n')
+
+    assert content.autosync() is True
+    assert settled(lambda: content.SYNC_LOG.exists() and content.SYNC_LOG.read_text().strip())
+    assert mine.read_text() == '# A Card, half written\n'
+
+
+def test_a_pull_that_failed_in_the_background_is_reported_next_run(synced, capsys):
+    """A detached pull has nowhere to print, so the next command says it."""
+    content.SYNC_LOG.parent.mkdir(parents=True, exist_ok=True)
+    content.SYNC_LOG.write_text('fatal: could not read from remote repository\n')
+
+    content.autosync()
+
+    err = capsys.readouterr().err
+    assert 'last failed to sync' in err
+    assert 'doit content sync' in err
+
+
+def test_a_successful_pull_reports_nothing(synced, capsys):
+    assert content.autosync() is True
+    assert settled(lambda: not content.SYNC_LOCK.exists())
+    capsys.readouterr()
+
+    content.autosync()
+
+    assert capsys.readouterr().err == ''
+
+
+def test_syncing_by_hand_clears_a_failure_already_fixed(synced, capsys):
+    content.SYNC_LOG.parent.mkdir(parents=True, exist_ok=True)
+    content.SYNC_LOG.write_text('fatal: could not read from remote repository\n')
+
+    assert content.cmd_sync() == 0
+
+    assert content.SYNC_LOG.read_text() == ''
+    content.autosync()
+    assert 'last failed to sync' not in capsys.readouterr().err

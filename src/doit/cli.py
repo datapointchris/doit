@@ -81,8 +81,16 @@ def root(
     The content clone happens here so a new machine needs no setup step anyone
     has to remember. It is one `exists()` once the checkout is there — see
     `doit.content.ensure_cloned` for why a failure only warns.
+
+    Keeping it current is the same argument on every later run, so that is not a
+    verb anyone has to remember either — the pull is detached, so a command costs
+    the same whether or not one was due. `content` is exempt: its own subcommands
+    report on the checkout, and a pull racing them would have `status` describe a
+    tree being rewritten underneath it.
     """
     content.ensure_cloned()
+    if ctx.invoked_subcommand != 'content':
+        content.autosync()
 
     # `update` runs its own check, so notifying too would ask the releases API
     # twice for one command and let the notice contradict what `--check` just
