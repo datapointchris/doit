@@ -1,6 +1,48 @@
 # CHANGELOG
 
 
+## v0.3.0 (2026-08-07)
+
+### Features
+
+- **dashboard**: Say where a project item lands, and spend the width on it
+  ([`9a601ed`](https://github.com/datapointchris/doit/commit/9a601ed4621f30cafa9e51e0fa6a5ecafca6516f))
+
+Three faults compounded into a lane that named things without placing them. The note column was
+  capped flat at 22 columns, so "CLI machine contract conformance" arrived as "CLI machine contract
+  …" with room going spare to the right of it. The whole layout was capped at 100 regardless of the
+  terminal. And the row never read `repo` at all — the one word that says where you would go to do
+  the thing.
+
+The note now carries repo then projects, deduped so a repo whose project shares its name is placed
+  once rather than as "syncer · syncer". It takes a share of the line instead of a fixed count,
+  which only binds when the notes are genuinely long, and the overall cap moves to 140.
+
+An item's notes hold the reasoning, the rejected alternatives and the pre-flight checks. Flattening
+  all of that into a row that then gets clipped ended the line mid-word in the second paragraph, so
+  the row takes the first sentence: it stops where the writer stopped.
+
+- **next**: Show where an offered item lives and what it is
+  ([`cc325d1`](https://github.com/datapointchris/doit/commit/cc325d1807f36465382e6440ffc460e066389097))
+
+A drawn row printed the resolved title and dropped the rest of the row the backend had already
+  returned. "Give cobracmd a usage-error exit code of 2" arrived with the repo it lands in, the
+  project it serves and five paragraphs of reasoning attached, and none of it reached the screen —
+  so deciding whether to pick it meant going back and asking the same backend a second time.
+
+The register names the fields, the way it already names label and id:
+
+context where it lives — one dotted path or several, joined detail the field to take a one-sentence
+  gist from, usually notes
+
+Declared rather than inferred, because hardcoding icb's field names would put a backend's model back
+  inside doit. `dig` gained list indices so a path can reach `projects.0.name`, which is where
+  membership actually lives.
+
+Rendered as one continuation line under the title, not two: the draw is five entries you scan, and a
+  paragraph under each turns it into a document.
+
+
 ## v0.2.1 (2026-08-07)
 
 ### Bug Fixes
