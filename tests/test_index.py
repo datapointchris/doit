@@ -6,6 +6,7 @@ the bash version indexed the registry by key, so half its tool rows named
 something you could not type.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,19 @@ def collections(tmp_path, monkeypatch):
     (tmp_path / 'shell' / 'functions.sh').write_text('#@gwip\n#--> commit work in progress\ngwip() {\n  :\n}\n')
     (tmp_path / 'shell' / 'aliases.sh').write_text('# list files\nalias ll="eza -l"\n')
 
+    # Pointing the lenses at fixtures was not enough: `unresolved` resolves through
+    # `shutil.which`, which reads the real PATH, so the rot report depended on what
+    # the machine running the tests happened to have installed. CI has none of it,
+    # and called a fixture row dead. Prepended rather than replacing PATH, so
+    # `long-gone` still resolves to nothing and git stays runnable.
+    stubs = tmp_path / 'bin'
+    stubs.mkdir()
+    for command in ('rg', 'forge'):
+        stub = stubs / command
+        stub.write_text('#!/bin/sh\n')
+        stub.chmod(0o755)
+    monkeypatch.setenv('PATH', f'{stubs}{os.pathsep}{os.environ["PATH"]}')
+
 
 def by_name(entries: list[index.Entry]) -> dict[str, index.Entry]:
     return {entry.name: entry for entry in entries}
@@ -99,6 +113,7 @@ def test_unresolved_finds_rot_and_nothing_else():
 
     assert 'long-gone' in dead
     assert 'ripgrep' not in dead, 'resolved through its usage, not its key'
+    assert 'forge' not in dead
     assert 'git-forgit-log' not in dead
 
 
