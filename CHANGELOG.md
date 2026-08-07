@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v0.2.1 (2026-08-07)
+
+### Bug Fixes
+
+- **test**: Stop the rot report depending on the host's PATH
+  ([`624ad5d`](https://github.com/datapointchris/doit/commit/624ad5d10953a05e63b4d1c321e4559ad030c7e4))
+
+The fixture pointed every lens at a fixture so no test read the real machine, but `unresolved`
+  resolves through `shutil.which`, which reads the real PATH. A machine without ripgrep installed
+  called a fixture row dead — which is every CI runner, and why CI has been red since the last two
+  pushes.
+
+Stub `rg` and `forge` onto a prepended PATH. Prepended rather than replacing, so `long-gone` still
+  resolves to nothing and git stays runnable.
+
+
 ## v0.2.0 (2026-08-07)
 
 ### Chores
