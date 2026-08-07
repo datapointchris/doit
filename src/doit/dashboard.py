@@ -54,6 +54,8 @@ from doit.lanes import Row
 from doit.lanes import Urgency
 from doit.lanes import unavailable
 from doit.render import console
+from doit.render import first_sentence
+from doit.render import join_context
 
 NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'}
 
@@ -91,9 +93,20 @@ ICB_SCHEMA_VERSION = 2
 LEARNING_NOT_STARTED = 1
 LEARNING_IN_PROGRESS = 2
 
-MAX_WIDTH = 100
+# A cap, not a target — it stops the note column flying off to the right of an
+# ultrawide terminal. It was 100, which on any normal terminal threw away width a
+# row needed: a project name arrived as "CLI machine contract …" while thirty
+# columns sat unused to the right of it.
+MAX_WIDTH = 140
 LABEL_WIDTH = 8
-NOTE_WIDTH_MAX = 22
+
+# The note qualifies the row, so it takes a share of the line rather than a fixed
+# count. A flat cap is wrong at both ends — too tight to name a repo and a project
+# on a wide terminal, and wide enough to crowd out the thing itself on a narrow
+# one. It only ever binds when the notes are genuinely long, because the column is
+# sized to the longest note actually on screen first.
+NOTE_WIDTH_SHARE = 0.4
+NOTE_WIDTH_MIN = 22
 
 # Two columns of habits, because a dozen single-name rows would swamp every
 # other lane while a single run-on line hides which ones are left.
@@ -148,9 +161,15 @@ def clean(text: str) -> str:
 
 
 def describe(title: str, detail: str) -> str:
-    """A row's own words plus whatever note the backend carries, because a bare
-    title like "Glove 80" names a thing without saying what to do with it."""
-    detail = clean(detail)
+    """A row's own words plus the gist of whatever note the backend carries,
+    because a bare title like "Glove 80" names a thing without saying what to do
+    with it.
+
+    The gist, not the note: an item's notes hold the reasoning, the rejected
+    alternatives and the pre-flight checks, and flattening all of that into a row
+    that then gets clipped ends the line in the middle of the second paragraph.
+    """
+    detail = first_sentence(detail)
     return f'{title} — {detail}' if detail else title
 
 
@@ -287,14 +306,17 @@ def build_projects_lane(results: dict[str, sources.Result], today: date) -> Lane
 
 
 def project_item_row(label: str, item: dict) -> Row:
-    """The item, what it means, and the work it belongs to.
+    """The item, what it means, and where the work lands.
 
-    An item can sit in several projects, so all of them are named — picking a
-    first would be arbitrary. Older `icb` builds omit the field entirely, which
-    reads as no membership and costs only the note.
+    The repo comes first because it is the one word that says where you would go
+    to do this; the projects follow because they say which effort it serves. An
+    item can sit in several projects, so all of them are named — picking a first
+    would be arbitrary. Either field can be absent: an errand has no repo, and an
+    older `icb` build omits membership entirely.
     """
-    projects = ' · '.join(project.get('name', '') for project in item.get('projects') or [])
-    return Row(label, describe(item.get('title', ''), item.get('notes', '')), projects)
+    projects = [project.get('name', '') for project in item.get('projects') or []]
+    where = join_context([item.get('repo'), *projects])
+    return Row(label, describe(item.get('title', ''), item.get('notes', '')), where)
 
 
 def build_upcoming_lane(results: dict[str, sources.Result], today: date) -> LaneView:
@@ -671,7 +693,8 @@ def render_lane(lane: LaneView, width: int, row_cap: int) -> None:
 def render_rows(rows: list[Row], width: int) -> None:
     # Sized to the notes actually on screen, so a lane of short notes stops
     # stealing width from its titles.
-    note_width = min(NOTE_WIDTH_MAX, max((len(row.note) for row in rows), default=0))
+    note_cap = max(NOTE_WIDTH_MIN, int(width * NOTE_WIDTH_SHARE))
+    note_width = min(note_cap, max((len(row.note) for row in rows), default=0))
     text_width = max(20, width - 3 - LABEL_WIDTH - (note_width + 1 if note_width else 0))
     for row in rows:
         line = Text('  ')

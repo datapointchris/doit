@@ -248,15 +248,16 @@ def test_projects_lane_separates_next_from_blocked():
 def test_projects_lane_carries_the_item_note_so_a_bare_title_says_something():
     lane = lanes_by_name(all_results())['projects']
 
-    assert lane.rows[0].text == 'An actionable item — what it actually means'
+    assert lane.rows[0].text == 'An actionable item — what it actually means.', 'the gist, not the whole note'
     assert lane.rows[1].text == 'A second item', 'no note means no dangling separator'
 
 
-def test_projects_lane_names_the_work_an_item_belongs_to():
+def test_projects_lane_says_where_the_work_lands():
     lane = lanes_by_name(all_results())['projects']
 
-    assert lane.rows[0].note == 'A Project'
-    assert lane.rows[1].note == 'A Project · Another Project', 'picking a first would be arbitrary'
+    assert lane.rows[0].note == 'A Project', 'an errand carries no repo'
+    assert lane.rows[1].note == 'somerepo · A Project · Another Project', 'picking one project would be arbitrary'
+    assert lane.rows[2].note == 'somerepo', 'a repo with no membership still says where to go'
 
 
 def test_projects_lane_survives_an_icb_that_omits_membership():
@@ -391,11 +392,12 @@ def test_maintenance_row_pairs_a_note_with_the_rank_it_sorts_on():
     assert dashboard.maintenance_row('review', 'x', {'overdue': 5})[1].note == '5d overdue'
 
 
-def test_describe_joins_a_title_to_its_note():
+def test_describe_joins_a_title_to_the_gist_of_its_note():
     assert dashboard.describe('A Title', 'some detail') == 'A Title — some detail'
     assert dashboard.describe('A Title', '') == 'A Title'
     assert dashboard.describe('A Title', None) == 'A Title'
     assert dashboard.describe('A Title', 'two\nlines') == 'A Title — two lines'
+    assert dashboard.describe('A Title', 'The gist. The reasoning behind it.') == 'A Title — The gist.'
 
 
 def test_clip():
@@ -429,3 +431,29 @@ def test_a_due_note_renders_rather_than_raising(capsys):
     dashboard.render_rows(rows, 80)
 
     assert '18:40' in capsys.readouterr().out
+
+
+def test_a_wide_terminal_spends_its_width_on_the_note(monkeypatch, capsys):
+    """The note is where a row says which repo and which project it belongs to.
+
+    Capped flat at 22 columns it arrived as "CLI machine contract …" no matter how
+    much room was going spare to the right of it.
+    """
+    monkeypatch.setenv('COLUMNS', '200')
+    note = 'goselfupdate · CLI machine contract conformance'
+    rows = [dashboard.Row('next', 'Give cobracmd a usage-error exit code of 2', note)]
+
+    dashboard.render_rows(rows, dashboard.MAX_WIDTH)
+
+    assert note in capsys.readouterr().out
+
+
+def test_a_narrow_terminal_spends_its_width_on_the_row_itself(monkeypatch, capsys):
+    monkeypatch.setenv('COLUMNS', '60')
+    rows = [dashboard.Row('next', 'Give cobracmd a usage-error exit code of 2', 'x' * 80)]
+
+    dashboard.render_rows(rows, 60)
+
+    printed = capsys.readouterr().out.rstrip('\n')
+    assert 'Give cobracmd' in printed
+    assert printed.count('x') <= int(60 * dashboard.NOTE_WIDTH_SHARE), 'the note never crowds out the thing itself'

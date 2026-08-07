@@ -86,7 +86,7 @@
       {
         "id": "019f0000-0000-7000-8000-000000000001",
         "title": "An actionable item",
-        "notes": "what it actually means",
+        "notes": "what it actually means. Then a second paragraph of reasoning, rejected alternatives and pre-flight checks.",
         "projects": [
           {
             "id": "p1",
@@ -100,6 +100,7 @@
         "id": "019f0000-0000-7000-8000-000000000002",
         "title": "A second item",
         "notes": null,
+        "repo": "somerepo",
         "projects": [
           {
             "id": "p1",
@@ -119,6 +120,7 @@
       {
         "id": "019f0000-0000-7000-8000-000000000003",
         "title": "A blocked item",
+        "repo": "somerepo",
         "completed": false,
         "archived": false
       }
