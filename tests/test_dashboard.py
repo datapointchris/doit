@@ -229,6 +229,36 @@ def test_maintenance_lane_ranks_by_how_late_a_row_actually_is():
     assert lane.rows[-1].note == 'never run', 'never run is the least urgent state, not the most'
 
 
+def test_maintenance_rows_carry_the_command_that_does_them():
+    """A row naming a thing to revisit and withholding the command that revisits
+    it is a row you can read and cannot act on."""
+    lane = lanes_by_name(all_results())['maintenance']
+
+    handles = {row.text: row.handle for row in lane.rows}
+    assert handles['Past its due date'] == 'echo overdue', "the register's own command"
+    assert handles['An Overdue Lab'] == 'doit labs show overdue-lab', 'a Lab is a document doit opens'
+
+
+def test_maintenance_shows_both_kinds_when_every_row_is_equally_urgent():
+    """A never-run review and a never-run lab rank identically.
+
+    Sorted as one list they tie, and reviews are collected first, so a stable sort
+    put every review above every lab — leaving a heading reading "14 reviews · 16
+    labs due" above ten reviews and not one lab.
+    """
+    reviews = [{'id': f'r{n}', 'desc': f'Review {n}', 'command': '', 'overdue': None} for n in range(5)]
+    labs = [{'id': f'l{n}', 'title': f'Lab {n}', 'scheduled': True, 'overdue': None} for n in range(5)]
+    results = {
+        'review': sources.Result(source='review', payload=reviews, exit_code=0),
+        'labs': sources.Result(source='labs', payload=labs, exit_code=0),
+    }
+
+    lane = dashboard.build_maintenance_lane(results, TODAY)
+
+    assert lane.meta == '5 reviews · 5 labs due'
+    assert [row.label for row in lane.rows[:4]] == ['review', 'lab', 'review', 'lab']
+
+
 def test_upcoming_lane_uses_one_distance_format_and_names_the_day():
     lane = lanes_by_name(all_results())['upcoming']
 
@@ -386,10 +416,11 @@ def test_is_due_row():
 
 
 def test_maintenance_row_pairs_a_note_with_the_rank_it_sorts_on():
-    assert dashboard.maintenance_row('review', 'x', {'overdue': None})[0] == (2, 0)
-    assert dashboard.maintenance_row('review', 'x', {'overdue': 0})[0] == (1, 0)
-    assert dashboard.maintenance_row('review', 'x', {'overdue': 5})[0] == (0, -5)
-    assert dashboard.maintenance_row('review', 'x', {'overdue': 5})[1].note == '5d overdue'
+    assert dashboard.maintenance_row('review', 'x', {'overdue': None}, '')[0] == (2, 0)
+    assert dashboard.maintenance_row('review', 'x', {'overdue': 0}, '')[0] == (1, 0)
+    assert dashboard.maintenance_row('review', 'x', {'overdue': 5}, '')[0] == (0, -5)
+    assert dashboard.maintenance_row('review', 'x', {'overdue': 5}, '')[1].note == '5d overdue'
+    assert dashboard.maintenance_row('review', 'x', {'overdue': 5}, 'indy index')[1].handle == 'indy index'
 
 
 def test_describe_joins_a_title_to_the_gist_of_its_note():
@@ -446,6 +477,22 @@ def test_a_wide_terminal_spends_its_width_on_the_note(monkeypatch, capsys):
     dashboard.render_rows(rows, dashboard.MAX_WIDTH)
 
     assert note in capsys.readouterr().out
+
+
+def test_a_row_with_a_command_shows_what_to_type(monkeypatch, capsys):
+    monkeypatch.setenv('COLUMNS', '200')
+    rows = [dashboard.Row('review', 'Re-index indy so search stays current', '25d overdue', handle='indy index')]
+
+    dashboard.render_rows(rows, dashboard.MAX_WIDTH)
+
+    assert f'{dashboard.HANDLE_MARK} indy index' in capsys.readouterr().out
+
+
+def test_a_trailing_column_takes_what_it_needs_bounded_by_its_share():
+    assert dashboard.column_width(140, ['', ''], 0.3, 20) == 0, 'a lane whose rows carry no command reserves nothing'
+    assert dashboard.column_width(140, ['↳ indy index'], 0.3, 20) == 12, 'what it needs, when that is under the share'
+    assert dashboard.column_width(140, ['x' * 90], 0.3, 20) == 42, 'the share, when the content runs longer'
+    assert dashboard.column_width(40, ['x' * 90], 0.3, 20) == 20, 'never below the minimum, however narrow the line'
 
 
 def test_a_narrow_terminal_spends_its_width_on_the_row_itself(monkeypatch, capsys):

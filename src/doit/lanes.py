@@ -51,14 +51,20 @@ class Row:
     """One thing you could act on.
 
     `label` is the gutter word, `text` the thing itself, `note` the trailing
-    qualifier. A source decides all three: doit never invents a label, because a
+    qualifier. A source decides all of them: doit never invents a label, because a
     label it invented would describe doit's model rather than the source's.
+
+    `handle` is what you would type to act on this row, and it is the difference
+    between a row you can read and a row you can do. A grid cell has carried one
+    since the beginning; a row not having one is why a lane could name a thing to
+    revisit while withholding the command that revisits it.
     """
 
     label: str
     text: str
     note: str = ''
     urgency: Urgency = Urgency.NONE
+    handle: str = ''
 
 
 @dataclass(frozen=True)
@@ -121,6 +127,7 @@ def row_from(payload: dict) -> Row:
         text=str(payload.get('text', '')),
         note=str(payload.get('note', '')),
         urgency=Urgency(urgency) if urgency in set(Urgency) else Urgency.NONE,
+        handle=str(payload.get('handle', '')),
     )
 
 
@@ -176,7 +183,10 @@ def to_document(lanes: list[Lane], generated_at: datetime) -> dict:
                 'meta': lane.meta,
                 'status': 'ok' if lane.available else 'unavailable',
                 'reason': lane.reason or None,
-                'rows': [{'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency)} for row in lane.rows],
+                'rows': [
+                    {'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency), 'handle': row.handle}
+                    for row in lane.rows
+                ],
                 'grid': [{'text': cell.text, 'done': cell.done, 'handle': cell.handle} for cell in lane.grid],
                 'total': lane.total,
                 'hints': lane.hints,

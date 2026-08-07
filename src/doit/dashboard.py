@@ -100,13 +100,20 @@ LEARNING_IN_PROGRESS = 2
 MAX_WIDTH = 140
 LABEL_WIDTH = 8
 
-# The note qualifies the row, so it takes a share of the line rather than a fixed
-# count. A flat cap is wrong at both ends — too tight to name a repo and a project
-# on a wide terminal, and wide enough to crowd out the thing itself on a narrow
-# one. It only ever binds when the notes are genuinely long, because the column is
-# sized to the longest note actually on screen first.
+# A trailing column takes a share of the line rather than a fixed count. A flat
+# cap is wrong at both ends — too tight to name a repo and a project on a wide
+# terminal, and wide enough to crowd out the thing itself on a narrow one. Both
+# only ever bind when the content is genuinely long, because a column is sized to
+# what is actually on screen first.
 NOTE_WIDTH_SHARE = 0.4
 NOTE_WIDTH_MIN = 22
+HANDLE_WIDTH_SHARE = 0.3
+HANDLE_WIDTH_MIN = 20
+TEXT_WIDTH_MIN = 20
+
+# Marks the handle as something to type rather than something to read. The same
+# arrow the nudge and `doit review due` use for the same field.
+HANDLE_MARK = '↳'
 
 # Two columns of habits, because a dozen single-name rows would swamp every
 # other lane while a single run-on line hides which ones are left.
@@ -420,36 +427,45 @@ def build_maintenance_lane(results: dict[str, sources.Result], today: date) -> L
     review = results.get('review')
     labs = results.get('labs')
 
-    ranked = []
+    ranked_reviews = []
+    ranked_labs = []
     reasons = []
-    review_due = 0
-    labs_due = 0
 
     # The register slug (`indy-reindex`) identifies a row to the tooling; what it
-    # is for only exists in the description, so that is what gets shown.
+    # is for only exists in the description, so that is what gets shown — and the
+    # register's own `command` is the handle, because a row saying "Re-index indy"
+    # without saying `indy index` names the intent and withholds the act.
     review_items = review.payload if review else None
     if isinstance(review_items, list):
         for item in review_items:
             if is_due_row(item):
-                review_due += 1
-                ranked.append(maintenance_row('review', item.get('desc') or item.get('id', ''), item))
+                ranked_reviews.append(maintenance_row('review', item.get('desc') or item.get('id', ''), item, item.get('command', '')))
     else:
         reasons.append(sources.reason('doit review', review))
 
+    # A Lab carries no command of its own — it is a document you open, and the
+    # verb that opens it is doit's. Naming it here is not backend knowledge
+    # leaking in: this is doit's own lane, reading doit's own module.
     labs_items = labs.payload if labs else None
     if isinstance(labs_items, list):
         for item in labs_items:
             if item.get('scheduled') and is_due_row(item):
-                labs_due += 1
-                ranked.append(maintenance_row('lab', item.get('title') or item.get('id', ''), item))
+                handle = f'doit labs show {item.get("id", "")}'
+                ranked_labs.append(maintenance_row('lab', item.get('title') or item.get('id', ''), item, handle))
     else:
         reasons.append(sources.reason('doit labs', labs))
 
     if len(reasons) == 2:
         return unavailable('maintenance', 'MAINTENANCE', '; '.join(reasons))
 
-    ranked.sort(key=lambda entry: entry[0])
-    rows = [row for _, row in ranked]
+    # Ranked within a kind, then interleaved across the two. A single sort put
+    # every review above every lab, because a never-run row of either kind ranks
+    # identically and reviews were collected first — so a heading reading
+    # "14 reviews · 16 labs due" sat above ten reviews and no lab at all.
+    ranked_reviews.sort(key=lambda entry: entry[0])
+    ranked_labs.sort(key=lambda entry: entry[0])
+    review_due, labs_due = len(ranked_reviews), len(ranked_labs)
+    rows = round_robin([row for _, row in ranked_reviews], [row for _, row in ranked_labs])
     return LaneView(
         name='maintenance',
         title='MAINTENANCE',
@@ -461,17 +477,17 @@ def build_maintenance_lane(results: dict[str, sources.Result], today: date) -> L
     )
 
 
-def maintenance_row(label: str, text: str, item: dict) -> tuple[tuple[int, int], Row]:
+def maintenance_row(label: str, text: str, item: dict, handle: str) -> tuple[tuple[int, int], Row]:
     """A row plus how late it is, paired so the lane can rank on the number the
     backend gave rather than on the sentence built from it. Sorting the note text
     would put "12d overdue" above "3d overdue", and never-run entries — the least
     urgent state there is — above everything genuinely due."""
     overdue = item.get('overdue')
     if overdue is None:
-        return (2, 0), Row(label, text, 'never run', Urgency.NONE)
+        return (2, 0), Row(label, text, 'never run', Urgency.NONE, handle)
     if overdue == 0:
-        return (1, 0), Row(label, text, 'due today', Urgency.DUE)
-    return (0, -overdue), Row(label, text, f'{overdue}d overdue', Urgency.OVERDUE)
+        return (1, 0), Row(label, text, 'due today', Urgency.DUE, handle)
+    return (0, -overdue), Row(label, text, f'{overdue}d overdue', Urgency.OVERDUE, handle)
 
 
 def round_robin(*groups: list[Row]) -> list[Row]:
@@ -690,32 +706,49 @@ def render_lane(lane: LaneView, width: int, row_cap: int) -> None:
         console.print(Text(f'  partial — {lane.reason}', style='yellow'))
 
 
+def column_width(width: int, values: list[str], share: float, minimum: int) -> int:
+    """How wide a trailing column gets: what it needs, bounded by its share.
+
+    Sized to the values actually on screen first, so a lane whose rows carry no
+    command reserves nothing for one and a lane of short notes stops stealing
+    width from its titles.
+    """
+    needed = max((len(value) for value in values), default=0)
+    return min(needed, max(minimum, int(width * share)))
+
+
+def handle_text(row: Row) -> str:
+    return f'{HANDLE_MARK} {row.handle}' if row.handle else ''
+
+
 def render_rows(rows: list[Row], width: int) -> None:
-    # Sized to the notes actually on screen, so a lane of short notes stops
-    # stealing width from its titles.
-    note_cap = max(NOTE_WIDTH_MIN, int(width * NOTE_WIDTH_SHARE))
-    note_width = min(note_cap, max((len(row.note) for row in rows), default=0))
-    text_width = max(20, width - 3 - LABEL_WIDTH - (note_width + 1 if note_width else 0))
+    handle_width = column_width(width, [handle_text(row) for row in rows], HANDLE_WIDTH_SHARE, HANDLE_WIDTH_MIN)
+    note_width = column_width(width, [row.note for row in rows], NOTE_WIDTH_SHARE, NOTE_WIDTH_MIN)
+    reserved = sum(size + 1 for size in (handle_width, note_width) if size)
+    text_width = max(TEXT_WIDTH_MIN, width - 3 - LABEL_WIDTH - reserved)
     for row in rows:
         line = Text('  ')
         line.append(row.label.ljust(LABEL_WIDTH), style='yellow')
         line.append(' ')
-        # A row without a note is not padded, so the line ends where its text
-        # does rather than in a run of trailing spaces.
-        if not row.note:
-            line.append(fitted(row.text, text_width))
-            console.print(line, no_wrap=True, overflow='ellipsis')
-            continue
         line.append(fitted(row.text, text_width, pad=True))
-        line.append(' ')
-        # Styled on the Text itself: rich refuses a style argument when what is
-        # being appended is already a Text, and only a due or overdue note
-        # carries one — so this raised for exactly the rows that matter most.
-        note = fitted(row.note, note_width)
-        style = NOTE_STYLES[row.urgency]
-        if style:
-            note.stylize(style)
-        line.append(note)
+        if handle_width:
+            line.append(' ')
+            handle = fitted(handle_text(row), handle_width, pad=True)
+            handle.stylize('cyan')
+            line.append(handle)
+        if note_width:
+            line.append(' ')
+            # Styled on the Text itself: rich refuses a style argument when what
+            # is being appended is already a Text, and only a due or overdue note
+            # carries one — so this raised for exactly the rows that matter most.
+            note = fitted(row.note, note_width)
+            style = NOTE_STYLES[row.urgency]
+            if style:
+                note.stylize(style)
+            line.append(note)
+        # Padded up to the last column that has anything in it, then trimmed, so
+        # a line ends where its content does rather than in trailing spaces.
+        line.rstrip()
         console.print(line, no_wrap=True, overflow='ellipsis')
 
 

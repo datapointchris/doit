@@ -172,7 +172,7 @@ def test_what_doit_emits_is_what_doit_reads():
             name='day',
             title='DAY',
             meta='2 planned',
-            rows=[lanes.Row('now', 'Lights', '18:40', lanes.Urgency.OVERDUE)],
+            rows=[lanes.Row('now', 'Lights', '18:40', lanes.Urgency.OVERDUE, 'day set lights evening')],
             grid=[lanes.GridCell('Exercise', True, '')],
             total=2,
             hints=['day status'],
