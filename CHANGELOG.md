@@ -1,6 +1,34 @@
 # CHANGELOG
 
 
+## v0.5.0 (2026-08-07)
+
+### Features
+
+- Give every row the command that opens the thing it names
+  ([`fcba2d3`](https://github.com/datapointchris/doit/commit/fcba2d38bf420abffb2f3dcd21be1521062e4b80))
+
+The maintenance lane was not the only one you could read and not act on. A task showed a priority,
+  which is not its id. An article showed a title and nothing else — no source, no id, 309 of them. A
+  book, a countdown, a learning resource: all named, none reachable. Every one of those backends has
+  a `view` verb, so the handle is uniform across the lanes, it is the read rather than a write, and
+  it is built in the icb adapter where doit's knowledge of icb already lives and where it disappears
+  when icb speaks the lane contract itself.
+
+Three lanes were also dropping fields they had been handed. An article's host is the one thing
+  separating a vendor blog post from a paper without opening either. An event's venue is most of
+  what a row about somewhere you have to be is for. A task's notes are why "audi pcv valve" is on
+  the list at all.
+
+Projects stays without a handle, deliberately: its ids are UUIDs, so the invocation runs to sixty
+  columns and would ellipsise into something that looks copyable and is not, taking the title's
+  width with it. The verb goes in the lane hint, and `doit next` prints it in full via a new
+  register `view:` field — a drawn row has a line to spend on one and a three-row glance does not.
+
+Columns reorder to text, note, handle: what it is, how urgent it is, what to type. Between the two,
+  the command split every title from its own qualifier.
+
+
 ## v0.4.0 (2026-08-07)
 
 ### Features
