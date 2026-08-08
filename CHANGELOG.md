@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.10.2 (2026-08-08)
+
+### Bug Fixes
+
+- **dashboard**: Build show handles, not view
+  ([`92350ad`](https://github.com/datapointchris/doit/commit/92350ad83a908502ac600bf8f143a60ba6d6b457))
+
+icb and learning renamed the verb that displays one instance from `view` to `show`, so every
+  dashboard row handle and the example pursuits register pointed at a command that no longer exists.
+
+The `view:` key in a pursuit is unchanged — it names the field, not the verb. Verb standardization
+  rationale is in ~/dev/standards/cli-design.md.
+
+
 ## v0.10.1 (2026-08-08)
 
 ### Bug Fixes
