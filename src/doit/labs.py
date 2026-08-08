@@ -41,7 +41,6 @@ from doit.cards import render_body
 from doit.cards import slugify
 from doit.cards import split_frontmatter
 from doit.paths import library_dir
-from doit.paths import xdg_data_home
 from doit.paths import xdg_state_home
 from doit.render import console
 from doit.render import error_console
@@ -52,8 +51,9 @@ LABS_DIR = Path(os.environ.get('DOIT_LABS_DIR') or library_dir() / 'labs')
 STATE = Path(os.environ.get('DOIT_LABS_STATE') or xdg_state_home() / 'doit' / 'labs-state.json')
 
 # The tool registry backs the zero-authoring flashcard deck (recall the command
-# from an example's description). Toolbox owns this file; doit only reads it.
-REGISTRY = Path(os.environ.get('TOOLBOX_REGISTRY') or xdg_data_home() / 'toolbox' / 'registry.yml')
+# from an example's description). It is a third kind of card in the library,
+# beside workflows/ and labs/, and is read here rather than owned here.
+REGISTRY = Path(os.environ.get('DOIT_TOOLS_REGISTRY') or library_dir() / 'tools' / 'registry.yml')
 
 # A flashcard session stays short — the research says a few minutes / <=5 new/day
 # beats long cramming — so a session samples at most this many cards.

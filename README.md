@@ -42,7 +42,7 @@ an item done at one desk counts at the other. Work that is genuinely per-machine
 
 ## Content
 
-Cards and Labs are content, not code — they live in
+Cards, Labs and the tool registry are content, not code — they live in
 [terminal-library](https://github.com/datapointchris/terminal-library), cloned into
 `$XDG_DATA_HOME/terminal-library/` and updated by `doit content sync`. It stays a git checkout at
 the installed path, so writing a card works on any machine and no release stands between writing one
