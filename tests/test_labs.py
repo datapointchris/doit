@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from doit import labs
+from doit import render
 from doit import tools
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures'
@@ -121,6 +122,21 @@ def test_load_flashcards_filter_by_tag():
 
 def test_load_flashcards_unknown_subject_empty():
     assert labs.load_flashcards('nonexistent') == []
+
+
+def test_flash_refuses_a_run_with_nobody_to_answer_it(capsys):
+    """Every card waits on a keystroke. Off a terminal that is a stdin which never
+    closes — no output, no exit code. pytest's stdin is exactly that caller."""
+    assert labs.cmd_flash() == 1
+    assert 'nobody to answer' in capsys.readouterr().err
+
+
+def test_no_input_refuses_flash_even_on_a_terminal(monkeypatch, capsys):
+    monkeypatch.setattr('sys.stdin.isatty', lambda: True)
+    monkeypatch.setattr(render, '_no_input', True)
+
+    assert labs.cmd_flash() == 1
+    assert 'nobody to answer' in capsys.readouterr().err
 
 
 def test_new_writes_straight_into_the_deck(tmp_path, monkeypatch):

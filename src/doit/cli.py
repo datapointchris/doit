@@ -24,6 +24,7 @@ from doit import shell
 from doit import sources
 from doit import tools
 from doit import workflows
+from doit.render import set_no_input
 
 TAGLINE = 'What to do now, and everything that decides it.'
 
@@ -77,6 +78,10 @@ def root(
         bool | None,
         typer.Option('--version', '-V', callback=version_callback, is_eager=True, help='Show the installed version and exit.'),
     ] = None,
+    no_input: Annotated[
+        bool,
+        typer.Option('--no-input', help='Never prompt; fail naming the flag that would have answered.'),
+    ] = False,
 ) -> None:
     """Root callback, hosting the app-level options.
 
@@ -90,6 +95,7 @@ def root(
     report on the checkout, and a pull racing them would have `status` describe a
     tree being rewritten underneath it.
     """
+    set_no_input(no_input)
     content.ensure_cloned()
     if ctx.invoked_subcommand != 'content':
         content.autosync()

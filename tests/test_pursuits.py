@@ -19,6 +19,7 @@ import pytest
 
 from doit import journal
 from doit import pursuits
+from doit import render
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'pursuits'
 NOW = datetime.fromisoformat('2026-08-04T12:00:00-04:00')
@@ -404,6 +405,26 @@ def test_on_log_substitutes_the_offered_items_id(sandbox, tmp_path):
     result = pursuits.run_on_log(config, {'id': '422', 'label': 'Task'}, '', None, assume_yes=True)
     assert result['ran'] is True
     assert marker.read_text() == '422'
+
+
+def test_on_log_is_not_run_when_there_is_nobody_to_confirm_with(sandbox, tmp_path):
+    """The prompt would block on a stdin that never closes, so an unconfirmed
+    on_log is skipped rather than asked about. -y is what runs it unattended."""
+    marker = tmp_path / 'ran.txt'
+    config = {'resolve': 'echo x', 'on_log': f'touch {marker}'}
+
+    assert pursuits.run_on_log(config, {'id': '1', 'label': 'Task'}, '', None, assume_yes=False) is None
+    assert not marker.exists()
+
+
+def test_on_log_is_not_run_under_no_input_even_on_a_terminal(sandbox, tmp_path, monkeypatch):
+    monkeypatch.setattr('sys.stdin.isatty', lambda: True)
+    monkeypatch.setattr(render, '_no_input', True)
+    marker = tmp_path / 'ran.txt'
+    config = {'resolve': 'echo x', 'on_log': f'touch {marker}'}
+
+    assert pursuits.run_on_log(config, {'id': '1', 'label': 'Task'}, '', None, assume_yes=False) is None
+    assert not marker.exists()
 
 
 def test_on_log_is_skipped_when_the_item_has_no_id():

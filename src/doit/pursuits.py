@@ -36,7 +36,6 @@ import os
 import random
 import shlex
 import subprocess
-import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -73,6 +72,7 @@ from doit.paths import machine_name
 from doit.paths import xdg_cache_home
 from doit.paths import xdg_config_home
 from doit.paths import xdg_state_home
+from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
 from doit.render import first_sentence
@@ -740,7 +740,7 @@ def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_
         pursuit=item.get('pursuit', ''),
     )
     if not assume_yes:
-        if not sys.stdin.isatty():
+        if not can_prompt():
             return None
         prompt = Text('  ')
         prompt.append(command, style='cyan')

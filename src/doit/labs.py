@@ -42,6 +42,7 @@ from doit.cards import slugify
 from doit.cards import split_frontmatter
 from doit.paths import library_dir
 from doit.paths import xdg_state_home
+from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
 from doit.state import load_state
@@ -360,6 +361,9 @@ def cmd_flash(subject: str | None = None) -> int:
         message = f'No examples to drill for {subject!r}.' if subject else f'No registry examples found at {tools.REGISTRY}.'
         console.print(Text(message))
         return 0
+    if not can_prompt():
+        error_console.print('flash is answered card by card, and this run has nobody to answer it.')
+        return 1
     random.shuffle(cards)
     cards = cards[:FLASH_SESSION]
     console.rule('[cyan]Flashcards — recall the command', align='left')
