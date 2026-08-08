@@ -1,9 +1,9 @@
 """Tests for doit.index — the federated index and the rot report.
 
 The lens parsers are covered against small fixtures rather than the real
-collections, which change under you. What is asserted hardest is the invocation:
-the bash version indexed the registry by key, so half its tool rows named
-something you could not type.
+collections, which change under you. What is asserted hardest is the invocation,
+because a registry key is a package name as often as a command and a row keyed
+by name names something you cannot type.
 """
 
 import os
@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from doit import index
+from doit import tools
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures'
 
@@ -45,7 +46,7 @@ def collections(tmp_path, monkeypatch):
     """Point every lens at a fixture, so no test reads the real machine."""
     registry = tmp_path / 'registry.yml'
     registry.write_text(REGISTRY_YAML)
-    monkeypatch.setattr(index, 'REGISTRY', registry)
+    monkeypatch.setattr(tools, 'REGISTRY', registry)
     monkeypatch.setattr(index, 'WORKFLOWS_DIR', FIXTURE_DIR / 'workflows')
     monkeypatch.setattr(index, 'SKILLS_DIR', tmp_path / 'no-skills')
     monkeypatch.setattr(index, 'FORGIT_PLUGIN', tmp_path / 'no-forgit')
@@ -73,15 +74,11 @@ def by_name(entries: list[index.Entry]) -> dict[str, index.Entry]:
 
 
 def test_a_registry_key_is_not_the_invocation():
-    """`ripgrep` installs `rg`. The key names the package, `usage` names the command.
+    """`ripgrep` installs `rg`. The key names the package, `usage` names the command."""
+    indexed = by_name(index.index_tools())
 
-    This is the whole reason the index was rewritten: indexing by key rendered
-    65 of 130 tool rows as things absent from PATH.
-    """
-    tools = by_name(index.index_tools())
-
-    assert tools['ripgrep'].invocation == 'rg [pattern] [path]'
-    assert tools['git-forgit-log'].invocation == 'git forgit log'
+    assert indexed['ripgrep'].invocation == 'rg [pattern] [path]'
+    assert indexed['git-forgit-log'].invocation == 'git forgit log'
 
 
 def test_the_display_line_carries_the_invocation():
@@ -104,7 +101,7 @@ def test_the_invocation_is_omitted_when_it_repeats_the_name():
     [('rg [pattern]', 'rg'), ('git forgit log', 'git'), ('source aws-profiles', 'aws-profiles'), ('', '')],
 )
 def test_invocation_head_is_the_word_you_actually_run(usage, expected):
-    assert index.invocation_head(usage) == expected
+    assert tools.invocation_head(usage) == expected
 
 
 def test_unresolved_finds_rot_and_nothing_else():
@@ -137,8 +134,31 @@ def test_functions_need_the_annotation_to_be_indexed():
     assert functions['gwip'].description == 'commit work in progress'
 
 
+def test_a_function_carries_its_body_because_that_is_the_refresher():
+    assert by_name(index.index_functions())['gwip'].body == '  :'
+
+
+def test_an_annotated_function_with_no_definition_still_yields_a_row(monkeypatch, tmp_path):
+    """An entry that vanishes on a syntax error is worse than a ragged body."""
+    shell = tmp_path / 'shell-only'
+    shell.mkdir()
+    (shell / 'functions.sh').write_text('#@orphan\n#--> annotated but never defined\n#@second\n#--> and another\nsecond() {\n  :\n}\n')
+    monkeypatch.setattr(index, 'SHELL_DIR', shell)
+
+    functions = by_name(index.index_functions())
+
+    assert functions['orphan'].description == 'annotated but never defined'
+    assert functions['orphan'].body == ''
+    assert functions['second'].body == '  :'
+
+
 def test_aliases_take_the_preceding_comment_as_their_description():
     assert by_name(index.index_aliases())['ll'].description == 'list files'
+
+
+def test_an_alias_carries_what_it_expands_to():
+    """A card that omits the expansion cannot say why the alias is worth keeping."""
+    assert by_name(index.index_aliases())['ll'].command == 'eza -l'
 
 
 def test_workflow_rows_point_at_the_command_that_renders_them():
@@ -164,8 +184,8 @@ def test_build_index_can_be_scoped_to_one_collection():
 
 
 def test_a_missing_collection_is_silent_not_fatal(monkeypatch, tmp_path):
-    """A machine without the toolbox registry still gets every other lens."""
-    monkeypatch.setattr(index, 'REGISTRY', tmp_path / 'nope.yml')
+    """A machine without the tool registry still gets every other lens."""
+    monkeypatch.setattr(tools, 'REGISTRY', tmp_path / 'nope.yml')
 
     assert index.index_tools() == []
     assert index.build_index(), 'the other collections still index'

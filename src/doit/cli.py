@@ -22,6 +22,7 @@ from doit import pursuits
 from doit import review
 from doit import shell
 from doit import sources
+from doit import tools
 from doit import workflows
 
 TAGLINE = 'What to do now, and everything that decides it.'
@@ -55,6 +56,7 @@ app.add_typer(pursuits.app, name='pursuits')
 app.add_typer(review.app, name='review')
 app.add_typer(labs.app, name='labs')
 app.add_typer(workflows.app, name='workflows')
+app.add_typer(tools.app, name='tools')
 app.add_typer(find.index_app, name='index')
 app.add_typer(sources.app, name='sources')
 app.add_typer(content.app, name='content')

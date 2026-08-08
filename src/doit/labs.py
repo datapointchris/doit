@@ -29,9 +29,9 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-import yaml
 from rich.text import Text
 
+from doit import tools
 from doit.cadence import is_due
 from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
@@ -49,11 +49,6 @@ from doit.state import save_state
 
 LABS_DIR = Path(os.environ.get('DOIT_LABS_DIR') or library_dir() / 'labs')
 STATE = Path(os.environ.get('DOIT_LABS_STATE') or xdg_state_home() / 'doit' / 'labs-state.json')
-
-# The tool registry backs the zero-authoring flashcard deck (recall the command
-# from an example's description). It is a third kind of card in the library,
-# beside workflows/ and labs/, and is read here rather than owned here.
-REGISTRY = Path(os.environ.get('DOIT_TOOLS_REGISTRY') or library_dir() / 'tools' / 'registry.yml')
 
 # A flashcard session stays short — the research says a few minutes / <=5 new/day
 # beats long cramming — so a session samples at most this many cards.
@@ -339,13 +334,12 @@ def load_flashcards(subject: str | None = None) -> list[dict]:
     its command. Zero authoring — every tool's examples become a deck.
 
     A subject filters to one tool by name or by tag membership.
+
+    The registry backs this deck (recall the command from an example's
+    description). `doit.tools` owns it; this only reads it.
     """
-    if not REGISTRY.exists():
-        return []
-    data = yaml.safe_load(REGISTRY.read_text()) or {}
-    tools = data.get('tools') or {}
     cards = []
-    for name, tool in tools.items():
+    for name, tool in tools.load_registry().items():
         tool = tool or {}
         if subject and name != subject and subject not in (tool.get('tags') or []):
             continue
@@ -363,7 +357,7 @@ def cmd_flash(subject: str | None = None) -> int:
     self-mark. Ephemeral (no schedule) — the daily warm-up next to the Labs."""
     cards = load_flashcards(subject)
     if not cards:
-        message = f'No examples to drill for {subject!r}.' if subject else f'No registry examples found at {REGISTRY}.'
+        message = f'No examples to drill for {subject!r}.' if subject else f'No registry examples found at {tools.REGISTRY}.'
         console.print(Text(message))
         return 0
     random.shuffle(cards)

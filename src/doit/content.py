@@ -248,7 +248,7 @@ def cmd_path() -> int:
     return 0
 
 
-app = typer.Typer(name='content', no_args_is_help=True, help='The cards and Labs checkout.')
+app = typer.Typer(name='content', no_args_is_help=True, help='The terminal-library checkout.')
 
 
 @app.command('sync')

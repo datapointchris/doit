@@ -6,18 +6,17 @@ and the tmux keybindings parsed out of their own card. doit owns none of them �
 each row names where it came from and what to type, and rendering a subject is
 delegated back to whatever owns it.
 
-**Every row carries its invocation, and that is the fix this rewrite exists for.**
-The bash version indexed the registry by its key, so `ripgrep` and `git-delta`
-and twenty `git-forgit-*` entries rendered as rows naming things you cannot type
-— 65 of 130 tool rows named something absent from PATH. The command was in the
-registry the whole time, in each entry's `usage` field: `rg [pattern] [path]`,
-`git forgit log`. Reading it drops the unresolvable count from 65 to 11, and the
-survivors are shell integrations defined at runtime (`br`, `z`, `nvm`) plus
-genuine registry rot.
+**Every row carries its invocation, not just its name.** A registry key is a
+package name as often as a command — `ripgrep` installs `rg`, `git-delta`
+installs `delta`, forgit's shortcuts are keyed `git-forgit-*` — so a row keyed by
+name names something you cannot type. The command is in each entry's `usage`
+field: `rg [pattern] [path]`, `git forgit log`.
 
 Rot is reported rather than rendered. `unresolved()` is what turns "this row goes
 nowhere" from a thing you rediscover every time you search into a list you can
 fix, which is the difference between an index that decays and one that does not.
+What survives it is shell integrations defined at runtime (`br`, `z`, `nvm`),
+which are not rot, plus entries that genuinely are.
 """
 
 import os
@@ -27,24 +26,21 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
 from doit.cards import first_heading
 from doit.cards import split_frontmatter
 from doit.paths import library_dir
+from doit.tools import LEADING_KEYWORDS
+from doit.tools import invocation_head
+from doit.tools import load_registry
 
 SHELL_DIR = Path(os.environ.get('SHELL_DIR') or Path.home() / '.local' / 'shell')
 SKILLS_DIR = Path(os.environ.get('DOIT_SKILLS_DIR') or Path.home() / '.claude' / 'skills')
-REGISTRY = Path(os.environ.get('DOIT_TOOLS_REGISTRY') or library_dir() / 'tools' / 'registry.yml')
 WORKFLOWS_DIR = Path(os.environ.get('DOIT_WORKFLOWS_DIR') or library_dir() / 'workflows')
 FORGIT_PLUGIN = Path(os.environ.get('FORGIT_PLUGIN') or Path.home() / '.config' / 'zsh' / 'plugins' / 'forgit' / 'forgit.plugin.zsh')
 
 # The card that owns the tmux keybindings, so the in-tmux popup and this index
 # read one source rather than drifting apart.
 TMUX_CARD = 'tmux-commands'
-
-# Shell keywords that can lead a `usage` string without being the command.
-LEADING_KEYWORDS = {'source', '.', 'eval', 'exec'}
 
 
 @dataclass(frozen=True)
@@ -63,6 +59,14 @@ class Entry:
     # Registry entries only: what `doit launch` uses to offer your own tools
     # ahead of the hundred third-party ones.
     category: str = ''
+    # Shell functions only: the definition itself, which is the refresher a
+    # one-line description cannot be.
+    body: str = ''
+    # What the row expands to, where that is a different string from its name —
+    # an alias, a git alias, a forgit shortcut. `invocation` is what you type;
+    # this is what happens when you do, and a card that omits it is a card that
+    # cannot answer why the alias is worth remembering.
+    command: str = ''
 
     def display(self) -> str:
         """The one line fzf shows and searches.
@@ -85,8 +89,8 @@ def shell_files() -> list[Path]:
     """The shared shell files plus this platform's, which holds both.
 
     The platform file (macos.sh / archlinux.sh / wsl.sh) carries functions and
-    aliases too. Reading only the shared files is what made platform-specific
-    shortcuts findable in `toolbox funcs` but not here.
+    aliases too, so reading only the shared files silently drops every
+    platform-specific shortcut from the index.
     """
     files = [SHELL_DIR / 'functions.sh', SHELL_DIR / 'aliases.sh']
     platform = os.environ.get('PLATFORM')
@@ -106,11 +110,8 @@ def index_tools() -> list[Entry]:
     `rg`, `git-delta` installs `delta` — so the key alone names a row you cannot
     act on. `usage` holds the real invocation and every entry has one.
     """
-    if not REGISTRY.exists():
-        return []
-    tools = (yaml.safe_load(REGISTRY.read_text()) or {}).get('tools') or {}
     entries = []
-    for name, meta in tools.items():
+    for name, meta in load_registry().items():
         meta = meta or {}
         entries.append(
             Entry(
@@ -165,17 +166,42 @@ def index_functions() -> list[Entry]:
 
     The annotation is the opt-in: an unannotated function is an internal helper
     and stays out of the index.
+
+    The definition that follows is captured too. A description says what a
+    function is for; the body is the only thing that says what it does, and
+    reading it is why anyone opens the file. Definitions are top-level, so the
+    brace in column one closes them — a nested brace is always indented. A
+    function whose block never closes still yields its row, because an entry
+    that vanishes on a syntax error is worse than one with a ragged body.
     """
-    entries = []
+    entries: list[Entry] = []
+    pending: tuple[str, str] | None = None
+    body: list[str] | None = None
     name = ''
+
+    def flush() -> None:
+        nonlocal pending, body
+        if pending:
+            entries.append(Entry(source='func', name=pending[0], invocation=pending[0], description=pending[1], body='\n'.join(body or [])))
+        pending, body = None, None
+
     for line in shell_text().splitlines():
-        if line.startswith('#@'):
+        if body is not None:
+            if line.startswith('}'):
+                flush()
+            else:
+                body.append(line)
+        elif line.startswith('#@'):
+            flush()
             name = line[2:].strip()
         elif line.startswith('#-->') and name:
-            entries.append(Entry(source='func', name=name, invocation=name, description=line[4:].strip()))
-            name = ''
+            pending, name = (name, line[4:].strip()), ''
         elif line and not line.startswith('#'):
+            # The definition line itself; everything up to the closing brace is
+            # the body.
+            body = [] if pending else None
             name = ''
+    flush()
     return entries
 
 
@@ -187,8 +213,10 @@ def index_aliases() -> list[Entry]:
         if line.startswith('#'):
             description = line.lstrip('#').strip()
         elif line.startswith('alias '):
-            name = line[6:].split('=', 1)[0]
-            entries.append(Entry(source='alias', name=name, invocation=name, description=description))
+            name, _, expansion = line[6:].partition('=')
+            entries.append(
+                Entry(source='alias', name=name, invocation=name, description=description, command=expansion.strip().strip('\'"'))
+            )
             description = ''
         elif line.strip():
             description = ''
@@ -206,7 +234,10 @@ def index_git_aliases() -> list[Entry]:
         key, _, expansion = line.partition(' ')
         name = key.removeprefix('alias.')
         if name:
-            entries.append(Entry(source='git', name=name, invocation=f'git {name}', description=expansion))
+            # description and command are the same string here: the expansion is
+            # both what identifies a git alias in a search line and what its card
+            # prints under it.
+            entries.append(Entry(source='git', name=name, invocation=f'git {name}', description=expansion, command=expansion))
     return entries
 
 
@@ -220,7 +251,13 @@ def index_forgit() -> list[Entry]:
         return []
     pattern = re.compile(r'forgit_([a-z_]+)="\$\{forgit_[a-z_]+:-([a-zA-Z-]+)\}"')
     return [
-        Entry(source='forgit', name=name, invocation=name, description=f'forgit: {action.replace("_", " ")}')
+        Entry(
+            source='forgit',
+            name=name,
+            invocation=name,
+            description=f'forgit: {action.replace("_", " ")}',
+            command=action.replace('_', ' '),
+        )
         for action, name in pattern.findall(FORGIT_PLUGIN.read_text())
     ]
 
@@ -288,24 +325,14 @@ def resolvable_names() -> set[str]:
     return names
 
 
-def invocation_head(invocation: str) -> str:
-    """The word a `usage` string actually asks you to run."""
-    tokens = invocation.split()
-    if not tokens:
-        return ''
-    if tokens[0] in LEADING_KEYWORDS and len(tokens) > 1:
-        return tokens[1]
-    return tokens[0]
-
-
 def unresolved(entries: list[Entry] | None = None) -> list[Entry]:
     """Rows naming something this machine cannot run.
 
     Only the lenses whose rows are commands are checked. A workflow card, a
     skill or a tmux keybinding is not a command and cannot be dead in this sense.
 
-    This is the report the bash version never had. A row that goes nowhere is
-    registry rot, and rot you cannot list is rot you re-encounter forever.
+    A row that goes nowhere is registry rot, and rot you cannot list is rot you
+    re-encounter forever.
     """
     checkable = {'tool', 'func', 'alias', 'forgit'}
     entries = build_index() if entries is None else entries

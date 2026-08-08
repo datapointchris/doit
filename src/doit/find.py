@@ -2,18 +2,21 @@
 
 `doit find` is one motion: fuzzy-match a line, press Enter, get everything known
 about that subject assembled from every collection that has it. `doit show` is
-that same composite when you already know the name — it is what `menu labs <tool>`
-used to do, and it is a command rather than a picker callback because knowing the
-name is the common case. `doit launch` is the other direction: your areas and your
-own tools, for when the question is "what can I even run here".
+that same composite when you already know the name, and it is a command rather
+than a picker callback because knowing the name is the common case. `doit launch`
+is the other direction: your areas and your own tools, for when the question is
+"what can I even run here".
 
 fzf is shelled out to rather than reimplemented. It is already the picker
 everywhere else on this machine, and a Python reimplementation would be a worse
 one that also had to be maintained.
 
-Nothing here renders a subject itself. Each lens delegates to the tool that owns
-it — `toolbox show`, `doit workflows show`, `bat` over a skill file — because a
-second renderer is a second thing to keep in step with the first.
+Nothing here renders a subject itself. Each lens hands off to whatever owns it —
+`doit.tools` for anything out of the registry or the shell files, `doit workflows
+show` for a card, `bat` over a skill file — because a second renderer is a second
+thing to keep in step with the first. Whether that hand-off is an in-process call
+or a subprocess follows from where the owner lives, and is not a distinction this
+module makes.
 """
 
 import json
@@ -25,6 +28,7 @@ import typer
 from rich.text import Text
 
 from doit import index
+from doit import tools
 from doit.render import console
 from doit.render import error_console
 
@@ -75,7 +79,7 @@ def index_lines(entries: list[index.Entry]) -> list[str]:
 def cmd_find(term: str, sources: list[str] | None) -> int:
     entries = index.build_index(sources)
     if not entries:
-        error_console.print('Nothing indexed. Is the toolbox registry installed?')
+        error_console.print('Nothing indexed. Fetch the library with [cyan]doit content sync[/].')
         return 1
     selected = run_fzf(
         index_lines(entries),
@@ -140,10 +144,10 @@ def cmd_show(subject: str) -> int:
 
     if 'tool' in found:
         entry = found['tool']
-        render_section(f'toolbox — {entry.invocation}', 'yellow')
-        delegate(['toolbox', 'show', subject])
+        render_section(f'registry — {entry.invocation}', 'yellow')
+        tools.render_tool(subject, tools.load_registry().get(subject) or {}, heading=False)
         render_section('tldr — common examples', 'blue')
-        delegate(['tldr', index.invocation_head(entry.invocation)])
+        delegate(['tldr', tools.invocation_head(entry.invocation)])
     if 'workflow' in found:
         render_section('workflow — your reference card', 'cyan')
         delegate(['doit', 'workflows', 'show', subject])
@@ -152,10 +156,28 @@ def cmd_show(subject: str) -> int:
         delegate(['bat', '--style=plain', '--color=always', '--language=markdown', str(index.SKILLS_DIR / subject / 'SKILL.md')])
     for source in ('func', 'alias', 'git', 'forgit', 'tmux'):
         if source in found:
-            entry = found[source]
-            render_section(f'{source} — {entry.invocation}', 'cyan')
-            console.print(Text(f'  {entry.description}'))
+            console.print()
+            render_lens_card(found[source])
     return 0
+
+
+def render_lens_card(entry: index.Entry, brief: bool = False) -> None:
+    """The card shape belonging to whichever shell collection this row came from.
+
+    The fallback is the shape for a row that is not a command — a tmux keybinding
+    is a key, so there is nothing for a `↳` line to carry.
+    """
+    if entry.source == 'func':
+        tools.render_function(entry.name, entry.description, entry.body, brief=brief)
+    elif entry.source == 'alias':
+        tools.render_alias(entry.name, entry.command, entry.description, brief=brief)
+    elif entry.source == 'git':
+        tools.render_git_alias(entry.name, entry.command, brief=brief)
+    elif entry.source == 'forgit':
+        tools.render_forgit(entry.name, entry.command, brief=brief)
+    else:
+        tools.card_title(entry.invocation, entry.source)
+        tools.card_detail(entry.description, brief)
 
 
 def cmd_unresolved(as_json: bool) -> int:
@@ -209,7 +231,8 @@ def show_command(subject: Annotated[str, typer.Argument()]) -> None:
 def preview_command(source: Annotated[str, typer.Argument()], name: Annotated[str, typer.Argument()]) -> None:
     """Render one row for the fzf preview pane."""
     if source == 'tool':
-        raise typer.Exit(0 if delegate(['toolbox', 'show', name]) else 1)
+        tools.render_tool(name, tools.load_registry().get(name) or {})
+        raise typer.Exit(0)
     if source == 'workflow':
         raise typer.Exit(0 if delegate(['doit', 'workflows', '__render', name]) else 1)
     if source == 'skill':
@@ -218,7 +241,7 @@ def preview_command(source: Annotated[str, typer.Argument()], name: Annotated[st
         raise typer.Exit(0 if delegate(args) else 1)
     entry = lens_sources(name).get(source)
     if entry:
-        console.print(Text(f'{entry.invocation}\n\n{entry.description}'))
+        render_lens_card(entry)
     raise typer.Exit(0)
 
 

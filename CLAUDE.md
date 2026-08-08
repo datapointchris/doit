@@ -37,6 +37,17 @@ falls back to this machine's zsh history whenever atuin cannot be asked.
 - **State** — `$XDG_STATE_HOME/doit/`. Per-machine wherever a sync layer would otherwise have to
   merge concurrent writes, which it cannot.
 
+## One renderer per collection, and `doit.tools` owns three of them
+
+`doit find` and `doit show` assemble a subject from every collection that has it and render none
+of it themselves — each lens hands off to whatever owns it. `doit.tools` is that owner for the
+registry and for the shell collections, so its card shapes take plain arguments rather than index
+rows: that is what lets `doit show` compose them and the reminder rotation reuse them without
+`tools` importing `index`, which would close a cycle.
+
+The registry's own path and loader live in `doit.tools` for the same reason — `index` and `labs`
+both read it, and a constant defined per reader is a constant that drifts.
+
 ## Sources are configuration, not code
 
 `doit` must not know which apps exist. Adding a source is an edit to `sources.yml`, never a release.

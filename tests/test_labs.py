@@ -1,9 +1,7 @@
 """Tests for doit.labs — Lab loading, frontmatter parsing, and schedule status.
 
 An autouse fixture points the deck at a committed fixture directory and the state
-at a file that does not exist, so every Lab reads as never-practiced. That
-replaces the env-before-import dance the dotfiles version needed when this was a
-uv single-file script loaded by path.
+at a file that does not exist, so every Lab reads as never-practiced.
 """
 
 from pathlib import Path
@@ -12,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from doit import labs
+from doit import tools
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures'
 LABS_FIXTURE = FIXTURE_DIR / 'labs'
@@ -21,7 +20,7 @@ LABS_FIXTURE = FIXTURE_DIR / 'labs'
 def deck(monkeypatch):
     monkeypatch.setattr(labs, 'LABS_DIR', LABS_FIXTURE)
     monkeypatch.setattr(labs, 'STATE', LABS_FIXTURE / 'does-not-exist-state.json')
-    monkeypatch.setattr(labs, 'REGISTRY', FIXTURE_DIR / 'labs-registry.yml')
+    monkeypatch.setattr(tools, 'REGISTRY', FIXTURE_DIR / 'labs-registry.yml')
 
 
 def test_load_labs_reads_frontmatter():
