@@ -6,6 +6,7 @@ correctly and prints the wrong field is not a passing case.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,17 @@ def registry(tmp_path, monkeypatch):
     path = tmp_path / 'registry.yml'
     path.write_text(REGISTRY_YAML)
     monkeypatch.setattr(tools, 'REGISTRY', path)
+
+    # The PATH check resolves through `shutil.which`, which reads the real PATH,
+    # so without a stub the card's verdict depends on what the machine running
+    # the tests happens to have installed. Prepended rather than replacing PATH,
+    # so `long-gone` still resolves to nothing.
+    stubs = tmp_path / 'bin'
+    stubs.mkdir()
+    stub = stubs / 'rg'
+    stub.write_text('#!/bin/sh\n')
+    stub.chmod(0o755)
+    monkeypatch.setenv('PATH', f'{stubs}{os.pathsep}{os.environ["PATH"]}')
     return path
 
 
