@@ -1,6 +1,43 @@
 # CHANGELOG
 
 
+## v0.7.0 (2026-08-08)
+
+### Chores
+
+- **lint**: Ignore the generated CHANGELOG.md
+  ([`d7d3452`](https://github.com/datapointchris/doit/commit/d7d3452b1e67835ba12a76b5cd99e1ddae87a7cc))
+
+semantic-release rewrites CHANGELOG.md on every release, so markdownlint --fix normalizing it is
+  undone on the next one and resurfaces as a rebase conflict when a local commit lands on top of the
+  release commit.
+
+### Features
+
+- **review**: Observe last-done instead of asking for it
+  ([`9918baa`](https://github.com/datapointchris/doit/commit/9918baa55a74cc473fd0d5ddeee52afb586b5c1d))
+
+A cadence item's date had one origin: typing `doit review done <id>`. A declared date has nothing
+  underneath it to re-check, so an item done and never reported reads exactly like one never done —
+  which is the state the register exists to notice.
+
+An observer supplies evidence instead. By default an item is done when the command it already names
+  last ran, so most items need no configuration. `{newest-date-in: <path>}` reads another tool's
+  state file for work that leaves no prompt behind: the nudge runs `toolbox remind --brief` as a
+  subprocess, so the reminder that fires automatically is the one shell history cannot see.
+
+History comes from atuin, the only source recording which machine ran a command, falling back to
+  this machine's zsh history when atuin cannot be asked. That makes `scope: machine` answerable, so
+  per-box work is not cleared by the other desk doing it.
+
+`observe: false` covers a command that opens work rather than being it — a review window, a `claude
+  /...` session — where observing would count an abandoned session as done.
+
+Never-run now ranks above overdue in the maintenance lane, matching `cadence.is_due` and `doit
+  review due`, and ties break on the shorter cadence. `doit review list` names stranded done-dates,
+  since renaming an item silently orphans its history under the old key.
+
+
 ## v0.6.0 (2026-08-07)
 
 ### Documentation
