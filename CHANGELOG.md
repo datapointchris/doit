@@ -1,6 +1,43 @@
 # CHANGELOG
 
 
+## v0.10.0 (2026-08-08)
+
+### Documentation
+
+- **comments**: State what the code is, not what it replaced
+  ([`c527a04`](https://github.com/datapointchris/doit/commit/c527a04a0fd5205e570a1f20d2d69413fb2bb514))
+
+Both docstrings narrated a predecessor implementation — what the bash version did and why it could
+  not do this. The next reader does not have that diff, and the narration decays while the code
+  moves on.
+
+The durable fact underneath survives the rewrite in each case: cards exist because Labs and workflow
+  cards are one file shape, and the checkout is one resolved path rather than a symlink followed
+  backwards.
+
+### Features
+
+- **tools**: Render the registry natively as doit tools
+  ([`19629b7`](https://github.com/datapointchris/doit/commit/19629b73b244e0028cdd00cac924f997c4a0864a))
+
+`doit tools show/list/categories` replaces `toolbox show`, completing the set beside `doit workflows
+  show` and `doit labs show` — three collections in the terminal library, three namespaces rendering
+  them alike. find and the fzf preview call it in process instead of spawning toolbox.
+
+doit.tools owns the registry path and loader, which index and labs now import: a constant defined
+  per reader is a constant that drifts. Its card shapes take plain arguments, not index rows, so
+  composing them does not require importing index and closing a cycle.
+
+Two things the ported card does differently. The PATH check reads the usage string rather than the
+  registry key, so `ripgrep` resolves through `rg`. And a miss is stated without a verdict:
+  functions and aliases are never on PATH and outnumber genuine rot two to one here, so `doit index
+  unresolved` — which decides it against the shell files — stays the one report that says which.
+
+The index gained two fields the cards need and nothing carried: a function's body, which is the
+  refresher a description cannot be, and what an alias expands to.
+
+
 ## v0.9.0 (2026-08-08)
 
 ### Features
