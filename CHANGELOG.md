@@ -1,6 +1,35 @@
 # CHANGELOG
 
 
+## v0.8.0 (2026-08-08)
+
+### Documentation
+
+- **review**: A show: command must be a read
+  ([`b6680b1`](https://github.com/datapointchris/doit/commit/b6680b117fbaef766fbc00411af79edd44cabe09))
+
+The nudge runs `show:` on a cadence, so a command with side effects changes things nothing asked
+  for. Worse, when what it changes is what the item observes, the item marks itself done every time
+  the nudge fires — which is what `toolbox remind` did before it grew --peek.
+
+### Features
+
+- **content**: Follow the terminal-library rename
+  ([`1f317fc`](https://github.com/datapointchris/doit/commit/1f317fcacf894042caf43a3d8a88cd2d764e18e2))
+
+doit-content became terminal-library. The old name claimed doit owned the collection, and doit is
+  one reader of it — the tool registry moving in next makes that plainly wrong. The checkout moves
+  with the name, from $XDG_DATA_HOME/doit/ to $XDG_DATA_HOME/terminal-library/.
+
+content, labs, workflows and index each rebuilt that root from a literal, so it is resolved once in
+  paths.library_dir() and they reach into a subdirectory of it. Every DOIT_* override still wins
+  where it did before; only the defaults move. The next consumer is an import, not a fifth copy.
+
+An existing install re-clones at the new path on first run. Anything uncommitted in the old
+  directory stays there — it is not read again and not deleted, so check it before removing it by
+  hand.
+
+
 ## v0.7.0 (2026-08-08)
 
 ### Chores
