@@ -248,13 +248,17 @@ def cmd_done(item_id: str) -> int:
 def run_show(row: dict) -> None:
     """Run a due item's `show:` command and let its output print inline.
 
-    Only the nudge calls this — a `show:` command produces live content and can
-    have side effects (e.g. `toolbox remind` advances its round-robin so it cycles
-    to the next neglected tool), so the manual `list`/`due` views only ever read.
+    Only the nudge calls this, so the manual `list`/`due` views only ever read.
     This is the one place a review item runs rather than being displayed, and it
     is opt-in per item: `command:` is shown, `show:` is run. Stdout is inherited
     so colored output survives, and a timeout keeps a slow command from wedging
     shell startup.
+
+    A `show:` command must be a read. Anything it changes is a change nothing
+    asked for — and worse, if what it changes is what the item observes, the item
+    marks itself done every time the nudge fires. `toolbox remind` has a `--peek`
+    for exactly this, and a `show:` needing a side effect to be useful is an
+    argument for a flag on that tool, not for relaxing this.
 
     A `show:` command must emit at most a couple of lines — it runs inside a
     nudge, so a command that prints its own full listing silently turns the nudge
