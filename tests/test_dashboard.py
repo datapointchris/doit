@@ -214,19 +214,16 @@ def test_maintenance_lane_says_what_an_entry_is_for():
 
 
 def test_maintenance_lane_ranks_by_how_late_a_row_actually_is():
-    """Sorting the note text would rank "16d overdue" below "9d overdue" and put
-    never-run entries above everything genuinely due."""
+    """Never-run leads because its lateness is unbounded, then the genuinely
+    overdue by how late they are — sorting the note text would rank "16d overdue"
+    below "9d overdue"."""
     lane = lanes_by_name(all_results())['maintenance']
 
-    assert [row.urgency for row in lane.rows] == [
-        dashboard.Urgency.OVERDUE,
-        dashboard.Urgency.OVERDUE,
-        dashboard.Urgency.DUE,
-        dashboard.Urgency.NONE,
-    ]
-    overdue = [row.note for row in lane.rows if row.urgency is dashboard.Urgency.OVERDUE]
-    assert overdue == ['16d overdue', '9d overdue'], 'most overdue first, numerically'
-    assert lane.rows[-1].note == 'never run', 'never run is the least urgent state, not the most'
+    assert lane.rows[0].note == 'never run', 'nothing has ever shown this happening'
+    reviews = [row.note for row in lane.rows if row.label == 'review']
+    assert reviews == ['never run', '16d overdue', 'due today'], 'ranked within a kind; labs interleave'
+    assert lane.rows[0].urgency is dashboard.Urgency.OVERDUE, 'never run is a late state, not a neutral one'
+    assert lane.rows[-1].urgency is dashboard.Urgency.DUE, 'due today is the least late state'
 
 
 def test_every_lane_that_can_name_a_handle_does():
@@ -488,9 +485,25 @@ def test_is_due_row():
 
 
 def test_maintenance_row_pairs_a_note_with_the_rank_it_sorts_on():
-    assert dashboard.maintenance_row('review', 'x', {'overdue': None}, '')[0] == (2, 0)
-    assert dashboard.maintenance_row('review', 'x', {'overdue': 0}, '')[0] == (1, 0)
-    assert dashboard.maintenance_row('review', 'x', {'overdue': 5}, '')[0] == (0, -5)
+    assert dashboard.maintenance_row('review', 'x', {'overdue': None}, '')[0] == (0, 0)
+    assert dashboard.maintenance_row('review', 'x', {'overdue': 5}, '')[0] == (1, -5)
+    assert dashboard.maintenance_row('review', 'x', {'overdue': 0}, '')[0] == (2, 0)
+    assert dashboard.maintenance_row('review', 'x', {'overdue': None}, '')[1].urgency is dashboard.Urgency.OVERDUE
+
+
+def test_never_run_ranks_the_shortest_cadence_first():
+    """A weekly thing never once done has missed far more of its own cycles than
+    a six-monthly one, and every never-run row would otherwise tie."""
+    weekly = dashboard.maintenance_row('review', 'x', {'overdue': None, 'cadence_days': 7}, '')[0]
+    biannual = dashboard.maintenance_row('review', 'x', {'overdue': None, 'cadence_days': 180}, '')[0]
+
+    assert weekly < biannual
+    assert weekly < dashboard.maintenance_row('review', 'x', {'overdue': 99}, '')[0], 'never run still leads'
+
+
+def test_a_row_without_a_cadence_days_still_ranks():
+    """A source that predates the field contributes lanes rather than crashing one."""
+    assert dashboard.maintenance_row('review', 'x', {'overdue': None}, '')[0] == (0, 0)
     assert dashboard.maintenance_row('review', 'x', {'overdue': 5}, '')[1].note == '5d overdue'
     assert dashboard.maintenance_row('review', 'x', {'overdue': 5}, 'indy index')[1].handle == 'indy index'
 

@@ -129,6 +129,7 @@ def statuses() -> list[dict]:
                 'title': meta['title'],
                 'tags': meta['tags'],
                 'cadence': cadence,
+                'cadence_days': parse_cadence(cadence) if cadence else 0,
                 'last': last,
                 'overdue': overdue,
                 'scheduled': bool(cadence),

@@ -13,9 +13,12 @@ mirrors the `overdue` field the backends already emit. Backends own due-ness and
 that is the contract, and it is what lets the dashboard need no dependencies. Inside one package it
 reads as removable duplication. Do not remove it.
 
-**Same-day commits reappear in a review.** A cadence register holds a date while commits hold a
-timestamp, so resolving the date to the newest preceding commit shows same-day commits again on the
-next run. Repeating a few is the correct direction to be wrong in; the alternative drops them unread.
+**The review lane shells out to atuin on every render.** The dashboard deliberately stopped
+subprocessing its own lanes on cost grounds, so a new one reads as a regression. It is not the same
+call: those two spawned a Python interpreter each to re-read a local file this process could already
+open, whereas atuin is the only source that knows which machine ran a command, which is what makes a
+`scope: machine` item answerable at all. It is one query per process, shared by every item, and it
+falls back to this machine's zsh history whenever atuin cannot be asked.
 
 ## Content, config, and state are three different things
 

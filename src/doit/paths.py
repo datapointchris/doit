@@ -42,4 +42,14 @@ def machine_name() -> str:
     (arch/archlinux, Macmini/macmini) and split one machine into several, so the
     bare name is recorded and any canonicalization happens at read time.
     """
-    return socket.gethostname().split('.')[0].lower()
+    return canonical_host(socket.gethostname())
+
+
+def canonical_host(name: str) -> str:
+    """A hostname from anywhere, reduced to the form :func:`machine_name` records.
+
+    Other tools report the fully qualified name — atuin stores `macmini.trusted`
+    — so a comparison against a bare recorded name fails on every host and
+    quietly reports that nothing ever ran here.
+    """
+    return name.split('.')[0].strip().lower()

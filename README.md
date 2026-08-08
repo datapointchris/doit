@@ -6,9 +6,7 @@ Every other CLI on this machine stewards records — tasks, books, learning trac
 `doit` is the only one that consumes them and points somewhere: what is outstanding, what to do
 next, what is due to revisit, what to practice, and the reference for actually doing it.
 
-**Status: early.** The command surface below is the target, not what is built.
-
-## What it will do
+## What it does
 
 ```bash
 doit next             # what to do now, drawn from weights you declared
@@ -31,9 +29,20 @@ a source is an edit, never a release.
 A source that is not configured is silent. One that is configured but missing gets a single line.
 One that runs and fails shows its error. A lane is never silently dropped.
 
+## Due is observed, not declared
+
+A cadence item is done when something shows it was done — the command it names appearing in shell
+history, or another tool's state file recording the work. `doit review done <id>` still works and
+still counts, but nothing depends on your remembering to type it, because an item you did and never
+reported reads exactly like one you never did.
+
+History comes from atuin, which records the machine each command ran on and syncs between them, so
+an item done at one desk counts at the other. Work that is genuinely per-machine says
+`scope: machine` and is only answered by runs on that box.
+
 ## Content
 
-Cards, Labs, and the register are content, not code — they live in their own repo, cloned into
+Cards and Labs are content, not code — they live in their own repo, cloned into
 `$XDG_DATA_HOME/doit/` and updated by `doit content sync`. It stays a git checkout at the installed
 path, so writing a card works on any machine and no release stands between writing one and having
 it. A machine that authors cards can point that path at a checkout of its own; doit resolves it

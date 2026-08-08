@@ -10,12 +10,14 @@ overdue days are derived from today and a committed state file would rot.
 
 import json
 from datetime import date
+from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
+from doit import observe
 from doit import review
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'review'
@@ -74,13 +76,68 @@ def test_statuses_orders_most_overdue_first(tmp_path, monkeypatch):
     assert review.is_due(rows[2]['overdue']) is False
 
 
+def observe_history(tmp_path, monkeypatch, entries: dict) -> None:
+    """A shell history recording each command as last run on the given date."""
+    lines = [f': {int(datetime.combine(when, datetime.min.time()).timestamp())}:0;{command}' for command, when in entries.items()]
+    history = tmp_path / 'history'
+    history.write_text('\n'.join(lines) + '\n')
+    monkeypatch.setattr(observe, 'HISTORY', history)
+    observe.history_entries.cache_clear()
+
+
+def test_running_the_command_clears_an_item_a_stale_stamp_left_overdue(tmp_path, monkeypatch):
+    """Doing the thing is what marks it done. An item whose only record is one
+    you have to type reads as weeks overdue hours after it ran."""
+    today = date.today()
+    write_state(tmp_path, monkeypatch, {'overdue-item': (today - timedelta(days=30)).isoformat()})
+    observe_history(tmp_path, monkeypatch, {'echo overdue': today})
+
+    row = {row['id']: row for row in review.statuses()}['overdue-item']
+
+    assert row['last'] == today.isoformat()
+    assert row['overdue'] == -7, 'a 7-day cadence, done today'
+    assert row['observed'] is True, 'a date you never typed must not read as one you did'
+
+
+def test_a_stamp_still_wins_when_it_is_the_later_evidence(tmp_path, monkeypatch):
+    """Observation may only ever improve a date. A command run long ago cannot
+    undo `done`, or adding an observer would lose history."""
+    today = date.today()
+    write_state(tmp_path, monkeypatch, {'overdue-item': today.isoformat()})
+    observe_history(tmp_path, monkeypatch, {'echo overdue': today - timedelta(days=200)})
+
+    row = {row['id']: row for row in review.statuses()}['overdue-item']
+
+    assert row['last'] == today.isoformat()
+    assert row['observed'] is False
+
+
+def test_orphaned_state_ids_names_history_a_rename_stranded(tmp_path, monkeypatch):
+    """Renaming an item strands its done-date under the old key, and the item
+    then reads as never done — the state that looks most like it needs doing."""
+    write_state(tmp_path, monkeypatch, {'overdue-item': '2026-01-01', 'old-name': '2026-01-01'})
+
+    assert review.orphaned_state_ids() == ['old-name']
+
+
 def test_list_json_emits_every_item_with_its_status(capsys):
     assert review.cmd_list(as_json=True) == 0
 
     rows = json.loads(capsys.readouterr().out)
 
     assert len(rows) == 3, '--json emits the whole register, not just what is due'
-    assert set(rows[0]) == {'id', 'cadence', 'desc', 'command', 'show', 'last', 'overdue'}
+    assert set(rows[0]) == {
+        'id',
+        'cadence',
+        'cadence_days',
+        'desc',
+        'command',
+        'show',
+        'last',
+        'overdue',
+        'observed',
+        'problem',
+    }
 
 
 def test_list_json_is_parsable_without_a_register(monkeypatch, capsys):

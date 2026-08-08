@@ -6,7 +6,8 @@
     "command": "",
     "show": "",
     "last": null,
-    "overdue": null
+    "overdue": null,
+    "cadence_days": 7
   },
   {
     "id": "overdue-item",
@@ -15,7 +16,8 @@
     "command": "echo overdue",
     "show": "",
     "last": "2026-07-01",
-    "overdue": 16
+    "overdue": 16,
+    "cadence_days": 7
   },
   {
     "id": "due-today-item",
@@ -24,7 +26,8 @@
     "command": "",
     "show": "",
     "last": "2026-07-10",
-    "overdue": 0
+    "overdue": 0,
+    "cadence_days": 14
   },
   {
     "id": "not-yet-due-item",
@@ -33,6 +36,7 @@
     "command": "",
     "show": "",
     "last": "2026-07-24",
-    "overdue": -28
+    "overdue": -28,
+    "cadence_days": 0
   }
 ]

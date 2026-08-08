@@ -545,15 +545,26 @@ def build_maintenance_lane(results: dict[str, sources.Result], today: date) -> L
 
 def maintenance_row(label: str, text: str, item: dict, handle: str) -> tuple[tuple[int, int], Row]:
     """A row plus how late it is, paired so the lane can rank on the number the
-    backend gave rather than on the sentence built from it. Sorting the note text
-    would put "12d overdue" above "3d overdue", and never-run entries — the least
-    urgent state there is — above everything genuinely due."""
+    backend gave rather than on the sentence built from it — sorting the note
+    text would put "12d overdue" above "3d overdue".
+
+    Never-run leads: its lateness is not small but unbounded, since nothing has
+    ever shown the task happening, so it is at least as neglected as anything
+    carrying a real date. `doit review due` and `cadence.is_due` rank it the same
+    way over the same data.
+
+    Within never-run the shortest cadence leads, on `cadence_days` as the backend
+    computed it — something wanted weekly and never once done has missed far more
+    of its own cycles than something wanted twice a year. Without that tiebreak
+    every never-run row ties, which on a fresh register is most of the lane
+    ordered by nothing at all.
+    """
     overdue = item.get('overdue')
     if overdue is None:
-        return (2, 0), Row(label, text, 'never run', Urgency.NONE, handle)
+        return (0, item.get('cadence_days', 0)), Row(label, text, 'never run', Urgency.OVERDUE, handle)
     if overdue == 0:
-        return (1, 0), Row(label, text, 'due today', Urgency.DUE, handle)
-    return (0, -overdue), Row(label, text, f'{overdue}d overdue', Urgency.OVERDUE, handle)
+        return (2, 0), Row(label, text, 'due today', Urgency.DUE, handle)
+    return (1, -overdue), Row(label, text, f'{overdue}d overdue', Urgency.OVERDUE, handle)
 
 
 def round_robin(*groups: list[Row]) -> list[Row]:

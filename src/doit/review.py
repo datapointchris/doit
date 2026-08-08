@@ -33,6 +33,8 @@ from doit.cadence import is_due
 from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
 from doit.cadence import status_label
+from doit.observe import newest
+from doit.observe import observed
 from doit.paths import xdg_config_home
 from doit.paths import xdg_state_home
 from doit.render import console
@@ -54,6 +56,15 @@ TEMPLATE = """\
 #   description  what to revisit or run
 #   cadence      how often: <n>d / <n>w / <n>mo / <n>y  (e.g. 2w, 1mo)
 #   command      optional; shown so you know what to run (not auto-run)
+#   observe      where "I did this" is observed from; default is the command
+#
+# Last-done is observed, not declared: an item is done when its `command` last
+# ran at a shell prompt, so most items need no `observe:`. Override it when the
+# trace lives elsewhere, and `doit review done` still counts if it is later.
+#
+#   observe: {newest-date-in: <path>}   newest date in a {name: date} JSON map
+#   observe: {history: <command>}       watch a different command than `command`
+#   observe: false                      observe nothing; only `review done` counts
 
 items:
   revisit-a-tool:
@@ -84,6 +95,11 @@ def statuses() -> list[dict]:
 
     overdue is the number of days past due (negative = not yet due); None means
     the item has never been done, which sorts to the very top as most urgent.
+
+    Last-done is the newest of two kinds of evidence: what ``done`` recorded, and
+    what an observer saw happen (see :mod:`doit.observe`). Both are true reports
+    of the same act, so the later one wins and neither can move the date
+    backwards — an item stays done once anything at all can show it was done.
     """
     items = load_items() or {}
     state = load_state(STATE)
@@ -91,27 +107,44 @@ def statuses() -> list[dict]:
     rows = []
     for item_id, meta in items.items():
         meta = meta or {}
-        last = state.get(item_id)
+        stamped = state.get(item_id)
+        seen = observed(meta.get('observe'), meta.get('command', '') or '')
+        last = newest(stamped, seen.date)
         overdue = overdue_days(last, meta.get('cadence', ''), today)
         rows.append(
             {
                 'id': item_id,
                 'cadence': str(meta.get('cadence', '')),
+                'cadence_days': parse_cadence(meta.get('cadence', '')),
                 'desc': meta.get('description', '') or '',
                 'command': meta.get('command', '') or '',
                 'show': meta.get('show', '') or '',
                 'last': last,
                 'overdue': overdue,
+                'observed': bool(seen.date) and last == seen.date,
+                'problem': seen.problem,
             }
         )
     rows.sort(key=lambda r: float('inf') if r['overdue'] is None else r['overdue'], reverse=True)
     return rows
 
 
+def orphaned_state_ids() -> list[str]:
+    """Recorded done-dates whose register item no longer exists.
+
+    Renaming an item silently strands its history: ``statuses`` reads the state
+    by the register's ids, so the old key stops being consulted and the item
+    reads as never done. Nothing else would ever mention it, and "never done" is
+    exactly the state that looks like it needs attention most.
+    """
+    items = load_items() or {}
+    return sorted(key for key in load_state(STATE) if key not in items)
+
+
 def render_item(row: dict) -> None:
     meta = f'every {row["cadence"]}'
     if row['last']:
-        meta += f' · last {row["last"]}'
+        meta += f' · last {row["last"]}{" (observed)" if row["observed"] else ""}'
     line = Text('  ')
     line.append(f'{row["id"]:<20}', style='yellow')
     line.append(f'  {status_label(row["overdue"])}  ·  {meta}')
@@ -121,6 +154,8 @@ def render_item(row: dict) -> None:
         command = Text('      ')
         command.append(f'↳ {row["command"]}', style='cyan')
         console.print(command)
+    if row['problem']:
+        console.print(Text(f'      observe: {row["problem"]}', style='yellow'))
     console.print()
 
 
@@ -172,7 +207,21 @@ def cmd_list(as_json: bool = False) -> int:
     console.rule('[cyan]Review — full register', align='left')
     for row in statuses():
         render_item(row)
+    render_orphans()
     return 0
+
+
+def render_orphans() -> None:
+    """Name any stranded done-dates, in the one view that is about the register
+    itself rather than about what to do next. The nudge and `due` stay silent —
+    a misfiled record is not a task, and an interrupt that reports bookkeeping is
+    the kind you stop reading."""
+    orphans = orphaned_state_ids()
+    if not orphans:
+        return
+    console.print(Text(f'Recorded done-dates with no register item: {", ".join(orphans)}', style='yellow'))
+    console.print('  Renaming an item strands its history — rename the key in the state file to keep it.')
+    console.print(f'  [cyan]{STATE}[/]')
 
 
 def cmd_done(item_id: str) -> int:
