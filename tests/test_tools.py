@@ -203,11 +203,32 @@ def test_show_points_wider_when_the_name_is_not_in_the_registry():
     assert result.exit_code == 1
 
 
-def test_categories_counts_each_group():
-    result = runner.invoke(app, ['tools', 'categories'])
+def test_categories_list_counts_each_group():
+    result = runner.invoke(app, ['tools', 'categories', 'list'])
 
     assert result.exit_code == 0
     assert 'search' in result.stdout
+
+
+def test_categories_list_json_is_parsable():
+    result = runner.invoke(app, ['tools', 'categories', 'list', '--json'])
+
+    assert json.loads(result.stdout) == [{'category': 'search', 'tools': 2}]
+
+
+def test_bare_categories_prints_help_rather_than_listing():
+    """Every node in the tree shows help bare, so walking down never runs something."""
+    result = runner.invoke(app, ['tools', 'categories'])
+
+    assert result.exit_code != 0, 'a bare namespace is a usage error, not a read'
+    assert 'list' in result.stdout
+
+
+def test_bare_tools_prints_help_rather_than_listing():
+    result = runner.invoke(app, ['tools'])
+
+    assert result.exit_code != 0
+    assert 'show' in result.stdout and 'list' in result.stdout
 
 
 def test_fixture_registry_is_the_one_under_test(registry: Path):

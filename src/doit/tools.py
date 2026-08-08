@@ -237,10 +237,10 @@ def render_forgit(name: str, action: str, brief: bool = False) -> None:
 
 
 def cmd_show(name: str, brief: bool) -> int:
-    tools = load_registry()
-    if name not in tools:
+    registry = load_registry()
+    if name not in registry:
         return unknown_tool(name)
-    render_tool(name, tools[name], brief=brief)
+    render_tool(name, registry[name], brief=brief)
     return 0
 
 
@@ -261,22 +261,22 @@ def unknown_tool(name: str) -> int:
 
 
 def cmd_list(category: str | None, as_json: bool) -> int:
-    tools = load_registry()
+    registry = load_registry()
     if as_json:
         rows = [
             {'name': name, 'category': (meta or {}).get('category') or '', 'description': (meta or {}).get('description') or ''}
-            for name, meta in sorted(tools.items())
+            for name, meta in sorted(registry.items())
             if not category or (meta or {}).get('category') == category
         ]
         print(json.dumps(rows, indent=2))
         return 0
-    if not tools:
+    if not registry:
         console.print(Text(f'No registry at {REGISTRY}.'))
         console.print('Fetch the library with [cyan]doit content sync[/].')
         return 0
 
     grouped: dict[str, list[tuple[str, str]]] = {}
-    for name, meta in sorted(tools.items()):
+    for name, meta in sorted(registry.items()):
         meta = meta or {}
         grouped.setdefault(meta.get('category') or 'uncategorised', []).append((name, meta.get('description') or ''))
     if category and category not in grouped:
@@ -300,15 +300,23 @@ def cmd_list(category: str | None, as_json: bool) -> int:
     return 0
 
 
-def cmd_categories() -> int:
-    tools = load_registry()
-    if not tools:
-        console.print(Text(f'No registry at {REGISTRY}.'))
-        return 0
+def category_counts() -> dict[str, int]:
     counts: dict[str, int] = {}
-    for meta in tools.values():
+    for meta in load_registry().values():
         name = (meta or {}).get('category') or 'uncategorised'
         counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def cmd_categories_list(as_json: bool) -> int:
+    counts = category_counts()
+    if as_json:
+        print(json.dumps([{'category': name, 'tools': counts[name]} for name in sorted(counts)], indent=2))
+        return 0
+    if not counts:
+        console.print(Text(f'No registry at {REGISTRY}.'))
+        console.print('Fetch the library with [cyan]doit content sync[/].')
+        return 0
     console.rule('[cyan]Tool categories', align='left')
     width = max(len(name) for name in counts)
     for name in sorted(counts):
@@ -341,7 +349,17 @@ def show_command(
     raise typer.Exit(cmd_show(name, brief))
 
 
-@app.command('categories')
-def categories_command() -> None:
-    """The category names and how many tools each holds."""
-    raise typer.Exit(cmd_categories())
+# A namespace rather than a bare `categories` that lists: every node in the tree
+# prints help when given no arguments, so walking down one token at a time never
+# runs something you did not ask for. That the set is read-only and will never
+# grow `create` does not buy it an exemption — predictability is the point.
+categories_app = typer.Typer(name='categories', no_args_is_help=True, help='The categories tools are grouped under.')
+app.add_typer(categories_app, name='categories')
+
+
+@categories_app.command('list')
+def categories_list_command(
+    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
+) -> None:
+    """Every category and how many tools it holds."""
+    raise typer.Exit(cmd_categories_list(as_json))
