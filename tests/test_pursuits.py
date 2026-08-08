@@ -332,18 +332,18 @@ def test_resolve_one_skips_a_context_field_the_row_does_not_carry(tmp_path):
 def test_resolve_one_fills_the_offered_items_id_into_the_view_command(tmp_path):
     payload = tmp_path / 'items.json'
     payload.write_text(json.dumps([{'title': 'Ship the CLI', 'id': '019fa297-0c01-7737-bb4f-8f05de2fe2cd'}]))
-    config = {'resolve': f'cat {payload}', 'label': 'title', 'id': 'id', 'view': 'icb projects items view {id}'}
+    config = {'resolve': f'cat {payload}', 'label': 'title', 'id': 'id', 'view': 'icb projects items show {id}'}
 
     resolved = pursuits.resolve_one('build', config)
 
-    assert resolved['view'] == 'icb projects items view 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
+    assert resolved['view'] == 'icb projects items show 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
 
 
 def test_a_view_command_wanting_an_id_the_backend_withheld_is_not_printed(tmp_path):
     # A command shown with a hole in it reads as something you could run.
     payload = tmp_path / 'items.json'
     payload.write_text(json.dumps([{'title': 'Ship the CLI'}]))
-    config = {'resolve': f'cat {payload}', 'label': 'title', 'view': 'icb projects items view {id}'}
+    config = {'resolve': f'cat {payload}', 'label': 'title', 'view': 'icb projects items show {id}'}
 
     assert pursuits.resolve_one('build', config)['view'] == ''
 
@@ -353,7 +353,7 @@ def test_a_view_command_needing_no_id_is_printed_as_written():
 
 
 def test_view_without_resolve_is_refused(tmp_path):
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    view: icb tasks view {id}\n')
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    view: icb tasks show {id}\n')
     with pytest.raises(pursuits.RegisterError, match='view'):
         pursuits.load_pursuits(path)
 
@@ -488,7 +488,7 @@ def test_a_drawn_row_prints_the_command_that_opens_the_item(monkeypatch, capsys)
     """
     monkeypatch.setenv('COLUMNS', '200')
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    view = 'icb projects items view 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
+    view = 'icb projects items show 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
     resolved = {'chores': {'label': 'Give cobracmd a usage-error exit code of 2', 'view': view}}
 
     pursuits.render_row(1, 'chores', state, resolved, False, 6)

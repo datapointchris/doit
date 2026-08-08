@@ -161,7 +161,7 @@ pursuits:
     label: name
     id: id
     context: category
-    view: icb tasks view {id}
+    view: icb tasks show {id}
     on_log: icb tasks complete {id}
 
   read-library:

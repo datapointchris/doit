@@ -244,17 +244,17 @@ def test_every_lane_that_can_name_a_handle_does():
 def test_a_handle_is_the_read_verb_not_a_write():
     lanes = lanes_by_name(all_results())
 
-    assert lanes['tasks'].rows[0].handle.startswith('icb tasks view ')
-    assert lanes['books'].rows[0].handle.startswith('icb books view ')
-    assert lanes['articles'].rows[0].handle.startswith('icb articles view ')
-    assert lanes['learning'].rows[0].handle.startswith('learning resources view ')
-    assert lanes['projects'].rows[0].handle.startswith('icb projects items view ')
+    assert lanes['tasks'].rows[0].handle.startswith('icb tasks show ')
+    assert lanes['books'].rows[0].handle.startswith('icb books show ')
+    assert lanes['articles'].rows[0].handle.startswith('icb articles show ')
+    assert lanes['learning'].rows[0].handle.startswith('learning resources show ')
+    assert lanes['projects'].rows[0].handle.startswith('icb projects items show ')
 
 
 def test_a_row_whose_backend_gave_no_id_offers_no_handle():
     # A handle that would fail reads as something you can run.
-    assert dashboard.view_handle('icb tasks view', {'name': 'no id here'}) == ''
-    assert dashboard.view_handle('icb tasks view', {'id': 422}) == 'icb tasks view 422'
+    assert dashboard.view_handle('icb tasks show', {'name': 'no id here'}) == ''
+    assert dashboard.view_handle('icb tasks show', {'id': 422}) == 'icb tasks show 422'
 
 
 def test_maintenance_rows_carry_the_command_that_does_them():
@@ -341,9 +341,9 @@ def test_projects_lane_rows_carry_a_handle_you_can_type():
     lane = lanes_by_name(all_results())['projects']
 
     assert [row.handle for row in lane.rows] == [
-        'icb projects items view 101',
-        'icb projects items view 102',
-        'icb projects items view 103',
+        'icb projects items show 101',
+        'icb projects items show 102',
+        'icb projects items show 103',
     ]
 
 

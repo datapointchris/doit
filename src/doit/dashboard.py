@@ -224,7 +224,7 @@ def build_tasks_lane(results: dict[str, sources.Result], today: date) -> LaneVie
             f'p{task.get("priority", "")}',
             describe(task.get('name', ''), task.get('notes', '')),
             task.get('category', ''),
-            handle=view_handle('icb tasks view', task),
+            handle=view_handle('icb tasks show', task),
         )
         for task in items
     ]
@@ -303,7 +303,7 @@ def build_books_lane(results: dict[str, sources.Result], today: date) -> LaneVie
 
 
 def book_row(label: str, book: dict) -> Row:
-    return Row(label, clean(book.get('title', '')), clean(book.get('author', '')), handle=view_handle('icb books view', book))
+    return Row(label, clean(book.get('title', '')), clean(book.get('author', '')), handle=view_handle('icb books show', book))
 
 
 def build_articles_lane(results: dict[str, sources.Result], today: date) -> LaneView:
@@ -334,7 +334,7 @@ def article_row(label: str, article: dict) -> Row:
         label,
         clean(article.get('title', '')),
         source_host(article.get('url', '')),
-        handle=view_handle('icb articles view', article),
+        handle=view_handle('icb articles show', article),
     )
 
 
@@ -377,7 +377,7 @@ def project_item_row(label: str, item: dict) -> Row:
         label,
         describe(item.get('title', ''), item.get('notes', '')),
         where,
-        handle=view_handle('icb projects items view', item, key='number'),
+        handle=view_handle('icb projects items show', item, key='number'),
     )
 
 
@@ -394,10 +394,10 @@ def build_upcoming_lane(results: dict[str, sources.Result], today: date) -> Lane
     entries = []
     for countdown in countdowns.get('items') or []:
         text = describe(countdown.get('name', ''), countdown.get('notes', ''))
-        entries.append((countdown.get('due_date', ''), text, view_handle('icb countdowns view', countdown)))
+        entries.append((countdown.get('due_date', ''), text, view_handle('icb countdowns show', countdown)))
     for event in events.get('items') or []:
         text = describe(event.get('name', ''), event.get('venue') or event.get('notes', ''))
-        entries.append((event_date(event.get('date', '')), text, view_handle('icb events view', event)))
+        entries.append((event_date(event.get('date', '')), text, view_handle('icb events show', event)))
     entries.sort(key=lambda entry: entry[0])
 
     # The gutter always answers "how far away", the note always answers "which
@@ -467,7 +467,7 @@ def resource_row(label: str, resource: dict, note: str = '') -> Row:
     """One openable resource. The handle is the read verb rather than the URL the
     resource carries: a link is not something you type, and `view` prints it
     along with everything else the row had no room for."""
-    return Row(label, resource.get('title', ''), note, handle=view_handle('learning resources view', resource))
+    return Row(label, resource.get('title', ''), note, handle=view_handle('learning resources show', resource))
 
 
 def track_rows(focuses: list[dict], seen: set) -> list[Row]:
