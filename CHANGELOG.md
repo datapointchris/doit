@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v0.11.0 (2026-08-08)
+
+### Features
+
+- Never prompt a caller that cannot answer
+  ([`306d529`](https://github.com/datapointchris/doit/commit/306d52960d2c77a5d94ddd9427ee01f201175e9d))
+
+The flashcard drill read a keystroke per card with no gate at all, so off a terminal it waited on a
+  stdin that never closes — no output, no exit code. It now refuses up front; there is no flag that
+  answers a recall drill for you.
+
+run_on_log already skipped its confirmation without a terminal. Both now ask render.can_prompt(), so
+  --no-input takes the same branch from a terminal and how a run behaves unattended can be rehearsed
+  without faking a pipe.
+
+The gate lives beside the consoles in render.py because it answers the same question they do — who,
+  if anyone, is on the other end.
+
+
 ## v0.10.3 (2026-08-08)
 
 ### Bug Fixes
