@@ -1,6 +1,21 @@
 # CHANGELOG
 
 
+## v0.10.1 (2026-08-08)
+
+### Bug Fixes
+
+- **tests**: Stub rg on PATH so the card verdict is not the machine's
+  ([`aaa2332`](https://github.com/datapointchris/doit/commit/aaa23327885920e67da229d2425cdadb100f0d37))
+
+The PATH check resolves through shutil.which, which reads the real PATH, so the tool card's verdict
+  depended on what the machine running the tests had installed. CI has neither rg nor most of the
+  registry and called the row dead.
+
+Prepended rather than replacing PATH, so long-gone still resolves to nothing and the miss case stays
+  covered — the same fixture shape test_index.py uses.
+
+
 ## v0.10.0 (2026-08-08)
 
 ### Documentation
