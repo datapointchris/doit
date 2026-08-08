@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v0.9.0 (2026-08-08)
+
+### Features
+
+- **tools**: Read the registry from terminal-library
+  ([`1256a9a`](https://github.com/datapointchris/doit/commit/1256a9ab3def281babcbd2428dd556f868e01de9))
+
+The registry is a third kind of card beside workflows/ and labs/, so it is read from the library
+  rather than from a path named after toolbox. dotfiles still owns the copy toolbox reads; this only
+  repoints doit.
+
+$TOOLBOX_REGISTRY becomes $DOIT_TOOLS_REGISTRY. The old name pointed at a tool being archived and
+  was neither the reader nor the owner; nothing in the fleet ever set it, and toolbox and dotfiles'
+  tool-usage keep their own resolution untouched.
+
+library_dir() absorbed the last two xdg_data_home() callers, so both imports went with them — the
+  tools/ subdirectory cost an argument, not a fifth copy of the root.
+
+
 ## v0.8.0 (2026-08-08)
 
 ### Documentation
