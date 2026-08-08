@@ -2,7 +2,7 @@
 on where content, config and state live.
 
 Content — the cards and Labs — belongs under the data dir, where ``doit content
-sync`` keeps a checkout of the content repo. Hand-edited files doit only ever
+sync`` keeps a checkout of the terminal library. Hand-edited files doit only ever
 reads (pursuits, the review register, sources) belong under the config dir: they
 are personal, and both of doit's repos are public. State doit writes belongs
 under the state dir, and anything a recompute can rebuild under the cache dir.
@@ -33,6 +33,20 @@ def xdg_state_home() -> Path:
 def xdg_cache_home() -> Path:
     """`$XDG_CACHE_HOME`, or its spec default when unset or empty."""
     return Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
+
+
+def library_dir() -> Path:
+    """The terminal-library checkout: the cards, the Labs, everything authored there.
+
+    Named for the library and not for doit, because doit is one reader of it. A
+    path under `doit/` would say the collection is doit's, and the collection
+    outlives any one tool that parses it.
+
+    Resolved here once rather than at every module that reaches into a
+    subdirectory of it: a literal repeated per consumer is one more place a move
+    has to be chased, and this path has already moved twice.
+    """
+    return xdg_data_home() / 'terminal-library'
 
 
 def machine_name() -> str:

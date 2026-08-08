@@ -22,8 +22,11 @@ falls back to this machine's zsh history whenever atuin cannot be asked.
 
 ## Content, config, and state are three different things
 
-- **Content** — cards and Labs. Their own repo, cloned into `$XDG_DATA_HOME/doit/`, updated by
-  `doit content sync`. Authored often, so it must never need a release of this repo to change.
+- **Content** — cards and Labs. The `terminal-library` repo, cloned into
+  `$XDG_DATA_HOME/terminal-library/`, updated by `doit content sync`. Authored often, so it must
+  never need a release of this repo to change. Named for the library and not for doit, because doit
+  is one reader of it. `paths.library_dir()` is the only place that resolves the root; every module
+  reaches into a subdirectory of that rather than rebuilding the path, so the next move is one line.
   That path is resolved, never assumed to be a real directory: a machine that authors cards points
   it at a checkout kept where its git lives, so writing a card and reading it stay one file. Making
   that so is the installing layer's job — doit only ever opens the path it is given.

@@ -1,9 +1,10 @@
 """The cards and Labs, and keeping them current.
 
 Content is authored far more often than doit is released, so it does not ship
-inside doit. It is a git checkout under `$XDG_DATA_HOME/doit/`, which means
-writing a card and having a card are the same act on every machine — the tldr
-model, where pages live upstream and the client fetches them.
+inside doit. It is a git checkout of the terminal library under
+`$XDG_DATA_HOME/terminal-library/`, which means writing a card and having a card
+are the same act on every machine — the tldr model, where pages live upstream
+and the client fetches them.
 
 Not `doit update`: that verb is reserved for a tool updating *itself*, one
 spelling everywhere. The content and the binary are two different things to
@@ -32,12 +33,12 @@ from typing import Annotated
 import typer
 from rich.text import Text
 
-from doit.paths import xdg_data_home
+from doit.paths import library_dir
 from doit.paths import xdg_state_home
 from doit.render import console
 from doit.render import error_console
 
-CONTENT_DIR = Path(os.environ.get('DOIT_CONTENT_DIR') or xdg_data_home() / 'doit')
+CONTENT_DIR = Path(os.environ.get('DOIT_CONTENT_DIR') or library_dir())
 
 # State, not config: this is one machine's record of its own last pull.
 SYNC_LOG = Path(os.environ.get('DOIT_CONTENT_SYNC_LOG') or xdg_state_home() / 'doit' / 'content-sync.log')
@@ -54,7 +55,7 @@ MACHINE_DRIVEN = frozenset({'__preview', '__render', 'names'})
 
 # Where the cards come from on a machine that has none yet. Overridable so a
 # fork, a mirror, or a test can point somewhere else without patching code.
-CONTENT_REMOTE = os.environ.get('DOIT_CONTENT_REMOTE') or 'https://github.com/datapointchris/doit-content.git'
+CONTENT_REMOTE = os.environ.get('DOIT_CONTENT_REMOTE') or 'https://github.com/datapointchris/terminal-library.git'
 
 
 def git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:

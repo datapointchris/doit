@@ -31,12 +31,13 @@ import yaml
 
 from doit.cards import first_heading
 from doit.cards import split_frontmatter
+from doit.paths import library_dir
 from doit.paths import xdg_data_home
 
 SHELL_DIR = Path(os.environ.get('SHELL_DIR') or Path.home() / '.local' / 'shell')
 SKILLS_DIR = Path(os.environ.get('DOIT_SKILLS_DIR') or Path.home() / '.claude' / 'skills')
 REGISTRY = Path(os.environ.get('TOOLBOX_REGISTRY') or xdg_data_home() / 'toolbox' / 'registry.yml')
-WORKFLOWS_DIR = Path(os.environ.get('DOIT_WORKFLOWS_DIR') or xdg_data_home() / 'doit' / 'workflows')
+WORKFLOWS_DIR = Path(os.environ.get('DOIT_WORKFLOWS_DIR') or library_dir() / 'workflows')
 FORGIT_PLUGIN = Path(os.environ.get('FORGIT_PLUGIN') or Path.home() / '.config' / 'zsh' / 'plugins' / 'forgit' / 'forgit.plugin.zsh')
 
 # The card that owns the tmux keybindings, so the in-tmux popup and this index

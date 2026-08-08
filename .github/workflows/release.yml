@@ -13,7 +13,7 @@ jobs:
   #
   # There is no publish job. doit is installed from this repo with uv, and the
   # tag is what an install resolves against. The cards and Labs ship separately
-  # in doit-content, which is why authoring one needs no release here.
+  # in terminal-library, which is why authoring one needs no release here.
   version:
     runs-on: ubuntu-latest
     permissions:

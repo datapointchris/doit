@@ -40,6 +40,7 @@ from doit.cards import first_heading
 from doit.cards import render_body
 from doit.cards import slugify
 from doit.cards import split_frontmatter
+from doit.paths import library_dir
 from doit.paths import xdg_data_home
 from doit.paths import xdg_state_home
 from doit.render import console
@@ -47,7 +48,7 @@ from doit.render import error_console
 from doit.state import load_state
 from doit.state import save_state
 
-LABS_DIR = Path(os.environ.get('DOIT_LABS_DIR') or xdg_data_home() / 'doit' / 'labs')
+LABS_DIR = Path(os.environ.get('DOIT_LABS_DIR') or library_dir() / 'labs')
 STATE = Path(os.environ.get('DOIT_LABS_STATE') or xdg_state_home() / 'doit' / 'labs-state.json')
 
 # The tool registry backs the zero-authoring flashcard deck (recall the command
