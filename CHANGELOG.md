@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v0.10.3 (2026-08-08)
+
+### Bug Fixes
+
+- **tools**: Categories is a namespace, not a bare noun that reads
+  ([`ea55c26`](https://github.com/datapointchris/doit/commit/ea55c26f7d53b77b5eac7d91388a2cf20f474f59))
+
+`doit tools categories` listed when invoked bare. cli-design.md's 'No args shows help. Always' binds
+  at every level of the tree, so a node that reads bare is one you cannot walk down without running
+  something you did not ask for — and a noun in the verb slot does not say which of list, show or
+  create it meant.
+
+Now `doit tools categories list`, with --json alongside it. That the set is derived and will never
+  grow `create` buys no exemption: rustup target list and helm repo list are the shape, and
+  predictability is the point.
+
+
 ## v0.10.2 (2026-08-08)
 
 ### Bug Fixes
