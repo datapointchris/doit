@@ -1,9 +1,8 @@
 """Markdown cards: the primitives Labs and workflow cards both need.
 
-Two browsers over the same file shape — YAML frontmatter, a `# ` title, a body
-rendered through bat — had grown up separately, one in Python and one in bash.
-They differed only in which directory they read, which is not a difference worth
-two implementations.
+Labs and workflow cards are one file shape — YAML frontmatter, a `# ` title, a
+body rendered through bat — and differ only in which directory they are read
+from, which is not a difference worth two implementations.
 
 Nothing here knows about either collection. A caller supplies the path.
 """

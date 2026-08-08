@@ -6,9 +6,8 @@ collected in one place. They are the thing `doit next` hands you when you get
 there, which is why they live here rather than in a tool of their own.
 
 The cards directory is a git checkout that `doit content sync` pulls, so `new`
-writes the file the reader reads. The bash version could not: it had no idea
-where its own content lived, so it found an existing symlink, resolved it
-backwards to the dotfiles source, wrote there, and symlinked forward again.
+writes the file the reader reads — one path, resolved once, rather than a symlink
+followed backwards to wherever the content is authored.
 
 Searching cards is `doit find --source workflow`, not a verb here. A card is one
 row in the federated index alongside tools, skills, aliases and tmux keys, and
