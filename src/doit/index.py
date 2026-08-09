@@ -149,7 +149,7 @@ def index_skills() -> list[Entry]:
 
     A skill description carries its trigger and output rules too, which are long
     and inflate every fuzzy match. The first sentence is what identifies it, and
-    `doit skills list --full` is where the rest of it is readable.
+    `doit claude skills list --full` is where the rest of it is readable.
     """
     return [Entry(source='skill', name=skill.name, invocation=f'/{skill.name}', description=skill.summary) for skill in load_skills()]
 

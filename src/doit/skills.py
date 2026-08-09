@@ -1,8 +1,9 @@
 """Claude skills — what you own, and what each one is actually for.
 
-Invoked as `doit skills`. A skill is a directory under `~/.claude/skills/` holding
-one `SKILL.md`: YAML frontmatter naming it and describing when it should fire, and
-a markdown body that is the instruction Claude follows.
+Invoked as `doit claude skills`; see `doit.claude` for why it sits under a
+namespace. A skill is a directory under `~/.claude/skills/` holding one
+`SKILL.md`: YAML frontmatter naming it and describing when it should fire, and a
+markdown body that is the instruction Claude follows.
 
 This is a browse view, and it exists because the two other ways of seeing the
 library both discard the part worth reading. `doit find --source skill` keeps only
@@ -151,7 +152,7 @@ def warn_no_skills() -> int:
 def unknown_skill(name: str) -> int:
     error_console.print(Text(f'No skill {name!r}.'))
     hint = Text('See what is available with ')
-    hint.append('doit skills list', style='cyan')
+    hint.append('doit claude skills list', style='cyan')
     hint.append(', or search across everything with ')
     hint.append(f'doit find {name}', style='cyan')
     error_console.print(hint)
@@ -203,7 +204,7 @@ def cmd_list(group: str | None, as_json: bool, full: bool) -> int:
             console.print(line, no_wrap=not full, overflow=None if full else 'ellipsis')
 
     shown = sum(len(rows) for rows in grouped.values())
-    console.print(f'\n  {shown} skills · [cyan]doit skills show <name>[/]')
+    console.print(f'\n  {shown} skills · [cyan]doit claude skills show <name>[/]')
     report_invalid(skills)
     return 0
 
@@ -261,7 +262,7 @@ def cmd_groups(as_json: bool) -> int:
         line.append(name.ljust(width), style='green')
         line.append(f'  {counts[name]}')
         console.print(line)
-    console.print('\n  [cyan]doit skills list --group <name>[/]')
+    console.print('\n  [cyan]doit claude skills list --group <name>[/]')
     return 0
 
 

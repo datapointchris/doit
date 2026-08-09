@@ -14,7 +14,7 @@ doit dashboard        # every lane, unranked — what is outstanding across ever
 doit review due       # what is due to revisit, on a cadence
 doit labs due         # hands-on practice that is due
 doit workflows list   # the reference cards
-doit skills list      # the Claude skills you own, and when each fires
+doit claude skills list # the Claude skills you own, and when each fires
 doit tools show <n>   # what one tool is, and what to type
 doit log              # record what actually happened
 ```

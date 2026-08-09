@@ -137,7 +137,7 @@ def test_an_unknown_skill_points_at_the_federated_search(capsys):
     assert skills.cmd_show('nope') == 1
 
     err = capsys.readouterr().err
-    assert 'doit skills list' in err
+    assert 'doit claude skills list' in err
     assert 'doit find nope' in err
 
 
@@ -157,8 +157,16 @@ def test_a_machine_without_the_library_is_not_an_error(tmp_path, monkeypatch, ca
     assert 'work box' in capsys.readouterr().out
 
 
+def test_the_collection_lives_under_the_claude_namespace():
+    """`doit skills` would collide with the skills `learning` stewards."""
+    runner = CliRunner()
+
+    assert runner.invoke(cli_app, ['claude', 'skills', 'list']).exit_code == 0
+    assert runner.invoke(cli_app, ['skills', 'list']).exit_code == 2
+
+
 def test_search_is_not_a_verb_here():
     """Scoping the federated index is a filter: `doit find --source skill`."""
-    result = CliRunner().invoke(cli_app, ['skills', 'search', 'note'])
+    result = CliRunner().invoke(cli_app, ['claude', 'skills', 'search', 'note'])
 
     assert result.exit_code == 2
