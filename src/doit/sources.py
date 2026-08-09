@@ -227,6 +227,13 @@ def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
     if not built and source.adapter:
         built = ADAPTERS.get(source.adapter, lambda _: [])(result)
     if source.lanes:
+        # A conforming source names its lanes only in its payload, so a call that
+        # failed produces no payload and the lane disappears — the silent drop
+        # this module exists to prevent, and invisible precisely when a backend
+        # is broken. `lanes` is the only declaration of what should have been
+        # there, so it doubles as the fallback rather than staying a filter.
+        if not built:
+            return [lanes.unavailable(name, name.upper(), reason(source.id, result)) for name in source.lanes]
         built = [lane for lane in built if lane.name in source.lanes]
     return built
 
