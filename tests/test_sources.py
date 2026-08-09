@@ -72,6 +72,35 @@ def test_a_source_may_be_restricted_to_some_of_its_lanes():
     assert sources.lanes_from(source, sources.Result(source='day', payload=CONFORMING, exit_code=0)) == []
 
 
+def test_a_declared_lane_survives_the_call_that_failed():
+    """The silent drop, closed for conforming sources.
+
+    A conforming source names its lanes only in its payload, so a failed call
+    used to take the lane off the dashboard entirely — reading as "nothing
+    outstanding" exactly when a backend is broken. Declaring `lanes` is the only
+    statement of what should have been there, so it doubles as the fallback.
+    """
+    source = sources.Source(id='gh', command=['gh', 'search', 'prs'], lanes=('prs',))
+    result = sources.Result(source='gh', exit_code=1, stderr='gh: could not authenticate', failure=sources.Failure.FAILED)
+
+    built = sources.lanes_from(source, result)
+
+    assert [lane.name for lane in built] == ['prs']
+    assert built[0].available is False
+    assert 'authenticate' in built[0].reason
+
+
+def test_an_undeclared_lane_still_vanishes_when_its_source_fails():
+    """Nothing was claimed, so there is nothing to report missing.
+
+    doit cannot invent a name for a lane a source never said it had.
+    """
+    source = sources.Source(id='gh', command=['gh', 'search', 'prs'])
+    result = sources.Result(source='gh', exit_code=1, stderr='boom', failure=sources.Failure.FAILED)
+
+    assert sources.lanes_from(source, result) == []
+
+
 def test_a_non_conforming_payload_without_an_adapter_yields_nothing():
     """Silence rather than a guess: doit does not know this app's model."""
     source = sources.Source(id='day', command=['day'])
