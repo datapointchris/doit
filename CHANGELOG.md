@@ -1,6 +1,64 @@
 # CHANGELOG
 
 
+## v0.11.1 (2026-08-09)
+
+### Bug Fixes
+
+- **sources**: Keep a declared lane visible when its source fails
+  ([`c4777c7`](https://github.com/datapointchris/doit/commit/c4777c704a7c448a5213f3245bd42030607ef893))
+
+A conforming source names its lanes only in its payload, so a call that failed produced no payload
+  and `lanes_from` returned nothing — the lane left the dashboard entirely. That is the silent drop
+  the module exists to prevent, and it was invisible exactly when a backend was broken.
+
+`lanes` was already config, used only to filter. It is also the only statement of what should have
+  been there, so it now doubles as the fallback: a failed call with a declared lane emits an
+  unavailable lane carrying `reason()`, the same line an adapter-backed source would show.
+
+Undeclared lanes still vanish. doit cannot invent a name for a lane a source never said it had.
+
+Found wiring up a `prs` lane over `gh search prs`: logging gh out took the lane off the dashboard
+  rather than reporting the auth failure.
+
+- **sources**: Keep a declared lane visible when its source fails
+  ([#1](https://github.com/datapointchris/doit/pull/1),
+  [`13d5ab4`](https://github.com/datapointchris/doit/commit/13d5ab4502b810696c840adb02732b6eec9c05f1))
+
+## What this is for
+
+Wiring a `prs` lane over `gh search prs` surfaced a hole in the source contract: with `gh` logged
+  out, the lane did not report the auth failure — it disappeared from the dashboard entirely.
+  `sources.py` opens by saying a lane is never silently dropped, "because a dashboard that quietly
+  omits a lane reads as *nothing outstanding*, which is the worst available failure". For conforming
+  sources that was not actually true.
+
+## Why it happened
+
+Adapter-backed sources declare their lane names in code, so `dashboard.py` can emit
+  `unavailable(name, title, reason)` when the call fails. A conforming source names its lanes **only
+  in its payload** — and a failed call has no payload. `lanes_from` returned `[]` and the lane
+  ceased to exist.
+
+## The decision
+
+`lanes:` in `sources.yml` was already there, used only to filter a source down to some of its lanes.
+  It is also the only place a source states what it *should* have produced, so it now doubles as the
+  failure declaration. No new config key, no adapter, no schema change.
+
+Undeclared lanes still vanish on failure, deliberately — doit cannot invent a name for a lane a
+  source never claimed. That is the second test.
+
+## What to look at
+
+- `src/doit/sources.py` — `lanes_from`, the `if not built` branch. The ordering matters: the filter
+  still runs on success, so the existing restrict-to-some-lanes behaviour is untouched (its test
+  still passes unmodified). - Whether `name.upper()` is the right title fallback here. It matches
+  `lane_from`'s own default, but an unavailable lane has no payload to take a nicer title from.
+
+393 tests pass, 2 new.
+
+
 ## v0.11.0 (2026-08-08)
 
 ### Features
