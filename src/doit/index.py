@@ -29,12 +29,12 @@ from pathlib import Path
 from doit.cards import first_heading
 from doit.cards import split_frontmatter
 from doit.paths import library_dir
+from doit.skills import load_skills
 from doit.tools import LEADING_KEYWORDS
 from doit.tools import invocation_head
 from doit.tools import load_registry
 
 SHELL_DIR = Path(os.environ.get('SHELL_DIR') or Path.home() / '.local' / 'shell')
-SKILLS_DIR = Path(os.environ.get('DOIT_SKILLS_DIR') or Path.home() / '.claude' / 'skills')
 WORKFLOWS_DIR = Path(os.environ.get('DOIT_WORKFLOWS_DIR') or library_dir() / 'workflows')
 FORGIT_PLUGIN = Path(os.environ.get('FORGIT_PLUGIN') or Path.home() / '.config' / 'zsh' / 'plugins' / 'forgit' / 'forgit.plugin.zsh')
 
@@ -148,17 +148,10 @@ def index_skills() -> list[Entry]:
     """Claude skills, described by the first sentence of their description.
 
     A skill description carries its trigger and output rules too, which are long
-    and inflate every fuzzy match. The first sentence is what identifies it.
+    and inflate every fuzzy match. The first sentence is what identifies it, and
+    `doit skills list --full` is where the rest of it is readable.
     """
-    if not SKILLS_DIR.exists():
-        return []
-    entries = []
-    for path in sorted(SKILLS_DIR.glob('*/SKILL.md')):
-        described = re.search(r'^description:\s*(.+)$', path.read_text(), re.M)
-        summary = described.group(1).strip() if described else ''
-        summary = re.split(r'(?<=[.!?])\s+(?=[A-Z])', summary)[0]
-        entries.append(Entry(source='skill', name=path.parent.name, invocation=f'/{path.parent.name}', description=summary))
-    return entries
+    return [Entry(source='skill', name=skill.name, invocation=f'/{skill.name}', description=skill.summary) for skill in load_skills()]
 
 
 def index_functions() -> list[Entry]:

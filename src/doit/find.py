@@ -28,6 +28,7 @@ import typer
 from rich.text import Text
 
 from doit import index
+from doit import skills
 from doit import tools
 from doit.render import console
 from doit.render import error_console
@@ -153,7 +154,7 @@ def cmd_show(subject: str) -> int:
         delegate(['doit', 'workflows', 'show', subject])
     if 'skill' in found:
         render_section('skill — Claude skill', 'green')
-        delegate(['bat', '--style=plain', '--color=always', '--language=markdown', str(index.SKILLS_DIR / subject / 'SKILL.md')])
+        delegate(['bat', '--style=plain', '--color=always', '--language=markdown', str(skills.SKILLS_DIR / subject / 'SKILL.md')])
     for source in ('func', 'alias', 'git', 'forgit', 'tmux'):
         if source in found:
             console.print()
@@ -236,7 +237,7 @@ def preview_command(source: Annotated[str, typer.Argument()], name: Annotated[st
     if source == 'workflow':
         raise typer.Exit(0 if delegate(['doit', 'workflows', '__render', name]) else 1)
     if source == 'skill':
-        path = index.SKILLS_DIR / name / 'SKILL.md'
+        path = skills.SKILLS_DIR / name / 'SKILL.md'
         args = ['bat', '--style=plain', '--color=always', '--language=markdown', str(path)]
         raise typer.Exit(0 if delegate(args) else 1)
     entry = lens_sources(name).get(source)
