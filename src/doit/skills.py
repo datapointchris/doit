@@ -98,7 +98,11 @@ def read_frontmatter(text: str) -> tuple[dict, str, bool]:
     """
     front, body = split_document(text)
     if not front:
-        return {}, body, True
+        # `split_document` returns nothing for a file with no frontmatter and
+        # for one that opens `---` and never closes it. Only the second is rot,
+        # and reporting it valid-with-no-description is the shape the flag most
+        # needs to catch — every field a listing shows comes back empty.
+        return {}, body, not text.startswith('---')
     try:
         meta = yaml.safe_load(front)
     except yaml.YAMLError:

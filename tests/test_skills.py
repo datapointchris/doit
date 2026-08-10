@@ -55,6 +55,15 @@ def test_summary_does_not_end_at_an_abbreviation():
     assert by_name()['capture-note'].summary == 'Capture a durable technical note.'
 
 
+def test_frontmatter_that_never_closes_is_rot_not_an_absent_block():
+    """Both split to nothing, and only one of them is a file to go and fix."""
+    unterminated = skills.read_frontmatter('---\nname: broken\ndescription: no closing fence\n\n# Body\n')
+    absent = skills.read_frontmatter('# Just a body\n')
+
+    assert unterminated[2] is False
+    assert absent[2] is True
+
+
 def test_the_group_comes_from_the_name_not_a_hardcoded_vocabulary():
     """The closed verb set lives in review-fleet; a copy here would drift."""
     names = by_name()
