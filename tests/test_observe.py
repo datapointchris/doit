@@ -116,9 +116,9 @@ def test_observed_defaults_to_watching_the_items_own_command(tmp_path, monkeypat
 
 def test_observed_false_turns_observation_off(tmp_path, monkeypatch):
     """For an item whose command is not the work — a picker, a browse view."""
-    write_history(tmp_path, monkeypatch, [(date(2026, 4, 5), 'doit labs pick')])
+    write_history(tmp_path, monkeypatch, [(date(2026, 4, 5), 'doit labs choose')])
 
-    assert observe.observed(False, 'doit labs pick').date is None
+    assert observe.observed(False, 'doit labs choose').date is None
 
 
 def test_observed_takes_an_explicit_observer_over_the_command(tmp_path, monkeypatch):

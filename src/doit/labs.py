@@ -212,7 +212,7 @@ def cmd_list(as_json: bool = False) -> int:
     console.rule('[cyan]Labs — full deck', align='left')
     for row in statuses():
         render_row(row)
-    console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   pick interactively:  [cyan]doit labs pick[/]')
+    console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   choose interactively:  [cyan]doit labs choose[/]')
     return 0
 
 
@@ -418,9 +418,9 @@ def show_command(lab_id: Annotated[str, typer.Argument(help='The Lab to open.')]
     raise typer.Exit(cmd_show(lab_id))
 
 
-@app.command('pick')
-def pick_command() -> None:
-    """Pick a Lab interactively (fzf)."""
+@app.command('choose')
+def choose_command() -> None:
+    """Choose a Lab interactively (fzf)."""
     raise typer.Exit(cmd_pick())
 
 
