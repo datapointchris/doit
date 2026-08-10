@@ -1,6 +1,163 @@
 # CHANGELOG
 
 
+## v0.12.0 (2026-08-10)
+
+### Bug Fixes
+
+- **skills**: Apply the standards pass findings
+  ([`d8b1ef4`](https://github.com/datapointchris/doit/commit/d8b1ef4dc337c0a3d9a58a61ee44776f1e4388c8))
+
+Four rule breaks from the review on #2, and the two judgements it raised that no standard reaches.
+
+Unknown --group is a usage error at exit 2, like find's --source, and the check runs before the
+  --json branch. `--group nope --json` was printing `[]` and exiting 0, which tells a machine caller
+  the group is empty rather than absent. Silent on an empty library so the work box, which carries
+  no ~/.claude at all, still gets the explanation.
+
+`skills groups` becomes `skills groups list`. tools.py made the opposite call three commits ago and
+  recorded why beside it: a set being read-only "does not buy it an exemption — predictability is
+  the point".
+
+The skill lens in find hands off to doit.skills rather than shelling bat at the raw file. That was
+  correct while nothing owned skills; this branch creates the owner and gives it render_skill, so
+  `doit show` now renders the card like the workflow lens beside it, in-process rather than spawning
+  an interpreter to re-read a file this one can open.
+
+read_frontmatter takes its split from cards.split_document and keeps only the policy. Restating the
+  split is what let the copies diverge on guarding a scalar frontmatter; the guard is now in cards
+  too, where a `---\nfoo\n---` block was handed back for a caller to .get() on.
+
+cmd_list and cmd_groups take their booleans keyword-only. The call sites read `cmd_list(None, False,
+  True)` and `cmd_list(None, True, False)` six lines apart, meaning opposite things.
+
+Both tests asserting on rendered rows are deleted rather than pinned to a width. They were really
+  about the terminal: at 80 columns the clipped row hid the phrase the summary test asserted absent,
+  so it passed with the sentence splitter disabled entirely. A width would only choose which
+  consumer's terminal the suite pretends to be, and which field a row prints is a rendering detail.
+  `summary` is tested directly and carried in the JSON.
+
+- **skills**: Report unterminated frontmatter as rot
+  ([`27ebd35`](https://github.com/datapointchris/doit/commit/27ebd357dc85eb5d62f8aa6f6b8fa074a2b7dfb1))
+
+`split_document` returns nothing both for a file with no frontmatter and for one that opens `---`
+  and never closes it, so read_frontmatter was reporting the second as valid YAML with an empty
+  description. That is the shape the strict flag most needs to catch: every field a listing shows
+  comes back empty, and the one mechanism built to say why stays silent.
+
+No file in the library has it today, which is why this is a line rather than an item — a skill
+  authored with a typo is exactly what the flag is for.
+
+### Features
+
+- **skills**: List and describe the Claude skill library
+  ([`980c4d4`](https://github.com/datapointchris/doit/commit/980c4d48b67c79ec4e347e182309a9fe76575782))
+
+`doit skills list|show|groups` — the browse view for ~/.claude/skills, which neither existing path
+  could give. `doit find --source skill` keeps only the first sentence of a description, because the
+  trigger prose and output rules that follow inflate every fuzzy match; Claude Code's own listing
+  shows what the model sees rather than what you would choose from. Here the whole description is
+  the point, and --full prints it.
+
+Grouping splits the name on its first hyphen rather than matching a verb list, so the closed
+  vocabulary stays in review-fleet § "Skill health" and a new verb needs no release here. A name
+  that does not parse lands in "ungrouped", which is the audit finding surfaced for free.
+
+SKILLS_DIR and the loader move from index to the new module, following the rule the registry already
+  follows in doit.tools — a path defined per reader is a path that drifts. index and find both read
+  through it.
+
+Frontmatter is parsed as YAML with a line-read fallback: four skills in the live library carry an
+  unquoted `: ` in their description, which Claude Code tolerates and yaml.safe_load rejects.
+  Dropping them would hide the most-used skills, so the listing reports them by name instead —
+  unresolved()'s rule, that rot is reported rather than rendered around.
+
+- **skills**: List and describe the Claude skill library
+  ([#2](https://github.com/datapointchris/doit/pull/2),
+  [`9e8df68`](https://github.com/datapointchris/doit/commit/9e8df68f016ccb0785f32b076ff3d01ce36f39b0))
+
+## What this is for
+
+A browse view of `~/.claude/skills` — every skill, grouped, with the whole description rather than a
+  truncated one.
+
+Neither existing path answers it. `doit find --source skill` deliberately keeps only the first
+  sentence, because a description carries trigger phrases and output rules that inflate every fuzzy
+  match. Claude Code's own listing shows what the *model* sees when deciding whether a skill
+  applies, which is not the same question as "what do I own and which one do I want".
+
+``` doit claude skills list [--group G] [--full] [--json] doit claude skills show <name> doit claude
+  skills groups [--json] ```
+
+**Why a `claude` namespace and not `doit skills`.** `skills` is the one collection name in doit that
+  collides with a concept another CLI owns: `learning` stewards the topics and tracks Chris is
+  developing, `doit labs` the practice for them, so a bare `doit skills` reads at least as naturally
+  as *his* skills. Workflow cards, Labs and the tool registry have no such collision and stay at one
+  word. It is also where a sibling goes — `~/.claude` holds agents, commands, hooks and output
+  styles, and deciding now keeps filling one a mount here rather than another product's vocabulary
+  arriving loose at doit's root.
+
+## Decisions
+
+**Grouping splits the name, it does not match a verb list.** The closed vocabulary lives in
+  `review-fleet` § "Skill health"; a copy here would be a second copy that drifts, and adding a verb
+  would need a release. A name that does not parse as `<verb>-<target>` lands in `ungrouped`, so the
+  `audit-skills` Step 1 finding shows up for free rather than needing a check that has to be kept
+  current.
+
+**`SKILLS_DIR` and the loader moved out of `index` into the new module.** This is the rule the tool
+  registry already follows in `doit.tools` — "a constant defined per reader is a constant that
+  drifts". `index` and `find` both read through `skills.load_skills()` now. Rejected leaving the
+  path in `index`: `skills` would have had to import `index` to reach it, and `index` already
+  imports the collections.
+
+**Frontmatter is parsed as YAML, with a line-read fallback.** Four skills in the live library
+  (`audit-standards`, `capture-item`, `capture-workflow`, `learn-explain`) carry an unquoted `: `
+  inside their description, which Claude Code's loader tolerates and `yaml.safe_load` rejects.
+  Parsing strictly would silently drop four of the most-used skills from the listing. The fallback
+  keeps them listed and the listing **names them**, following `unresolved()`'s rule that rot is
+  reported rather than rendered around.
+
+## What to look at
+
+- `src/doit/skills.py` — `read_frontmatter` is the only interesting part. The fallback is reached
+  only after YAML has already refused, so it is not a second parser competing with the first. - The
+  `SUMMARY_END` regex deliberately does not reuse `render.first_sentence`. That one stops at any
+  punctuation-then-space, which is right for a stored note and wrong for a description dense with
+  `e.g.`, `~/notes/` and `/slash-commands`. - `tests/fixtures/skills/` is four awkward cases rather
+  than four tidy ones — `e.g.` in a description, invalid YAML, a manual-only skill, and a name that
+  does not parse. Each is something the real library contains. - `find.py` had two more
+  `index.SKILLS_DIR` references that no test covers; mypy caught them, not the suite.
+
+## Not in this PR
+
+The four invalid-YAML descriptions are reported, not fixed. Every escape-free quoting form is a
+  block scalar, and whether Claude Code's own loader reads one is unverified — getting it wrong
+  silently empties a skill's trigger prose, which is how a skill stops firing without anything
+  saying so.
+
+### Refactoring
+
+- **skills**: Move the listing under a claude namespace
+  ([`6d34fe9`](https://github.com/datapointchris/doit/commit/6d34fe953fb064a5b50a58f9036640b6363f908d))
+
+`doit claude skills` rather than `doit skills`. `skills` is the one collection name in doit that
+  collides with a concept another CLI owns — `learning` stewards the topics and tracks Chris is
+  developing and `doit labs` the practice for them, so a bare `doit skills` reads at least as
+  naturally as his skills as it does Claude Code's skill files. Workflow cards, Labs and the tool
+  registry are unambiguous at one word and stay there.
+
+It is also where a sibling goes. ~/.claude holds agents, commands, hooks and output styles beside
+  the skills; those directories are mostly empty today, and deciding now is what keeps filling one a
+  mount rather than another product's vocabulary arriving loose at doit's root — the retrofit
+  cli-design.md § "A resource that could ever grow a second command is a namespace today" exists to
+  prevent. Nothing was merged or typed by anyone yet, which is the window where this costs one
+  commit.
+
+`doit find --source skill` is unchanged: a --source value is a lens filter alongside tool, func and
+  tmux, not a command path.
+
+
 ## v0.11.1 (2026-08-09)
 
 ### Bug Fixes
