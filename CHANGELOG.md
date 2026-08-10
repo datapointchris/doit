@@ -1,6 +1,45 @@
 # CHANGELOG
 
 
+## v0.13.0 (2026-08-10)
+
+### Build System
+
+- **precommit**: Resync to forge toolchain 14
+  ([`db36f74`](https://github.com/datapointchris/doit/commit/db36f742ccc77e3c959c3aae6a128ea07c48fae0))
+
+### Features
+
+- **kit**: Report what you own and never reach for
+  ([`7f2fcc9`](https://github.com/datapointchris/doit/commit/7f2fcc9f44d15d49f3b683f823d355a10ac08d99))
+
+Adds `doit kit usage` and `doit kit unused` — the second of two folds over the federated index.
+  `unresolved` joins it against PATH and the shell files and answers "you cannot run this"; these
+  join it against shell history and answer "you can run it and never do". Read together they
+  separate a stale registry entry from a genuinely forgotten one.
+
+Renames the `index` namespace to `kit`. `index` named the data structure rather than what it holds,
+  and held two of the six operations over the union while the everyday four sit at the root, so it
+  read as a leftovers drawer. `find`, `show` and `launch` stay where they are.
+
+Counting folds observe.history_entries, the cached atuin-with-zsh-fallback read the review register
+  already makes. A second history parser would answer a subtly different question within a month,
+  and then two commands would disagree about whether rg had been used.
+
+The join key is the whole of the difficulty and three spellings get it wrong. Measuring by name
+  reports ripgrep as never used, because you type rg. Measuring by the head word gives all 23
+  git-forgit-* rows git's own count, since their invocation is `git forgit add`. And three rows
+  spell arguments in bare caps — bbkt pr VERB, dectl PIPELINE RESOURCE ACTION, jira issue VERB —
+  which match no command line ever typed. Matching is therefore is_invocation_of against the literal
+  invocation prefix, the same word boundary that stops `claude /audit-repo` claiming an
+  /audit-repo-docs run.
+
+Rows sharing a typed form merge, because the unit of the answer is a thing you can type: the
+  registry documents several of Chris's own shell functions, so 235 catalogue rows are 204 things.
+  tmux, workflow and skill are excluded rather than reported unused — a keybinding never reaches a
+  shell history, so a permanent zero there would be a lie rather than a finding.
+
+
 ## v0.12.0 (2026-08-10)
 
 ### Bug Fixes
