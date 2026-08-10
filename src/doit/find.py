@@ -154,7 +154,8 @@ def cmd_show(subject: str) -> int:
         delegate(['doit', 'workflows', 'show', subject])
     if 'skill' in found:
         render_section('skill — Claude skill', 'green')
-        delegate(['bat', '--style=plain', '--color=always', '--language=markdown', str(skills.SKILLS_DIR / subject / 'SKILL.md')])
+        if skill := skills.load_skill(subject):
+            skills.render_skill(skill, heading=False)
     for source in ('func', 'alias', 'git', 'forgit', 'tmux'):
         if source in found:
             console.print()
@@ -237,9 +238,10 @@ def preview_command(source: Annotated[str, typer.Argument()], name: Annotated[st
     if source == 'workflow':
         raise typer.Exit(0 if delegate(['doit', 'workflows', '__render', name]) else 1)
     if source == 'skill':
-        path = skills.SKILLS_DIR / name / 'SKILL.md'
-        args = ['bat', '--style=plain', '--color=always', '--language=markdown', str(path)]
-        raise typer.Exit(0 if delegate(args) else 1)
+        skill = skills.load_skill(name)
+        if skill:
+            skills.render_skill(skill)
+        raise typer.Exit(0 if skill else 1)
     entry = lens_sources(name).get(source)
     if entry:
         render_lens_card(entry)

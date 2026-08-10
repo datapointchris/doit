@@ -69,7 +69,7 @@ def test_sections_are_the_body_headings():
 
 
 def test_list_groups_by_verb_and_puts_an_unparseable_name_on_its_own(capsys):
-    assert skills.cmd_list(None, False, False) == 0
+    assert skills.cmd_list(None) == 0
 
     out = capsys.readouterr().out
     assert 'capture' in out
@@ -78,27 +78,26 @@ def test_list_groups_by_verb_and_puts_an_unparseable_name_on_its_own(capsys):
 
 
 def test_list_reports_frontmatter_that_is_not_valid_yaml(capsys):
-    assert skills.cmd_list(None, False, False) == 0
+    assert skills.cmd_list(None) == 0
 
     err = capsys.readouterr().err
     assert 'learn-explain' in err
     assert 'not valid YAML' in err
 
 
-def test_list_full_gives_the_whole_description(capsys):
-    assert skills.cmd_list(None, False, True) == 0
-
-    assert 'a pattern that took effort to work out' in capsys.readouterr().out
-
-
-def test_list_summary_stops_at_the_first_sentence(capsys):
-    assert skills.cmd_list(None, False, False) == 0
-
-    assert 'a pattern that took effort to work out' not in capsys.readouterr().out
+# There is deliberately no test that the human list clips to the summary and
+# `--full` does not. Both assertions were on rendered console output, so both
+# were really about the terminal width: at 80 columns the clipped row hid the
+# phrase the summary test asserted absent, and the test passed with the sentence
+# splitter disabled entirely. Pinning a width would only have chosen which
+# consumer's terminal the suite pretends to be. `summary` is tested directly
+# above and carried in the JSON below; which of the two a row prints is a
+# rendering detail, and a test asserting a detail stays the same is one that
+# fails when the layout improves.
 
 
 def test_list_json_carries_what_a_caller_would_filter_on(capsys):
-    assert skills.cmd_list(None, True, False) == 0
+    assert skills.cmd_list(None, as_json=True) == 0
 
     rows = {row['name']: row for row in json.loads(capsys.readouterr().out)}
     assert rows['audit-repo']['auto_invocable'] is False
@@ -107,17 +106,35 @@ def test_list_json_carries_what_a_caller_would_filter_on(capsys):
 
 
 def test_list_can_be_scoped_to_one_group(capsys):
-    assert skills.cmd_list('capture', False, False) == 0
+    assert skills.cmd_list('capture') == 0
 
     out = capsys.readouterr().out
     assert 'capture-note' in out
     assert 'audit-repo' not in out
 
 
-def test_an_unknown_group_names_the_ones_that_exist(capsys):
-    assert skills.cmd_list('nope', False, False) == 1
+def test_an_unknown_group_is_a_usage_error_naming_the_ones_that_exist():
+    """Exit 2, like `find --source`. Exit 1 cannot be told from a run that failed."""
+    result = CliRunner().invoke(cli_app, ['claude', 'skills', 'list', '--group', 'nope'])
 
-    assert 'ungrouped' in capsys.readouterr().err
+    assert result.exit_code == 2
+    assert 'ungrouped' in result.output
+
+
+def test_an_unknown_group_is_caught_before_json_is_emitted():
+    """`--group nope --json` printed `[]` and exited 0 — the group read as empty."""
+    result = CliRunner().invoke(cli_app, ['claude', 'skills', 'list', '--group', 'nope', '--json'])
+
+    assert result.exit_code == 2
+    assert '[]' not in result.output
+
+
+def test_an_empty_library_does_not_turn_a_group_into_a_usage_error(tmp_path, monkeypatch, capsys):
+    """On the work box every group is unknown; the explanation is the useful answer."""
+    monkeypatch.setattr(skills, 'SKILLS_DIR', tmp_path / 'absent')
+
+    assert skills.cmd_list('capture') == 0
+    assert 'work box' in capsys.readouterr().out
 
 
 def test_show_accepts_the_slash_form_a_user_would_type(capsys):
@@ -142,7 +159,7 @@ def test_an_unknown_skill_points_at_the_federated_search(capsys):
 
 
 def test_groups_counts_each_verb(capsys):
-    assert skills.cmd_groups(True) == 0
+    assert skills.cmd_groups(as_json=True) == 0
 
     counts = {row['group']: row['skills'] for row in json.loads(capsys.readouterr().out)}
     assert counts == {'audit': 1, 'capture': 1, 'learn': 1, 'ungrouped': 1}
@@ -152,7 +169,7 @@ def test_a_machine_without_the_library_is_not_an_error(tmp_path, monkeypatch, ca
     """~/.claude is Syncthing-synced, so the work box has no skills at all."""
     monkeypatch.setattr(skills, 'SKILLS_DIR', tmp_path / 'absent')
 
-    assert skills.cmd_list(None, False, False) == 0
+    assert skills.cmd_list(None) == 0
     assert skills.load_skills() == []
     assert 'work box' in capsys.readouterr().out
 
@@ -163,6 +180,14 @@ def test_the_collection_lives_under_the_claude_namespace():
 
     assert runner.invoke(cli_app, ['claude', 'skills', 'list']).exit_code == 0
     assert runner.invoke(cli_app, ['skills', 'list']).exit_code == 2
+
+
+def test_groups_is_a_namespace_not_a_bare_noun_that_lists():
+    """The call `doit tools categories` already made — every node prints help bare."""
+    runner = CliRunner()
+
+    assert runner.invoke(cli_app, ['claude', 'skills', 'groups', 'list']).exit_code == 0
+    assert 'list' in runner.invoke(cli_app, ['claude', 'skills', 'groups']).output
 
 
 def test_search_is_not_a_verb_here():

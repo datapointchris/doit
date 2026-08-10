@@ -35,6 +35,7 @@ import typer
 import yaml
 from rich.text import Text
 
+from doit.cards import split_document
 from doit.render import console
 from doit.render import error_console
 from doit.tools import block
@@ -90,13 +91,14 @@ def read_frontmatter(text: str) -> tuple[dict, str, bool]:
     The flag is the point of doing it this way. `unresolved()` in `doit.index`
     established the shape: report rot rather than rendering around it, or the
     listing quietly becomes the reason nobody fixes the file.
+
+    The split comes from `doit.cards` and only the policy lives here. Restating
+    the split is what let the two copies diverge on whether a scalar frontmatter
+    is guarded against.
     """
-    if not text.startswith('---'):
-        return {}, text, True
-    parts = text.split('---', 2)
-    if len(parts) < 3:
-        return {}, text, True
-    front, body = parts[1], parts[2].lstrip('\n')
+    front, body = split_document(text)
+    if not front:
+        return {}, body, True
     try:
         meta = yaml.safe_load(front)
     except yaml.YAMLError:
@@ -159,8 +161,29 @@ def unknown_skill(name: str) -> int:
     return 1
 
 
-def cmd_list(group: str | None, as_json: bool, full: bool) -> int:
+def group_names(skills: list[Skill]) -> list[str]:
+    """Every group present, in display order."""
+    return sorted({skill.group or 'ungrouped' for skill in skills})
+
+
+def check_group(group: str | None, skills: list[Skill]) -> None:
+    """Reject an unknown `--group` as a usage error, before anything renders.
+
+    Ahead of the `--json` branch on purpose: a machine caller filtering on a
+    group that does not exist was being handed `[]` and exit 0, which reads as
+    "the group is empty" rather than "you named the wrong one".
+
+    Silent on an empty library, so the work box — which carries no `~/.claude`
+    at all — gets the explanation in `warn_no_skills` rather than a usage error
+    about a group that would have been valid anywhere else.
+    """
+    if group and skills and group not in group_names(skills):
+        raise typer.BadParameter(f'unknown group {group!r}; choose from {", ".join(group_names(skills))}')
+
+
+def cmd_list(group: str | None, *, as_json: bool = False, full: bool = False) -> int:
     skills = load_skills()
+    check_group(group, skills)
     if as_json:
         rows = [
             {
@@ -184,9 +207,6 @@ def cmd_list(group: str | None, as_json: bool, full: bool) -> int:
     grouped: dict[str, list[Skill]] = {}
     for skill in skills:
         grouped.setdefault(skill.group or 'ungrouped', []).append(skill)
-    if group and group not in grouped:
-        error_console.print(Text(f'No group {group!r}. Known: {", ".join(sorted(grouped))}'))
-        return 1
     if group:
         grouped = {group: grouped[group]}
 
@@ -221,18 +241,29 @@ def report_invalid(skills: list[Skill]) -> None:
         error_console.print(Text('  Quote the description — an unquoted `: ` ends the mapping value.'))
 
 
-def cmd_show(name: str) -> int:
+def load_skill(name: str) -> Skill | None:
+    """One skill by name, or None. `/name` is accepted — it is what gets pasted."""
     name = name.removeprefix('/')
-    for skill in load_skills():
-        if skill.name == name:
-            render_skill(skill)
-            return 0
-    return unknown_skill(name)
+    return next((skill for skill in load_skills() if skill.name == name), None)
 
 
-def render_skill(skill: Skill) -> None:
-    console.rule(f'[cyan]{skill.name}', align='left')
-    console.print()
+def cmd_show(name: str) -> int:
+    skill = load_skill(name)
+    if skill is None:
+        return unknown_skill(name.removeprefix('/'))
+    render_skill(skill)
+    return 0
+
+
+def render_skill(skill: Skill, heading: bool = True) -> None:
+    """The detail card.
+
+    `heading` is off when a caller has already named the subject, so `doit show`
+    does not rule the same name twice — the same contract `render_tool` carries.
+    """
+    if heading:
+        console.rule(f'[cyan]{skill.name}', align='left')
+        console.print()
     block('Description', skill.description)
     field('Invoke', f'/{skill.name} {skill.argument_hint}'.strip())
     field('Auto-invocable', 'yes' if skill.auto else f'no — only /{skill.name} reaches it')
@@ -246,7 +277,7 @@ def render_skill(skill: Skill) -> None:
             console.print(Text(f'  {section}'), no_wrap=True, overflow='ellipsis')
 
 
-def cmd_groups(as_json: bool) -> int:
+def cmd_groups(*, as_json: bool = False) -> int:
     counts: dict[str, int] = {}
     for skill in load_skills():
         counts[skill.group or 'ungrouped'] = counts.get(skill.group or 'ungrouped', 0) + 1
@@ -276,7 +307,7 @@ def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
     """Every skill and when it fires, grouped by verb."""
-    raise typer.Exit(cmd_list(group, as_json, full))
+    raise typer.Exit(cmd_list(group, as_json=as_json, full=full))
 
 
 @app.command('show')
@@ -285,9 +316,16 @@ def show_command(name: Annotated[str, typer.Argument(help='The skill to describe
     raise typer.Exit(cmd_show(name))
 
 
-@app.command('groups')
-def groups_command(
+# A namespace rather than a bare `groups` that lists, matching the call already
+# made for `doit tools categories`: every node in the tree prints help bare, so
+# walking down one token at a time never runs something you did not ask for.
+groups_app = typer.Typer(name='groups', no_args_is_help=True, help='The verb groups skills are named under.')
+app.add_typer(groups_app, name='groups')
+
+
+@groups_app.command('list')
+def groups_list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
-    """The verb groups skills are named under."""
-    raise typer.Exit(cmd_groups(as_json))
+    """Every group and how many skills it holds."""
+    raise typer.Exit(cmd_groups(as_json=as_json))
