@@ -16,6 +16,7 @@ doit labs due         # hands-on practice that is due
 doit workflows list   # the reference cards
 doit claude skills list # the Claude skills you own, and when each fires
 doit tools show <n>   # what one tool is, and what to type
+doit kit unused       # what you own, can run, and never reach for
 doit log              # record what actually happened
 ```
 

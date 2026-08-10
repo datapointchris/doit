@@ -20,6 +20,12 @@ open, whereas atuin is the only source that knows which machine ran a command, w
 `scope: machine` item answerable at all. It is one query per process, shared by every item, and it
 falls back to this machine's zsh history whenever atuin cannot be asked.
 
+**That one read now has two consumers, and must keep having one parser.** `observe.history_entries`
+answers "when was this register item last done"; `usage.measure` folds the same cached read into a
+count and a last-run date per row of your kit. A second parser would answer a subtly different
+question within a month, and then `review` and `kit` would disagree about whether you had used `rg`.
+Anything else needing history folds this, never re-reads it.
+
 ## Content, config, and state are three different things
 
 - **Content** — cards, Labs, and the tool registry (`workflows/`, `labs/`, `tools/`). The
