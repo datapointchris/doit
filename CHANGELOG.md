@@ -1,6 +1,40 @@
 # CHANGELOG
 
 
+## v1.0.0 (2026-08-10)
+
+### Documentation
+
+- **kit**: Record the single history read and its two folds
+  ([`803a9d4`](https://github.com/datapointchris/doit/commit/803a9d4123a81b8f7f8accfb5fd401697c8ef9c6))
+
+CLAUDE.md's atuin note explained why the review lane shells out; it now also says that read has a
+  second consumer and must keep having one parser, since a second would drift and leave `review` and
+  `kit` disagreeing about whether something had been used.
+
+README gains the `doit kit unused` line — it is a headline capability, not a verb someone would find
+  by walking the tree.
+
+### Features
+
+- **labs**: Pick becomes choose, the one word for a picker
+  ([`3262479`](https://github.com/datapointchris/doit/commit/326247998095b4e0269db194aaea89ee2783e858))
+
+The fleet spelled one act four ways — `theme change`, `font change`, `doit labs pick`, `doit launch`
+  — which is cli-design.md's own tell for real drift: one tool spelling it differently from every
+  other, for the same job on the same kind of object.
+
+`choose` won on the precedent it sits beside, tmux's choose-tree / choose-client / choose-buffer
+  family and gum's `choose`. The reasoning and the rejected alternatives are cli-design.md § "The
+  interactive picker is `choose`" and architecture/verb-axes.md.
+
+`doit launch` is deliberately not renamed. It answers "what can I even run here" rather than
+  returning a peer of a known kind — after a choose you have a thing, after a launch you have gone
+  somewhere.
+
+The review register calls this verb; its entry was updated to match.
+
+
 ## v0.13.0 (2026-08-10)
 
 ### Build System
