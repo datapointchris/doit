@@ -60,7 +60,7 @@ app.add_typer(labs.app, name='labs')
 app.add_typer(workflows.app, name='workflows')
 app.add_typer(claude.app, name='claude')
 app.add_typer(tools.app, name='tools')
-app.add_typer(find.index_app, name='index')
+app.add_typer(find.kit_app, name='kit')
 app.add_typer(sources.app, name='sources')
 app.add_typer(content.app, name='content')
 

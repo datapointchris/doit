@@ -95,7 +95,7 @@ def test_a_path_miss_is_reported_without_a_verdict(capsys):
     out = render(capsys, 'long-gone', tools.load_registry()['long-gone'])
 
     assert 'not on PATH' in out
-    assert 'doit index unresolved' in out
+    assert 'doit kit unresolved' in out
     assert 'stale entry' not in out, 'the card cannot tell a function from rot, so it does not claim to'
 
 

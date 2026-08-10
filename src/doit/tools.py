@@ -193,7 +193,7 @@ def render_tool(name: str, meta: dict, brief: bool = False, heading: bool = True
     # A miss is stated without a verdict attached. Shell functions and aliases
     # are never on PATH and are perfectly runnable, and they outnumber genuine
     # rot two to one here — so a card calling every miss a stale entry would be
-    # wrong most of the times it spoke. `doit index unresolved` separates them,
+    # wrong most of the times it spoke. `doit kit unresolved` separates them,
     # against the shell files rather than a guess, and is the one report that
     # should say it.
     head = invocation_head(usage)
@@ -201,7 +201,7 @@ def render_tool(name: str, meta: dict, brief: bool = False, heading: bool = True
         console.print(Text.from_markup('[green]✓[/] ') + Text(f'{head} is on PATH'))
     else:
         console.print(Text.from_markup('[yellow]⚠[/] ') + Text(f'{head or name} is not on PATH — functions and aliases never are'))
-        console.print(Text('  Sort the stale entries from those with doit index unresolved', style='cyan'), no_wrap=True)
+        console.print(Text('  Sort the stale entries from those with doit kit unresolved', style='cyan'), no_wrap=True)
 
 
 def render_function(name: str, description: str, body: str = '', brief: bool = False) -> None:
