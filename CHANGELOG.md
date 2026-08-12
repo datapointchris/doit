@@ -1,6 +1,85 @@
 # CHANGELOG
 
 
+## v2.0.0 (2026-08-12)
+
+### Bug Fixes
+
+- **find**: Report a missing picker as a failure
+  ([`dc59c62`](https://github.com/datapointchris/doit/commit/dc59c62cf00505b04204b2cb87e2ec63cb169fd1))
+
+`run_fzf` returned '' both when the pick was cancelled and when fzf was not installed, and every
+  caller mapped '' to 0. `choose` is read back through `$(...)`, where exit status is the caller's
+  only signal, so a machine without fzf reported "it ran and you chose nothing" — an empty command
+  line with no explanation. It returns None for a missing binary and '' for a cancelled pick, and
+  `find`, `choose` and `launch` each fail on None. Fixed in `run_fzf` rather than at one call site,
+  because all three shared the conflation.
+
+The headers are constants now. Two commands share one picker and the header is the only thing on
+  screen naming which one you are in, so the test compares against the constant instead of fishing a
+  phrase out of an English sentence — rewording a header was a test failure.
+
+`find` said "Search across every collection you own" beside a `choose` that said what it prints, so
+  the adjacent pair gave a reader nothing to choose between. `find` now carries the other half: it
+  opens everything known about the one you pick.
+
+Dropped the test asserting the printed invocation was not the row name. Its only assertion was
+  satisfied by a crash, and the test above it already asserts the exact output; its reasoning moved
+  into that docstring, where the registry key and the command still differ.
+
+### Features
+
+- **find**: Put a picked command on the prompt
+  ([`76a5ab2`](https://github.com/datapointchris/doit/commit/76a5ab2b7cb594136db92ac301cb4a80744dccba))
+
+`doit find` ended at a rendered card, so the one thing you would do next with a row — run it — meant
+  retyping what was on screen. `doit choose` is the same picker ending at stdout: it prints the
+  row's invocation and nothing else, so `$(doit choose)` composes in any shell.
+
+Landing it on the prompt is the shell's half, because the line editor belongs to the parent process
+  a subprocess cannot reach into. `doit shell-widgets zsh` emits that half — a ZLE widget replacing
+  the current line, and a `dochoose` function loading the next prompt. It is its own block rather
+  than part of the startup nudge, which is gated on wanting reminders; a keybinding that vanishes
+  with an unrelated toggle is one nobody trusts.
+
+The invocation rides through fzf as a fourth tab field rather than being resolved from the name a
+  second time. `--with-nth=1` already hides it, and a second index pass is a second answer that can
+  disagree with the row the human pointed at.
+
+The completion offered `index`, a namespace that became `kit`. Fixed, and a test now joins that
+  hand-written list to the command tree.
+
+- **shell**: Namespace init, widgets, completion
+  ([`1d51aa8`](https://github.com/datapointchris/doit/commit/1d51aa85c6a4c05f7c493e4068baed9dbb8f3d19))
+
+`doit shell init|widgets|completion`, replacing the flat `shell-init`, `shell-widgets` and
+  `completion`. Three commands out of one module, all taking the same shell argument and all
+  emitting a block to eval — the resource is the shell integration, and `doit shell --help` is now
+  the one screen that says what a shell loads from doit. The threshold was already passed by
+  `shell-init` and `completion` alone; `shell-widgets` only made it visible.
+
+The widget help claimed a keybinding the block never emitted. It emits none, and now says so: doit
+  cannot see what a keymap already holds, so a chord chosen here is one taken from whatever had it.
+  The block defines and names the widget, the help shows the bindkey to write, and the rc that knows
+  the keymap binds it.
+
+Rejected: keeping the flat spelling with a justification in CLAUDE.md, since a fourth block is
+  foreseeable and there is no reason to write. Rejected: splitting the difference by leaving `doit
+  completion` at the root to match the sibling `<tool> completion zsh` lines in the zshrc — that
+  leaves `doit shell --help` unable to name the third block, which is the discovery surface the
+  namespace exists to create, and doit's completion is a cached rc line nobody finds by typing.
+  Rejected: hidden root aliases, the permanent cost the standard names, bought to soften a window
+  that closes as soon as dotfiles carries the new spelling.
+
+BREAKING CHANGE: `doit shell-init` and `doit completion` are now `doit shell init` and `doit shell
+  completion`. dotfiles holds the rc lines that cache both, and its matching change is required.
+
+### Breaking Changes
+
+- **shell**: `doit shell-init` and `doit completion` are now `doit shell init` and `doit shell
+  completion`. dotfiles holds the rc lines that cache both, and its matching change is required.
+
+
 ## v1.0.1 (2026-08-12)
 
 ### Bug Fixes
