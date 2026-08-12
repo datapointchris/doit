@@ -59,6 +59,9 @@ def test_only_the_first_field_is_shown_and_searched():
 
 
 def test_choosing_prints_the_invocation_and_nothing_else(picks, capsys):
+    """The row is `ripgrep` and the answer is `rg`: a registry key is a package
+    name as often as a command, and printing the name would put something this
+    machine cannot run on the line."""
     picks(find.index_lines(ENTRIES)[0])
 
     assert find.cmd_choose('', None) == 0
@@ -66,15 +69,6 @@ def test_choosing_prints_the_invocation_and_nothing_else(picks, capsys):
     captured = capsys.readouterr()
     assert captured.out == 'rg [pattern] [path]\n'
     assert captured.err == ''
-
-
-def test_the_invocation_is_printed_even_where_it_differs_from_the_name(picks, capsys):
-    """A registry key is a package name as often as a command; printing the name
-    would put `ripgrep` on the line, which is not a thing this machine runs."""
-    picks(find.index_lines(ENTRIES)[0])
-    find.cmd_choose('', None)
-
-    assert capsys.readouterr().out.strip() != 'ripgrep'
 
 
 def test_backing_out_of_the_picker_is_not_an_error(picks, capsys):
@@ -86,13 +80,43 @@ def test_backing_out_of_the_picker_is_not_an_error(picks, capsys):
     assert capsys.readouterr().out == ''
 
 
-def test_the_choose_header_says_where_the_pick_lands(picks):
+@pytest.mark.parametrize('command', [find.cmd_choose, find.cmd_find])
+def test_a_missing_picker_is_a_failure_rather_than_a_cancelled_pick(monkeypatch, capsys, command):
+    """Esc and "fzf is not installed" both used to be ''. `choose` is read back
+    through `$(...)`, where exit status is the only signal the caller gets, so
+    a machine without fzf reported "it ran and you chose nothing"."""
+    monkeypatch.setattr(index, 'build_index', lambda sources=None: list(ENTRIES))
+    monkeypatch.setattr(find.shutil, 'which', lambda binary: None)
+
+    assert command('', None) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    assert 'fzf is not installed' in captured.err
+
+
+def test_launching_without_a_picker_fails_the_same_way(monkeypatch, capsys):
+    """`launch` reads one index of its own, so it does not inherit the guard."""
+    monkeypatch.setattr(index, 'index_tools', lambda: [])
+    monkeypatch.setattr(find.shutil, 'which', lambda binary: None)
+
+    assert find.cmd_launch() == 1
+    assert 'fzf is not installed' in capsys.readouterr().err
+
+
+def test_each_picker_names_where_its_own_pick_lands(picks):
     """Two commands share one picker, so the header is the only thing on screen
-    that says which one you are in."""
+    that says which one you are in. Compared against the constants rather than
+    a phrase, so rewording a header is not a test failure."""
     calls = picks('')
     find.cmd_choose('', None)
+    assert calls['header'] == find.CHOOSE_HEADER
 
-    assert 'command line' in calls['header']
+    calls = picks('')
+    find.cmd_find('', None)
+    assert calls['header'] == find.FIND_HEADER
+
+    assert find.CHOOSE_HEADER != find.FIND_HEADER
 
 
 def test_finding_still_opens_the_composite(monkeypatch, picks):

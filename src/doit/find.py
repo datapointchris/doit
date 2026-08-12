@@ -58,16 +58,28 @@ FZF_COMMON = [
     '--preview-window=right:62%',
 ]
 
+# The header is the only thing on screen naming which picker you are in, so it
+# is named here rather than quoted at the call site — two commands share one
+# picker, and a copy-paste header is the drift that makes them indistinguishable.
+FIND_HEADER = 'Enter opens everything known about it'
+CHOOSE_HEADER = 'Enter puts it on your command line'
+LAUNCH_HEADER = 'Your areas and tools · Enter shows it'
 
-def run_fzf(lines: list[str], query: str, preview: str, header: str) -> str:
-    """Pick one line with fzf, or '' if nothing was chosen.
+
+def run_fzf(lines: list[str], query: str, preview: str, header: str) -> str | None:
+    """Pick one line with fzf: the row, '' when the pick was cancelled, None when fzf is missing.
+
+    Cancelling and having no picker are different answers and every caller has
+    to tell them apart. `choose` is read back through `$(...)`, where exit status
+    is the caller's only signal — a missing binary reported as success is an
+    empty command line with no explanation of why.
 
     A missing fzf is reported rather than raised: the index is still usable
     through `--json`, and a stack trace would say less than one sentence does.
     """
     if not shutil.which('fzf'):
         error_console.print('fzf is not installed on this machine.')
-        return ''
+        return None
     command = [
         'fzf',
         *FZF_COMMON,
@@ -96,12 +108,9 @@ def cmd_find(term: str, sources: list[str] | None) -> int:
     if not entries:
         error_console.print('Nothing indexed. Fetch the library with [cyan]doit content sync[/].')
         return 1
-    selected = run_fzf(
-        index_lines(entries),
-        term,
-        'doit __preview {2} {3}',
-        'Enter opens everything known about it',
-    )
+    selected = run_fzf(index_lines(entries), term, 'doit __preview {2} {3}', FIND_HEADER)
+    if selected is None:
+        return 1
     if not selected:
         return 0
     return cmd_show(selected.split('\t')[2])
@@ -120,12 +129,9 @@ def cmd_choose(term: str, sources: list[str] | None) -> int:
     if not entries:
         error_console.print('Nothing indexed. Fetch the library with [cyan]doit content sync[/].')
         return 1
-    selected = run_fzf(
-        index_lines(entries),
-        term,
-        'doit __preview {2} {3}',
-        'Enter puts it on your command line',
-    )
+    selected = run_fzf(index_lines(entries), term, 'doit __preview {2} {3}', CHOOSE_HEADER)
+    if selected is None:
+        return 1
     if not selected:
         return 0
     print(selected.split('\t')[3])
@@ -141,7 +147,9 @@ def cmd_launch() -> int:
     own = [entry for entry in index.index_tools() if entry.category == 'custom-tools']
     rows = [f'{name:<18} {description}\t{name}' for name, description in AREAS]
     rows += [f'{entry.name:<18} {entry.description}\t{entry.name}' for entry in sorted(own, key=lambda e: e.name)]
-    selected = run_fzf(rows, '', 'doit __preview tool {2}', 'Your areas and tools · Enter shows it')
+    selected = run_fzf(rows, '', 'doit __preview tool {2}', LAUNCH_HEADER)
+    if selected is None:
+        return 1
     if not selected:
         return 0
     return cmd_show(selected.split('\t')[-1])
@@ -262,14 +270,15 @@ def lenses(source: list[str] | None) -> list[str] | None:
 
 
 def find_command(term: TermArgument = None, source: LensOption = None) -> None:
-    """Search across every collection you own."""
+    """Search everything you own and open all that is known about the one you pick."""
     raise typer.Exit(cmd_find(' '.join(term or []), lenses(source)))
 
 
 def choose_command(term: TermArgument = None, source: LensOption = None) -> None:
-    """Pick one thing and print what you would type to run it.
+    """Pick one thing and print what you would type to run it — read, never opened.
 
-    Bound to a key by `doit shell-widgets zsh`; `$(doit choose)` in any shell.
+    `$(doit choose)` in any shell. `doit shell widgets zsh` emits the zsh half
+    that lands the pick on the line editor instead of on stdout.
     """
     raise typer.Exit(cmd_choose(' '.join(term or []), lenses(source)))
 
