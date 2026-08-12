@@ -7,6 +7,12 @@ than a picker callback because knowing the name is the common case. `doit launch
 is the other direction: your areas and your own tools, for when the question is
 "what can I even run here".
 
+`doit choose` is the same picker ending somewhere else: it prints the row's
+invocation and nothing else, so the thing you pointed at can be run rather than
+only read. Landing it on the prompt is the shell's half — see `doit.shell` — and
+has to be, because the line editor belongs to the parent process this one cannot
+reach into.
+
 fzf is shelled out to rather than reimplemented. It is already the picker
 everywhere else on this machine, and a Python reimplementation would be a worse
 one that also had to be maintained.
@@ -75,8 +81,14 @@ def run_fzf(lines: list[str], query: str, preview: str, header: str) -> str:
 
 
 def index_lines(entries: list[index.Entry]) -> list[str]:
-    """`display <TAB> source <TAB> name` — field one is shown and searched."""
-    return [f'{entry.display()}\t{entry.source}\t{entry.name}' for entry in entries]
+    """`display <TAB> source <TAB> name <TAB> invocation` — field one is shown and searched.
+
+    The invocation rides along rather than being looked up again after the pick.
+    `--with-nth=1` means fzf neither displays nor matches it, and re-resolving a
+    name through a second `build_index()` is a second answer that can disagree
+    with the row the human actually pointed at.
+    """
+    return [f'{entry.display()}\t{entry.source}\t{entry.name}\t{entry.invocation}' for entry in entries]
 
 
 def cmd_find(term: str, sources: list[str] | None) -> int:
@@ -93,6 +105,31 @@ def cmd_find(term: str, sources: list[str] | None) -> int:
     if not selected:
         return 0
     return cmd_show(selected.split('\t')[2])
+
+
+def cmd_choose(term: str, sources: list[str] | None) -> int:
+    """The same pick, ending on the command line instead of in a card.
+
+    `find` answers "tell me about this" and `choose` answers "give me this to
+    run" — two terminal acts over one picker, so neither has to be a mode of the
+    other. Plain `print` rather than the console: this string is the answer a
+    caller reads back through `$(...)`, and a style code or a wrap in it would
+    land on the prompt verbatim.
+    """
+    entries = index.build_index(sources)
+    if not entries:
+        error_console.print('Nothing indexed. Fetch the library with [cyan]doit content sync[/].')
+        return 1
+    selected = run_fzf(
+        index_lines(entries),
+        term,
+        'doit __preview {2} {3}',
+        'Enter puts it on your command line',
+    )
+    if not selected:
+        return 0
+    print(selected.split('\t')[3])
+    return 0
 
 
 def cmd_launch() -> int:
@@ -208,18 +245,33 @@ def cmd_unresolved(as_json: bool) -> int:
 kit_app = typer.Typer(name='kit', no_args_is_help=True, help='Everything you own, and what you actually reach for.')
 
 
-def find_command(
-    term: Annotated[list[str] | None, typer.Argument(help='What to search for.')] = None,
-    source: Annotated[
-        list[str] | None,
-        typer.Option('--source', help=f'Limit to one collection (repeatable): {", ".join(index.LENSES)}'),
-    ] = None,
-) -> None:
-    """Search across every collection you own."""
+TermArgument = Annotated[list[str] | None, typer.Argument(help='What to search for.')]
+
+LensOption = Annotated[
+    list[str] | None,
+    typer.Option('--source', help=f'Limit to one collection (repeatable): {", ".join(index.LENSES)}'),
+]
+
+
+def lenses(source: list[str] | None) -> list[str] | None:
+    """The `--source` list, or a usage error naming what it could have been."""
     unknown = [name for name in source or [] if name not in index.LENSES]
     if unknown:
         raise typer.BadParameter(f'unknown source(s) {", ".join(unknown)}; choose from {", ".join(index.LENSES)}')
-    raise typer.Exit(cmd_find(' '.join(term or []), source))
+    return source
+
+
+def find_command(term: TermArgument = None, source: LensOption = None) -> None:
+    """Search across every collection you own."""
+    raise typer.Exit(cmd_find(' '.join(term or []), lenses(source)))
+
+
+def choose_command(term: TermArgument = None, source: LensOption = None) -> None:
+    """Pick one thing and print what you would type to run it.
+
+    Bound to a key by `doit shell-widgets zsh`; `$(doit choose)` in any shell.
+    """
+    raise typer.Exit(cmd_choose(' '.join(term or []), lenses(source)))
 
 
 def launch_command() -> None:

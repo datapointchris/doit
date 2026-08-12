@@ -5,6 +5,7 @@ parse is the classic way this breaks, and it breaks at shell startup on every
 machine at once rather than where it was written.
 """
 
+import re
 import shutil
 import subprocess
 import time
@@ -25,7 +26,7 @@ def parses(script: str) -> bool:
 
 
 @needs_zsh
-@pytest.mark.parametrize('generate', [shell.zsh_init, shell.zsh_completion])
+@pytest.mark.parametrize('generate', [shell.zsh_init, shell.zsh_completion, shell.zsh_widgets])
 def test_the_generated_zsh_parses(generate):
     assert parses(generate())
 
@@ -59,8 +60,52 @@ def test_completion_offers_a_pursuit_where_one_is_expected():
     assert 'log|skip)' in script, 'the two verbs that take a pursuit'
 
 
-def test_an_unsupported_shell_is_a_usage_error():
-    result = runner.invoke(cli_app, ['shell-init', 'fish'])
+def test_the_completion_offers_no_verb_the_cli_does_not_have():
+    """`index` survived here for two months after the namespace became `kit`,
+    because nothing joined this hand-written list to the command tree."""
+    offered = set(re.findall(r"^\s+'([a-z-]+):", shell.zsh_completion(), re.M))
+    registered = {command.name for command in cli_app.registered_commands}
+    registered |= {group.name for group in cli_app.registered_groups}
+
+    assert offered <= registered, f'completion offers {sorted(offered - registered)}'
+
+
+def test_the_widget_block_reaches_doit_only_through_a_public_verb():
+    """The two blocks this pattern replaced named doit's internals and broke."""
+    block = shell.zsh_widgets()
+
+    assert 'doit choose' in block
+    assert '.local/state' not in block
+    assert 'next-names.txt' not in block
+
+
+def test_the_widget_exists_before_anything_can_bind_it():
+    """dotfiles binds a key to this name, and the bind is silent when the widget
+    is missing — so the failure surfaces on a keypress rather than at startup."""
+    block = shell.zsh_widgets()
+
+    assert 'zle -N doit-choose-widget' in block
+    assert block.index('doit-choose-widget()') < block.index('zle -N doit-choose-widget')
+
+
+def test_the_widget_repaints_the_prompt_fzf_drew_over():
+    """fzf takes the screen and does not give it back; without this the prompt
+    is left visually corrupted after every pick."""
+    assert 'zle reset-prompt' in shell.zsh_widgets()
+
+
+def test_the_non_widget_path_loads_the_next_prompt():
+    """`print -z` keeps whatever is already on the line, which is the difference
+    between the function and the widget rather than an implementation detail."""
+    block = shell.zsh_widgets()
+
+    assert 'dochoose()' in block
+    assert 'print -z' in block
+
+
+@pytest.mark.parametrize('verb', ['shell-init', 'shell-widgets', 'completion'])
+def test_an_unsupported_shell_is_a_usage_error(verb):
+    result = runner.invoke(cli_app, [verb, 'fish'])
 
     assert result.exit_code == 2
     assert 'zsh' in result.output

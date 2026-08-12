@@ -44,10 +44,12 @@ app.command('log')(pursuits.log_command)
 app.command('skip')(pursuits.skip_command)
 app.command('dashboard')(dashboard.dashboard_command)
 app.command('find')(find.find_command)
+app.command('choose')(find.choose_command)
 app.command('launch')(find.launch_command)
 
 app.command('show')(find.show_command)
 app.command('shell-init')(shell.shell_init_command)
+app.command('shell-widgets')(shell.shell_widgets_command)
 app.command('completion')(shell.completion_command)
 add_update_command(app, UPDATE_CONFIG)
 
