@@ -88,6 +88,16 @@ def test_the_widget_exists_before_anything_can_bind_it():
     assert block.index('doit-choose-widget()') < block.index('zle -N doit-choose-widget')
 
 
+def test_the_block_binds_no_key_of_its_own():
+    """doit cannot see what the keymap already holds, so the rc binds and this
+    only defines and names the widget. The help screen says exactly that, and a
+    live bindkey here would make it a lie the day someone loses a chord."""
+    block = shell.zsh_widgets()
+
+    assert [line for line in block.splitlines() if line.strip().startswith('bindkey')] == []
+    assert 'doit-choose-widget' in block
+
+
 def test_the_widget_repaints_the_prompt_fzf_drew_over():
     """fzf takes the screen and does not give it back; without this the prompt
     is left visually corrupted after every pick."""
@@ -103,9 +113,9 @@ def test_the_non_widget_path_loads_the_next_prompt():
     assert 'print -z' in block
 
 
-@pytest.mark.parametrize('verb', ['shell-init', 'shell-widgets', 'completion'])
+@pytest.mark.parametrize('verb', ['init', 'widgets', 'completion'])
 def test_an_unsupported_shell_is_a_usage_error(verb):
-    result = runner.invoke(cli_app, [verb, 'fish'])
+    result = runner.invoke(cli_app, ['shell', verb, 'fish'])
 
     assert result.exit_code == 2
     assert 'zsh' in result.output

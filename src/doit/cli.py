@@ -48,9 +48,6 @@ app.command('choose')(find.choose_command)
 app.command('launch')(find.launch_command)
 
 app.command('show')(find.show_command)
-app.command('shell-init')(shell.shell_init_command)
-app.command('shell-widgets')(shell.shell_widgets_command)
-app.command('completion')(shell.completion_command)
 add_update_command(app, UPDATE_CONFIG)
 
 # What the fzf preview pane calls, not what you type.
@@ -63,6 +60,7 @@ app.add_typer(workflows.app, name='workflows')
 app.add_typer(claude.app, name='claude')
 app.add_typer(tools.app, name='tools')
 app.add_typer(find.kit_app, name='kit')
+app.add_typer(shell.app, name='shell')
 app.add_typer(sources.app, name='sources')
 app.add_typer(content.app, name='content')
 

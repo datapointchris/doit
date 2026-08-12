@@ -78,7 +78,7 @@ NUDGE_MAX_ITEMS = 8
 
 # The nudge interval is stored as plain minutes in the synced state dir so the
 # shell gate can read it with a bare `cat` (no parsing) and the value is shared
-# across machines. This is the same file `doit shell-init` emits a gate against.
+# across machines. This is the same file `doit shell init` emits a gate against.
 NUDGE_INTERVAL = xdg_state_home() / 'doit' / 'nudge-interval-minutes'
 
 
