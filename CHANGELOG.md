@@ -336,7 +336,7 @@ icb and learning renamed the verb that displays one instance from `view` to `sho
   dashboard row handle and the example pursuits register pointed at a command that no longer exists.
 
 The `view:` key in a pursuit is unchanged — it names the field, not the verb. Verb standardization
-  rationale is in ~/dev/standards/cli-design.md.
+  rationale is in standards/cli-design.md.
 
 
 ## v0.10.1 (2026-08-08)
@@ -694,7 +694,7 @@ The draw takes --explain and --reroll, which is cli-design.md's named disqualifi
 - Drop citations a reader of a public repo cannot open
   ([`0b6b957`](https://github.com/datapointchris/doit/commit/0b6b957bf2bc9e69356a44a7f625c6f61cbd08b9))
 
-Four comments pointed at ~/dev/standards and ~/dev/vision.md, which resolve only on my own machines.
+Four comments pointed at standards/ and ~/dev/vision.md, which resolve only on my own machines.
   The reasoning each one carried is worth keeping, so it stays inline; only the unopenable link
   goes.
 
