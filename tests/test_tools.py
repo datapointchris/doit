@@ -184,10 +184,47 @@ def test_list_can_be_scoped_to_one_category():
     assert 'ripgrep' in result.stdout
 
 
-def test_an_unknown_category_is_an_error_naming_the_real_ones():
+def test_an_unknown_category_is_a_usage_error_naming_the_ones_that_exist():
+    """Exit 2, like `find --source`. Exit 1 cannot be told from a run that failed."""
     result = runner.invoke(app, ['tools', 'list', '--category', 'nope'])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 2
+    assert 'search' in result.output
+    assert 'doit tools categories list' in result.output
+
+
+def test_an_unknown_category_is_caught_before_json_is_emitted():
+    """`--category nope --json` printed `[]` and exited 0 — the category read as empty."""
+    result = runner.invoke(app, ['tools', 'list', '--category', 'nope', '--json'])
+
+    assert result.exit_code == 2
+    assert '[]' not in result.output
+
+
+def test_uncategorised_selects_the_same_rows_on_both_paths(monkeypatch, tmp_path):
+    """A row authoring no category is grouped under `uncategorised`, so `--category` must reach it.
+
+    The JSON filter read the raw key, where the human path reads the bucket, so
+    the name the listing prints was the one name the JSON path could not select.
+    """
+    path = tmp_path / 'registry.yml'
+    path.write_text('tools:\n  homeless:\n    description: No category authored\n')
+    monkeypatch.setattr(tools, 'REGISTRY', path)
+
+    result = runner.invoke(app, ['tools', 'list', '--category', 'uncategorised', '--json'])
+
+    assert result.exit_code == 0
+    assert [row['name'] for row in json.loads(result.stdout)] == ['homeless']
+
+
+def test_an_empty_registry_does_not_turn_a_category_into_a_usage_error(monkeypatch, tmp_path):
+    """Before `doit content sync` every category is unknown; the explanation is the useful answer."""
+    monkeypatch.setattr(tools, 'REGISTRY', tmp_path / 'nope.yml')
+
+    result = runner.invoke(app, ['tools', 'list', '--category', 'search'])
+
+    assert result.exit_code == 0
+    assert 'doit content sync' in result.output
 
 
 def test_list_json_is_parsable():

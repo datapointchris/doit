@@ -260,13 +260,42 @@ def unknown_tool(name: str) -> int:
     return 1
 
 
+def category_of(meta: dict | None) -> str:
+    """The category a row is grouped under, named for the ones that authored none."""
+    return (meta or {}).get('category') or 'uncategorised'
+
+
+def category_names(registry: dict) -> list[str]:
+    """Every category present, in display order."""
+    return sorted({category_of(meta) for meta in registry.values()})
+
+
+def check_category(category: str | None, registry: dict) -> None:
+    """Reject an unknown `--category` as a usage error, before anything renders.
+
+    Ahead of the `--json` branch on purpose: a machine caller filtering on a
+    category that does not exist was being handed `[]` and exit 0, which reads
+    as "the category is empty" rather than "you named the wrong one".
+
+    Silent on an empty registry, so a machine that has not synced content yet
+    gets the `doit content sync` explanation rather than a usage error about a
+    category that would have been valid anywhere else.
+    """
+    if category and registry and category not in category_names(registry):
+        raise typer.BadParameter(
+            f'unknown category {category!r}; choose from {", ".join(category_names(registry))}. '
+            'Counts per category: doit tools categories list'
+        )
+
+
 def cmd_list(category: str | None, as_json: bool) -> int:
     registry = load_registry()
+    check_category(category, registry)
     if as_json:
         rows = [
             {'name': name, 'category': (meta or {}).get('category') or '', 'description': (meta or {}).get('description') or ''}
             for name, meta in sorted(registry.items())
-            if not category or (meta or {}).get('category') == category
+            if not category or category_of(meta) == category
         ]
         print(json.dumps(rows, indent=2))
         return 0
@@ -278,10 +307,7 @@ def cmd_list(category: str | None, as_json: bool) -> int:
     grouped: dict[str, list[tuple[str, str]]] = {}
     for name, meta in sorted(registry.items()):
         meta = meta or {}
-        grouped.setdefault(meta.get('category') or 'uncategorised', []).append((name, meta.get('description') or ''))
-    if category and category not in grouped:
-        error_console.print(Text(f'No category {category!r}. Known: {", ".join(sorted(grouped))}'))
-        return 1
+        grouped.setdefault(category_of(meta), []).append((name, meta.get('description') or ''))
     if category:
         grouped = {category: grouped[category]}
 
@@ -303,7 +329,7 @@ def cmd_list(category: str | None, as_json: bool) -> int:
 def category_counts() -> dict[str, int]:
     counts: dict[str, int] = {}
     for meta in load_registry().values():
-        name = (meta or {}).get('category') or 'uncategorised'
+        name = category_of(meta)
         counts[name] = counts.get(name, 0) + 1
     return counts
 
