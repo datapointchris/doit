@@ -1,6 +1,34 @@
 # CHANGELOG
 
 
+## v1.0.1 (2026-08-12)
+
+### Bug Fixes
+
+- **tools**: Unknown --category is a usage error
+  ([`b415b87`](https://github.com/datapointchris/doit/commit/b415b87ded04c1e9c72620574ec38ab736cb3d29))
+
+Exit 1 could not be told from a command that ran and failed, and the --json branch returned ahead of
+  the check, so a machine caller naming a category that does not exist was handed [] and exit 0 —
+  the category read as empty rather than wrong.
+
+check_category raises typer.BadParameter ahead of both renderings, naming the categories that exist
+  and pointing at doit tools categories list. It stays silent on an empty registry, where the doit
+  content sync explanation is the useful answer instead.
+
+The category fallback was spelled out at three call sites, which is how the two paths came to
+  disagree: the JSON filter compared the raw key while the listing bucketed absent ones under
+  uncategorised, so the one name the listing printed was the one name JSON could not select.
+
+### Documentation
+
+- Cite the standards without a machine path
+  ([`b40ee85`](https://github.com/datapointchris/doit/commit/b40ee858df251bad437bd4b360bb77b9c3148791))
+
+The citation carried an absolute path from one machine's layout. What a reader needs is the file and
+  the section, and those do not move.
+
+
 ## v1.0.0 (2026-08-10)
 
 ### Documentation
@@ -336,7 +364,7 @@ icb and learning renamed the verb that displays one instance from `view` to `sho
   dashboard row handle and the example pursuits register pointed at a command that no longer exists.
 
 The `view:` key in a pursuit is unchanged — it names the field, not the verb. Verb standardization
-  rationale is in standards/cli-design.md.
+  rationale is in ~/dev/standards/cli-design.md.
 
 
 ## v0.10.1 (2026-08-08)
@@ -694,7 +722,7 @@ The draw takes --explain and --reroll, which is cli-design.md's named disqualifi
 - Drop citations a reader of a public repo cannot open
   ([`0b6b957`](https://github.com/datapointchris/doit/commit/0b6b957bf2bc9e69356a44a7f625c6f61cbd08b9))
 
-Four comments pointed at standards/ and ~/dev/vision.md, which resolve only on my own machines.
+Four comments pointed at ~/dev/standards and ~/dev/vision.md, which resolve only on my own machines.
   The reasoning each one carried is worth keeping, so it stays inline; only the unopenable link
   goes.
 
