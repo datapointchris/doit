@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v2.4.0 (2026-08-13)
+
+### Features
+
+- **index**: Add a zsh keybinding lens
+  ([`abb63b6`](https://github.com/datapointchris/doit/commit/abb63b6b35a45d234a571107ed0287c2322eb647))
+
+The keys most worth finding are bound by plugins at load time — fzf's ^T and ^[c, atuin's ^R — so
+  they appear in no config file any lens could parse. The lens asks zsh itself, for the reason the
+  git lens asks git.
+
+A raw keymap is mostly vi motions, which discover nothing, so the live keymap is diffed against a
+  stock 'zsh -f'. What survives is exactly what this machine's config added, and the filter needs no
+  denylist to maintain.
+
+Narrowed again to the keymaps main actually points at: a plugin binds into both editing modes and
+  only one is live, so the dormant copy would offer keys that do nothing when pressed.
+
+
 ## v2.3.0 (2026-08-13)
 
 ### Features
