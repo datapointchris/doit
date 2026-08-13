@@ -34,6 +34,7 @@ import typer
 from rich.text import Text
 
 from doit.paths import library_dir
+from doit.paths import library_source
 from doit.paths import xdg_state_home
 from doit.render import console
 from doit.render import error_console
@@ -69,6 +70,11 @@ def is_checkout(path: Path) -> bool:
 def remote_url(path: Path) -> str:
     result = git('remote', 'get-url', 'origin', cwd=path)
     return result.stdout.strip() if result.returncode == 0 else ''
+
+
+def content_source() -> str:
+    """Which layer named this checkout, for `content status` to print."""
+    return '$DOIT_CONTENT_DIR' if os.environ.get('DOIT_CONTENT_DIR') else library_source()
 
 
 def ensure_cloned() -> bool:
@@ -230,7 +236,7 @@ def cmd_status() -> int:
     """
     if not is_checkout(CONTENT_DIR):
         return explain_missing()
-    console.print(Text(f'path    {CONTENT_DIR}'), soft_wrap=True)
+    console.print(Text(f'path    {CONTENT_DIR}  (from {content_source()})'), soft_wrap=True)
     console.print(Text(f'remote  {remote_url(CONTENT_DIR) or "(none)"}'), soft_wrap=True)
     dirty = git('status', '--porcelain', cwd=CONTENT_DIR).stdout.strip()
     if not dirty:
