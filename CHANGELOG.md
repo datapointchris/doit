@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v2.1.0 (2026-08-13)
+
+### Features
+
+- **kit**: Read the usage table back as prose
+  ([`1cbd2c6`](https://github.com/datapointchris/doit/commit/1cbd2c67e38b3519443fef8eeb7e8c5c956aa73e))
+
+
 ## v2.0.0 (2026-08-12)
 
 ### Bug Fixes
