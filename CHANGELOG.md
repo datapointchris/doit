@@ -1,6 +1,40 @@
 # CHANGELOG
 
 
+## v2.1.1 (2026-08-13)
+
+### Bug Fixes
+
+- **kit**: Stop the digest sending private context
+  ([`2c0f7ed`](https://github.com/datapointchris/doit/commit/2c0f7ed0198d73c8c27a26e42c4c3a1bce207f39))
+
+`claude -p` injects the machine's own configuration ahead of the prompt, so every reading sent the
+  whole user-level CLAUDE.md and the account email beside a table this module filters field by
+  field. That memory loads from the home directory whatever the working directory is, so running in
+  a scratch directory bounded project memory and nothing else, and the claim that the payload was
+  the whole of what the session saw did not hold.
+
+`--safe-mode` is the flag that bounds it. Measured against a loopback endpoint on Claude Code
+  2.1.229, one call made twice differing only in that flag: a first user message of 64,551
+  characters without it and 373 with, an identical tool array, and OAuth authenticating unchanged.
+  `--bare` reads as the stronger form of the same flag and breaks that OAuth session, so it is not
+  the answer.
+
+Nothing pinned any of it. The argv spy asserted only that the prompt was absent from the command, so
+  deleting a containment flag left the suite green. Each flag is now asserted positively, the deny
+  list by its joined value.
+
+A reading also reaches stdout before it is stored. The append ran first and only DigestFailed was
+  caught, so an unwritable state directory raised through an answer that had already cost a request;
+  the file is replaceable and the answer is not. A failed write now names the path and shows in the
+  exit code.
+
+DigestFailed carries a Failure key rather than a sentence, which tells the four modes apart and
+  keeps a test off the wording. A handle matching nothing lists the handles that do, instead of
+  pointing at the verb that spends a request to recover from a typo, and `digest list` is where
+  those handles come from.
+
+
 ## v2.1.0 (2026-08-13)
 
 ### Features
