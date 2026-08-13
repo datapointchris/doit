@@ -16,12 +16,23 @@ and it filters the row *after* serializing it, so a field added to ``Row``
 upstream is dropped rather than silently joining the payload.
 
 The session is denied every tool as well, so it cannot go and open the history
-file those counts were derived from. The payload is the whole of what it sees.
+file those counts were derived from.
 
-``claude -p`` is a network call, so it happens only when asked: ``run``, or the
-fleet schedule entry that invokes ``run``. ``show`` reads what a run wrote and
-never reaches the network, which is why the two are separate verbs rather than
-one verb and a flag.
+**The payload is not the whole of what gets sent, and bounding the rest takes a
+flag.** ``claude -p`` injects the machine's own configuration ahead of the
+prompt, and the user-level ``CLAUDE.md`` loads out of the home directory whatever
+the working directory is — so running somewhere neutral bounds the *project*
+memory and nothing else. Measured against a loopback endpoint on Claude Code
+2.1.229, the same call made twice and differing only in that flag: the first user
+message was 64,551 characters without it and 373 with. What survives the flag is
+the account email and the date, which the CLI injects either way. ``--bare``
+reads as the stronger form of the same flag and is not one — it breaks the OAuth
+session a scheduled run authenticates with.
+
+``claude -p`` is a network call, so it happens only when asked: ``run``, or a
+schedule that invokes ``run``. ``show`` and ``list`` read what a run wrote and
+never reach the network, which is why they are separate verbs rather than one
+verb and a flag.
 
 Readings are kept under the state directory rather than the cache directory
 because a recompute cannot rebuild one — a second call costs another request
@@ -37,6 +48,7 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
@@ -59,17 +71,16 @@ SCHEMA_VERSION = 1
 PAYLOAD_FIELDS = ('typed', 'sources', 'count', 'days_since')
 
 # What the session may not do. `--allowed-tools` pre-approves rather than
-# confines, so the deny list is the only flag that restricts anything — measured
-# in fleet's grader on 2026-08-12, where `--allowed-tools "Read,Glob,Grep"` ran
-# Bash regardless. Everything is denied because the reading needs nothing: the
-# table is in the prompt, and a session that can read a file could open the
-# shell history this payload exists to stay clear of.
+# confines, so the deny list is the only flag that restricts anything —
+# `--allowed-tools "Read,Glob,Grep"` left Bash in the tool set on Claude Code
+# 2.1.x. Everything is denied because the reading needs nothing: the table is in
+# the prompt, and a session that can read a file could open the shell history
+# this payload exists to stay clear of.
 DENIED_TOOLS = ('Bash', 'Read', 'Write', 'Edit', 'NotebookEdit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task')
 
 # Replaces the session's output style for the call. Without it the active style
 # wraps the answer in headings and commentary, which is what gets stored and
-# read back months later. `--system-prompt` also preserves the OAuth session
-# where `--bare` breaks it.
+# read back months later.
 SYSTEM_PROMPT = (
     'You read one table of aggregated command statistics and reply with short plain-text prose. '
     'No preamble, no headings, no bullet lists, no markdown, no code fences. '
@@ -80,11 +91,50 @@ SYSTEM_PROMPT = (
 # rather than hang a scheduled run forever.
 DEFAULT_TIMEOUT_SECONDS = 300
 
+# How many handles a miss names before it points at `list` instead. An error is
+# read at a glance, and readings accumulate for as long as the schedule runs, so
+# printing the whole record buries the sentence that says what went wrong.
+HANDLES_ON_MISS = 5
+
 STATE_DIR = xdg_state_home() / 'doit'
 
 
+class Failure(StrEnum):
+    """Why a reading could not be taken, as a key rather than as a sentence.
+
+    The four want different reactions — an absent binary is a machine to fix, a
+    timeout is worth retrying, an empty answer is not — so a caller has to be
+    able to tell them apart, which a printable string does not allow. Wording
+    lives once in :data:`FAILURE_TEXT` keyed by this, so a sentence can be
+    rewritten without a test noticing.
+    """
+
+    NOT_INSTALLED = 'not-installed'
+    TIMED_OUT = 'timed-out'
+    FAILED = 'failed'
+    EMPTY = 'empty'
+
+
+FAILURE_TEXT: dict[Failure, str] = {
+    Failure.NOT_INSTALLED: 'claude is not installed on this machine, so no reading can be taken.',
+    Failure.TIMED_OUT: 'claude did not answer within {detail}.',
+    Failure.FAILED: 'claude failed: {detail}',
+    Failure.EMPTY: 'claude returned nothing.',
+}
+
+
 class DigestFailed(Exception):
-    """The reading could not be taken. Carries the sentence to print."""
+    """The reading could not be taken.
+
+    ``reason`` is the key a caller branches on and a test asserts; the sentence
+    is derived from it, and ``detail`` carries whatever the runtime knew that the
+    wording could not.
+    """
+
+    def __init__(self, reason: Failure, detail: str = '') -> None:
+        self.reason = reason
+        self.detail = detail
+        super().__init__(FAILURE_TEXT[reason].format(detail=detail))
 
 
 @dataclass(frozen=True)
@@ -176,16 +226,23 @@ def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
     argument list a shell refuses, and argv is readable from `ps` by anything on
     the machine.
 
-    The call runs in a scratch directory so no repo's `CLAUDE.md` is loaded as
-    instructions — `doit` is run from wherever you happen to be standing, and a
-    reading shaped by whichever repo that was is not reproducible.
+    `--safe-mode` is what keeps the payload the payload. Without it the session
+    loads the machine's own configuration and sends it ahead of the prompt, so a
+    module that filters a table field by field ships an unbounded personal
+    document beside it. Nothing about the answer shows that the flag is missing.
+
+    The call also runs in a scratch directory, which bounds the working directory
+    independently of what any one flag means: `doit` runs from wherever you
+    happen to be standing, and a reading shaped by whichever repo that was is not
+    reproducible.
     """
     if not shutil.which('claude'):
-        raise DigestFailed('claude is not installed on this machine, so no reading can be taken.')
+        raise DigestFailed(Failure.NOT_INSTALLED)
 
     command = [
         'claude',
         '-p',
+        '--safe-mode',
         '--system-prompt',
         SYSTEM_PROMPT,
         '--disallowed-tools',
@@ -195,14 +252,13 @@ def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
         try:
             result = subprocess.run(command, input=prompt, text=True, capture_output=True, cwd=scratch, timeout=timeout, check=False)
         except subprocess.TimeoutExpired as expired:
-            raise DigestFailed(f'claude did not answer within {timeout:.0f}s.') from expired
+            raise DigestFailed(Failure.TIMED_OUT, f'{timeout:.0f}s') from expired
 
     if result.returncode != 0:
-        detail = result.stderr.strip() or f'exit {result.returncode}'
-        raise DigestFailed(f'claude failed: {detail}')
+        raise DigestFailed(Failure.FAILED, result.stderr.strip() or f'exit {result.returncode}')
     text = result.stdout.strip()
     if not text:
-        raise DigestFailed('claude returned nothing.')
+        raise DigestFailed(Failure.EMPTY)
     return text
 
 
@@ -223,6 +279,24 @@ def append(path: Path, digest: Digest) -> Digest:
     with path.open('a', encoding='utf-8') as handle:
         handle.write(json.dumps(record) + '\n')
     return digest
+
+
+def store(path: Path, digest: Digest) -> bool:
+    """Append the reading, reporting a write failure instead of raising through it.
+
+    Two things are at stake and only one of them can be recovered. The request is
+    spent whether or not the file is writable, so a caller that lets the write
+    take the process down loses the answer it already paid for; a caller that
+    prints first loses a record another run can replace. The exit code still says
+    something went wrong, because a schedule whose record silently stops arriving
+    has no other way to find out.
+    """
+    try:
+        append(path, digest)
+    except OSError as failure:
+        error_console.print(f'Reading taken but not stored at {path} — {failure}')
+        return False
+    return True
 
 
 def read_all(directory: Path) -> list[Digest]:
@@ -279,9 +353,8 @@ def cmd_run(days: int, directory: Path) -> int:
         days=days,
         text=text,
     )
-    append(digest_path(directory, digest.machine), digest)
     print(digest.text)
-    return 0
+    return 0 if store(digest_path(directory, digest.machine), digest) else 1
 
 
 def emit(digest: Digest) -> None:
@@ -289,13 +362,32 @@ def emit(digest: Digest) -> None:
     print(json.dumps(dataclasses.asdict(digest), indent=2))
 
 
-def cmd_show(handle: str, as_json: bool, directory: Path) -> int:
-    """Print a stored reading without touching the network."""
-    chosen = select(read_all(directory), handle)
-    if chosen is None:
-        error_console.print(f'No reading stored for {handle!r}.' if handle else 'No reading stored yet.')
+def report_no_match(handle: str, kept: list[Digest]) -> int:
+    """Say what to do next, which is a different thing in each of the two cases.
+
+    With nothing stored, spending a request is the only move there is. With
+    readings stored, the handle was mistyped — and `run` would then spend a
+    request to recover from a typo, while the handles that do resolve fix it for
+    nothing.
+    """
+    if not kept:
+        error_console.print('No reading stored yet.')
         error_console.print('Take one with [cyan]doit kit digest run[/].')
         return 1
+    error_console.print(f'No reading stored for {handle!r}. Stored readings, newest first:')
+    for digest in reversed(kept[-HANDLES_ON_MISS:]):
+        error_console.print(f'  [cyan]{digest.generated}[/] · {digest.machine}')
+    if len(kept) > HANDLES_ON_MISS:
+        error_console.print('See the rest with [cyan]doit kit digest list[/].')
+    return 1
+
+
+def cmd_show(handle: str, as_json: bool, directory: Path) -> int:
+    """Print a stored reading without touching the network."""
+    kept = read_all(directory)
+    chosen = select(kept, handle)
+    if chosen is None:
+        return report_no_match(handle, kept)
     if as_json:
         emit(chosen)
         return 0
@@ -304,18 +396,47 @@ def cmd_show(handle: str, as_json: bool, directory: Path) -> int:
     return 0
 
 
+def cmd_list(as_json: bool, directory: Path) -> int:
+    """Name every stored reading, oldest first, so `show` has a handle to be given."""
+    kept = read_all(directory)
+    # An empty record is an empty array, not the prose hint: --json is parsed by
+    # whatever asked for it, and a sentence on stdout is a parse error rather
+    # than the readable line it looks like.
+    if as_json:
+        # Plain print, never the rich console: a Console soft-wraps at terminal
+        # width, which would put newlines inside JSON strings and hand a consumer
+        # a parse error instead of data.
+        print(json.dumps([dataclasses.asdict(digest) for digest in kept], indent=2))
+        return 0
+    if not kept:
+        console.print('No reading stored yet.')
+        console.print('Take one with [cyan]doit kit digest run[/].')
+        return 0
+    console.rule('[cyan]Readings', align='left')
+    for digest in kept:
+        console.print(f'  [cyan]{digest.generated}[/] · {digest.machine} · {digest.rows} rows, cold after {digest.days}d')
+    console.print('\nRead one:  [cyan]doit kit digest show <handle>[/]')
+    return 0
+
+
 app = typer.Typer(name='digest', no_args_is_help=True, help='What your usage table says, read back as prose.')
 
 
 DaysOption = Annotated[int, typer.Option('--days', help='Days without a run before a row counts as cold.')]
+
+JsonOption = Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')]
 
 
 @app.command('run')
 def digest_run_command(days: DaysOption = usage.DEFAULT_DAYS) -> None:
     """Read your usage table with claude and store what it says.
 
-    The only command here that reaches the network. It sends the aggregated
-    table — what you type, how often, how long ago — and never a command line.
+    The only command here that reaches the network, and one run is one request.
+    It sends the aggregated table — what you type, how often, how long ago — and
+    never a command line.
+
+        doit kit digest run             read the table as it stands today
+        doit kit digest run --days 30   count a row cold after a month, not a season
     """
     raise typer.Exit(cmd_run(days, STATE_DIR))
 
@@ -323,7 +444,27 @@ def digest_run_command(days: DaysOption = usage.DEFAULT_DAYS) -> None:
 @app.command('show')
 def digest_show_command(
     when: Annotated[str | None, typer.Argument(help='A stored timestamp, or any prefix of one. Omitted, the newest.')] = None,
-    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
+    as_json: JsonOption = False,
 ) -> None:
-    """Print a reading a run stored."""
+    """Print a reading a run already took, without spending another.
+
+    Handles come from `doit kit digest list`, and a date is a handle because any
+    prefix of a stored timestamp resolves.
+
+        doit kit digest show              the newest reading
+        doit kit digest show 2026-08-12   the reading taken that day
+    """
     raise typer.Exit(cmd_show(when or '', as_json, STATE_DIR))
+
+
+@app.command('list')
+def digest_list_command(as_json: JsonOption = False) -> None:
+    """Name every reading stored, oldest first.
+
+    The handles `show` takes, and how far back the record goes. Reads the stored
+    file, so it answers on a machine that has no claude on it at all.
+
+        doit kit digest list          what has been read, and when
+        doit kit digest list --json   every reading whole, text included
+    """
+    raise typer.Exit(cmd_list(as_json, STATE_DIR))
