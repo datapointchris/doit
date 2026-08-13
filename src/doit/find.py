@@ -34,6 +34,7 @@ from typing import Annotated
 import typer
 from rich.text import Text
 
+from doit import digest
 from doit import index
 from doit import skills
 from doit import tools
@@ -251,6 +252,11 @@ def cmd_unresolved(as_json: bool) -> int:
 
 
 kit_app = typer.Typer(name='kit', no_args_is_help=True, help='Everything you own, and what you actually reach for.')
+
+# The reading over the same table `usage` and `unused` count, so it belongs
+# beside them rather than at the root. Its own module because it is the one part
+# of `kit` that leaves the machine.
+kit_app.add_typer(digest.app, name='digest')
 
 
 TermArgument = Annotated[list[str] | None, typer.Argument(help='What to search for.')]
