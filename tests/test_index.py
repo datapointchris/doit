@@ -42,9 +42,55 @@ tools:
 """
 
 
+# The leading greeting is deliberate: a zshrc that prints on startup is ordinary,
+# and the parser has to survive one. So are the range and the key-to-key alias,
+# which are the two shapes `bindkey` emits that name no widget at all.
+LIVE_BINDKEYS = """\
+ ✓ zsh loaded
+#keymap main
+"^A"-"^C" self-insert
+"^G" gwip
+"^H" fzf-man-widget
+"^I" expand-or-complete
+"^R" atuin-search-viins
+"^S" self-insert
+"gUU" "gUgU"
+#keymap emacs
+"^A" beginning-of-line
+"^T" fzf-file-widget
+#keymap viins
+"^A"-"^C" self-insert
+"^G" gwip
+"^H" fzf-man-widget
+"^I" expand-or-complete
+"^R" atuin-search-viins
+"^S" self-insert
+"gUU" "gUgU"
+#keymap vicmd
+"^R" fzf-history-widget
+"j" down-line-or-history
+"""
+
+STOCK_BINDKEYS = """\
+#keymap main
+"^A" beginning-of-line
+#keymap emacs
+"^A" beginning-of-line
+#keymap viins
+"^A"-"^C" self-insert
+"^H" vi-backward-delete-char
+"^I" expand-or-complete
+"^R" redisplay
+#keymap vicmd
+"^R" redo
+"j" down-line-or-history
+"""
+
+
 @pytest.fixture(autouse=True)
 def collections(tmp_path, monkeypatch):
     """Point every lens at a fixture, so no test reads the real machine."""
+    monkeypatch.setattr(index, 'zsh_bindkeys', lambda interactive: LIVE_BINDKEYS if interactive else STOCK_BINDKEYS)
     registry = tmp_path / 'registry.yml'
     registry.write_text(REGISTRY_YAML)
     monkeypatch.setattr(tools, 'REGISTRY', registry)
@@ -176,6 +222,71 @@ def test_tmux_keys_come_from_the_card_so_the_popup_cannot_drift():
     # boundary; the key you actually press is unescaped.
     assert 'prefix + |' in keys
     assert keys['prefix + |'].description == 'split vertical'
+
+
+def test_zsh_keys_are_what_your_config_adds_to_a_stock_zsh():
+    """A raw keymap is mostly vi motions. The diff is the part you did not know."""
+    keys = by_name(index.index_zsh_keys())
+
+    assert set(keys) == {'viins ^G', 'viins ^H', 'viins ^R', 'vicmd ^R'}
+    assert 'viins ^I' not in keys, 'bound identically in a stock zsh'
+
+
+def test_the_dormant_editing_mode_is_not_indexed():
+    """fzf binds into both modes. Only the one `main` points at can be pressed."""
+    keys = by_name(index.index_zsh_keys())
+
+    assert 'emacs ^T' not in keys, 'main is viins here, so the emacs keymap is unreachable'
+    assert not any(key.startswith('main ') for key in keys), 'reported under its real name'
+
+
+def test_an_unrecognised_editing_mode_is_reported_as_main():
+    """A keymap linked to main under some other name is still what you press."""
+    bindings = {('main', '^G'): 'gwip', ('mine', '^G'): 'gwip'}
+
+    assert index.active_keymaps(bindings) == ('main',)
+
+
+def test_a_zsh_key_carries_the_widget_it_runs():
+    assert by_name(index.index_zsh_keys())['viins ^R'].command == 'atuin-search-viins'
+    assert by_name(index.index_zsh_keys())['viins ^R'].invocation == '^R', 'the invocation is what you press'
+
+
+def test_the_keymap_is_in_the_name_because_one_key_is_two_bindings():
+    """`^R` is atuin in insert mode and fzf in command mode."""
+    keys = by_name(index.index_zsh_keys())
+
+    assert keys['viins ^R'].command == 'atuin-search-viins'
+    assert keys['vicmd ^R'].command == 'fzf-history-widget'
+
+
+def test_a_widget_you_wrote_is_described_by_its_own_annotation():
+    """The `#-->` line above the function stays the only place it is written down."""
+    assert by_name(index.index_zsh_keys())['viins ^G'].description == 'commit work in progress'
+
+
+def test_an_unknown_widget_falls_back_to_its_own_name():
+    assert by_name(index.index_zsh_keys())['viins ^H'].description == 'fzf man widget'
+
+
+def test_bulk_and_alias_bindings_never_become_rows():
+    """A range is always self-insert, and `"gUU" "gUgU"` names no widget at all."""
+    keys = by_name(index.index_zsh_keys())
+
+    assert not any(key.endswith('^S') for key in keys), 'self-insert is not a discovery'
+    assert not any('gUU' in key for key in keys)
+
+
+def test_a_zsh_key_is_never_reported_as_rot():
+    """A keybinding is pressed, not typed, so PATH has nothing to say about it."""
+    assert not [entry for entry in index.unresolved() if entry.source == 'zsh']
+
+
+def test_a_machine_without_zsh_still_gets_every_other_lens(monkeypatch):
+    monkeypatch.setattr(index, 'zsh_bindkeys', lambda interactive: '')
+
+    assert index.index_zsh_keys() == []
+    assert index.build_index(), 'the other collections still index'
 
 
 def test_build_index_can_be_scoped_to_one_collection():

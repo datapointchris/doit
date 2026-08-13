@@ -43,7 +43,7 @@ Anything else needing history folds this, never re-reads it.
 - **State** — `$XDG_STATE_HOME/doit/`. Per-machine wherever a sync layer would otherwise have to
   merge concurrent writes, which it cannot.
 
-## One renderer per collection, and `doit.tools` owns three of them
+## One renderer per collection, and `doit.tools` owns most of them
 
 `doit find` and `doit show` assemble a subject from every collection that has it and render none
 of it themselves — each lens hands off to whatever owns it. `doit.tools` is that owner for the

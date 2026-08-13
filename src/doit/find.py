@@ -204,7 +204,7 @@ def cmd_show(subject: str) -> int:
         render_section('skill — Claude skill', 'green')
         if skill := skills.load_skill(subject):
             skills.render_skill(skill, heading=False)
-    for source in ('func', 'alias', 'git', 'forgit', 'tmux'):
+    for source in ('func', 'alias', 'git', 'forgit', 'zsh', 'tmux'):
         if source in found:
             console.print()
             render_lens_card(found[source])
@@ -225,6 +225,8 @@ def render_lens_card(entry: index.Entry, brief: bool = False) -> None:
         tools.render_git_alias(entry.name, entry.command, brief=brief)
     elif entry.source == 'forgit':
         tools.render_forgit(entry.name, entry.command, brief=brief)
+    elif entry.source == 'zsh':
+        tools.render_zsh_key(entry.name, entry.command, entry.description, brief=brief)
     else:
         tools.card_title(entry.invocation, entry.source)
         tools.card_detail(entry.description, brief)

@@ -1,10 +1,11 @@
 """The federated index: everything you own, in one searchable list.
 
-Eight collections, one row shape. The tools registry, the workflow cards, Claude
-skills, annotated shell functions, aliases, git aliases, forgit's fzf shortcuts,
-and the tmux keybindings parsed out of their own card. doit owns none of them —
-each row names where it came from and what to type, and rendering a subject is
-delegated back to whatever owns it.
+One row shape over every collection — `LENSES` is the roster. The tools
+registry, the workflow cards, Claude skills, annotated shell functions, aliases,
+git aliases, forgit's fzf shortcuts, the tmux keybindings parsed out of their own
+card, and the zsh keys your config binds. doit owns none of them — each row names
+where it came from and what to type, and rendering a subject is delegated back to
+whatever owns it.
 
 **Every row carries its invocation, not just its name.** A registry key is a
 package name as often as a command — `ripgrep` installs `rg`, `git-delta`
@@ -19,6 +20,7 @@ What survives it is shell integrations defined at runtime (`br`, `z`, `nvm`),
 which are not rot, plus entries that genuinely are.
 """
 
+import functools
 import os
 import re
 import shutil
@@ -279,6 +281,162 @@ def index_tmux_keys() -> list[Entry]:
     return entries
 
 
+# Every keymap that could be the live one, plus `main` to identify which of them
+# is. Both editing modes are asked for because which one a machine runs is its own
+# choice, and only the one `main` points at ends up indexed.
+ZSH_KEYMAPS = ('main', 'emacs', 'viins', 'vicmd')
+
+# Bound in every zsh and never a discovery: literal insertion, the terminal's own
+# escape sequences, and the digit prefix.
+ZSH_NOISE = frozenset({'self-insert', 'undefined-key', 'bracketed-paste', 'digit-argument'})
+
+# What zsh's own widgets do, in the words someone searching would use. Only the
+# ones a config actually binds need an entry — a widget absent here falls back to
+# its own name, which is already most of a description.
+ZSH_WIDGETS = {
+    '_bash_complete-word': "complete the word using bash's completion rules",
+    '_bash_list-choices': "list matches using bash's completion rules",
+    '_complete_debug': 'run completion again with tracing on, into a pager',
+    '_complete_help': 'show which completion functions and tags apply here',
+    '_complete_tag': 'complete restricted to one group of matches',
+    '_correct_filename': 'spell-correct the filename under the cursor',
+    '_correct_word': 'spell-correct the word under the cursor',
+    '_expand_alias': 'expand the alias under the cursor in place',
+    '_expand_word': 'expand the word under the cursor in place',
+    '_history-complete-newer': 'complete from newer matches in history',
+    '_history-complete-older': 'complete from older matches in history',
+    '_list_expansions': 'list what the current word would expand to',
+    '_most_recent_file': 'insert the most recently modified matching file',
+    '_next_tags': 'cycle to the next group of completion matches',
+    '_read_comp': 'read a completion specification at the prompt',
+    'atuin-search': 'search shell history with atuin',
+    'atuin-search-viins': 'search shell history with atuin',
+    'fzf-cd-widget': 'cd into a directory picked with fzf',
+    'fzf-completion': 'complete the current word through fzf',
+    'fzf-file-widget': 'insert a file path picked with fzf',
+    'fzf-history-widget': 'search shell history with fzf',
+}
+
+# `"^H" fzf-man-widget`. A range (`"^A"-"^C"`) fails it at the space, which is
+# wanted — a range is only ever bulk self-insert. So does `"gUU" "gUgU"`, which
+# aliases one key sequence to another rather than naming a widget.
+ZSH_BINDING = re.compile(r'^"((?:[^"\\]|\\.)*)"\s+([^"\s]\S*)$')
+
+ZSH_DUMP = 'for keymap in {}; do print "#keymap $keymap"; bindkey -M $keymap; done'.format(' '.join(ZSH_KEYMAPS))
+
+
+@functools.cache
+def zsh_bindkeys(interactive: bool) -> str:
+    """The keymaps as zsh itself reports them, or '' when it cannot be asked.
+
+    Interactive is the live shell, with every plugin loaded; `-f` is stock zsh
+    with no startup files at all. The pair is what makes the diff possible.
+
+    Cached because a `doit find` that opens a card builds the index twice, and
+    the interactive read is the most expensive thing in it — it sources the whole
+    zshrc. Safe only because doit is a short-lived process.
+    """
+    flags = ['-i', '-c'] if interactive else ['-f', '-c']
+    try:
+        result = subprocess.run(
+            ['zsh', *flags, ZSH_DUMP],
+            capture_output=True,
+            text=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ''
+    return result.stdout
+
+
+def parse_bindkeys(text: str) -> dict[tuple[str, str], str]:
+    """`{(keymap, key): widget}` from a `bindkey` dump.
+
+    Anything that is not a `#keymap` marker or a binding is dropped, which is
+    what makes a zshrc that greets you on startup harmless here.
+    """
+    bindings: dict[tuple[str, str], str] = {}
+    keymap = ''
+    for line in text.splitlines():
+        if line.startswith('#keymap '):
+            keymap = line.removeprefix('#keymap ').strip()
+        elif keymap and (match := ZSH_BINDING.match(line)):
+            bindings[keymap, match.group(1)] = match.group(2)
+    return bindings
+
+
+def active_keymaps(bindings: dict[tuple[str, str], str]) -> tuple[str, ...]:
+    """The keymaps a key you press can actually reach.
+
+    `main` is an alias for whichever editing mode is live, so the other mode is
+    dormant — fzf binds its widgets into both, and indexing the dormant copy
+    offers keys that do nothing when pressed. Command mode ships with vi
+    insert mode and is unreachable without it.
+
+    Reported under the real name rather than as `main`, because the name is what
+    a `bindkey -M` goes on to use.
+    """
+
+    def keys_of(name: str) -> dict[str, str]:
+        return {key: widget for (keymap, key), widget in bindings.items() if keymap == name}
+
+    main = keys_of('main')
+    for mode in ('viins', 'emacs'):
+        if main and keys_of(mode) == main:
+            return (mode, 'vicmd') if mode == 'viins' else (mode,)
+    # A keymap of someone's own making, linked to main under a name this does not
+    # know. Indexing it as `main` is worse than dropping it.
+    return ('main',)
+
+
+def index_zsh_keys() -> list[Entry]:
+    """Keys your zsh binds that a stock zsh does not.
+
+    Asked of zsh rather than read out of the config files, for the reason the git
+    lens is asked of git: fzf and atuin bind their widgets when they load, so the
+    keys most worth finding — `^R`, `^T`, `^[c` — appear in no file this repo or
+    dotfiles could parse.
+
+    Diffed against stock zsh rather than filtered by a denylist. A raw keymap is
+    mostly vi motions, which are documented everywhere and discover nothing; what
+    is left after the diff is exactly what this machine's config added. The diff
+    also needs no maintenance, whereas a list of widgets to ignore would rot every
+    time a plugin changed.
+
+    Narrowed further to the keymaps you can reach, because a plugin binds into
+    both editing modes and only one of them is live.
+
+    A widget you wrote yourself gets its description from the function lens, so
+    the annotation above the function is still the only place it is written down.
+    """
+    live = parse_bindkeys(zsh_bindkeys(interactive=True))
+    if not live:
+        return []
+    stock = parse_bindkeys(zsh_bindkeys(interactive=False))
+    reachable = active_keymaps(live)
+    described = {entry.name: entry.description for entry in index_functions()}
+    entries = []
+    for (keymap, key), widget in sorted(live.items()):
+        if keymap not in reachable or widget in ZSH_NOISE or stock.get((keymap, key)) == widget:
+            continue
+        description = described.get(widget) or ZSH_WIDGETS.get(widget) or widget.lstrip('_').replace('-', ' ').replace('_', ' ')
+        entries.append(
+            Entry(
+                source='zsh',
+                # The keymap rides in the name because `^R` is atuin in insert
+                # mode and fzf in command mode, and a row you cannot tell apart
+                # from another row is one `doit show` cannot resolve.
+                name=f'{keymap} {key}',
+                invocation=key,
+                description=description,
+                command=widget,
+            )
+        )
+    return entries
+
+
 LENSES = {
     'tool': index_tools,
     'workflow': index_workflows,
@@ -288,6 +446,7 @@ LENSES = {
     'git': index_git_aliases,
     'forgit': index_forgit,
     'tmux': index_tmux_keys,
+    'zsh': index_zsh_keys,
 }
 
 

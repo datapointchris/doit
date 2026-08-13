@@ -42,10 +42,11 @@ from doit.tools import LEADING_KEYWORDS
 
 # Lenses whose rows are commands you type, so shell history can answer for them.
 #
-# The others are excluded rather than reported as unused. A tmux keybinding is
-# pressed inside tmux, a workflow card is read, a Claude skill runs inside a
-# session — none of them reaches a shell history, so counting them would report a
-# permanent zero and call it disuse. An unmeasurable row is not a forgotten one.
+# The others are excluded rather than reported as unused. A keybinding is
+# pressed, whether at the zsh prompt or inside tmux; a workflow card is read; a
+# Claude skill runs inside a session — none of them reaches a shell history, so
+# counting them would report a permanent zero and call it disuse. An unmeasurable
+# row is not a forgotten one.
 MEASURABLE = ('tool', 'func', 'alias', 'git', 'forgit')
 
 # Days without an invocation before something counts as unused. Long, because the
