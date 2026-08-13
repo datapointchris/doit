@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v2.2.0 (2026-08-13)
+
+### Features
+
+- **paths**: Let $DOIT_LIBRARY_DIR name the checkout
+  ([`1641e72`](https://github.com/datapointchris/doit/commit/1641e723240bd4564da2a238e085db6163900408))
+
+library_dir compiled the path in and consulted nothing, so the only way to read a second copy of the
+  library was to clone one. The library has carried two clones for exactly that reason — a dev one
+  under ~/tools and the XDG one doit reads — kept in step by two sync mechanisms that never compared
+  notes and had no check that they agreed.
+
+A variable is the rung this wants and a config key is not. The path is the same on every machine,
+  unlike the repo registry, whose value differs per machine and so earns one. Every rung has to
+  answer a question some machine actually asks.
+
+The default stays outside doit's own directory. A path under doit/ would say the collection is
+  doit's, and it outlives any one tool that parses it.
+
+
 ## v2.1.1 (2026-08-13)
 
 ### Bug Fixes
