@@ -39,6 +39,23 @@ def test_spec_default_when_set_but_empty(monkeypatch, var, resolve, default):
     assert resolve() == Path.home() / default
 
 
+def test_library_dir_follows_its_own_variable(monkeypatch, tmp_path):
+    monkeypatch.setenv('DOIT_LIBRARY_DIR', str(tmp_path / 'dev-copy'))
+    assert paths.library_dir() == tmp_path / 'dev-copy'
+
+
+def test_library_dir_defaults_beside_the_other_data(monkeypatch, tmp_path):
+    monkeypatch.delenv('DOIT_LIBRARY_DIR', raising=False)
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    assert paths.library_dir() == tmp_path / 'terminal-library'
+
+
+def test_library_dir_ignores_the_variable_set_but_empty(monkeypatch, tmp_path):
+    monkeypatch.setenv('DOIT_LIBRARY_DIR', '')
+    monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path))
+    assert paths.library_dir() == tmp_path / 'terminal-library'
+
+
 def test_machine_name_is_the_bare_lowercased_host(monkeypatch):
     monkeypatch.setattr(paths.socket, 'gethostname', lambda: 'Macmini.local')
     assert paths.machine_name() == 'macmini'

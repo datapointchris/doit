@@ -45,8 +45,17 @@ def library_dir() -> Path:
     Resolved here once rather than at every module that reaches into a
     subdirectory of it: a literal repeated per consumer is one more place a move
     has to be chased, and this path has already moved twice.
+
+    `$DOIT_LIBRARY_DIR` names a different checkout for one shell. Without it the
+    only way to read a second copy was to clone one, and a clone drifts: the
+    library carried a dev clone under `~/tools` and an XDG one for exactly this
+    reason, kept in step by two sync mechanisms that never compared notes.
+
+    No config rung. Every rung has to answer a question some machine actually
+    asks, and this path is the same on all of them — unlike the repo registry,
+    whose value differs per machine and so earns one.
     """
-    return xdg_data_home() / 'terminal-library'
+    return Path(os.environ.get('DOIT_LIBRARY_DIR') or xdg_data_home() / 'terminal-library')
 
 
 def machine_name() -> str:
