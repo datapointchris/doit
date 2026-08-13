@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v2.3.0 (2026-08-13)
+
+### Features
+
+- **paths**: Resolve the library in three rungs
+  ([`14577ee`](https://github.com/datapointchris/doit/commit/14577ee04b63708bb1c42d37dcb38f6b7c95732e))
+
+The library is the one path here doit does not own, and it had one rung: a variable added so a
+  second checkout could be a pointer instead of a clone. standards/data.md § "A shared file is named
+  in config; only the tool's own default is compiled in" asks for three, and the middle one is the
+  layer that reaches a process sourcing no profile — the rung a variable alone cannot be.
+
+config.toml is new here and optional. A machine keeping the library where doit expects it should not
+  have to hold a file saying so, and erroring on a malformed one would break exactly that machine,
+  so both fall through.
+
+setting_source travels with the value, per the same standard. An empty library is usually a config
+  that was never read rather than a wrong path, and the value alone cannot tell those apart.
+  `content status` prints it; `content path` stays one bare line, because a script reads that one.
+
+The rungs are asserted one at a time, each winning over every rung below it. Every rung yields a
+  path, so a reordering is invisible to a test that only checks one came back.
+
+
 ## v2.2.0 (2026-08-13)
 
 ### Features
