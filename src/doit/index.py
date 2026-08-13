@@ -322,6 +322,36 @@ ZSH_WIDGETS = {
 # aliases one key sequence to another rather than naming a widget.
 ZSH_BINDING = re.compile(r'^"((?:[^"\\]|\\.)*)"\s+([^"\s]\S*)$')
 
+# Control sequences with a key of their own on the keyboard. Naming the key is
+# the whole point of the translation, and `Tab` says something `^I` does not.
+CONTROL_KEYS = {'I': 'Tab', 'M': 'Enter', 'J': 'Enter', '?': 'Backspace'}
+
+
+def readable_key(key: str) -> str:
+    """`^X^R` as `Ctrl-X Ctrl-R` — the notation the tmux card already uses.
+
+    Not cosmetic. `^` is fzf's prefix-anchor operator, so a row displaying `^H`
+    is a row nobody can find by typing its key: the query anchors to the start of
+    the line and matches nothing. Every control binding was unsearchable by name
+    until this translation went in, which the recall harness is what caught.
+    """
+    parts = []
+    position = 0
+    while position < len(key):
+        if key.startswith('^[', position):
+            following = key[position + 2 : position + 3]
+            parts.append(f'Alt-{following}' if following else 'Esc')
+            position += 3 if following else 2
+        elif key[position] == '^' and position + 1 < len(key):
+            letter = key[position + 1].upper()
+            parts.append(CONTROL_KEYS.get(letter) or f'Ctrl-{letter}')
+            position += 2
+        else:
+            parts.append(key[position])
+            position += 1
+    return ' '.join(parts)
+
+
 ZSH_DUMP = 'for keymap in {}; do print "#keymap $keymap"; bindkey -M $keymap; done'.format(' '.join(ZSH_KEYMAPS))
 
 
@@ -422,16 +452,20 @@ def index_zsh_keys() -> list[Entry]:
         if keymap not in reachable or widget in ZSH_NOISE or stock.get((keymap, key)) == widget:
             continue
         description = described.get(widget) or ZSH_WIDGETS.get(widget) or widget.lstrip('_').replace('-', ' ').replace('_', ' ')
+        pressed = readable_key(key)
         entries.append(
             Entry(
                 source='zsh',
                 # The keymap rides in the name because `^R` is atuin in insert
                 # mode and fzf in command mode, and a row you cannot tell apart
                 # from another row is one `doit show` cannot resolve.
-                name=f'{keymap} {key}',
-                invocation=key,
+                name=f'{keymap} {pressed}',
+                invocation=pressed,
+                # The raw sequence survives here because it is what `bindkey`
+                # speaks, and rebinding the key is the one thing you would go on
+                # to do. Off the display line, where `^` would be an fzf operator.
+                command=f"bindkey -M {keymap} '{key}' {widget}",
                 description=description,
-                command=widget,
             )
         )
     return entries

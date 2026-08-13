@@ -228,15 +228,15 @@ def test_zsh_keys_are_what_your_config_adds_to_a_stock_zsh():
     """A raw keymap is mostly vi motions. The diff is the part you did not know."""
     keys = by_name(index.index_zsh_keys())
 
-    assert set(keys) == {'viins ^G', 'viins ^H', 'viins ^R', 'vicmd ^R'}
-    assert 'viins ^I' not in keys, 'bound identically in a stock zsh'
+    assert set(keys) == {'viins Ctrl-G', 'viins Ctrl-H', 'viins Ctrl-R', 'vicmd Ctrl-R'}
+    assert 'viins Tab' not in keys, 'bound identically in a stock zsh'
 
 
 def test_the_dormant_editing_mode_is_not_indexed():
     """fzf binds into both modes. Only the one `main` points at can be pressed."""
     keys = by_name(index.index_zsh_keys())
 
-    assert 'emacs ^T' not in keys, 'main is viins here, so the emacs keymap is unreachable'
+    assert 'emacs Ctrl-T' not in keys, 'main is viins here, so the emacs keymap is unreachable'
     assert not any(key.startswith('main ') for key in keys), 'reported under its real name'
 
 
@@ -247,33 +247,61 @@ def test_an_unrecognised_editing_mode_is_reported_as_main():
     assert index.active_keymaps(bindings) == ('main',)
 
 
-def test_a_zsh_key_carries_the_widget_it_runs():
-    assert by_name(index.index_zsh_keys())['viins ^R'].command == 'atuin-search-viins'
-    assert by_name(index.index_zsh_keys())['viins ^R'].invocation == '^R', 'the invocation is what you press'
+@pytest.mark.parametrize(
+    ('raw', 'readable'),
+    [
+        ('^H', 'Ctrl-H'),
+        ('^X^R', 'Ctrl-X Ctrl-R'),
+        ('^Xa', 'Ctrl-X a'),
+        ('^[c', 'Alt-c'),
+        ('^[', 'Esc'),
+        ('^I', 'Tab'),
+        ('^?', 'Backspace'),
+        ('/', '/'),
+    ],
+)
+def test_a_key_is_named_the_way_a_keyboard_names_it(raw, readable):
+    """`^` is fzf's prefix anchor, so a row displaying it cannot be found by it."""
+    assert index.readable_key(raw) == readable
+
+
+def test_a_zsh_key_is_searchable_by_the_key_you_press():
+    line = by_name(index.index_zsh_keys())['viins Ctrl-R'].display()
+
+    assert '^R' not in line, 'a caret on the display line is an fzf operator, not a match'
+    assert 'Ctrl-R' in line
+
+
+def test_a_zsh_key_carries_the_line_that_binds_it():
+    """Rebinding is what you do next, and `bindkey` speaks the raw sequence."""
+    entry = by_name(index.index_zsh_keys())['viins Ctrl-R']
+
+    assert entry.command == "bindkey -M viins '^R' atuin-search-viins"
+    assert entry.invocation == 'Ctrl-R', 'the invocation is what you press'
 
 
 def test_the_keymap_is_in_the_name_because_one_key_is_two_bindings():
     """`^R` is atuin in insert mode and fzf in command mode."""
     keys = by_name(index.index_zsh_keys())
 
-    assert keys['viins ^R'].command == 'atuin-search-viins'
-    assert keys['vicmd ^R'].command == 'fzf-history-widget'
+    assert keys['viins Ctrl-R'].command.endswith('atuin-search-viins')
+    assert keys['vicmd Ctrl-R'].command.endswith('fzf-history-widget')
 
 
 def test_a_widget_you_wrote_is_described_by_its_own_annotation():
     """The `#-->` line above the function stays the only place it is written down."""
-    assert by_name(index.index_zsh_keys())['viins ^G'].description == 'commit work in progress'
+    assert by_name(index.index_zsh_keys())['viins Ctrl-G'].description == 'commit work in progress'
 
 
 def test_an_unknown_widget_falls_back_to_its_own_name():
-    assert by_name(index.index_zsh_keys())['viins ^H'].description == 'fzf man widget'
+    assert by_name(index.index_zsh_keys())['viins Ctrl-H'].description == 'fzf man widget'
 
 
 def test_bulk_and_alias_bindings_never_become_rows():
     """A range is always self-insert, and `"gUU" "gUgU"` names no widget at all."""
     keys = by_name(index.index_zsh_keys())
 
-    assert not any(key.endswith('^S') for key in keys), 'self-insert is not a discovery'
+    assert not any(key.endswith('Ctrl-S') for key in keys), 'self-insert is not a discovery'
     assert not any('gUU' in key for key in keys)
 
 

@@ -230,15 +230,16 @@ def render_git_alias(name: str, command: str, brief: bool = False) -> None:
     card_arrow(f'git {command}', brief)
 
 
-def render_zsh_key(name: str, widget: str, description: str = '', brief: bool = False) -> None:
-    """A zsh keybinding: what pressing it does, then the widget it runs.
+def render_zsh_key(name: str, rebind: str, description: str = '', brief: bool = False) -> None:
+    """A zsh keybinding: what pressing it does, then the line that binds it.
 
-    The widget name is on the arrow rather than in the title because it is the
-    handle you need to rebind the key, and never the thing you were looking for.
+    The arrow carries the whole `bindkey` rather than the widget alone, because
+    changing the key is the one thing you go on to do after looking one up, and
+    the raw sequence it needs appears nowhere else on the card.
     """
     card_title(name, 'zsh keybinding')
     card_detail(description, brief)
-    card_arrow(widget, brief)
+    card_arrow(rebind, brief)
 
 
 def render_forgit(name: str, action: str, brief: bool = False) -> None:
