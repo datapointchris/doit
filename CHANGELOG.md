@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v2.4.1 (2026-08-13)
+
+### Bug Fixes
+
+- **index**: Name zsh keys the way a keyboard does
+  ([`ad61ee8`](https://github.com/datapointchris/doit/commit/ad61ee8c1ea3af10e69bb326212543da07574c35))
+
+A row displaying ^H could not be found by typing ^H. In fzf's extended syntax a leading caret
+  anchors the query to the start of the line, so every control binding matched nothing and every one
+  of them was unsearchable by its own key.
+
+Keys now read Ctrl-X Ctrl-R, Alt-c, Tab — the notation the tmux card already uses. The raw sequence
+  moves to the card's arrow as a whole bindkey line, which is both off the display line and the
+  thing you need to rebind the key.
+
+Found by running the index against generated queries: the 'search by its own name' family missed on
+  5.9% of rows, all of them zsh.
+
+
 ## v2.4.0 (2026-08-13)
 
 ### Features
