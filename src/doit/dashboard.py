@@ -670,6 +670,54 @@ def icb_adapter(result: sources.Result) -> list[LaneView]:
     return [build({'icb': result}, today) for _, build in ICB_LANES]
 
 
+# A PR is meant to be read the day it lands, so both thresholds are short.
+PR_DUE = 3
+PR_OVERDUE = 7
+PR_ROWS = 5
+
+
+def prs_adapter(result: sources.Result) -> list[LaneView]:
+    """`pull-requests` prints its own model as JSON; the shaping happens here.
+
+    That tool answers "what pull requests are open" and nothing else. What a lane
+    looks like is doit's question, so doit is what answers it — the alternative
+    was a `--lane` flag over there, which put this file's row shape inside a tool
+    whose only other consumer renders it completely differently.
+    """
+    payload = result.payload
+    if not isinstance(payload, list):
+        return [unavailable('prs', 'PRS', sources.reason('pull-requests', result))]
+
+    oldest = max((pr.get('age_days', 0) for pr in payload), default=0)
+    ranked = sorted(payload, key=lambda pr: -pr.get('age_days', 0))[:PR_ROWS]
+    rows = [
+        Row(
+            pr.get('repo', ''),
+            f'{pr.get("title", "")} (draft)' if pr.get('draft') else pr.get('title', ''),
+            f'{pr.get("age_days", 0)}d',
+            pr_urgency(pr.get('age_days', 0)),
+            'prs',
+        )
+        for pr in ranked
+    ]
+    return [
+        LaneView(
+            name='prs',
+            title='PRS',
+            meta='none open' if not payload else f'{len(payload)} open · oldest {oldest}d',
+            rows=rows,
+            total=len(payload),
+            hints=['prs list'],
+        )
+    ]
+
+
+def pr_urgency(age: int) -> Urgency:
+    if age >= PR_OVERDUE:
+        return Urgency.OVERDUE
+    return Urgency.DUE if age >= PR_DUE else Urgency.NONE
+
+
 def learning_adapter(result: sources.Result) -> list[LaneView]:
     """learning's overview model, as one lane."""
     return [build_learning_lane({'learning': result}, date.today())]
@@ -677,6 +725,7 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
 
 sources.register_adapter('icb', icb_adapter)
 sources.register_adapter('learning', learning_adapter)
+sources.register_adapter('prs', prs_adapter)
 
 
 def read_local(read: Callable[[], object]) -> sources.Result:

@@ -6,14 +6,15 @@ down, and nothing here imports a backend by name.
 
 Two kinds of source, and the difference is whose job the shape is:
 
-**Conforming** — the source emits a lane document (see `doit.lanes`) and doit
-renders it with no code at all. This is the interface other tools plug into and
-the one to build against.
+**Adapted** — the source prints its own model and a named adapter turns it into
+lanes. The adapter is Python and lives with the dashboard, which is where it
+belongs: what a lane looks like is doit's question, so doit is what answers it.
+A tool that answers "what is open" should not also carry doit's row shape,
+because its other consumers render the same data completely differently.
 
-**Adapted** — the source emits its own model and a named adapter turns it into
-lanes. That adapter is Python, lives with the dashboard, and exists because the
-app predates the contract. Every adapter is a migration that has not happened
-yet, not a design position.
+**Conforming** — the source emits a lane document (see `doit.lanes`) directly and
+doit renders it with no adapter. Available, and the right choice only for a tool
+whose entire reason to exist is feeding this dashboard.
 
 Failure policy is code, not config, because it must not vary by source. A source
 absent from the file is silent — it is not configured, so it does not exist. One
@@ -56,7 +57,7 @@ TEMPLATE = """\
 #
 #   command   argv to run; it must print a lane document on stdout
 #   timeout   seconds to wait (default 5)
-#   adapter   only for apps that do not speak the contract yet
+#   adapter   name a Python adapter in doit that shapes this source's own model
 #   lanes     optional; restricts which of a source's lanes are shown
 #
 # A source emitting doit's own lane document needs no adapter. Run
