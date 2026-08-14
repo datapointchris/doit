@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v2.5.0 (2026-08-14)
+
+### Features
+
+- **dashboard**: Adapt pull-requests rather than take its lane document
+  ([`49ccef2`](https://github.com/datapointchris/doit/commit/49ccef2c5bb3aa9707dd93900fb4331aa36d8acb))
+
+pull-requests prints open PRs as JSON and nothing else now. Shaping that into a lane is doit's
+  question, so doit answers it.
+
+The old arrangement had a --lane flag over there emitting this file's row shape. Its other consumer,
+  the prs picker, renders the same data completely differently — icons, colours, an action menu — so
+  the shape was never shared, only located in the wrong place.
+
+Also drops the claim that every adapter is a migration that has not happened. It was a line someone
+  wrote confidently, not a measurement, and it had adapters listed as debt when they are where lane
+  shape belongs. The conforming path stays available and is now described as what it is: the right
+  choice only for a tool whose whole reason to exist is feeding this dashboard.
+
+
 ## v2.4.1 (2026-08-13)
 
 ### Bug Fixes
