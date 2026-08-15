@@ -1,6 +1,32 @@
 # CHANGELOG
 
 
+## v2.5.1 (2026-08-15)
+
+### Bug Fixes
+
+- Name the icb tasks verb that exists
+  ([`4373053`](https://github.com/datapointchris/doit/commit/43730534351da873e258f01fadb7da09a8cab6e2))
+
+The shipped register template and the dashboard's tasks hint both named 'icb tasks todo'. The verb
+  is 'list', so a fresh 'doit pursuits edit' wrote a register whose chores row could never resolve,
+  and the dashboard pointed at a command that exits 2.
+
+- **next**: Report what a failed resolve said
+  ([`e58f454`](https://github.com/datapointchris/doit/commit/e58f454e7c5798076ef77c81b3768ae15be32393))
+
+A row whose backend failed printed '(icb unavailable)' regardless of what the backend actually said.
+  A register naming a verb the CLI dropped is indistinguishable from a service that is down, so the
+  row sent you to check a tool that was answering fine.
+
+The draw cache kept the failure for its whole window, so correcting the register left the dead
+  message on screen and only a reroll cleared it — which changes the draw the cache exists to hold
+  still. Failed rows are now asked again on a cache hit and the repaired result written back.
+
+A cached failure is truthy and carries no id, so 'doit log' treated it as a resolved item, skipped
+  the write-through to the owning CLI, and still reported the pursuit logged.
+
+
 ## v2.5.0 (2026-08-14)
 
 ### Features
