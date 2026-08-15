@@ -234,7 +234,7 @@ def build_tasks_lane(results: dict[str, sources.Result], today: date) -> LaneVie
         meta=f'{total} open',
         rows=rows,
         total=total,
-        hints=['icb tasks todo'],
+        hints=['icb tasks list'],
         reason=reason,
     )
 
