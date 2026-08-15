@@ -157,7 +157,7 @@ pursuits:
     description: The maintenance list nobody else is going to do
     weight: 25
     cadence: 1w
-    resolve: icb tasks todo --limit 3 --json
+    resolve: icb tasks list --limit 3 --json
     label: name
     id: id
     context: category
@@ -483,6 +483,26 @@ def resolve_all(names: list[str], pursuits: dict) -> dict[str, dict]:
     return {name: result for name, result in zip(wanted, results, strict=True) if result}
 
 
+def retry_failed_resolves(selection: dict, pursuits: dict) -> None:
+    """Ask again for the rows whose backend failed, leaving the draw itself alone.
+
+    The draw is cached so that running it three times while deciding does not
+    reshuffle it. A failure is not an answer, though, so caching one pins a dead
+    message to the row for the rest of the window — a backend that came back, or a
+    register entry that was corrected, keeps showing the old error. Rerolling would
+    clear it and change the very thing the cache is protecting.
+    """
+    resolved = selection.get('resolved') or {}
+    failed = [name for name, detail in resolved.items() if isinstance(detail, dict) and detail.get('error')]
+    if not failed:
+        return
+    for name in failed:
+        resolved.pop(name)
+    resolved.update(resolve_all(failed, pursuits))
+    selection['resolved'] = resolved
+    save_cached_draw(selection)
+
+
 def todays_context() -> list[str]:
     """Today's events and imminent countdowns — context, never candidates.
 
@@ -540,9 +560,13 @@ def render_row(index: int, name: str, state: dict, resolved: dict, pin: bool, wi
         when = format_elapsed(state['days_since'].get(name))
 
     detail = resolved.get(name) or {}
+    failure = detail.get('error')
     text = detail.get('label') or config.get('description') or ''
-    if detail.get('error'):
-        text = f'({detail.get("backend") or "resolve"} unavailable)'
+    if failure:
+        # What the backend said, never a verdict about the backend. A register
+        # naming a verb the CLI dropped fails identically to one that is logged
+        # out, and only the message it printed tells the two apart.
+        text = f'{detail.get("backend") or "resolve"}: {failure}'
 
     line = Text('  ')
     line.append('!' if pin else str(index), style='yellow' if pin else 'cyan')
@@ -552,9 +576,9 @@ def render_row(index: int, name: str, state: dict, resolved: dict, pin: bool, wi
     line.append(f'{weight:>3} · {when}'.ljust(STATUS_COLUMN))
     if text:
         line.append('  ')
-        line.append(text, style='green')
+        line.append(text, style='red' if failure else 'green')
     console.print(line, no_wrap=True, overflow='ellipsis')
-    if not detail.get('error'):
+    if not failure:
         render_context(detail, width)
 
 
@@ -612,6 +636,7 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
     else:
         selection = cached
         names = selection['pinned'] + selection['drawn']
+        retry_failed_resolves(selection, pursuits)
 
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
@@ -800,6 +825,10 @@ def cmd_log(name: str, words: list[str], ago: str | None, minutes: int | None, a
     # something different from what was offered.
     cached = load_cached_draw(now) or {}
     item = (cached.get('resolved') or {}).get(matched) or {}
+    # A cached failure is truthy and carries no id, so it satisfies the guard below
+    # and the write-through to the owning CLI is skipped without saying so.
+    if item.get('error'):
+        item = {}
     if not item and pursuits[matched].get('resolve'):
         item = resolve_one(matched, pursuits[matched]) or {}
 

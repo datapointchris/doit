@@ -185,6 +185,59 @@ def test_a_cached_draw_expires(sandbox):
     assert pursuits.load_cached_draw(NOW + timedelta(minutes=pursuits.CACHE_MINUTES + 1)) is None
 
 
+def test_a_cached_failure_is_asked_again_without_disturbing_the_draw(sandbox, tmp_path):
+    """A backend that recovers must show through the window, and rerolling is not
+    the way — it changes the draw, which is what the cache exists to hold still."""
+    payload = tmp_path / 'row.json'
+    payload.write_text('[{"name": "Trim Dingo Nails"}]')
+    selection = {
+        'draw_id': 'abc',
+        'created_at': NOW.isoformat(),
+        'pinned': [],
+        'drawn': ['chores'],
+        'resolved': {'chores': {'pursuit': 'chores', 'error': 'error: unknown flag: --limit', 'backend': 'icb'}},
+    }
+
+    pursuits.retry_failed_resolves(selection, {'chores': {'resolve': f'cat {payload}', 'label': 'name'}})
+
+    assert selection['drawn'] == ['chores']
+    assert selection['resolved']['chores']['label'] == 'Trim Dingo Nails'
+    assert 'error' not in selection['resolved']['chores']
+    assert pursuits.load_cached_draw(NOW)['resolved']['chores']['label'] == 'Trim Dingo Nails'
+
+
+def test_a_retry_that_finds_nothing_drops_the_stale_error(sandbox, tmp_path):
+    # resolve_all omits a pursuit that resolved to nothing, so the failed entry has
+    # to go before the merge or the dead message outlives the backend it came from.
+    payload = tmp_path / 'empty.json'
+    payload.write_text('[]')
+    selection = {
+        'draw_id': 'abc',
+        'created_at': NOW.isoformat(),
+        'pinned': [],
+        'drawn': ['chores'],
+        'resolved': {'chores': {'pursuit': 'chores', 'error': 'exited 1', 'backend': 'icb'}},
+    }
+
+    pursuits.retry_failed_resolves(selection, {'chores': {'resolve': f'cat {payload}', 'label': 'name'}})
+
+    assert 'chores' not in selection['resolved']
+
+
+def test_a_cached_draw_that_resolved_cleanly_is_not_asked_again(sandbox):
+    selection = {
+        'draw_id': 'abc',
+        'created_at': NOW.isoformat(),
+        'pinned': [],
+        'drawn': ['chores'],
+        'resolved': {'chores': {'label': 'Trim Dingo Nails'}},
+    }
+
+    pursuits.retry_failed_resolves(selection, {'chores': {'resolve': 'definitely-not-a-real-command', 'label': 'name'}})
+
+    assert selection['resolved']['chores'] == {'label': 'Trim Dingo Nails'}
+
+
 def test_a_corrupt_cache_is_a_miss_not_a_crash(sandbox):
     pursuits.DRAW_CACHE.parent.mkdir(parents=True, exist_ok=True)
     pursuits.DRAW_CACHE.write_text('{half a file')
@@ -433,6 +486,41 @@ def test_on_log_is_skipped_when_the_item_has_no_id():
     assert pursuits.run_on_log(config, {'label': 'no id here'}, '', None, assume_yes=True) is None
 
 
+def test_logging_re_resolves_past_a_cached_failure(sandbox, tmp_path, monkeypatch):
+    """A cached failure is truthy but carries no id.
+
+    Left in place it satisfies the guard that would otherwise re-resolve, so the
+    write-through to the owning CLI is skipped and nothing on screen says the item
+    was never completed.
+    """
+    marker = tmp_path / 'completed.txt'
+    payload = tmp_path / 'row.json'
+    payload.write_text('[{"id": 422, "name": "Trim Dingo Nails"}]')
+    register = write_register(
+        tmp_path,
+        'pursuits:\n'
+        '  chores:\n'
+        '    weight: 25\n'
+        f'    resolve: cat {payload}\n'
+        '    label: name\n'
+        '    id: id\n'
+        f'    on_log: sh -c "echo {{id}} > {marker}"\n',
+    )
+    monkeypatch.setattr(pursuits, 'REGISTER', register)
+    pursuits.save_cached_draw(
+        {
+            'draw_id': 'abc',
+            'created_at': datetime.now().astimezone().isoformat(),
+            'pinned': [],
+            'drawn': ['chores'],
+            'resolved': {'chores': {'pursuit': 'chores', 'error': 'exited 1', 'backend': 'icb'}},
+        }
+    )
+
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+    assert marker.read_text().strip() == '422'
+
+
 def test_on_log_is_skipped_when_the_pursuit_declares_none():
     assert pursuits.run_on_log({'resolve': 'echo x'}, {'id': '1'}, '', None, assume_yes=True) is None
 
@@ -526,14 +614,30 @@ def test_a_row_with_nothing_extra_to_say_stays_one_line(capsys):
 
 
 def test_a_backend_that_failed_gets_no_continuation_line(capsys):
-    # The row already says the backend is unavailable; a second line under it
-    # would be context for an item that was never resolved.
+    # The row already says the backend failed; a second line under it would be
+    # context for an item that was never resolved.
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     resolved = {'chores': {'error': 'exited 1', 'backend': 'icb', 'context': 'stale', 'detail': 'stale'}}
 
     pursuits.render_row(1, 'chores', state, resolved, False, 6)
 
     assert len(capsys.readouterr().out.strip().splitlines()) == 1
+
+
+def test_a_failed_row_carries_what_the_backend_said(monkeypatch, capsys):
+    """A stale register entry and a logged-out CLI fail the same way.
+
+    Naming the backend and calling it unavailable reads as an outage, which sends
+    you to check a service that is answering fine. The message the backend printed
+    is the only part that says which of the two happened.
+    """
+    monkeypatch.setenv('COLUMNS', '200')
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    resolved = {'chores': {'error': 'error: unknown flag: --limit', 'backend': 'icb'}}
+
+    pursuits.render_row(1, 'chores', state, resolved, False, 6)
+
+    assert 'icb: error: unknown flag: --limit' in capsys.readouterr().out
 
 
 def test_format_elapsed_switches_unit_rather_than_format():
