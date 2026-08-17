@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v2.12.0 (2026-08-17)
+
+### Features
+
+- **kit**: Carry toolbox's rotation history into the per-lens cursors
+  ([`a9abfbc`](https://github.com/datapointchris/doit/commit/a9abfbc04f76762ce41372b4d695a0709b5457bb))
+
+A lens with no cursor takes what belongs to it out of toolbox's single reminders.json, rekeyed onto
+  the typed form. Without it the tool lens starts from nothing over eighty cold rows and spends most
+  of a year re-showing cards this machine was given in the spring.
+
+Rotation state is per-machine and unsynced, so this reads a local file rather than being a step
+  someone has to remember per box. Names that no longer catalogue anything are dropped rather than
+  carried.
+
+
 ## v2.11.0 (2026-08-17)
 
 ### Features
