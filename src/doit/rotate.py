@@ -48,10 +48,10 @@ LENSES = ('tool', 'func', 'alias', 'git', 'forgit', 'workflow', 'tmux', 'zsh')
 
 # The rotation toolbox kept: one file across every lens, keyed by catalogue name.
 # A lens with no cursor of its own takes what belongs to it from here, so a
-# machine keeps its own history across the switch instead of spending eighty
-# weeks re-showing tools it was shown this summer. Rotation state is per-machine
-# and unsynced, which is why this reads a local file rather than being a one-off
-# anyone has to run per box. Goes when toolbox does.
+# machine keeps its history across the switch instead of spending eighty weeks
+# re-showing tools it was shown this summer. Reading it on demand rather than
+# converting once is what makes it need no per-machine step. Delete with the
+# rest of the toolbox removal.
 TOOLBOX_CURSOR = xdg_state_home() / 'toolbox' / 'reminders.json'
 
 

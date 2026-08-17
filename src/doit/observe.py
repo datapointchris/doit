@@ -194,9 +194,9 @@ def last_run(prefix: str, scope: str = FLEET) -> Observation:
 def newest_date_in(path: str) -> Observation:
     """The newest date among the values of a ``{name: date}`` JSON map.
 
-    The shape other tools' round-robin state already has — ``toolbox`` stamps
-    each tool with the day it last surfaced it — so "when did this last happen at
-    all" is the newest value in the file. Reading a foreign state file is sound
+    The shape round-robin state already has — a rotation stamps each row with the
+    day it last surfaced it — so "when did this last happen at all" is the newest
+    value in the file. Reading a foreign state file is sound
     precisely because it is a read: the owning tool keeps writing it for its own
     reasons whether or not doit is looking.
     """
@@ -228,7 +228,7 @@ def observed(spec: object, command: str) -> Observation:
     - ``false`` — observe nothing; the recorded ``doit review done`` date stands
       alone, for an item whose command is not the work (a picker, a browse view)
     - ``{kind: argument}`` — one named observer, for a trace that is not the
-      command: ``{newest-date-in: ~/.local/state/toolbox/reminders.json}``
+      command: ``{newest-date-in: ~/.local/state/doit/rotation/tool.json}``
     - any of the above plus ``scope: machine`` — only runs on this machine count,
       for work that is per-box rather than done once for everyone. ``{scope:
       machine}`` on its own keeps the default observer and narrows it.

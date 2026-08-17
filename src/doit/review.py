@@ -256,7 +256,7 @@ def run_show(row: dict) -> None:
 
     A `show:` command must be a read. Anything it changes is a change nothing
     asked for — and worse, if what it changes is what the item observes, the item
-    marks itself done every time the nudge fires. `toolbox remind` has a `--peek`
+    marks itself done every time the nudge fires. `doit kit remind` has a `--peek`
     for exactly this, and a `show:` needing a side effect to be useful is an
     argument for a flag on that tool, not for relaxing this.
 
@@ -306,7 +306,7 @@ def cmd_nudge() -> int:
     if len(due) > len(shown):
         console.print(f'  +{len(due) - len(shown)} more  ·  [cyan]doit review due[/]')
     # After the roster, expand any items carrying live content (e.g. the
-    # neglected tool `toolbox remind` picks) so the roster stays scannable.
+    # neglected tool `doit kit remind` picks) so the roster stays scannable.
     console.print()
     for row in shown:
         run_show(row)
