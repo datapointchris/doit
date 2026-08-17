@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v2.11.0 (2026-08-17)
+
+### Features
+
+- **kit**: Rotate a forgotten row per lens, replacing toolbox remind
+  ([`470ed93`](https://github.com/datapointchris/doit/commit/470ed939ac0f2a1266e1c9e8e932db68b9479b98))
+
+One cursor per lens rather than one across everything. A single rotation makes a row's recurrence a
+  function of the whole population instead of what the row is worth: weekly over 127 registry tools
+  surfaces any given tool once every two and a half years, and a new lens of fifty pushes every
+  existing one further out again.
+
+A measurable lens is narrowed to what usage.unused calls the tail. The lenses history cannot see —
+  tmux, workflow, zsh — rotate whole, because filtering those on coldness would find every row cold
+  and be no filter.
+
+Cursors are one file per lens in the {name: date} shape observe already reads, so a register item
+  watches its own lens through newest-date-in with no new observer. Not review-state.json: an
+  orphaned register stamp must warn, a dropped catalogue row must not.
+
+
 ## v2.10.0 (2026-08-17)
 
 ### Features
