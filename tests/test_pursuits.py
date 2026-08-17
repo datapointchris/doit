@@ -712,3 +712,25 @@ def test_a_pursuit_without_credit_is_weighed_exactly_as_before(tmp_path, monkeyp
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     assert state['days_banked']['chore'] == state['days_since']['chore']
     assert state['banked_position'] == {}
+
+
+def test_the_standing_line_counts_what_would_clear_the_backlog(tmp_path, monkeypatch):
+    """A count, not a duration: "4 away" is four chores you could decide to do."""
+    state = credit_state(tmp_path, monkeypatch, [5.0])
+    assert pursuits.behind_summary(state) == '4 away from current · chore 4'
+
+
+def test_the_standing_line_is_silent_when_current(tmp_path, monkeypatch):
+    assert pursuits.behind_summary(credit_state(tmp_path, monkeypatch, [0.0, 0.0])) == ''
+
+
+def test_a_pursuit_without_credit_never_reaches_the_standing_line(tmp_path, monkeypatch):
+    """Late without credit is a scalar with no countable units behind it."""
+    register_path = tmp_path / 'pursuits.yml'
+    register_path.write_text(CREDIT_REGISTER.replace('    credit: 1w\n', ''))
+    monkeypatch.setattr(pursuits, 'REGISTER', register_path)
+    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', tmp_path / 'state')
+    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
+    write_journal(tmp_path / 'state', 'chore', [30.0])
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    assert pursuits.behind_summary(state) == ''

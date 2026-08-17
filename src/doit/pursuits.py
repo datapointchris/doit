@@ -600,6 +600,27 @@ def format_elapsed(days: float | None) -> str:
     return f'{int(days / 30)}mo ago'
 
 
+def behind_summary(state: dict) -> str:
+    """How many completions would bring every banking pursuit back to current.
+
+    A count rather than a duration, because it names the action: "3 away" is
+    three chores, and that is a thing you can decide to do tonight. Only pursuits
+    declaring credit appear — for the rest, being late is a scalar with no
+    countable units behind it.
+    """
+    owed = {}
+    for name, position in state.get('banked_position', {}).items():
+        interval = state['intervals'].get(name, 0.0)
+        if position is None or interval <= 0 or position > -interval:
+            continue
+        owed[name] = round(-position / interval)
+    if not owed:
+        return ''
+    total = sum(owed.values())
+    detail = ', '.join(f'{name} {count}' for name, count in sorted(owed.items(), key=lambda row: -row[1]))
+    return f'{total} away from current · {detail}'
+
+
 def format_banked(position: float | None, interval: float) -> str | None:
     """How far ahead or behind a banking pursuit stands, in whole units of its cadence.
 
@@ -740,6 +761,9 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
         for index, name in enumerate(selection['drawn'], start=1):
             render_row(index, name, state, resolved, False, width)
     console.print()
+    standing = behind_summary(state)
+    if standing:
+        console.print(Text(f'  {standing}\n', style='yellow'))
     # `\[note]` is escaped: rich reads a bare bracket as a style tag, which
     # silently dropped the optional argument from this hint.
     console.print(r'Log:  [cyan]doit log <pursuit> \[note][/]   Pass:  [cyan]doit skip <pursuit>[/]')

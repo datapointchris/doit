@@ -47,6 +47,7 @@ from rich.text import Text
 
 from doit import labs
 from doit import lanes as lanemodel
+from doit import pursuits
 from doit import review
 from doit import sources
 from doit.lanes import GridCell
@@ -463,6 +464,61 @@ def build_learning_lane(results: dict[str, sources.Result], today: date) -> Lane
     )
 
 
+def build_meso_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+    """meso's cycles, as the training that is currently prescribed.
+
+    Rows are workouts rather than cycles, because a cycle is a plan and a workout
+    is the thing you can go and do — the same reason the learning lane rows
+    resources rather than track units.
+
+    What was already performed is deliberately absent. `meso sessions` answers
+    that, and it feeds the `train` pursuit's evidence instead: a dashboard lane
+    says what is outstanding, and a session is the opposite of outstanding.
+    """
+    result = results.get('meso')
+    if result is None or not isinstance(result.payload, list):
+        return unavailable('meso', 'TRAINING', sources.reason('meso', result))
+
+    rows = []
+    active = 0
+    for cycle in result.payload:
+        if not isinstance(cycle, dict) or cycle.get('status') != 'active':
+            continue
+        active += 1
+        target = cycle.get('target_date')
+        urgency = Urgency.NONE
+        if isinstance(target, str):
+            remaining = (date.fromisoformat(target) - today).days
+            urgency = Urgency.OVERDUE if remaining < 0 else Urgency.DUE if remaining <= 14 else Urgency.NONE
+        for workout in cycle.get('workouts') or []:
+            if not isinstance(workout, dict):
+                continue
+            rows.append(
+                Row(
+                    label=str(workout.get('phase') or 'do'),
+                    text=str(workout.get('workout_name') or ''),
+                    note=str(workout.get('frequency') or ''),
+                    urgency=urgency,
+                    handle=f'meso workouts show {workout.get("workout_id")}',
+                )
+            )
+
+    plural = '' if active == 1 else 's'
+    return LaneView(
+        name='meso',
+        title='TRAINING',
+        meta=f'{active} cycle{plural} active · {len(rows)} prescribed',
+        rows=rows,
+        total=len(rows),
+        hints=['meso cycles list', 'meso sessions list'],
+    )
+
+
+def meso_adapter(result: sources.Result) -> list[LaneView]:
+    """meso's cycle model, as one lane."""
+    return [build_meso_lane({'meso': result}, date.today())]
+
+
 def resource_row(label: str, resource: dict, note: str = '') -> Row:
     """One openable resource. The handle is the read verb rather than the URL the
     resource carries: a link is not something you type, and `view` prints it
@@ -725,6 +781,7 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
 
 sources.register_adapter('icb', icb_adapter)
 sources.register_adapter('learning', learning_adapter)
+sources.register_adapter('meso', meso_adapter)
 sources.register_adapter('prs', prs_adapter)
 
 
@@ -953,9 +1010,28 @@ def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
         print(lanemodel.dumps(collected, datetime.now()))
     else:
         render_lanes(collected, date.today(), row_cap)
+        standing = pursuit_standing()
+        if standing:
+            console.print(Text(f'  {standing}\n', style='yellow'))
     # A read-only glance always succeeds: degradation is shown per lane, and a
     # consumer of --json checks lanes[].status rather than the exit code.
     return 0
+
+
+def pursuit_standing() -> str:
+    """How far behind the banking pursuits stand, or nothing when they are current.
+
+    Guarded rather than trusted. A register that refuses to load is a real and
+    deliberate failure mode, and it must cost this one line rather than the whole
+    glance — the dashboard's own lanes have nothing to do with the weights.
+    """
+    try:
+        register = pursuits.load_pursuits()
+        if not register:
+            return ''
+        return pursuits.behind_summary(pursuits.build_state(register, datetime.now().astimezone()))
+    except (pursuits.RegisterError, OSError, ValueError):
+        return ''
 
 
 def dashboard_command(

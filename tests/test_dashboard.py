@@ -589,3 +589,59 @@ def test_a_narrow_terminal_spends_its_width_on_the_row_itself(monkeypatch, capsy
     printed = capsys.readouterr().out.rstrip('\n')
     assert 'Give cobracmd' in printed
     assert printed.count('x') <= int(60 * dashboard.NOTE_WIDTH_SHARE), 'the note never crowds out the thing itself'
+
+
+MESO_CYCLES = [
+    {
+        'name': 'Lower Body — Return to Running',
+        'status': 'active',
+        'target_date': '2026-10-09',
+        'workouts': [
+            {'workout_id': 1, 'workout_name': 'Session A — Loaded Lower', 'phase': 'base', 'frequency': '2×/week'},
+            {'workout_id': 2, 'workout_name': 'Session B — CR Mobility', 'phase': 'base', 'frequency': '4×/week'},
+        ],
+    },
+    {
+        'name': 'Dance Calf Conditioning',
+        'status': 'paused',
+        'target_date': None,
+        'workouts': [{'workout_id': 9, 'workout_name': 'Calf ladder', 'phase': 'base', 'frequency': 'daily'}],
+    },
+]
+
+
+def meso_lane(payload, today=TODAY):
+    result = sources.Result(source='meso', payload=payload, exit_code=0)
+    return dashboard.build_meso_lane({'meso': result}, today)
+
+
+def test_the_training_lane_rows_workouts_not_cycles():
+    """A cycle is a plan; a workout is the thing you can go and do."""
+    lane = meso_lane(MESO_CYCLES)
+    assert lane.title == 'TRAINING'
+    assert [row.text for row in lane.rows] == ['Session A — Loaded Lower', 'Session B — CR Mobility']
+    assert lane.rows[0].handle == 'meso workouts show 1'
+
+
+def test_a_paused_cycle_contributes_nothing():
+    lane = meso_lane(MESO_CYCLES)
+    assert lane.meta == '1 cycle active · 2 prescribed'
+    assert all('Calf' not in row.text for row in lane.rows)
+
+
+def test_a_cycle_past_its_target_pushes_harder_than_one_with_months_left():
+    relaxed = meso_lane(MESO_CYCLES, date(2026, 1, 1))
+    assert relaxed.rows[0].urgency == dashboard.Urgency.NONE
+
+    late = meso_lane(MESO_CYCLES, date(2026, 11, 1))
+    assert late.rows[0].urgency == dashboard.Urgency.OVERDUE
+
+
+def test_a_meso_that_cannot_answer_says_so_rather_than_vanishing():
+    """A dropped lane reads as "nothing outstanding", which is the worst thing
+    this dashboard could say wrongly."""
+    failed = sources.Result(source='meso', exit_code=1, stderr='not logged in', failure=sources.Failure.FAILED)
+    lane = dashboard.build_meso_lane({'meso': failed}, TODAY)
+    assert lane.available is False
+    assert lane.title == 'TRAINING'
+    assert 'not logged in' in lane.reason
