@@ -1,0 +1,17 @@
+[
+  {
+    "source": "tool",
+    "name": "broot",
+    "invocation": "br [path]"
+  },
+  {
+    "source": "tool",
+    "name": "long-gone",
+    "invocation": "long-gone"
+  },
+  {
+    "source": "func",
+    "name": "retired-helper",
+    "invocation": "retired-helper <arg>"
+  }
+]

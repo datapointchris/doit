@@ -45,6 +45,7 @@ from urllib.parse import urlsplit
 import typer
 from rich.text import Text
 
+from doit import index as indexmodel
 from doit import labs
 from doit import lanes as lanemodel
 from doit import pursuits
@@ -75,6 +76,7 @@ NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'
 LOCAL_BACKENDS = {
     'review': review.statuses,
     'labs': labs.statuses,
+    'kit': indexmodel.unresolved_rows,
 }
 
 # The dashboard is a glance: three rows a lane, or ten when you asked for that
@@ -623,6 +625,42 @@ def maintenance_row(label: str, text: str, item: dict, handle: str) -> tuple[tup
     return (1, -overdue), Row(label, text, f'{overdue}d overdue', Urgency.OVERDUE, handle)
 
 
+def build_kit_lane(results: dict[str, sources.Result]) -> LaneView:
+    """The rows of your kit that name something this machine cannot run.
+
+    A standing condition rather than a schedule, which is why it is a lane and
+    not a register item. The register can only say "go and look every month";
+    this says what is wrong the moment it becomes wrong, and says nothing on a
+    machine whose index is clean.
+
+    The handle is `doit show`, because the act here is judging one entry rather
+    than running it — the row is on the list precisely because running it fails.
+    """
+    kit = results.get('kit')
+    payload = kit.payload if kit else None
+    if not isinstance(payload, list):
+        return unavailable('kit', 'KIT', sources.reason('doit kit', kit))
+
+    rows = [
+        Row(
+            entry.get('source', ''),
+            entry.get('name', ''),
+            entry.get('invocation', '') if entry.get('invocation') != entry.get('name') else '',
+            Urgency.NONE,
+            f'doit show {entry.get("name", "")}',
+        )
+        for entry in payload
+    ]
+    return LaneView(
+        name='kit',
+        title='KIT',
+        meta='every row resolves' if not rows else f'{plural(len(rows), "row")} naming nothing runnable',
+        rows=rows,
+        total=len(rows),
+        hints=['doit kit unresolved'],
+    )
+
+
 def round_robin(*groups: list[Row]) -> list[Row]:
     """Order rows so every kind gets a slot before any kind gets a second one.
 
@@ -712,7 +750,7 @@ ICB_LANES = (
     ('upcoming', build_upcoming_lane),
 )
 
-LOCAL_LANES = ('maintenance',)
+LOCAL_LANES = ('maintenance', 'kit')
 
 # Every lane doit can name today. A conforming source contributes lanes that are
 # not in this list, which is the point — it is a convenience for `--lane`, not a
@@ -802,7 +840,7 @@ def local_lanes() -> list[LaneView]:
     dashboard that needs configuring before it can show your own register would
     be configuration for its own sake."""
     results = {name: read_local(read) for name, read in LOCAL_BACKENDS.items()}
-    return [build_maintenance_lane(results, date.today())]
+    return [build_maintenance_lane(results, date.today()), build_kit_lane(results)]
 
 
 def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneView]:

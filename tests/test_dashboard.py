@@ -37,6 +37,7 @@ def all_results() -> dict:
         'learning': ok('learning-overview.json'),
         'review': ok('review-list.json'),
         'labs': ok('labs-list.json'),
+        'kit': ok('kit-unresolved.json'),
     }
 
 
@@ -49,6 +50,7 @@ def lanes_by_name(results: dict) -> dict:
     built = [build(results, TODAY) for _, build in dashboard.ICB_LANES]
     built.append(dashboard.build_learning_lane(results, TODAY))
     built.append(dashboard.build_maintenance_lane(results, TODAY))
+    built.append(dashboard.build_kit_lane(results))
     return {lane.name: lane for lane in built}
 
 
@@ -285,6 +287,41 @@ def test_maintenance_shows_both_kinds_when_every_row_is_equally_urgent():
 
     assert lane.meta == '5 reviews · 5 labs due'
     assert [row.label for row in lane.rows[:4]] == ['review', 'lab', 'review', 'lab']
+
+
+def test_kit_lane_names_the_entry_and_what_it_claims_you_can_type():
+    """The gap between the two is the whole finding: the row is keyed `broot`
+    and the thing that fails is `br`."""
+    lane = lanes_by_name(all_results())['kit']
+
+    assert lane.meta == '3 rows naming nothing runnable'
+    assert lane.rows[0].label == 'tool'
+    assert lane.rows[0].text == 'broot'
+    assert lane.rows[0].note == 'br [path]'
+
+
+def test_kit_rows_offer_the_read_rather_than_the_command_that_fails():
+    lane = lanes_by_name(all_results())['kit']
+
+    assert lane.rows[0].handle == 'doit show broot'
+    assert all(row.urgency is dashboard.Urgency.NONE for row in lane.rows), 'rot has no deadline to be late against'
+
+
+def test_kit_lane_drops_an_invocation_that_only_repeats_the_name():
+    lane = lanes_by_name(all_results())['kit']
+
+    assert {row.text: row.note for row in lane.rows}['long-gone'] == ''
+
+
+def test_a_clean_index_says_so_rather_than_leaving_the_lane_blank():
+    """A lane that vanishes when it has nothing to report reads as never having run."""
+    results = {'kit': sources.Result(source='kit', payload=[], exit_code=0)}
+
+    lane = dashboard.build_kit_lane(results)
+
+    assert lane.available is True
+    assert lane.meta == 'every row resolves'
+    assert lane.rows == []
 
 
 def test_an_article_row_says_where_it_came_from():
