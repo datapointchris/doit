@@ -97,3 +97,38 @@ def test_each_lens_advances_alone():
 
     assert rotate.cursor_path('tool').exists()
     assert not rotate.cursor_path('forgit').exists()
+
+
+def test_a_lens_with_no_cursor_inherits_what_toolbox_recorded(tmp_path, monkeypatch):
+    """Eighty cold tools would otherwise re-show reminders given this summer."""
+    old = tmp_path / 'reminders.json'
+    old.write_text('{"ripgrep": "2026-07-01", "gone": "2026-07-02"}')
+    monkeypatch.setattr(rotate, 'TOOLBOX_CURSOR', old)
+    entries = [tool('ripgrep', 'rg [pattern]'), tool('fd')]
+
+    rotate.seed('tool', entries)
+
+    assert rotate.cursor_path('tool').read_text().strip().startswith('{')
+    carried = rotate.cursor_path('tool').read_text()
+    assert '"rg"' in carried, 'rekeyed onto what you type'
+    assert 'gone' not in carried, 'a name that catalogues nothing takes its stamp with it'
+    assert 'fd' not in carried, 'never shown by toolbox either, so it stays unshown'
+
+
+def test_an_existing_cursor_is_never_overwritten_by_the_old_one(tmp_path, monkeypatch):
+    old = tmp_path / 'reminders.json'
+    old.write_text('{"ripgrep": "2020-01-01"}')
+    monkeypatch.setattr(rotate, 'TOOLBOX_CURSOR', old)
+    rotate.record('tool', tool('ripgrep', 'rg [pattern]'), TODAY)
+
+    rotate.seed('tool', [tool('ripgrep', 'rg [pattern]')])
+
+    assert '2026-08-17' in rotate.cursor_path('tool').read_text()
+
+
+def test_a_machine_without_the_old_file_seeds_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(rotate, 'TOOLBOX_CURSOR', tmp_path / 'absent.json')
+
+    rotate.seed('tool', [tool('rg')])
+
+    assert not rotate.cursor_path('tool').exists()

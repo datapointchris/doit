@@ -46,6 +46,14 @@ ROTATION_DIR = xdg_state_home() / 'doit' / 'rotation'
 # has gone cold; the rest rotate whole.
 LENSES = ('tool', 'func', 'alias', 'git', 'forgit', 'workflow', 'tmux', 'zsh')
 
+# The rotation toolbox kept: one file across every lens, keyed by catalogue name.
+# A lens with no cursor of its own takes what belongs to it from here, so a
+# machine keeps its own history across the switch instead of spending eighty
+# weeks re-showing tools it was shown this summer. Rotation state is per-machine
+# and unsynced, which is why this reads a local file rather than being a one-off
+# anyone has to run per box. Goes when toolbox does.
+TOOLBOX_CURSOR = xdg_state_home() / 'toolbox' / 'reminders.json'
+
 
 def cursor_path(lens: str) -> Path:
     return ROTATION_DIR / f'{lens}.json'
@@ -67,6 +75,24 @@ def candidates(lens: str, entries: list[Entry] | None = None, rows: list[usage.R
     return [entry for entry in mine if usage.typed_form(entry) in cold]
 
 
+def seed(lens: str, pool: list[Entry]) -> None:
+    """Give a lens with no cursor whatever toolbox recorded for its rows.
+
+    Names that no longer catalogue anything are dropped rather than carried:
+    a row leaving the registry should take its cursor entry with it silently,
+    which is the behaviour that made this a separate file from the register's
+    own state in the first place.
+
+    Writing is not advancing. A peek may trigger this, because importing history
+    is not the same act as showing a card and counting it.
+    """
+    path = cursor_path(lens)
+    if path.exists() or not TOOLBOX_CURSOR.exists():
+        return
+    inherited = load_state(TOOLBOX_CURSOR)
+    save_state(path, {usage.typed_form(entry) or entry.name: inherited[entry.name] for entry in pool if entry.name in inherited})
+
+
 def next_up(lens: str, entries: list[Entry] | None = None, rows: list[usage.Row] | None = None) -> Entry | None:
     """The candidate shown longest ago, or never.
 
@@ -78,6 +104,7 @@ def next_up(lens: str, entries: list[Entry] | None = None, rows: list[usage.Row]
     pool = candidates(lens, entries, rows)
     if not pool:
         return None
+    seed(lens, pool)
     shown = load_state(cursor_path(lens))
     return min(pool, key=lambda entry: (shown.get(usage.typed_form(entry) or entry.name, ''), entry.name))
 
