@@ -1,6 +1,22 @@
 # CHANGELOG
 
 
+## v2.9.1 (2026-08-17)
+
+### Bug Fixes
+
+- **update**: Hand the release lookup a gh credential
+  ([`29d8d35`](https://github.com/datapointchris/doit/commit/29d8d3580d022c543c0730f63b38fe3f7f090268))
+
+An unauthenticated caller gets 60 GitHub API requests an hour per IP, shared with every other
+  anonymous tool on the machine. Running out surfaces as a failed update rather than as a quota, and
+  this repo being public means nothing about the limit.
+
+token_func rather than token: the config is built at import and the notify gate resolves it on every
+  invocation to decline most of them, so an eager call would put a gh spawn in front of every doit
+  command.
+
+
 ## v2.9.0 (2026-08-17)
 
 ### Bug Fixes
