@@ -126,6 +126,24 @@ def latest_occurrence(records: list[dict], event: str) -> dict[str, datetime]:
     return latest
 
 
+def ages(records: list[dict], pursuit: str, event: str, now: datetime) -> list[float]:
+    """Days elapsed for every matching record of one pursuit.
+
+    The counterpart to :func:`latest_occurrence`, which keeps only the newest. A
+    pursuit banking credit needs each occurrence, because how many there were is
+    the whole question.
+    """
+    found = []
+    for record in records:
+        if record.get('event') != event or record.get('pursuit') != pursuit:
+            continue
+        when = parse_time(record.get('occurred_at') or record.get('logged_at'))
+        if when is None:
+            continue
+        found.append(max((now - when).total_seconds() / 86400.0, 0.0))
+    return found
+
+
 def days_since(latest: dict[str, datetime], names: list[str], now: datetime) -> dict[str, float | None]:
     """Days elapsed per pursuit, ``None`` for one with no matching event yet."""
     elapsed: dict[str, float | None] = {}

@@ -53,6 +53,8 @@ from doit import evidence
 from doit import journal
 from doit.allocate import DEFAULT_ALPHA
 from doit.allocate import FALLBACK_LOGS_PER_DAY
+from doit.allocate import banked_days_since
+from doit.allocate import banked_position
 from doit.allocate import draw
 from doit.allocate import effective_weights
 from doit.allocate import first_draw_probabilities
@@ -128,6 +130,7 @@ KNOWN_FIELDS = {
     'evidence_time',
     'evidence_items',
     'evidence_where',
+    'credit',
 }
 
 TEMPLATE = """\
@@ -289,13 +292,28 @@ def build_state(pursuits: dict, now: datetime) -> dict:
     elapsed = days_since(last_done, list(active), now)
     elapsed_skip = days_since(last_skip, list(active), now)
 
+    # A pursuit declaring credit is stating a rate rather than a rhythm, so doing
+    # several at once pays several forward. Only urgency reads this — `days_since`
+    # stays the honest time since the last one, because that is what gets shown.
+    banked = dict(elapsed)
+    positions: dict[str, float | None] = {}
+    for name, config in active.items():
+        if not config.get('credit'):
+            continue
+        cap = float(parse_cadence(config['credit']))
+        occurrences = journal.ages(records, name, 'done', now)
+        if not occurrences:
+            continue
+        banked[name] = banked_days_since(occurrences, intervals[name], cap)
+        positions[name] = banked_position(banked[name], intervals[name])
+
     alphas = {name: float(config.get('alpha', DEFAULT_ALPHA)) for name, config in active.items()}
     effective = {}
     for name in active:
         one = effective_weights(
             {name: weights[name]},
             {name: intervals[name]},
-            {name: elapsed[name]},
+            {name: banked[name]},
             {name: elapsed_skip[name]},
             alphas[name],
         )
@@ -310,6 +328,8 @@ def build_state(pursuits: dict, now: datetime) -> dict:
         'shares': shares,
         'intervals': intervals,
         'days_since': elapsed,
+        'days_banked': banked,
+        'banked_position': positions,
         'days_since_skip': elapsed_skip,
         'effective': effective,
         'probability': first_draw_probabilities(effective),
@@ -333,6 +353,14 @@ def pinned(state: dict) -> list[str]:
     overdue = []
     for name, config in state['active'].items():
         if not config.get('cadence'):
+            continue
+        if config.get('credit'):
+            # Banking already accounts for the cadence. Asking overdue_days as
+            # well would pin a pursuit that has been paid days forward, which is
+            # the whole thing credit exists to stop.
+            position = state['banked_position'].get(name)
+            if position is None or position < 0:
+                overdue.append((name, None if position is None else -position))
             continue
         last = state['last_done'].get(name)
         days = overdue_days(last[:10] if last else None, config['cadence'], state['today'])
@@ -572,10 +600,31 @@ def format_elapsed(days: float | None) -> str:
     return f'{int(days / 30)}mo ago'
 
 
+def format_banked(position: float | None, interval: float) -> str | None:
+    """How far ahead or behind a banking pursuit stands, in whole units of its cadence.
+
+    None inside a single interval, so the ordinary case falls through to the plain
+    elapsed time — "1 ahead" and "today" say the same thing, and only one of them
+    needs a new vocabulary to read.
+    """
+    if position is None or interval <= 0:
+        return None
+    # Rounded, not truncated. A completion logged seconds ago leaves an age of
+    # about 1e-5 days, so three of them bank 2.9999 and truncation reports two.
+    if position >= interval:
+        return f'banked {round(position)}d'
+    if position <= -interval:
+        return f'behind {round(-position)}d'
+    return None
+
+
 def render_row(index: int, name: str, state: dict, resolved: dict, pin: bool, width: int) -> None:
     config = state['active'].get(name, {})
     weight = int(state['weights'].get(name, 0))
-    if pin:
+    banked = format_banked(state['banked_position'].get(name), state['intervals'].get(name, 0.0))
+    if banked:
+        when = banked
+    elif pin:
         last = state['last_done'].get(name)
         days = overdue_days(last[:10] if last else None, config.get('cadence', '0d'), state['today'])
         when = status_label(days)

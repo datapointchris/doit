@@ -646,3 +646,69 @@ def test_format_elapsed_switches_unit_rather_than_format():
     assert pursuits.format_elapsed(3) == '3d ago'
     assert pursuits.format_elapsed(30) == '4w ago'
     assert pursuits.format_elapsed(200) == '6mo ago'
+
+
+CREDIT_REGISTER = """
+pursuits:
+  chore:
+    description: Complete chore that is not on the task list
+    weight: 25
+    cadence: 1d
+    credit: 1w
+"""
+
+
+def write_journal(directory, name: str, ages_in_days: list[float]):
+    directory.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for index, age in enumerate(ages_in_days):
+        when = (NOW - timedelta(days=age)).isoformat()
+        lines.append(json.dumps({'id': str(index), 'pursuit': name, 'event': 'done', 'occurred_at': when}))
+    (directory / 'next-log-test.jsonl').write_text('\n'.join(lines) + '\n')
+
+
+def credit_state(tmp_path, monkeypatch, ages_in_days: list[float]):
+    register_path = tmp_path / 'pursuits.yml'
+    register_path.write_text(CREDIT_REGISTER)
+    monkeypatch.setattr(pursuits, 'REGISTER', register_path)
+    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', tmp_path / 'state')
+    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
+    write_journal(tmp_path / 'state', 'chore', ages_in_days)
+    return pursuits.build_state(pursuits.load_pursuits(), NOW)
+
+
+def test_a_banked_pursuit_is_not_pinned_despite_its_cadence(tmp_path, monkeypatch):
+    """The bug this guards: pinning read the cadence directly and ignored credit.
+
+    A daily cadence is overdue the day after it was last done, so a chore paid
+    three days forward was pinned every morning regardless.
+    """
+    state = credit_state(tmp_path, monkeypatch, [0.0, 0.0, 0.0])
+    assert round(state['banked_position']['chore']) == 3
+    assert 'chore' not in pursuits.pinned(state)
+
+
+def test_a_pursuit_behind_is_still_pinned_and_says_by_how_much(tmp_path, monkeypatch):
+    state = credit_state(tmp_path, monkeypatch, [4.0])
+    assert state['banked_position']['chore'] == -3.0
+    assert 'chore' in pursuits.pinned(state)
+    assert pursuits.format_banked(-3.0, 1.0) == 'behind 3d'
+
+
+def test_days_since_stays_the_honest_elapsed_time(tmp_path, monkeypatch):
+    """Credit changes what gets weighed, never what gets displayed as last-done."""
+    state = credit_state(tmp_path, monkeypatch, [0.0, 0.0, 0.0])
+    assert state['days_since']['chore'] == 0.0, 'three chores today were all done today'
+    assert state['days_banked']['chore'] == -2.0, 'and the draw sees two days of cover'
+
+
+def test_a_pursuit_without_credit_is_weighed_exactly_as_before(tmp_path, monkeypatch):
+    register_path = tmp_path / 'pursuits.yml'
+    register_path.write_text(CREDIT_REGISTER.replace('    credit: 1w\n', ''))
+    monkeypatch.setattr(pursuits, 'REGISTER', register_path)
+    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', tmp_path / 'state')
+    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
+    write_journal(tmp_path / 'state', 'chore', [0.0, 0.0, 0.0])
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    assert state['days_banked']['chore'] == state['days_since']['chore']
+    assert state['banked_position'] == {}

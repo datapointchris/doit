@@ -85,6 +85,46 @@ def implied_intervals(weights: dict[str, float], logs_per_day: float) -> dict[st
     return {name: implied_interval(share, logs_per_day) for name, share in implied_shares(weights).items()}
 
 
+def banked_days_since(ages: list[float], interval: float, cap: float) -> float | None:
+    """Effective age when each completion banks one interval of credit forward.
+
+    A pursuit stating a rate rather than a rhythm should let that rate be met
+    early. Three chores in one evening is three days of a daily cadence, and
+    counting them as one is what makes a burst feel unrewarded — so each
+    completion advances the satisfied-through point by one interval from wherever
+    it already stood, rather than from the moment it happened.
+
+    ``cap`` bounds the position in both directions, and the symmetry is the
+    point. Ahead, it stops a spring clean from silencing the daily prompt for a
+    month, which is half of what a daily cadence is for. Behind, it stops a
+    fortnight away from accruing a debt no evening can clear — a backlog only
+    directs attention while it is payable, and past that it just reads as
+    failure. So the pursuit forgives anything older than the window.
+
+    Returned in the units :func:`urgency` reads, so a pursuit banked ahead of
+    itself reports a negative age and falls inside the cooldown.
+    """
+    if not ages:
+        return None
+    stamps = sorted(-age for age in ages)
+    # Carried from where the pursuit already stood, never reset to the moment each
+    # completion happened — resetting is what makes a single chore erase a week of
+    # missed ones, which is the same collapse credit exists to undo.
+    through = stamps[0]
+    for when in stamps:
+        through = min(through + interval, when + cap)
+    return interval - max(through, -cap)
+
+
+def banked_position(banked: float | None, interval: float) -> float | None:
+    """Days a pursuit is satisfied into the future, negative when it is behind.
+
+    The same number :func:`banked_days_since` works in, read the way a person
+    asks it: how far ahead am I, or how much do I owe.
+    """
+    return None if banked is None else interval - banked
+
+
 def urgency(days_since: float | None, interval: float, alpha: float = DEFAULT_ALPHA) -> float:
     """How much a pursuit's weight is multiplied by, given how long it has been.
 

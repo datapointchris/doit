@@ -112,3 +112,58 @@ def test_first_draw_probabilities_sum_to_one_and_exclude_zeros():
     assert probabilities['cooling'] == 0.0
     assert abs(sum(probabilities.values()) - 1.0) < 1e-9
     assert probabilities['a'] == 0.75
+
+
+def test_one_completion_banks_exactly_what_days_since_already_said():
+    """The generalisation has to leave the ordinary case untouched.
+
+    A pursuit done once, with credit configured, must weigh identically to one
+    without — otherwise turning credit on silently re-times everything else.
+    """
+    assert allocate.banked_days_since([3.0], interval=1.0, cap=7.0) == 3.0
+    assert allocate.banked_days_since([0.0], interval=1.0, cap=7.0) == 0.0
+
+
+def test_three_completions_in_one_evening_cover_three_days():
+    """The whole point: a burst is credited, not collapsed to its last entry."""
+    banked = allocate.banked_days_since([0.0, 0.0, 0.0], interval=1.0, cap=7.0)
+    assert banked == -2.0, 'satisfied two days past today, so due again on the third'
+    assert allocate.urgency(banked, interval=1.0) == 0.0, 'and cannot be drawn meanwhile'
+
+
+def test_the_bank_runs_out_and_the_pursuit_comes_back():
+    three_days_ago = [3.0, 3.0, 3.0]
+    assert allocate.banked_days_since(three_days_ago, interval=1.0, cap=7.0) == 1.0
+    assert allocate.urgency(1.0, interval=1.0) == 1.0, 'exactly due, not overdue'
+
+
+def test_credit_cannot_be_hoarded_past_the_cap():
+    """A spring clean must not silence a daily prompt for a month."""
+    twenty = [0.0] * 20
+    banked = allocate.banked_days_since(twenty, interval=1.0, cap=7.0)
+    assert allocate.banked_position(banked, 1.0) == 7.0
+
+
+def test_debt_is_forgiven_past_the_cap_too():
+    """A fortnight away must not accrue a backlog no evening can clear."""
+    banked = allocate.banked_days_since([30.0], interval=1.0, cap=7.0)
+    assert allocate.banked_position(banked, 1.0) == -7.0
+    assert allocate.urgency(banked, interval=1.0) == allocate.URGENCY_CEILING
+
+
+def test_a_missed_stretch_is_owed_and_paid_down_one_at_a_time():
+    """Debt carries. One chore clears one, not the whole backlog."""
+    interval, cap = 1.0, 7.0
+    owed = allocate.banked_position(allocate.banked_days_since([4.0], interval, cap), interval)
+    assert owed == -3.0, 'one done four days ago covers that day, leaving three'
+
+    paid = allocate.banked_position(allocate.banked_days_since([4.0, 0.0], interval, cap), interval)
+    assert paid == -2.0, 'doing one now pays exactly one of them down'
+
+    cleared = [4.0, 0.0, 0.0, 0.0]
+    assert allocate.banked_position(allocate.banked_days_since(cleared, interval, cap), interval) == 0.0
+
+
+def test_never_done_stays_none_rather_than_becoming_a_debt():
+    assert allocate.banked_days_since([], interval=1.0, cap=7.0) is None
+    assert allocate.banked_position(None, 1.0) is None
