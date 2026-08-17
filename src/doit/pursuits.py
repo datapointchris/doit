@@ -49,6 +49,7 @@ import yaml
 from rich.table import Table
 from rich.text import Text
 
+from doit import evidence
 from doit import journal
 from doit.allocate import DEFAULT_ALPHA
 from doit.allocate import FALLBACK_LOGS_PER_DAY
@@ -123,6 +124,10 @@ KNOWN_FIELDS = {
     'detail',
     'view',
     'on_log',
+    'evidence',
+    'evidence_time',
+    'evidence_items',
+    'evidence_where',
 }
 
 TEMPLATE = """\
@@ -151,6 +156,17 @@ TEMPLATE = """\
 #   context      where it lives — one path or several, joined
 #   detail       the field to take a one-sentence gist from, usually notes
 #   view         command that opens the item in full, {id} substituted
+#
+# Where resolve asks "what should I do?", evidence asks the same app "did I
+# already?" — so a pursuit you satisfy through its own CLI stops being offered
+# without you also logging it here. The later of the two answers wins, and the
+# apps are asked on a timer rather than per command. `doit pursuits evidence`
+# asks them now and names any that could not be reached.
+#
+#   evidence        command printing JSON rows of what got done
+#   evidence_time   the timestamp field on each row
+#   evidence_items  optional key holding the rows when they are nested
+#   evidence_where  optional field: value pairs selecting the rows that count
 
 pursuits:
   chores:
@@ -163,6 +179,8 @@ pursuits:
     context: category
     view: icb tasks show {id}
     on_log: icb tasks complete {id}
+    evidence: icb tasks list --status completed --limit 1 --json
+    evidence_time: complete_date
 
   read-library:
     description: Read what is already on the shelf
@@ -263,7 +281,10 @@ def build_state(pursuits: dict, now: datetime) -> dict:
         if config.get('cadence'):
             intervals[name] = float(parse_cadence(config['cadence']))
 
-    last_done = latest_occurrence(records, 'done')
+    # The apps are asked before the draw is weighed, so a pursuit satisfied in its
+    # own CLI stops being offered without anyone retyping it here.
+    observations = evidence.refresh(active, CACHE_DIR, now)
+    last_done = evidence.merged(latest_occurrence(records, 'done'), evidence.observed(observations))
     last_skip = latest_occurrence(records, 'skip')
     elapsed = days_since(last_done, list(active), now)
     elapsed_skip = days_since(last_skip, list(active), now)
@@ -296,6 +317,8 @@ def build_state(pursuits: dict, now: datetime) -> dict:
         'measured_rate': measured_rate,
         'last_done': {name: when.isoformat() for name, when in last_done.items()},
         'records': records,
+        'observed': evidence.observed(observations),
+        'evidence_errors': evidence.problems(observations),
     }
 
 
@@ -1032,6 +1055,52 @@ def cmd_dormant() -> int:
     return 0
 
 
+def cmd_evidence(as_json: bool = False) -> int:
+    """What each app says you last did, and which of them could not be asked.
+
+    Its own command because the draw consumes this silently. A pursuit whose
+    backend is logged out falls back to the journal and simply reads as never
+    done, which looks identical to genuinely never having done it — the two need
+    to be told apart somewhere, and this is where.
+    """
+    pursuits = load_pursuits()
+    if not pursuits:
+        return 1
+    now = datetime.now().astimezone()
+    active = {name: config for name, config in pursuits.items() if is_active(config, now.date())}
+    observations = evidence.refresh(active, CACHE_DIR, now, force=True)
+    seen = evidence.observed(observations)
+    failed = evidence.problems(observations)
+    declared = evidence.declared(active)
+
+    if as_json:
+        console.print_json(
+            data={
+                'observed': {name: when.isoformat() for name, when in seen.items()},
+                'errors': failed,
+                'undeclared': sorted(set(active) - set(declared)),
+            }
+        )
+        return 0
+
+    console.rule('[cyan]Evidence', align='left')
+    for name in sorted(active, key=lambda key: -active[key].get('weight', 0)):
+        line = Text('  ')
+        line.append(f'{name:<9}', style='white')
+        if name not in declared:
+            line.append('no backend — logged by hand', style='yellow')
+        elif name in failed:
+            line.append(failed[name], style='red')
+        elif name in seen:
+            elapsed = (now - seen[name]).total_seconds() / 86400.0
+            line.append(f'{format_elapsed(elapsed)} · {seen[name]:%d %b %H:%M}')
+        else:
+            line.append('asked, nothing recorded yet')
+        console.print(line)
+    console.print('\n  The apps are asked on a timer; this asks them now.\n')
+    return 0
+
+
 def cmd_edit() -> int:
     if not REGISTER.exists():
         REGISTER.parent.mkdir(parents=True, exist_ok=True)
@@ -1121,6 +1190,14 @@ def drift_command(
 def dormant_command() -> None:
     """Pursuits gone colder than their weight implies."""
     run(cmd_dormant)
+
+
+@app.command('evidence')
+def evidence_command(
+    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
+) -> None:
+    """What each app says you last did, asked now rather than on the timer."""
+    run(lambda: cmd_evidence(as_json))
 
 
 @app.command('edit')
