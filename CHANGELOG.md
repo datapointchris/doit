@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v2.8.0 (2026-08-17)
+
+### Features
+
+- **dashboard**: Add the meso training lane and a standing line
+  ([`f197d74`](https://github.com/datapointchris/doit/commit/f197d742b9bd2969d918c8d9ffc3852185b11f2c))
+
+meso was the one installed CLI exposing a model nothing read. It has no overview verb, so the lane
+  is built from cycles: rows are workouts rather than cycles, because a cycle is a plan and a
+  workout is the thing you can go and do. What was already performed stays out of it and feeds the
+  train pursuit's evidence instead — a session is the opposite of outstanding.
+
+next and dashboard now close with how many completions would bring the banking pursuits back to
+  current. A count rather than a duration, because it names the action: four away is four chores,
+  and that is something you can decide to do tonight. Pursuits without credit are excluded, where
+  being late is a scalar with no countable units behind it.
+
+The dashboard guards its read of the register. A register that refuses to load is a deliberate
+  failure mode and must cost one line rather than the whole glance.
+
+
 ## v2.7.0 (2026-08-17)
 
 ### Features
