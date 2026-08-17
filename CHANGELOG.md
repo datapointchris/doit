@@ -1,6 +1,38 @@
 # CHANGELOG
 
 
+## v2.6.0 (2026-08-17)
+
+### Chores
+
+- **pyproject**: Raise assertion verbosity instead of test verbosity
+  ([`3bbade3`](https://github.com/datapointchris/doit/commit/3bbade3911129cc9d28da6c67ee8a3f6abdda02d))
+
+A failing assertion truncated its diff and printed "use -vv to show", so the reader re-ran the whole
+  suite to see it. addopts = "-vv" answered that by raising test-list verbosity as well, which is a
+  different question: a green run printed a line per test and said nothing. verbosity_assertions
+  raises only the half that was wanted.
+
+Written by the forge pyproject die.
+
+### Features
+
+- **pursuits**: Derive last-done from the apps that own the act
+  ([`2a7d15b`](https://github.com/datapointchris/doit/commit/2a7d15bad56bf83ecbb6e0934346a14cbb9e0c8c))
+
+The journal only ever knew what was retyped into it, so a pursuit satisfied constantly through its
+  own CLI read as never done and kept being offered. The ceiling on what the draw could know was
+  whatever got logged twice.
+
+A pursuit now declares evidence beside resolve: where resolve asks what to do, evidence asks the
+  same backend whether it already happened. The later of the journal and the app wins, so
+  hand-logging still carries the pursuits no app can see.
+
+Reads are cached on a half-hour TTL and gathered concurrently, and a backend that cannot be reached
+  keeps its previous answer rather than dropping to never — the two are indistinguishable in the
+  draw, so 'pursuits evidence' names which is which.
+
+
 ## v2.5.1 (2026-08-15)
 
 ### Bug Fixes
