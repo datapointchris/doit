@@ -1,6 +1,41 @@
 # CHANGELOG
 
 
+## v2.13.0 (2026-08-17)
+
+### Documentation
+
+- Name the verbs that exist now that toolbox is gone
+  ([`d19c2ca`](https://github.com/datapointchris/doit/commit/d19c2cae153d8b589e15392c2af321bcb15b51e3))
+
+The --peek argument, the nudge comment and the newest-date-in example all cited a binary this
+  machine no longer has, and the observe fixtures used its commands as their history strings.
+
+rotate.py's seeding note claimed doit state is unsynced. The homelab folder manifest declares
+  doit-state as a sendreceive folder, so the reason it reads a local file is that doing so needs no
+  step per box.
+
+- The README lists kit remind
+  ([`082fc84`](https://github.com/datapointchris/doit/commit/082fc84478bc414e7b0953ec7f1e8d1f910ff2b3))
+
+It is a headline verb now — the weekly register item runs it, and it is the one thing in kit that
+  decides what to put in front of you rather than reporting on what is already there.
+
+### Features
+
+- **dashboard**: A dotfiles lane, one row per machine that needs a look
+  ([`18662fe`](https://github.com/datapointchris/doit/commit/18662fec1f020c0882f85933801963df75eaf81e))
+
+runs/ is shared across the fleet, so dotfiles report list --json is every machine's history newest
+  first. The fold to each machine's newest run is what turns that into the state of each box.
+
+dotfiles decides what ok means — the outcome field is the same string its own table prints. Folding
+  and drawing is doit's half, which is the split prs_adapter already describes.
+
+A healthy machine is not a row. A lane where every row reads ok is a lane that trains you to stop
+  reading it, so the count stays in the meta and the rows are what needs something.
+
+
 ## v2.12.0 (2026-08-17)
 
 ### Features
