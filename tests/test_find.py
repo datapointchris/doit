@@ -144,3 +144,29 @@ def test_an_unknown_source_is_a_usage_error(verb):
 
     assert result.exit_code == 2
     assert 'nonsense' in result.output
+
+
+def test_peek_shows_the_card_without_advancing_the_rotation(monkeypatch, tmp_path):
+    """The startup nudge draws this repeatedly; the rotation moves when you do."""
+    monkeypatch.setattr(find.rotate, 'ROTATION_DIR', tmp_path / 'rotation')
+    monkeypatch.setattr(find.rotate, 'next_up', lambda lens, *args: ENTRIES[1])
+
+    assert find.cmd_remind('alias', brief=True, peek=True) == 0
+    assert not find.rotate.cursor_path('alias').exists()
+
+    assert find.cmd_remind('alias', brief=True, peek=False) == 0
+    assert 'll' in find.rotate.cursor_path('alias').read_text()
+
+
+def test_an_unknown_lens_is_a_usage_error():
+    result = runner.invoke(cli_app, ['kit', 'remind', '--lens', 'nonsense'])
+
+    assert result.exit_code == 2
+    assert 'nonsense' in result.output
+
+
+def test_a_lens_with_nothing_cold_says_so_rather_than_printing_a_blank(monkeypatch, capsys):
+    monkeypatch.setattr(find.rotate, 'next_up', lambda lens, *args: None)
+
+    assert find.cmd_remind('tool', brief=False, peek=False) == 0
+    assert 'Nothing in the tool lens' in capsys.readouterr().out

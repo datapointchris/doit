@@ -37,6 +37,7 @@ from rich.text import Text
 
 from doit import digest
 from doit import index
+from doit import rotate
 from doit import skills
 from doit import tools
 from doit import usage
@@ -479,3 +480,35 @@ def kit_unused_command(
 ) -> None:
     """What you own, can run, and never do."""
     raise typer.Exit(cmd_unused(as_json, source, days, minimum))
+
+
+def cmd_remind(lens: str, brief: bool, peek: bool) -> int:
+    """Surface one forgotten row of a lens, and advance that lens's rotation."""
+    if lens not in rotate.LENSES:
+        raise typer.BadParameter(f'unknown lens {lens}; rotations are kept for {", ".join(rotate.LENSES)}')
+    entry = rotate.next_up(lens)
+    if entry is None:
+        console.print(f'[green]✓[/] Nothing in the {lens} lens is due to resurface.')
+        return 0
+    if entry.source == 'tool':
+        tools.render_tool(entry.name, tools.load_registry().get(entry.name) or {}, brief=brief)
+    else:
+        render_lens_card(entry, brief=brief)
+    if not peek:
+        rotate.record(lens, entry)
+    return 0
+
+
+@kit_app.command('remind')
+def kit_remind_command(
+    lens: Annotated[str, typer.Option('--lens', help=f'Which collection to draw from: {", ".join(rotate.LENSES)}.')] = 'tool',
+    brief: Annotated[bool, typer.Option('--brief', help='A few lines, for a startup nudge.')] = False,
+    peek: Annotated[bool, typer.Option('--peek', help='Show it without advancing the rotation.')] = False,
+) -> None:
+    """Resurface something from one collection you have stopped reaching for.
+
+    Each lens keeps its own rotation, so a drill over the git aliases and a
+    reminder over the registry recur at whatever their own register item says
+    rather than at a rate the largest collection sets for all of them.
+    """
+    raise typer.Exit(cmd_remind(lens, brief, peek))
