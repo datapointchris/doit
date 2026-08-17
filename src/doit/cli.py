@@ -6,6 +6,7 @@ tree is built this way. Each subcommand module owns its own `app`; this file
 only assembles them.
 """
 
+import subprocess
 from typing import Annotated
 
 import typer
@@ -31,11 +32,32 @@ TAGLINE = 'What to do now, and everything that decides it.'
 
 app = typer.Typer(name='doit', no_args_is_help=True, help=TAGLINE)
 
+
+def github_token() -> str:
+    """A GitHub credential from the gh CLI.
+
+    This repository is public, so the release lookup needs no permission. It
+    needs the rate limit: an unauthenticated caller gets 60 API requests an hour
+    per IP address, shared with every other anonymous tool on the machine, and
+    running out reads as a failed update rather than as a quota.
+
+    pyselfupdate checks $GITHUB_TOKEN and $GH_TOKEN itself and deliberately will
+    not spawn a subprocess a caller did not ask for, so this adds the third
+    source. `standards/release.md` § "Expensive credentials resolve through a
+    `TokenFunc`" is why it is passed as `token_func`: the config below is built
+    at import and the notify gate resolves it on every invocation to decline
+    most of them, so an eager token would put a `gh` spawn in front of every
+    doit command.
+    """
+    result = subprocess.run(['gh', 'auth', 'token'], capture_output=True, text=True, check=False)
+    return result.stdout.strip() if result.returncode == 0 else ''
+
+
 # Notify-only by house rule: one check per 24h, one line to stderr, and
 # `doit update` is the only thing that writes anything. The notice and the
 # command share this one config so they cannot advertise a release the command
 # then refuses.
-UPDATE_CONFIG = Config(tool='doit', owner='datapointchris')
+UPDATE_CONFIG = Config(tool='doit', owner='datapointchris', token_func=github_token)
 
 # The draw and the two things you do to what it just offered sit at the root:
 # they act on the answer, while `pursuits` manages the file that produced it.
