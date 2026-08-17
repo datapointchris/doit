@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v2.7.0 (2026-08-17)
+
+### Features
+
+- **pursuits**: Bank credit and carry debt on a rate cadence
+  ([`f036509`](https://github.com/datapointchris/doit/commit/f03650989a806a4a95018fb6458f023da1744c45))
+
+A cadence stated one rhythm: done yesterday or not. Doing three chores in an evening counted as one,
+  and missing five days counted the same as missing one, because urgency reads only the newest entry
+  and saturates.
+
+A pursuit may now declare credit, which turns its cadence into a rate. Each completion advances the
+  satisfied-through point by one interval from wherever it already stood, so a burst pays days
+  forward and a missed stretch is owed rather than waved through. One completion clears one.
+
+Bounded in both directions by the declared window. Ahead, so a spring clean cannot silence a daily
+  prompt for a month; behind, because thirty owed chores is a number nobody acts on and a backlog
+  only directs attention while it is payable.
+
+days_since stays the honest elapsed time and only urgency reads the banked value, so what gets
+  displayed as last-done is unchanged. Pinning reads the banked position too — reading the cadence
+  alone pinned a pursuit that had already been paid forward.
+
+
 ## v2.6.0 (2026-08-17)
 
 ### Chores

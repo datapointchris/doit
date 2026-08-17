@@ -1,6 +1,6 @@
 [project]
 name = "doit"
-version = "2.6.0"
+version = "2.7.0"
 description = "The layer that decides what to attend to and drives it"
 authors = [{ name = "Chris Birch", email = "datapointchris@gmail.com" }]
 license = "MIT"
