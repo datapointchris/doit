@@ -39,6 +39,18 @@ tools:
     description: Removed two years ago
     usage: "long-gone --flags"
     tags: []
+  wrapped:
+    category: navigation
+    description: A shell wrapper a subprocess cannot see
+    usage: "wr [path]"
+    requires: rg
+    tags: []
+  needs-absent:
+    category: custom-tools
+    description: Real elsewhere; its prerequisite is not on this box
+    usage: "needs-absent"
+    requires: long-gone
+    tags: []
 """
 
 
@@ -159,6 +171,33 @@ def test_unresolved_finds_rot_and_nothing_else():
     assert 'ripgrep' not in dead, 'resolved through its usage, not its key'
     assert 'forge' not in dead
     assert 'git-forgit-log' not in dead
+
+
+def test_a_present_prerequisite_resolves_a_wrapper_no_subprocess_can_see():
+    """`wr` is to `rg` what `br` is to broot: the binary is what proves the row."""
+    verdict = index.classify()
+
+    assert 'wrapped' not in [entry.name for entry in verdict.dead]
+    assert 'wrapped' not in [entry.name for entry in verdict.absent]
+
+
+def test_an_absent_prerequisite_is_reported_apart_from_a_wrong_entry():
+    """Two different facts: nobody can fix `needs-absent` from this machine."""
+    verdict = index.classify()
+
+    assert [entry.name for entry in verdict.absent] == ['needs-absent']
+    assert 'needs-absent' not in [entry.name for entry in verdict.dead]
+    assert 'long-gone' in [entry.name for entry in verdict.dead], 'the same name, checked the hard way, is still rot'
+
+
+def test_requires_is_checked_rather_than_taken_as_an_exemption(monkeypatch):
+    """Uninstall the prerequisite and the row moves, which a note could not do."""
+    real = index.shutil.which
+    monkeypatch.setattr(index.shutil, 'which', lambda name: None if name == 'rg' else real(name))
+
+    verdict = index.classify()
+
+    assert 'wrapped' in [entry.name for entry in verdict.absent]
 
 
 def test_unresolved_ignores_lenses_that_are_not_commands():

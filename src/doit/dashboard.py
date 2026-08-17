@@ -626,12 +626,21 @@ def maintenance_row(label: str, text: str, item: dict, handle: str) -> tuple[tup
 
 
 def build_kit_lane(results: dict[str, sources.Result]) -> LaneView:
-    """The rows of your kit that name something this machine cannot run.
+    """The rows of your kit whose entry is wrong.
 
     A standing condition rather than a schedule, which is why it is a lane and
     not a register item. The register can only say "go and look every month";
     this says what is wrong the moment it becomes wrong, and says nothing on a
     machine whose index is clean.
+
+    Never the rows whose `requires:` names software this box does not have.
+    Those are correct entries and there is nothing here to repair, so a lane
+    counting them would be asking you to act on someone else's machine — and a
+    count you cannot act on is one you learn to stop reading.
+
+    What is left is a row this machine cannot run and nothing explains, which is
+    either a stale entry or one still owed a `requires:`. Both are repairs, and
+    both are made here.
 
     The handle is `doit show`, because the act here is judging one entry rather
     than running it — the row is on the list precisely because running it fails.
@@ -654,7 +663,7 @@ def build_kit_lane(results: dict[str, sources.Result]) -> LaneView:
     return LaneView(
         name='kit',
         title='KIT',
-        meta='every row resolves' if not rows else f'{plural(len(rows), "row")} naming nothing runnable',
+        meta='every row resolves' if not rows else f'{plural(len(rows), "row")} pointing nowhere',
         rows=rows,
         total=len(rows),
         hints=['doit kit unresolved'],

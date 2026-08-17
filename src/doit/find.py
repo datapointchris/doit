@@ -28,6 +28,7 @@ module makes.
 import json
 import shutil
 import subprocess
+from collections.abc import Callable
 from datetime import date
 from typing import Annotated
 
@@ -234,23 +235,38 @@ def render_lens_card(entry: index.Entry, brief: bool = False) -> None:
 
 def cmd_unresolved(as_json: bool) -> int:
     """List rows naming something this machine cannot run."""
-    dead = index.unresolved()
+    verdict = index.classify()
     if as_json:
-        print(json.dumps(index.unresolved_rows(dead), indent=2))
+        print(json.dumps(index.unresolved_rows(verdict.dead), indent=2))
         return 0
-    if not dead:
+    if not verdict.dead and not verdict.absent:
         console.print('[green]✓[/] Every indexed row names something runnable.')
         return 0
-    console.rule('[cyan]Unresolved index rows', align='left')
-    width = max(len(entry.name) for entry in dead)
-    for entry in dead:
-        line = Text('  ')
-        line.append(entry.name.ljust(width), style='yellow')
-        line.append(f'  {entry.invocation}')
-        console.print(line, no_wrap=True, overflow='ellipsis')
-    console.print(f'\n  {len(dead)} rows name something not on PATH, nor a function, alias or forgit shortcut.')
-    console.print('  Either the entry is stale, or its `usage` names a runtime shell integration.')
+
+    if verdict.dead:
+        console.rule('[cyan]Rows naming nothing runnable', align='left')
+        print_index_rows(verdict.dead, 'yellow')
+        console.print(f'\n  {len(verdict.dead)} rows name something not on PATH, nor a function, alias or forgit shortcut.')
+        console.print('  No `requires:` accounts for them, so either the entry is stale or it needs one.')
+
+    # A separate section, not a footnote on the one above. These are correct
+    # entries for software this box does not have, so counting them alongside
+    # rot is what trains you to stop reading the number.
+    if verdict.absent:
+        console.print()
+        console.rule('[cyan]Rows needing something this machine lacks', align='left')
+        print_index_rows(verdict.absent, 'cyan', note=lambda entry: f'needs {entry.requires}')
+        console.print(f'\n  {len(verdict.absent)} rows are fine and their prerequisite is not installed here.')
     return 0
+
+
+def print_index_rows(entries: list[index.Entry], style: str, note: Callable[[index.Entry], str] | None = None) -> None:
+    width = max(len(entry.name) for entry in entries)
+    for entry in entries:
+        line = Text('  ')
+        line.append(entry.name.ljust(width), style=style)
+        line.append(f'  {note(entry) if note else entry.invocation}')
+        console.print(line, no_wrap=True, overflow='ellipsis')
 
 
 kit_app = typer.Typer(name='kit', no_args_is_help=True, help='Everything you own, and what you actually reach for.')

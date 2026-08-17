@@ -27,6 +27,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from doit.cards import first_heading
 from doit.cards import split_frontmatter
@@ -77,6 +78,10 @@ class Entry:
     # this is what happens when you do, and a card that omits it is a card that
     # cannot answer why the alias is worth remembering.
     command: str = ''
+    # Registry entries only: the command whose presence decides whether this row
+    # is real, for the rows where the invocation cannot decide it. See
+    # `unresolved`.
+    requires: str = ''
 
     def display(self) -> str:
         """The one line fzf shows and searches.
@@ -128,6 +133,7 @@ def index_tools() -> list[Entry]:
                 description=meta.get('description') or '',
                 tags=tuple(meta.get('tags') or ()),
                 category=meta.get('category') or '',
+                requires=(meta.get('requires') or '').strip(),
             )
         )
     return entries
@@ -523,8 +529,19 @@ def resolvable_names() -> set[str]:
     return names
 
 
-def unresolved(entries: list[Entry] | None = None) -> list[Entry]:
-    """Rows naming something this machine cannot run.
+class Verdict(NamedTuple):
+    """What one pass over the checkable rows found.
+
+    Two outcomes rather than one, because "this entry is wrong" and "you do not
+    have this here" are different facts and only the first is anyone's to fix.
+    """
+
+    dead: list[Entry]
+    absent: list[Entry]
+
+
+def classify(entries: list[Entry] | None = None) -> Verdict:
+    """Sort the rows this machine cannot run into wrong ones and missing ones.
 
     Only the lenses whose rows are commands are checked. A workflow card, a
     skill or a tmux keybinding is not a command and cannot be dead in this sense.
@@ -532,14 +549,25 @@ def unresolved(entries: list[Entry] | None = None) -> list[Entry]:
     zsh for its keymap to answer a question about four lenses is most of what
     this costs, and the dashboard renders it on every draw.
 
-    A row that goes nowhere is registry rot, and rot you cannot list is rot you
-    re-encounter forever.
+    `requires:` names a command rather than a machine, and that is the whole
+    reason it works. Software is durable — `brew` is `brew` on the next Mac —
+    while a hostname is an identity that gets replaced, so a row scoped to one
+    stops being true the day the hardware does.
+
+    It is checked, not trusted. Present means the row is real and only its shell
+    wrapper is invisible to a subprocess, which is `br` for broot and `z` for
+    zoxide, so the row resolves. Absent means the thing the row is built on is
+    not on this box, which is `absent` rather than `dead` — the entry is fine
+    and there is nothing here to repair. Uninstall broot and its row moves from
+    the first case to the second on the next run, which is what makes the key
+    an observation rather than a note asking to be believed.
     """
     checkable = set(CHECKABLE_LENSES)
     entries = build_index(list(CHECKABLE_LENSES)) if entries is None else entries
     known = resolvable_names()
     git_aliases = {entry.name for entry in index_git_aliases()}
-    dead = []
+    dead: list[Entry] = []
+    absent: list[Entry] = []
     for entry in entries:
         if entry.source not in checkable:
             continue
@@ -551,8 +579,21 @@ def unresolved(entries: list[Entry] | None = None) -> list[Entry]:
             continue
         if shutil.which(head):
             continue
+        if entry.requires:
+            if not shutil.which(entry.requires):
+                absent.append(entry)
+            continue
         dead.append(entry)
-    return dead
+    return Verdict(dead, absent)
+
+
+def unresolved(entries: list[Entry] | None = None) -> list[Entry]:
+    """Rows whose entry is wrong: nothing on this machine, and nothing excusing it.
+
+    A row that goes nowhere is registry rot, and rot you cannot list is rot you
+    re-encounter forever.
+    """
+    return classify(entries).dead
 
 
 def unresolved_rows(dead: list[Entry] | None = None) -> list[dict]:

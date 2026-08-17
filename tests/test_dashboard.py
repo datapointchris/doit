@@ -294,7 +294,7 @@ def test_kit_lane_names_the_entry_and_what_it_claims_you_can_type():
     and the thing that fails is `br`."""
     lane = lanes_by_name(all_results())['kit']
 
-    assert lane.meta == '3 rows naming nothing runnable'
+    assert lane.meta == '3 rows pointing nowhere'
     assert lane.rows[0].label == 'tool'
     assert lane.rows[0].text == 'broot'
     assert lane.rows[0].note == 'br [path]'
