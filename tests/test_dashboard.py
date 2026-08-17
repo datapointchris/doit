@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 from doit import dashboard
 from doit import sources
 from doit.cli import app as cli_app
+from doit.lanes import Urgency
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'dashboard'
 
@@ -682,3 +683,45 @@ def test_a_meso_that_cannot_answer_says_so_rather_than_vanishing():
     assert lane.available is False
     assert lane.title == 'TRAINING'
     assert 'not logged in' in lane.reason
+
+
+def dotfiles_runs(*rows: tuple[str, str, str]) -> sources.Result:
+    payload = [{'run': f'2026-{machine}-check', 'machine': machine, 'verb': verb, 'outcome': outcome} for machine, verb, outcome in rows]
+    return sources.Result(source='dotfiles', payload=payload, exit_code=0)
+
+
+def test_the_dotfiles_lane_keeps_only_each_machines_newest_run() -> None:
+    """`runs/` is shared across the fleet, so the listing is every machine's
+    history. What a dashboard wants is the state of each box now."""
+    result = dotfiles_runs(('scheduler', 'check', '2 unconverged: packages'), ('scheduler', 'check', 'ok'))
+
+    lane = dashboard.dotfiles_adapter(result)[0]
+
+    assert [row.label for row in lane.rows] == ['scheduler']
+    assert lane.rows[0].text == '2 unconverged: packages'
+
+
+def test_a_healthy_machine_is_not_a_row() -> None:
+    """A lane where every row reads ok is a lane that trains you to stop reading
+    it. The count stays in the meta so a silent lane still says it measured."""
+    lane = dashboard.dotfiles_adapter(dotfiles_runs(('archlinux', 'check', 'ok'), ('mbp', 'check', 'ok')))[0]
+
+    assert lane.rows == []
+    assert lane.total == 0
+    assert '2 machine(s) reporting' in lane.meta
+
+
+def test_an_unhealthy_machine_carries_the_command_that_opens_its_run() -> None:
+    """A row you can read against a row you can do — the reason `Row` has a
+    handle at all."""
+    lane = dashboard.dotfiles_adapter(dotfiles_runs(('scheduler', 'check', 'unreadable')))[0]
+
+    assert lane.rows[0].handle == 'dotfiles report show 2026-scheduler-check'
+    assert lane.rows[0].urgency is Urgency.DUE
+
+
+def test_a_source_that_did_not_answer_says_so_rather_than_vanishing() -> None:
+    lane = dashboard.dotfiles_adapter(sources.Result(source='dotfiles', payload=None, exit_code=1))[0]
+
+    assert lane.name == 'dotfiles'
+    assert lane.rows == []

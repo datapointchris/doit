@@ -821,6 +821,49 @@ def pr_urgency(age: int) -> Urgency:
     return Urgency.DUE if age >= PR_DUE else Urgency.NONE
 
 
+def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
+    """`dotfiles report list --json` as one row per machine, newest run only.
+
+    That listing is every run from every machine, newest first, because `runs/` is
+    shared across the fleet. What a dashboard wants from it is the current state
+    of each box, so the fold is to the first row each machine appears in.
+
+    dotfiles decides what `ok` means — the field is the same string its own table
+    prints. Folding to the latest per machine and drawing it is doit's half, which
+    is the split `prs_adapter` above describes.
+
+    A healthy machine is not a row. The lane exists to say which box needs
+    something, and a fleet where every row reads ok is a lane that trains you to
+    stop reading it.
+    """
+    payload = result.payload
+    if not isinstance(payload, list):
+        return [unavailable('dotfiles', 'DOTFILES', sources.reason('dotfiles', result))]
+
+    latest: dict[str, dict] = {}
+    for run in payload:
+        machine = run.get('machine', '')
+        if machine and machine not in latest:
+            latest[machine] = run
+
+    wrong = [(machine, run) for machine, run in sorted(latest.items()) if run.get('outcome') != 'ok']
+    rows = [
+        Row(machine, run.get('outcome', ''), run.get('verb', ''), Urgency.DUE, f'dotfiles report show {run.get("run", "")}')
+        for machine, run in wrong
+    ]
+    healthy = len(latest) - len(wrong)
+    return [
+        LaneView(
+            name='dotfiles',
+            title='DOTFILES',
+            meta=f'{len(latest)} machine(s) reporting' if not wrong else f'{len(wrong)} of {len(latest)} need a look',
+            rows=rows,
+            total=len(wrong),
+            hints=['dotfiles check'] if wrong else [f'{healthy} machine(s) clean'],
+        )
+    ]
+
+
 def learning_adapter(result: sources.Result) -> list[LaneView]:
     """learning's overview model, as one lane."""
     return [build_learning_lane({'learning': result}, date.today())]
@@ -830,6 +873,7 @@ sources.register_adapter('icb', icb_adapter)
 sources.register_adapter('learning', learning_adapter)
 sources.register_adapter('meso', meso_adapter)
 sources.register_adapter('prs', prs_adapter)
+sources.register_adapter('dotfiles', dotfiles_adapter)
 
 
 def read_local(read: Callable[[], object]) -> sources.Result:
