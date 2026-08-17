@@ -44,6 +44,14 @@ FORGIT_PLUGIN = Path(os.environ.get('FORGIT_PLUGIN') or Path.home() / '.config' 
 # read one source rather than drifting apart.
 TMUX_CARD = 'tmux-commands'
 
+# The lenses whose rows are commands, and so the only ones rot can be asked about.
+CHECKABLE_LENSES = ('tool', 'func', 'alias', 'forgit')
+
+# The two ways a shell file spells a definition, anchored at column one because
+# that is where a top-level one starts and a nested one never does.
+FUNCTION_DEFINITION = re.compile(r'^(?:function\s+)?([A-Za-z_][\w.-]*)\s*\(\)\s*\{', re.M)
+FUNCTION_KEYWORD = re.compile(r'^function\s+([A-Za-z_][\w.-]*)\s*\{', re.M)
+
 
 @dataclass(frozen=True)
 class Entry:
@@ -88,17 +96,14 @@ class Entry:
 
 
 def shell_files() -> list[Path]:
-    """The shared shell files plus this platform's, which holds both.
+    """Every shell file this machine has, at whatever depth it sits.
 
-    The platform file (macos.sh / archlinux.sh / wsl.sh) carries functions and
-    aliases too, so reading only the shared files silently drops every
-    platform-specific shortcut from the index.
+    The tree is nested — a package manager's shortcuts under `pkg/<name>/`, a
+    platform's under `os/<name>/` — and the symlink layer links only what applies
+    to this box, so the directory is already the statement of what is here.
+    Anything narrower has to name the layout, and the layout belongs to dotfiles.
     """
-    files = [SHELL_DIR / 'functions.sh', SHELL_DIR / 'aliases.sh']
-    platform = os.environ.get('PLATFORM')
-    if platform and (SHELL_DIR / f'{platform}.sh').exists():
-        files.append(SHELL_DIR / f'{platform}.sh')
-    return [path for path in files if path.exists()]
+    return sorted(path for path in SHELL_DIR.rglob('*.sh') if path.is_file())
 
 
 def shell_text() -> str:
@@ -503,9 +508,16 @@ def resolvable_names() -> set[str]:
     Built once and reused, because `unresolved` would otherwise shell out per
     row. Shell functions and aliases are read from their files rather than asked
     of the shell: this runs in a subprocess that has sourced nothing.
+
+    Definitions are matched, not the `#@` annotation. That annotation is the
+    index's opt-in and says a function is worth offering you; whether the shell
+    will define the name is a different question, and an unannotated helper
+    answers yes to it. Reading the annotation for both makes every internal
+    function look like a row pointing nowhere.
     """
     text = shell_text()
-    names = set(re.findall(r'^#@(\S+)$', text, re.M))
+    names = set(FUNCTION_DEFINITION.findall(text))
+    names |= set(FUNCTION_KEYWORD.findall(text))
     names |= set(re.findall(r'^alias\s+([^=\s]+)=', text, re.M))
     names |= {entry.name for entry in index_forgit()}
     return names
@@ -516,12 +528,15 @@ def unresolved(entries: list[Entry] | None = None) -> list[Entry]:
 
     Only the lenses whose rows are commands are checked. A workflow card, a
     skill or a tmux keybinding is not a command and cannot be dead in this sense.
+    They are also the only ones built: reading sixty markdown cards and asking
+    zsh for its keymap to answer a question about four lenses is most of what
+    this costs, and the dashboard renders it on every draw.
 
     A row that goes nowhere is registry rot, and rot you cannot list is rot you
     re-encounter forever.
     """
-    checkable = {'tool', 'func', 'alias', 'forgit'}
-    entries = build_index() if entries is None else entries
+    checkable = set(CHECKABLE_LENSES)
+    entries = build_index(list(CHECKABLE_LENSES)) if entries is None else entries
     known = resolvable_names()
     git_aliases = {entry.name for entry in index_git_aliases()}
     dead = []
@@ -538,3 +553,15 @@ def unresolved(entries: list[Entry] | None = None) -> list[Entry]:
             continue
         dead.append(entry)
     return dead
+
+
+def unresolved_rows(dead: list[Entry] | None = None) -> list[dict]:
+    """The rot report as plain data, for whoever is rendering it.
+
+    `doit kit unresolved` prints these and the dashboard's kit lane lays them
+    out. Two readers, one producer: a second shaping would answer a subtly
+    different question within a month, and then the lane and the command would
+    disagree about whether your index is clean.
+    """
+    dead = unresolved() if dead is None else dead
+    return [{'source': entry.source, 'name': entry.name, 'invocation': entry.invocation} for entry in dead]

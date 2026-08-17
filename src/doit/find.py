@@ -236,7 +236,7 @@ def cmd_unresolved(as_json: bool) -> int:
     """List rows naming something this machine cannot run."""
     dead = index.unresolved()
     if as_json:
-        print(json.dumps([{'source': e.source, 'name': e.name, 'invocation': e.invocation} for e in dead], indent=2))
+        print(json.dumps(index.unresolved_rows(dead), indent=2))
         return 0
     if not dead:
         console.print('[green]✓[/] Every indexed row names something runnable.')

@@ -174,6 +174,29 @@ def test_a_shell_function_resolves_even_though_it_is_not_on_path():
     assert 'll' in index.resolvable_names()
 
 
+def test_a_nested_package_file_is_read_like_the_shared_ones(monkeypatch, tmp_path):
+    """A package manager's shortcuts sit under `pkg/<name>/`, not at the root."""
+    shell = tmp_path / 'nested'
+    (shell / 'pkg' / 'pacman').mkdir(parents=True)
+    (shell / 'pkg' / 'pacman' / 'pacman.sh').write_text('#@pacup\n#--> update everything\npacup() {\n  :\n}\nalias pacs="sudo pacman -S"\n')
+    monkeypatch.setattr(index, 'SHELL_DIR', shell)
+
+    assert by_name(index.index_functions())['pacup'].description == 'update everything'
+    assert 'pacs' in by_name(index.index_aliases())
+    assert {'pacup', 'pacs'} <= index.resolvable_names()
+
+
+def test_an_unannotated_function_resolves_without_entering_the_index(monkeypatch, tmp_path):
+    """Whether the shell defines a name and whether the index offers it are two questions."""
+    shell = tmp_path / 'unannotated'
+    shell.mkdir()
+    (shell / 'colors.sh').write_text('allcolors() {\n  :\n}\nfunction paint {\n  :\n}\n')
+    monkeypatch.setattr(index, 'SHELL_DIR', shell)
+
+    assert {'allcolors', 'paint'} <= index.resolvable_names()
+    assert index.index_functions() == []
+
+
 def test_functions_need_the_annotation_to_be_indexed():
     """The `#@name` annotation is the opt-in; helpers stay out."""
     functions = by_name(index.index_functions())
