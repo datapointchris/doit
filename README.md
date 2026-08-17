@@ -17,6 +17,7 @@ doit workflows list   # the reference cards
 doit claude skills list # the Claude skills you own, and when each fires
 doit tools show <n>   # what one tool is, and what to type
 doit kit unused       # what you own, can run, and never reach for
+doit kit remind       # resurface one of them, a lens at a time
 doit log              # record what actually happened
 ```
 
