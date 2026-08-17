@@ -1,6 +1,41 @@
 # CHANGELOG
 
 
+## v2.9.0 (2026-08-17)
+
+### Bug Fixes
+
+- **kit**: Resolve names against the whole deployed shell tree
+  ([`1db9942`](https://github.com/datapointchris/doit/commit/1db99428b7174b9ee803b44c93d3ee2be7f56d7b))
+
+Resolution read two files plus a flat <platform>.sh. The shell tree is nested — pkg/<name>/,
+  os/<name>/ — and no flat platform file is deployed, so a package manager's shortcuts were
+  invisible: five functions and seven aliases missing from the index here, and two library functions
+  reported as rot they are not.
+
+Resolvability now matches a definition rather than the #@ annotation. The annotation is the index's
+  opt-in and says a function is worth offering; whether the shell defines the name is a different
+  question an unannotated helper answers yes to.
+
+unresolved() builds only the four lenses it checks. Reading sixty markdown cards and asking zsh for
+  its keymap was most of what it cost.
+
+### Features
+
+- **dashboard**: Put unresolved index rows on their own lane
+  ([`623b56d`](https://github.com/datapointchris/doit/commit/623b56d99099b3b44626918245e39ade52d2674c))
+
+Rot in the kit was answerable only by remembering to run `doit kit unresolved`, and the register can
+  only say to go and look monthly. The lane says what is wrong the moment it is wrong, and says
+  every row resolves when there is nothing to report.
+
+The handle is `doit show`, not the invocation — the row is on the list because running it fails, so
+  the act is judging the entry.
+
+One producer feeds both readers. A second shaping would answer a subtly different question within a
+  month, and then the lane and the command would disagree about whether the index is clean.
+
+
 ## v2.8.0 (2026-08-17)
 
 ### Features
