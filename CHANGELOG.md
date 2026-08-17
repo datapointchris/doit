@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v2.10.0 (2026-08-17)
+
+### Features
+
+- **kit**: Judge a row on what it needs, not only on what it types
+  ([`d64c2d9`](https://github.com/datapointchris/doit/commit/d64c2d9aaf90849614dd94ea08544282102423a2))
+
+Four rows reported as rot were nothing of the kind. `br` and `z` are broot's and zoxide's shell
+  wrappers, which a subprocess cannot see even with both binaries on PATH; brew-maintenance and
+  reload-dev-forever depend on software this box does not have.
+
+`requires:` names the command that decides, and it names software rather than a machine on purpose —
+  brew is brew on the next Mac, while a hostname is an identity that gets replaced. It is checked,
+  not trusted: present resolves the row, absent moves it to its own section instead of counting it
+  as a wrong entry.
+
+The dashboard lane carries only the wrong entries, because a count you cannot act on from this
+  machine is one you stop reading.
+
+
 ## v2.9.1 (2026-08-17)
 
 ### Bug Fixes
