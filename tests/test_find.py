@@ -11,6 +11,7 @@ on the command line verbatim.
 """
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from doit import find
@@ -127,6 +128,48 @@ def test_finding_still_opens_the_composite(monkeypatch, picks):
 
     assert find.cmd_find('', None) == 0
     assert shown == ['ll']
+
+
+def test_the_preview_builds_only_the_collection_it_was_given(monkeypatch):
+    """It runs once per keystroke, and building every collection to render one
+    row asks zsh for its keymaps each time. That subprocess is an interactive
+    shell, which takes the terminal from the picker that spawned it."""
+    asked = []
+
+    def record(sources=None):
+        asked.append(sources)
+        return list(ENTRIES)
+
+    monkeypatch.setattr(index, 'build_index', record)
+
+    with pytest.raises(typer.Exit):
+        find.preview_command('alias', 'll')
+
+    assert asked == [['alias']]
+
+
+def test_a_launcher_row_says_which_collection_it_came_from(monkeypatch):
+    """Areas and tools share one picker and one preview string, so a row that
+    does not name its collection is one the preview renders as registry rot."""
+    monkeypatch.setattr(index, 'index_tools', lambda: [])
+    calls = {}
+    monkeypatch.setattr(find, 'run_fzf', lambda lines, query, preview, header: calls.update(lines=lines, preview=preview) or '')
+
+    assert find.cmd_launch() == 0
+    assert calls['preview'] == 'doit __preview {2} {3}'
+    assert all(line.split('\t')[1] == find.AREA for line in calls['lines'])
+
+
+def test_picking_an_area_lands_on_its_help_not_the_composite(monkeypatch):
+    """Nothing in any collection is named `review due`, so the composite can
+    only report that it knows nothing about doit's own areas."""
+    monkeypatch.setattr(index, 'index_tools', lambda: [])
+    ran = []
+    monkeypatch.setattr(find, 'delegate', lambda command: ran.append(command) or True)
+    monkeypatch.setattr(find, 'run_fzf', lambda *args: f'review due  what is due\t{find.AREA}\treview due')
+
+    assert find.cmd_launch() == 0
+    assert ran == [['doit', 'review', 'due', '--help']]
 
 
 def test_an_empty_index_says_how_to_fill_it(monkeypatch, capsys):

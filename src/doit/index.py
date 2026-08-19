@@ -23,6 +23,7 @@ which are not rot, plus entries that genuinely are.
 import functools
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -218,6 +219,25 @@ def index_functions() -> list[Entry]:
     return entries
 
 
+def alias_expansion(text: str) -> str:
+    """What an alias expands to, as the shell reads the right-hand side.
+
+    The value is one shell word, so anything after it is a trailing comment and
+    a quote inside it belongs to the command. Stripping quote characters off
+    both ends instead keeps the comment, drops the closing quote of a nested
+    string, and leaves `pp` reading `ssh ops -t "nvim ~/todo.md` — a line that
+    no longer runs, on a card whose whole job is to say what to type.
+
+    A line the shell itself could not parse falls back to the raw right-hand
+    side, because a row showing something ragged beats a row that vanishes.
+    """
+    try:
+        words = shlex.split(text, comments=True)
+    except ValueError:
+        return text.strip().strip('\'"')
+    return words[0] if words else ''
+
+
 def index_aliases() -> list[Entry]:
     """Aliases, with the immediately preceding comment as the description."""
     entries = []
@@ -227,9 +247,7 @@ def index_aliases() -> list[Entry]:
             description = line.lstrip('#').strip()
         elif line.startswith('alias '):
             name, _, expansion = line[6:].partition('=')
-            entries.append(
-                Entry(source='alias', name=name, invocation=name, description=description, command=expansion.strip().strip('\'"'))
-            )
+            entries.append(Entry(source='alias', name=name, invocation=name, description=description, command=alias_expansion(expansion)))
             description = ''
         elif line.strip():
             description = ''
@@ -383,6 +401,15 @@ def zsh_bindkeys(interactive: bool) -> str:
     Cached because a `doit find` that opens a card builds the index twice, and
     the interactive read is the most expensive thing in it — it sources the whole
     zshrc. Safe only because doit is a short-lived process.
+
+    `start_new_session` is what keeps the interactive read from taking the
+    terminal. An interactive zsh claims the controlling terminal with
+    `tcsetpgrp`, and it wins, because a shell ignores the SIGTTOU that would
+    otherwise stop a background process from doing it. Run where the caller is
+    already in the background — an fzf preview is — the foreground process group
+    is left pointing at this subprocess, and the picker is suspended by SIGTTIN
+    on its next keystroke. A new session has no controlling terminal to claim, so
+    there is nothing for zsh to take. The dump is identical either way.
     """
     flags = ['-i', '-c'] if interactive else ['-f', '-c']
     try:
@@ -393,6 +420,7 @@ def zsh_bindkeys(interactive: bool) -> str:
             check=False,
             stdin=subprocess.DEVNULL,
             timeout=10,
+            start_new_session=True,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return ''

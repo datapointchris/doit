@@ -44,6 +44,10 @@ from doit import usage
 from doit.render import console
 from doit.render import error_console
 
+# The collection name an area row carries. Not one of `index.LENSES` — an area is
+# a command of doit's own, and the launcher is the only picker that offers one.
+AREA = 'area'
+
 # What bare `doit launch` offers above your own tools: the areas of doit itself.
 AREAS = [
     ('next', 'What to do now, drawn from your weighted pursuits'),
@@ -146,21 +150,43 @@ def cmd_launch() -> int:
 
     Your own tools, not all 130: a launcher answering "what can I run here" with
     every third-party binary on the machine answers a different question.
+
+    Both kinds of row carry their collection, in the shape `index_lines` uses, so
+    one preview string serves the whole list. An area is a command rather than an
+    indexed thing — nothing in the registry is named `review due` — and a row
+    that does not say so is one the preview renders as registry rot and Enter
+    cannot resolve at all.
     """
     own = [entry for entry in index.index_tools() if entry.category == 'custom-tools']
-    rows = [f'{name:<18} {description}\t{name}' for name, description in AREAS]
-    rows += [f'{entry.name:<18} {entry.description}\t{entry.name}' for entry in sorted(own, key=lambda e: e.name)]
-    selected = run_fzf(rows, '', 'doit __preview tool {2}', LAUNCH_HEADER)
+    rows = [f'{name:<18} {description}\t{AREA}\t{name}' for name, description in AREAS]
+    rows += [f'{entry.name:<18} {entry.description}\ttool\t{entry.name}' for entry in sorted(own, key=lambda e: e.name)]
+    selected = run_fzf(rows, '', 'doit __preview {2} {3}', LAUNCH_HEADER)
     if selected is None:
         return 1
     if not selected:
         return 0
-    return cmd_show(selected.split('\t')[-1])
+    source, name = selected.split('\t')[1:3]
+    return show_area(name) if source == AREA else cmd_show(name)
 
 
-def lens_sources(subject: str) -> dict[str, index.Entry]:
-    """Every indexed row whose name is this subject, keyed by collection."""
-    return {entry.source: entry for entry in index.build_index() if entry.name == subject}
+def show_area(area: str) -> int:
+    """One of doit's own areas, shown as the help screen that routes into it.
+
+    Every other row in the launcher renders from a collection, and an area is in
+    none of them. Its help is the thing that answers the same question, and doit
+    writes help to route rather than to list.
+    """
+    return 0 if delegate(['doit', *area.split(), '--help']) else 1
+
+
+def lens_sources(subject: str, sources: list[str] | None = None) -> dict[str, index.Entry]:
+    """Every indexed row whose name is this subject, keyed by collection.
+
+    `doit show` wants all of them, which is the composite. A preview already
+    knows which collection its row came from, and narrowing to it is the
+    difference between reading one file and asking zsh for its keymaps.
+    """
+    return {entry.source: entry for entry in index.build_index(sources) if entry.name == subject}
 
 
 def render_section(title: str, style: str) -> None:
@@ -197,8 +223,12 @@ def cmd_show(subject: str) -> int:
         entry = found['tool']
         render_section(f'registry — {entry.invocation}', 'yellow')
         tools.render_tool(subject, tools.load_registry().get(subject) or {}, heading=False)
-        render_section('tldr — common examples', 'blue')
-        delegate(['tldr', tools.invocation_head(entry.invocation)])
+        # A heading is a promise that something follows it. tldr answers for
+        # itself when it has no page, so absence of the binary is the one case
+        # that would leave the promise unkept.
+        if shutil.which('tldr'):
+            render_section('tldr — common examples', 'blue')
+            delegate(['tldr', tools.invocation_head(entry.invocation)])
     if 'workflow' in found:
         render_section('workflow — your reference card', 'cyan')
         delegate(['doit', 'workflows', 'show', subject])
@@ -334,7 +364,14 @@ def show_command(subject: Annotated[str, typer.Argument()]) -> None:
 
 
 def preview_command(source: Annotated[str, typer.Argument()], name: Annotated[str, typer.Argument()]) -> None:
-    """Render one row for the fzf preview pane."""
+    """Render one row for the fzf preview pane.
+
+    Runs once per keystroke, so it builds the one collection fzf named rather
+    than the whole index. A source fzf could not have produced renders nothing:
+    the preview pane is not where a usage error is worth printing.
+    """
+    if source == AREA:
+        raise typer.Exit(show_area(name))
     if source == 'tool':
         tools.render_tool(name, tools.load_registry().get(name) or {})
         raise typer.Exit(0)
@@ -345,8 +382,7 @@ def preview_command(source: Annotated[str, typer.Argument()], name: Annotated[st
         if skill:
             skills.render_skill(skill)
         raise typer.Exit(0 if skill else 1)
-    entry = lens_sources(name).get(source)
-    if entry:
+    if source in index.LENSES and (entry := lens_sources(name, [source]).get(source)):
         render_lens_card(entry)
     raise typer.Exit(0)
 

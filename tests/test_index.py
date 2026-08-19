@@ -18,6 +18,11 @@ from doit import tools
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures'
 
+# Bound at import, before the autouse fixture swaps the module attribute for a
+# stub. One test is about how that subprocess is spawned rather than what it
+# returns, and the stub is the only thing reachable by name once it is in place.
+REAL_ZSH_BINDKEYS = index.zsh_bindkeys
+
 REGISTRY_YAML = """\
 tools:
   ripgrep:
@@ -281,6 +286,43 @@ def test_aliases_take_the_preceding_comment_as_their_description():
 def test_an_alias_carries_what_it_expands_to():
     """A card that omits the expansion cannot say why the alias is worth keeping."""
     assert by_name(index.index_aliases())['ll'].command == 'eza -l'
+
+
+@pytest.mark.parametrize(
+    ('expansion', 'expected'),
+    [
+        ("'sudo pacman -Sc' # Clean package cache", 'sudo pacman -Sc'),
+        ('\'ssh ops -t "nvim ~/todo.md"\'', 'ssh ops -t "nvim ~/todo.md"'),
+        ("'find . -name '\\''__pycache__'\\'' -delete'", "find . -name '__pycache__' -delete"),
+        ("'echo # not a comment'", 'echo # not a comment'),
+        ("'unbalanced", 'unbalanced'),
+    ],
+)
+def test_an_alias_expands_to_one_shell_word(expansion, expected):
+    """The right-hand side is one word, so a trailing comment is not part of it
+    and a quote inside it is. Stripping quote characters off both ends kept the
+    comment and ate the closing quote of a nested string, which left the card
+    printing a command that no longer runs."""
+    assert index.alias_expansion(expansion) == expected
+
+
+def test_the_interactive_read_cannot_take_the_terminal(monkeypatch):
+    """An interactive zsh claims the tty with `tcsetpgrp` and wins, because a
+    shell ignores the SIGTTOU that would stop a background process doing it.
+    Under an fzf preview that leaves the foreground group pointing at a dead
+    subprocess, and the picker is suspended by SIGTTIN on the next keystroke."""
+    calls = {}
+    monkeypatch.setattr(index.subprocess, 'run', lambda command, **kwargs: calls.update(kwargs) or _Completed())
+    REAL_ZSH_BINDKEYS.cache_clear()
+
+    REAL_ZSH_BINDKEYS(interactive=True)
+    REAL_ZSH_BINDKEYS.cache_clear()
+
+    assert calls['start_new_session'] is True
+
+
+class _Completed:
+    stdout = ''
 
 
 def test_workflow_rows_point_at_the_command_that_renders_them():
