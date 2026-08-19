@@ -777,3 +777,89 @@ def test_an_infinite_implied_interval_has_no_multiplier():
     # A zero-weight pursuit implies an infinite interval; dividing by it is not a
     # ratio anyone can read.
     assert pursuits.urgency_multiplier(multiplier_state(3.0, math.inf), 'a') == ''
+
+
+def answers(monkeypatch, *replies: str) -> list[str]:
+    """Feed the prompts a script, recording what each one asked."""
+    asked: list[str] = []
+    queued = list(replies)
+
+    def fake_input(prompt: str = '') -> str:
+        asked.append(prompt)
+        return queued.pop(0)
+
+    monkeypatch.setattr(pursuits.console, 'input', fake_input)
+    monkeypatch.setattr(render, '_no_input', False)
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: True)
+    return asked
+
+
+def test_log_without_a_pursuit_asks_which_one(sandbox, monkeypatch):
+    asked = answers(monkeypatch, 'chores', '', '')
+    assert pursuits.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 0
+    assert journal.read_all(sandbox / 'state')[0]['pursuit'] == 'chores'
+    assert any('pursuit' in prompt for prompt in asked)
+
+
+def test_log_asks_for_minutes_when_the_flag_is_absent(sandbox, monkeypatch):
+    # The whole reason for the prompt: --minutes is the input drift and forecast
+    # both need, and nobody finds it in a help screen they never open.
+    answers(monkeypatch, '', '45')
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
+    assert journal.read_all(sandbox / 'state')[0]['duration_minutes'] == 45
+
+
+def test_a_field_passed_as_a_flag_is_never_asked_about(sandbox, monkeypatch):
+    asked = answers(monkeypatch)
+    assert pursuits.cmd_log('chores', ['trimmed'], None, 20, assume_yes=True, no_write=True) == 0
+    assert asked == []
+    record = journal.read_all(sandbox / 'state')[0]
+    assert record['note'] == 'trimmed'
+    assert record['duration_minutes'] == 20
+
+
+def test_enter_at_the_minutes_prompt_records_nothing_rather_than_the_estimate(sandbox, monkeypatch):
+    # Defaulting to the register's estimate would write a guess into the journal
+    # as a measurement, and the forecast reading it back would quote itself.
+    answers(monkeypatch, '', '')
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
+    assert journal.read_all(sandbox / 'state')[0]['duration_minutes'] is None
+
+
+def test_log_without_a_pursuit_and_without_a_terminal_names_the_argument(sandbox, monkeypatch):
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
+    assert pursuits.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 1
+    assert journal.read_all(sandbox / 'state') == []
+
+
+def test_abandoning_the_pursuit_prompt_logs_nothing(sandbox, monkeypatch):
+    answers(monkeypatch, '')
+    assert pursuits.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 1
+    assert journal.read_all(sandbox / 'state') == []
+
+
+def test_the_minutes_prompt_refuses_what_is_not_a_positive_whole_number(monkeypatch):
+    answers(monkeypatch, 'ages', '-3', '0', '30')
+    assert pursuits.prompt_for_minutes() == 30
+
+
+def test_the_pursuit_prompt_marks_what_the_draw_offered(sandbox, monkeypatch, capsys):
+    answers(monkeypatch, 'chores')
+    assert pursuits.prompt_for_pursuit(pursuits.load_pursuits(), ['chores']) == 'chores'
+    printed = capsys.readouterr().out
+    assert '› chores' in printed
+
+
+def test_skipping_a_pinned_pursuit_says_it_will_come_back(sandbox, monkeypatch, capsys):
+    # pinned() reads cadence alone and never consults the effective weight, so the
+    # suppression a skip applies cannot reach one. Promising otherwise is a lie the
+    # next draw exposes immediately.
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('chores') == 0
+    assert 'still pinned' in capsys.readouterr().out
+
+
+def test_skipping_a_sampled_pursuit_still_reports_suppression(sandbox, monkeypatch, capsys):
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('read-library') == 0
+    assert 'suppressed' in capsys.readouterr().out
