@@ -1,6 +1,35 @@
 # CHANGELOG
 
 
+## v2.16.1 (2026-08-19)
+
+### Bug Fixes
+
+- **find**: A keystroke no longer suspends the picker's pane
+  ([`ed6aaa1`](https://github.com/datapointchris/doit/commit/ed6aaa1d49206eb4c7f8e38e436be2ba73e48099))
+
+The preview built every collection to render one row, and one of them asks zsh for its keymaps. That
+  subprocess is an interactive shell, which claims the controlling terminal with tcsetpgrp and wins,
+  because a shell ignores the SIGTTOU that would otherwise stop a background process from doing it.
+  An fzf preview runs in a background process group, so the foreground group was left pointing at a
+  subprocess that had already exited, and fzf's next read of the tty raised SIGTTIN. Spawning it in
+  a new session leaves it no controlling terminal to claim, and the bindkey dump is byte-identical
+  either way.
+
+The preview now builds only the collection fzf named, which is the reach that put an interactive
+  shell behind a keystroke at all.
+
+Four more things the same surface got wrong:
+
+- Every doit launch area row previewed as registry rot and failed on Enter, because nothing in any
+  collection is named 'review due'. Rows now carry their collection and an area opens the help
+  screen that routes into it. - doit show printed a tldr heading with nothing under it on a machine
+  without tldr. tldr speaks for itself when it merely has no page. - An alias expansion was read by
+  stripping quote characters off both ends, which kept a trailing comment and ate the closing quote
+  of a nested string. Eight of this machine's 32 alias cards named something that would not run. -
+  doit __preview no longer builds an index for a source fzf could not emit.
+
+
 ## v2.16.0 (2026-08-19)
 
 ### Build System
