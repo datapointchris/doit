@@ -257,6 +257,26 @@ def load_pursuits(path: Path | None = None) -> dict:
     return pursuits
 
 
+def load_settings(path: Path | None = None) -> dict:
+    """The register's `forecast:` block — what a day is assumed to hold.
+
+    A sibling of `pursuits:` rather than a key on one, because a daily budget is a
+    fact about the person and not about any single strand. Read from the same file
+    so there is one thing to hand-edit and one thing to sync.
+    """
+    path = REGISTER if path is None else path
+    if not path.exists():
+        return {}
+    document = yaml.safe_load(path.read_text()) or {}
+    settings = document.get('forecast') or {}
+    if not isinstance(settings, dict):
+        raise RegisterError(f'{path}: `forecast` must be a mapping of settings')
+    budget = settings.get('budget_minutes')
+    if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
+        raise RegisterError(f'{path}: forecast.budget_minutes must be a positive whole number')
+    return settings
+
+
 def term_ended(config: dict, today: date) -> bool:
     """Whether a time-boxed pursuit is past its `until` date."""
     until = config.get('until')
@@ -270,19 +290,32 @@ def is_active(config: dict, today: date) -> bool:
     return not config.get('paused') and not term_ended(config, today) and config.get('weight', 0) > 0
 
 
-def build_state(pursuits: dict, now: datetime) -> dict:
+def build_state(
+    pursuits: dict,
+    now: datetime,
+    records: list[dict] | None = None,
+    observed: dict[str, datetime] | None = None,
+) -> dict:
     """Everything the draw and every view need: rates, intervals, urgency, weights.
 
     Assembled in one place and passed around, because the same numbers are what
     gets drawn on, what gets displayed by `--explain`, and what gets recorded into
     the journal as the state at the moment of a log. Recomputing them per view is
     how those three drift apart.
+
+    ``records`` and ``observed`` default to the journal on disk and a live round
+    trip to every backend. :mod:`doit.forecast` supplies both instead, which is
+    what lets a simulated day run this function rather than a second copy of the
+    model — a copy is the only way the forecast could come to disagree with the
+    draw it claims to predict. Injecting them is also what keeps a thirty-day
+    simulation from making thirty evidence calls per replicate.
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
     weights = {name: float(config['weight']) for name, config in active.items()}
 
-    records = journal.read_all(JOURNAL_DIR) if JOURNAL_DIR.exists() else []
+    if records is None:
+        records = journal.read_all(JOURNAL_DIR) if JOURNAL_DIR.exists() else []
     measured_rate = rate_per_day(records, now)
     logs_per_day = measured_rate if measured_rate is not None else FALLBACK_LOGS_PER_DAY
 
@@ -300,8 +333,9 @@ def build_state(pursuits: dict, now: datetime) -> dict:
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
-    observations = evidence.refresh(active, CACHE_DIR, now)
-    last_done = evidence.merged(latest_occurrence(records, 'done'), evidence.observed(observations))
+    observations = {} if observed is not None else evidence.refresh(active, CACHE_DIR, now)
+    seen = evidence.observed(observations) if observed is None else observed
+    last_done = evidence.merged(latest_occurrence(records, 'done'), seen)
     last_skip = latest_occurrence(records, 'skip')
     elapsed = days_since(last_done, list(active), now)
     elapsed_skip = days_since(last_skip, list(active), now)
@@ -352,7 +386,7 @@ def build_state(pursuits: dict, now: datetime) -> dict:
         'measured_rate': measured_rate,
         'last_done': {name: when.isoformat() for name, when in last_done.items()},
         'records': records,
-        'observed': evidence.observed(observations),
+        'observed': seen,
         'evidence_errors': evidence.problems(observations),
     }
 
