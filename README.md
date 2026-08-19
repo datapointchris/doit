@@ -24,6 +24,17 @@ doit log              # record what actually happened
 Bare `doit` prints help, and so does every namespace under it — you can walk down one token at a
 time and never hit a cryptic error.
 
+### Which of the three to type
+
+`doit next` and `doit dashboard` are separate systems, and they meet only on the dashboard.
+
+- **`doit next`** ranks across everything, because you declared the ordering as a weight per
+  pursuit. It hands you five things and expects one back through `doit log`.
+- **`doit dashboard`** ranks across nothing. Each lane is ordered by whichever app owns it, three
+  rows deep, and no lane is comparable to the one beside it.
+- **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
+  line that caught your eye — the dashboard shows three of its rows and there are usually more.
+
 ## Sources are configuration
 
 `doit` knows nothing about which apps exist. `~/.config/doit/sources.yml` declares each source's id,

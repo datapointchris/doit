@@ -30,7 +30,22 @@ from doit.render import set_no_input
 
 TAGLINE = 'What to do now, and everything that decides it.'
 
-app = typer.Typer(name='doit', no_args_is_help=True, help=TAGLINE)
+# A command list answers "what is there" and the reader arrives with "what do I
+# do now". Routing lives on this screen and on a hub that owns several children,
+# never on a leaf — a tool that explains its workflow at every altitude buries
+# the command list it is trying to introduce.
+ROOT_HELP = f"""{TAGLINE}
+
+Start with **doit dashboard** for the spread, or **doit next** to be handed one thing.
+They are separate systems: **next** draws from the pursuit weights you declared and ranks
+across everything, **dashboard** reads every lane and ranks across none of them. They meet
+only on the dashboard.
+
+Reach for **doit review due** or **doit labs due** when MAINTENANCE is the line that caught
+your eye — the dashboard shows three of those rows and there are usually more.
+"""
+
+app = typer.Typer(name='doit', no_args_is_help=True, help=ROOT_HELP, rich_markup_mode='markdown')
 
 
 def github_token() -> str:
