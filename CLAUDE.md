@@ -6,7 +6,7 @@ The layer that decides what to attend to and drives it. It stewards no records o
 per-domain CLIs do that — so a change that has `doit` deciding a domain rule belongs in the CLI
 that owns the domain, not here.
 
-## Two things that will look like bugs and are not
+## Three things that will look like bugs and are not
 
 **The dashboard duplicates due-ness.** It imports nothing from the cadence module and instead
 mirrors the `overdue` field the backends already emit. Backends own due-ness and speak `--json`;
@@ -25,6 +25,14 @@ answers "when was this register item last done"; `usage.measure` folds the same 
 count and a last-run date per row of your kit. A second parser would answer a subtly different
 question within a month, and then `review` and `kit` would disagree about whether you had used `rg`.
 Anything else needing history folds this, never re-reads it.
+
+**`doit.machine` calls `dotfiles` from code, not through `sources.yml`.** The registry is one flat
+file for the whole fleet, and everything it gets checked against is scoped to one box, so a row for
+another machine's tool has nowhere to be filed except rot. dotfiles holds the manifests, runs
+everywhere including the work box, and `machines show` resolves this machine from `$MACHINE` without
+the fleet clone that only some machines have. Unknown is a third state and not an empty set: a box
+that cannot be asked judges rows by PATH alone, because treating "declares nothing" as the answer
+would file every package-installed row as foreign and empty the report.
 
 ## Content, config, and state are three different things
 
@@ -56,7 +64,10 @@ both read it, and a constant defined per reader is a constant that drifts.
 
 ## Sources are configuration, not code
 
-`doit` must not know which apps exist. Adding a source is an edit to `sources.yml`, never a release.
+`doit` must not know which apps supply *lanes*. Adding a source is an edit to `sources.yml`, never a
+release. That bounds the rule to the dashboard; `doit.machine` asks dotfiles a question no lane
+answers, and the tiers sanction it — doit is `experimental` above a `universal` tool, so when the one
+below moves, this is what changes.
 A source that is not configured is silent; one configured but missing gets a single line; one that
 runs and fails shows its error. A lane is never silently dropped — a dashboard that quietly omits a
 lane reads as "nothing outstanding", which is the worst available failure.

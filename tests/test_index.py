@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from doit import index
+from doit import machine
 from doit import skills
 from doit import tools
 
@@ -50,6 +51,18 @@ tools:
     description: Real elsewhere; its prerequisite is not on this box
     usage: "needs-absent"
     requires: long-gone
+    tags: []
+  elsewhere:
+    category: custom-tools
+    description: A package manager installs it, on a machine that is not this one
+    installed_via: go
+    usage: "elsewhere run"
+    tags: []
+  repo-shipped:
+    category: custom-tools
+    description: The dotfiles repo ships it, so the deployed shell tree scopes it
+    installed_via: dotfiles
+    usage: "repo-shipped"
     tags: []
 """
 
@@ -391,3 +404,85 @@ def test_a_missing_collection_is_silent_not_fatal(monkeypatch, tmp_path):
 
     assert index.index_tools() == []
     assert index.build_index(), 'the other collections still index'
+
+
+def declaring(*names: str, package_manager: str = 'pacman') -> machine.Declaration:
+    """A manifest that declares exactly these, as `machine.declaration` would."""
+    return machine.Declaration(frozenset(names), package_manager, known=True)
+
+
+def test_a_row_a_package_manager_installs_elsewhere_is_another_machines_not_rot(monkeypatch):
+    """`elsewhere` is a go tool, and the manifest for this box never names it."""
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', 'forge'))
+
+    verdict = index.classify()
+
+    assert 'elsewhere' in [entry.name for entry in verdict.foreign]
+    assert 'elsewhere' not in [entry.name for entry in verdict.dead]
+
+
+def test_a_row_this_machine_declares_and_lacks_is_still_rot(monkeypatch):
+    """Declared here and missing here is a failed install, which is anyone's to fix."""
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', 'forge', 'elsewhere'))
+
+    verdict = index.classify()
+
+    assert 'elsewhere' in [entry.name for entry in verdict.dead]
+    assert 'elsewhere' not in [entry.name for entry in verdict.foreign]
+
+
+def test_a_row_the_dotfiles_repo_ships_is_never_judged_by_the_manifest(monkeypatch):
+    """The deployed shell tree already scopes those, and no manifest lists them."""
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', 'forge'))
+
+    verdict = index.classify()
+
+    assert 'repo-shipped' in [entry.name for entry in verdict.dead]
+    assert 'repo-shipped' not in [entry.name for entry in verdict.foreign]
+
+
+def test_a_requirement_declared_as_the_package_manager_resolves_the_row(monkeypatch):
+    """`brew` is a coordinate rather than an item, so it is on no manifest's list."""
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', package_manager='long-gone'))
+
+    verdict = index.classify()
+
+    assert 'needs-absent' not in [entry.name for entry in verdict.foreign]
+    assert 'needs-absent' in [entry.name for entry in verdict.absent]
+
+
+def test_a_requirement_no_manifest_declares_makes_the_row_another_machines(monkeypatch):
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg'))
+
+    verdict = index.classify()
+
+    assert 'needs-absent' in [entry.name for entry in verdict.foreign]
+    assert verdict.absent == []
+
+
+def test_an_unreadable_manifest_leaves_every_row_where_it_was():
+    """A box that cannot say what it declares shows every row, never none."""
+    verdict = index.classify()
+
+    assert verdict.foreign == []
+    assert {'long-gone', 'elsewhere', 'repo-shipped'} <= {entry.name for entry in verdict.dead}
+
+
+def test_the_manifest_is_not_asked_when_every_row_resolves(monkeypatch):
+    """A clean index pays nothing, which is what keeps this off the dashboard's cost."""
+    asked = []
+    monkeypatch.setattr(machine, 'declaration', lambda: asked.append(1) or machine.UNKNOWN)
+
+    index.partition_foreign([], [])
+
+    assert asked == []
+
+
+def test_unresolved_rows_report_only_what_is_anyones_to_fix(monkeypatch):
+    """`doit kit unresolved --json` and the dashboard lane read this one fold."""
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', 'forge'))
+
+    names = {row['name'] for row in index.unresolved_rows()}
+
+    assert 'elsewhere' not in names
+    assert 'long-gone' in names

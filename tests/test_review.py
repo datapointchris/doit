@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from doit import machine
 from doit import observe
 from doit import review
 
@@ -224,3 +225,63 @@ def test_nudge_every_rejects_an_unparsable_duration():
 
     assert result.exit_code == 2
     assert 'expected a duration' in result.output
+
+
+REQUIRES_REGISTER = """\
+items:
+  needs-missing:
+    description: About software this box does not have
+    cadence: 1w
+    requires: long-gone-prerequisite
+  needs-present:
+    description: About software that is here
+    cadence: 1w
+    requires: sh
+  needs-nothing:
+    description: Applies everywhere
+    cadence: 1w
+"""
+
+
+@pytest.fixture
+def requires_register(tmp_path, monkeypatch):
+    path = tmp_path / 'register.yml'
+    path.write_text(REQUIRES_REGISTER)
+    monkeypatch.setattr(review, 'REGISTER', path)
+    return path
+
+
+def declaring(*names: str) -> machine.Declaration:
+    return machine.Declaration(frozenset(names), 'pacman', known=True)
+
+
+def test_an_item_about_software_this_machine_never_declared_is_hidden(requires_register, monkeypatch):
+    """`observe: {scope: machine}` means the other desk cannot clear it either, so
+    left in it counts overdue days forever against work nobody can do here."""
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg'))
+
+    assert {row['id'] for row in review.statuses()} == {'needs-present', 'needs-nothing'}
+
+
+def test_a_requirement_on_path_keeps_the_item(requires_register, monkeypatch):
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring())
+
+    assert 'needs-present' in {row['id'] for row in review.statuses()}
+
+
+def test_a_requirement_the_manifest_declares_keeps_the_item(requires_register, monkeypatch):
+    """Declared but not installed is still this machine's item — that is the reminder."""
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring('long-gone-prerequisite'))
+
+    assert 'needs-missing' in {row['id'] for row in review.statuses()}
+
+
+def test_an_unreadable_manifest_keeps_every_item(requires_register):
+    """A box that cannot say what it declares shows every item, never none."""
+    assert len(review.statuses()) == 3
+
+
+def test_an_item_with_no_requires_is_never_scoped_out(requires_register, monkeypatch):
+    monkeypatch.setattr(machine, 'declaration', lambda: declaring())
+
+    assert 'needs-nothing' in {row['id'] for row in review.statuses()}

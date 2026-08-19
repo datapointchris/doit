@@ -7,16 +7,20 @@ on the machine that had typed it, which is the worst shape a test failure comes
 in — so no test reads the real history file unless it writes one itself.
 
 The zsh lens reaches out the same way, to the live keymap, and is isolated here
-for the same reason.
+for the same reason. So does the machine manifest, which asks the real dotfiles
+what this box declares — left alone, whether a fixture row reads as rot or as
+another machine's would depend on who is running the suite.
 
-Autouse and suite-wide rather than per-module: the reach is `observe.HISTORY` and
-`index.zsh_bindkeys`, and any test that ends up calling `review.statuses` or
-`build_index` inherits it whether or not its module knows those exist.
+Autouse and suite-wide rather than per-module: the reaches are `observe.HISTORY`,
+`index.zsh_bindkeys` and `machine.declaration`, and any test that ends up calling
+`review.statuses` or `build_index` inherits them whether or not its module knows
+those exist.
 """
 
 import pytest
 
 from doit import index
+from doit import machine
 from doit import observe
 
 
@@ -56,3 +60,19 @@ def isolated_zsh_keymap(monkeypatch):
     """
     index.zsh_bindkeys.cache_clear()
     monkeypatch.setattr(index, 'zsh_bindkeys', lambda interactive: '')
+
+
+@pytest.fixture(autouse=True)
+def unknown_machine_manifest(monkeypatch):
+    """Answer the manifest with `UNKNOWN` unless a test declares its own.
+
+    `declaration` shells out to dotfiles, which is installed on every machine
+    that runs this suite and on none of the CI runners. Both answers are wrong to
+    inherit: the first makes a fixture row's bucket depend on this desk's
+    manifest, and the second makes it depend on dotfiles being absent.
+
+    `UNKNOWN` is the honest default because it is what a box that cannot be asked
+    reports, and every caller already falls back to judging rows by PATH there.
+    """
+    machine.declaration.cache_clear()
+    monkeypatch.setattr(machine, 'declaration', lambda: machine.UNKNOWN)

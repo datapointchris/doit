@@ -2,9 +2,9 @@
 
 The mirror of ``index.unresolved``, and the second of two folds with the same
 shape: your kit joined against evidence, yielding a verdict per row.
-``unresolved`` joins it against PATH and the shell files and answers "you cannot
-run this"; this joins it against shell history and answers "you can run it and
-you never do". Read together they separate rot from forgetting — a row that is
+``unresolved`` joins it against PATH, the shell files and this machine's manifest
+and answers "you cannot run this"; this joins it against shell history and
+answers "you can run it and you never do". Read together they separate rot from forgetting — a row that is
 both unresolved and unused is a stale entry to delete, while one that resolves
 fine and is unused is the thing worth resurfacing.
 

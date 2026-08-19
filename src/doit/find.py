@@ -240,7 +240,7 @@ def cmd_unresolved(as_json: bool) -> int:
     if as_json:
         print(json.dumps(index.unresolved_rows(verdict.dead), indent=2))
         return 0
-    if not verdict.dead and not verdict.absent:
+    if not verdict.dead and not verdict.absent and not verdict.foreign:
         console.print('[green]✓[/] Every indexed row names something runnable.')
         return 0
 
@@ -258,7 +258,22 @@ def cmd_unresolved(as_json: bool) -> int:
         console.rule('[cyan]Rows needing something this machine lacks', align='left')
         print_index_rows(verdict.absent, 'cyan', note=lambda entry: f'needs {entry.requires}')
         console.print(f'\n  {len(verdict.absent)} rows are fine and their prerequisite is not installed here.')
+
+    # Last and dimmest. These need nothing from you on this box, and the only
+    # reason to print them at all is so a row that vanished from the two sections
+    # above can be found rather than assumed deleted.
+    if verdict.foreign:
+        console.print()
+        console.rule('[cyan]Rows this machine never declared', align='left')
+        print_index_rows(verdict.foreign, 'bright_black', note=foreign_note)
+        console.print(f'\n  {len(verdict.foreign)} rows belong to a machine whose manifest declares them.')
+        console.print('  Nothing to repair here — `dotfiles machines show` is what says so.')
     return 0
+
+
+def foreign_note(entry: index.Entry) -> str:
+    """Why a row is another machine's, in the terms its own entry used."""
+    return f'needs {entry.requires}' if entry.requires else f'installed via {entry.installed_via}'
 
 
 def print_index_rows(entries: list[index.Entry], style: str, note: Callable[[index.Entry], str] | None = None) -> None:

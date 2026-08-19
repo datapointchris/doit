@@ -19,6 +19,7 @@ import contextlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import date
@@ -29,6 +30,7 @@ import typer
 import yaml
 from rich.text import Text
 
+from doit import machine
 from doit.cadence import is_due
 from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
@@ -90,6 +92,27 @@ def load_items() -> dict | None:
     return data.get('items') or {}
 
 
+def applies_here(requires: str) -> bool:
+    """Whether an item's `requires:` is satisfiable on this machine.
+
+    An item scoped to software this box does not have can never be done here, and
+    `observe: {scope: machine}` means the other desk doing it cannot clear it
+    either. Left in, it counts overdue days forever against work nobody can do.
+
+    Two sources, and either is enough. PATH answers for anything installed, and
+    the machine manifest answers for what is declared but not on PATH — a package
+    manager is a coordinate rather than an item, so `brew` is never on the PATH of
+    the Mac it defines. An unreadable manifest keeps the item, because a machine
+    that cannot say what it declares should show every item rather than none.
+    """
+    if not requires:
+        return True
+    if shutil.which(requires):
+        return True
+    declared = machine.declaration()
+    return not declared.known or declared.declares(requires)
+
+
 def statuses() -> list[dict]:
     """Every item with its derived overdue days, most urgent first.
 
@@ -107,6 +130,8 @@ def statuses() -> list[dict]:
     rows = []
     for item_id, meta in items.items():
         meta = meta or {}
+        if not applies_here(meta.get('requires', '') or ''):
+            continue
         stamped = state.get(item_id)
         seen = observed(meta.get('observe'), meta.get('command', '') or '')
         last = newest(stamped, seen.date)

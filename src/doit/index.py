@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
+from doit import machine
 from doit.cards import first_heading
 from doit.cards import split_frontmatter
 from doit.paths import library_dir
@@ -82,6 +83,11 @@ class Entry:
     # is real, for the rows where the invocation cannot decide it. See
     # `unresolved`.
     requires: str = ''
+    # Registry entries only: what puts the tool on a machine. `dotfiles` means
+    # the repo ships it and the deployed shell tree already answers for it;
+    # anything else names a package manager, and then the machine manifest is
+    # what says whether this box was ever meant to have it. See `classify`.
+    installed_via: str = ''
 
     def display(self) -> str:
         """The one line fzf shows and searches.
@@ -134,6 +140,7 @@ def index_tools() -> list[Entry]:
                 tags=tuple(meta.get('tags') or ()),
                 category=meta.get('category') or '',
                 requires=(meta.get('requires') or '').strip(),
+                installed_via=(meta.get('installed_via') or '').strip(),
             )
         )
     return entries
@@ -532,12 +539,14 @@ def resolvable_names() -> set[str]:
 class Verdict(NamedTuple):
     """What one pass over the checkable rows found.
 
-    Two outcomes rather than one, because "this entry is wrong" and "you do not
-    have this here" are different facts and only the first is anyone's to fix.
+    Three outcomes rather than one, because "this entry is wrong", "you do not
+    have this here" and "this was never for this machine" are different facts and
+    only the first is anyone's to fix.
     """
 
     dead: list[Entry]
     absent: list[Entry]
+    foreign: list[Entry]
 
 
 def classify(entries: list[Entry] | None = None) -> Verdict:
@@ -584,7 +593,54 @@ def classify(entries: list[Entry] | None = None) -> Verdict:
                 absent.append(entry)
             continue
         dead.append(entry)
-    return Verdict(dead, absent)
+    return partition_foreign(dead, absent)
+
+
+# What `installed_via` says when the dotfiles repo itself ships the row. Every
+# other value names a package manager, so the inverse is the test: one string to
+# keep current rather than the eight managers in use today.
+SHIPPED_BY_DOTFILES = 'dotfiles'
+
+
+def is_foreign(entry: Entry, declared: machine.Declaration) -> bool:
+    """Whether this row was written for a machine that is not this one.
+
+    A row a package manager installs is answerable from the manifest, and one the
+    dotfiles repo ships is not — the shell tree already scopes those, because the
+    symlink layer links `os/darwin/` only onto a Mac.
+
+    `requires:` is checked the same way and takes precedence, since it names the
+    software the row is built on rather than the row itself: `brew-maintenance`
+    is a dotfiles function everywhere and only means anything where brew is.
+    """
+    if entry.requires:
+        return not declared.declares(entry.requires)
+    if not entry.installed_via or entry.installed_via == SHIPPED_BY_DOTFILES:
+        return False
+    return not declared.declares(invocation_head(entry.invocation))
+
+
+def partition_foreign(dead: list[Entry], absent: list[Entry]) -> Verdict:
+    """Move the rows belonging to another machine out of the two fixable buckets.
+
+    The manifest is asked only when something already failed to resolve, so a
+    clean index costs nothing. Where it cannot be asked the verdict is returned
+    untouched, which is what this reported before the manifest was consulted at
+    all — a machine that cannot name what it declares is one that should keep
+    seeing every row, not one that should silently see none.
+    """
+    if not dead and not absent:
+        return Verdict(dead, absent, [])
+    declared = machine.declaration()
+    if not declared.known:
+        return Verdict(dead, absent, [])
+    foreign = [entry for entry in dead + absent if is_foreign(entry, declared)]
+    strangers = {(entry.source, entry.name) for entry in foreign}
+    return Verdict(
+        [entry for entry in dead if (entry.source, entry.name) not in strangers],
+        [entry for entry in absent if (entry.source, entry.name) not in strangers],
+        foreign,
+    )
 
 
 def unresolved(entries: list[Entry] | None = None) -> list[Entry]:
