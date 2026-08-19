@@ -11,6 +11,7 @@ froze the path at import and needed env vars set before the module loaded.
 """
 
 import json
+import math
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
@@ -96,6 +97,18 @@ def test_a_nonsense_cadence_is_refused(tmp_path):
 def test_on_log_without_resolve_is_refused(tmp_path):
     path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    on_log: echo hi\n')
     with pytest.raises(pursuits.RegisterError, match='on_log'):
+        pursuits.load_pursuits(path)
+
+
+def test_minutes_is_read_as_an_estimate(tmp_path):
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    minutes: 40\n')
+    assert pursuits.load_pursuits(path)['a']['minutes'] == 40
+
+
+@pytest.mark.parametrize('value', ['0', '-5', 'true', '"40"', '12.5'])
+def test_a_minutes_that_is_not_a_positive_whole_number_is_refused(tmp_path, value):
+    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    minutes: {value}\n')
+    with pytest.raises(pursuits.RegisterError, match='minutes'):
         pursuits.load_pursuits(path)
 
 
@@ -734,3 +747,33 @@ def test_a_pursuit_without_credit_never_reaches_the_standing_line(tmp_path, monk
     write_journal(tmp_path / 'state', 'chore', [30.0])
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     assert pursuits.behind_summary(state) == ''
+
+
+def multiplier_state(declared: float | None, implied: float) -> dict:
+    return {'intervals': {'a': declared}, 'implied_intervals': {'a': implied}}
+
+
+def test_a_cadence_shorter_than_the_implied_interval_reports_the_multiple():
+    # The number that was invisible: `cadence: 1d` against an implied 3.7d is
+    # what took a third of every draw on a weight claiming a ninth of it.
+    assert pursuits.urgency_multiplier(multiplier_state(1.0, 3.7), 'a') == ' ×3.7'
+
+
+def test_a_cadence_longer_than_the_implied_interval_reports_the_division():
+    assert pursuits.urgency_multiplier(multiplier_state(7.0, 3.7), 'a') == ' ÷1.9'
+
+
+@pytest.mark.parametrize('declared', [3.4, 3.7, 4.0])
+def test_a_cadence_within_a_tenth_of_the_implied_interval_says_nothing(declared):
+    # That close is the measured logging rate wobbling, not a decision.
+    assert pursuits.urgency_multiplier(multiplier_state(declared, 3.7), 'a') == ''
+
+
+def test_a_pursuit_with_no_cadence_has_no_multiplier():
+    assert pursuits.urgency_multiplier(multiplier_state(None, 3.7), 'a') == ''
+
+
+def test_an_infinite_implied_interval_has_no_multiplier():
+    # A zero-weight pursuit implies an infinite interval; dividing by it is not a
+    # ratio anyone can read.
+    assert pursuits.urgency_multiplier(multiplier_state(3.0, math.inf), 'a') == ''

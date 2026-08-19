@@ -131,6 +131,7 @@ KNOWN_FIELDS = {
     'evidence_items',
     'evidence_where',
     'credit',
+    'minutes',
 }
 
 TEMPLATE = """\
@@ -145,8 +146,14 @@ TEMPLATE = """\
 #   cadence      optional hard schedule (2w / 1mo); overdue pins it above the draw
 #   until        optional end date; after it the pursuit pauses and says so
 #   paused       optional; keeps it in the file but out of the draw
+#   minutes      optional; how long one of these takes, until enough logs carry
+#                --minutes for the journal to answer it. `doit forecast` reads it
 #   resolve      optional command answering "specifically what?" — see below
 #   on_log       optional command run after logging, e.g. completing the task
+#
+# A cadence replaces the interval the weight implies rather than sitting beside
+# it, so declaring one shorter than that interval multiplies how urgent the
+# pursuit gets, and one longer divides it. `doit pursuits list` names both.
 #
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
@@ -238,6 +245,9 @@ def load_pursuits(path: Path | None = None) -> dict:
             raise RegisterError(f'{name}: cadence must look like 10d / 2w / 1mo / 1y')
         if config.get('until') and not isinstance(config['until'], date):
             raise RegisterError(f'{name}: until must be a date (YYYY-MM-DD)')
+        estimate = config.get('minutes')
+        if estimate is not None and (not isinstance(estimate, int) or isinstance(estimate, bool) or estimate <= 0):
+            raise RegisterError(f'{name}: minutes must be a positive whole number')
         if config.get('on_log') and not config.get('resolve'):
             raise RegisterError(f'{name}: on_log needs resolve — there is no item to act on without it')
         if (config.get('context') or config.get('detail')) and not config.get('label'):
@@ -277,9 +287,13 @@ def build_state(pursuits: dict, now: datetime) -> dict:
     logs_per_day = measured_rate if measured_rate is not None else FALLBACK_LOGS_PER_DAY
 
     shares = implied_shares(weights)
-    intervals = implied_intervals(weights, logs_per_day)
+    implied = implied_intervals(weights, logs_per_day)
+    intervals = dict(implied)
     # An explicit cadence is a statement about the world, not about relative
-    # attention, so it wins over the interval the weight implies.
+    # attention, so it wins over the interval the weight implies. Both are kept
+    # because urgency divides by the one that won: declaring a cadence shorter
+    # than the implied interval multiplies how urgent the pursuit gets by the
+    # ratio between them, and a register cannot be read without seeing that.
     for name, config in active.items():
         if config.get('cadence'):
             intervals[name] = float(parse_cadence(config['cadence']))
@@ -327,6 +341,7 @@ def build_state(pursuits: dict, now: datetime) -> dict:
         'weights': weights,
         'shares': shares,
         'intervals': intervals,
+        'implied_intervals': implied,
         'days_since': elapsed,
         'days_banked': banked,
         'banked_position': positions,
@@ -598,6 +613,28 @@ def format_elapsed(days: float | None) -> str:
     if days < 90:
         return f'{int(days / 7)}w ago'
     return f'{int(days / 30)}mo ago'
+
+
+def urgency_multiplier(state: dict, name: str) -> str:
+    """What a declared cadence does to urgency, when it does anything worth saying.
+
+    Urgency divides elapsed time by whichever interval won, so a cadence shorter
+    than the one the weight implies multiplies the pursuit's effective weight by
+    that ratio raised to alpha, and a longer one divides it. The stated weight is
+    then not what the pursuit gets, and nothing else on the row says so — which
+    is how a `1d` beside `weight: 25` came to take a third of every draw.
+
+    Silent inside a tenth, because a ratio that close is the measured logging
+    rate wobbling rather than a decision anyone made.
+    """
+    declared = state['intervals'].get(name)
+    implied = state['implied_intervals'].get(name)
+    if not declared or not implied or math.isinf(implied):
+        return ''
+    ratio = implied / declared
+    if 0.9 <= ratio <= 1.1:
+        return ''
+    return f' ×{ratio:.1f}' if ratio > 1 else f' ÷{1 / ratio:.1f}'
 
 
 def behind_summary(state: dict) -> str:
@@ -998,7 +1035,7 @@ def cmd_list(as_json: bool) -> int:
     for name, config in sorted(pursuits.items(), key=lambda row: -row[1].get('weight', 0)):
         share = state['shares'].get(name)
         share_text = f'{share * 100:>5.1f}%' if share else '    —'
-        cadence = f' · {config["cadence"]}' if config.get('cadence') else ''
+        cadence = f' · {config["cadence"]}{urgency_multiplier(state, name)}' if config.get('cadence') else ''
         last = format_elapsed(state['days_since'].get(name))
         line = Text('  ')
         line.append(name.ljust(width), style='white')
@@ -1008,7 +1045,7 @@ def cmd_list(as_json: bool) -> int:
         elif term_ended(config, state['today']):
             line.append(f'  term ended {config["until"]}', style='yellow')
         console.print(line)
-    console.print('\n  share is what each weight implies against the rest · [cyan]doit pursuits edit[/]')
+    console.print('\n  share is what each weight implies · ×n is a cadence outrunning it\n  [cyan]doit pursuits edit[/]')
     return 0
 
 
