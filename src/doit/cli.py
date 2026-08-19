@@ -19,6 +19,7 @@ from doit import claude
 from doit import content
 from doit import dashboard
 from doit import find
+from doit import forecast
 from doit import labs
 from doit import pursuits
 from doit import review
@@ -91,6 +92,7 @@ add_update_command(app, UPDATE_CONFIG)
 app.command('__preview', hidden=True)(find.preview_command)
 
 app.add_typer(pursuits.app, name='pursuits')
+app.add_typer(forecast.app, name='forecast')
 app.add_typer(review.app, name='review')
 app.add_typer(labs.app, name='labs')
 app.add_typer(workflows.app, name='workflows')

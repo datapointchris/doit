@@ -11,6 +11,7 @@ froze the path at import and needed env vars set before the module loaded.
 """
 
 import json
+import math
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
@@ -96,6 +97,18 @@ def test_a_nonsense_cadence_is_refused(tmp_path):
 def test_on_log_without_resolve_is_refused(tmp_path):
     path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    on_log: echo hi\n')
     with pytest.raises(pursuits.RegisterError, match='on_log'):
+        pursuits.load_pursuits(path)
+
+
+def test_minutes_is_read_as_an_estimate(tmp_path):
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    minutes: 40\n')
+    assert pursuits.load_pursuits(path)['a']['minutes'] == 40
+
+
+@pytest.mark.parametrize('value', ['0', '-5', 'true', '"40"', '12.5'])
+def test_a_minutes_that_is_not_a_positive_whole_number_is_refused(tmp_path, value):
+    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    minutes: {value}\n')
+    with pytest.raises(pursuits.RegisterError, match='minutes'):
         pursuits.load_pursuits(path)
 
 
@@ -734,3 +747,119 @@ def test_a_pursuit_without_credit_never_reaches_the_standing_line(tmp_path, monk
     write_journal(tmp_path / 'state', 'chore', [30.0])
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     assert pursuits.behind_summary(state) == ''
+
+
+def multiplier_state(declared: float | None, implied: float) -> dict:
+    return {'intervals': {'a': declared}, 'implied_intervals': {'a': implied}}
+
+
+def test_a_cadence_shorter_than_the_implied_interval_reports_the_multiple():
+    # The number that was invisible: `cadence: 1d` against an implied 3.7d is
+    # what took a third of every draw on a weight claiming a ninth of it.
+    assert pursuits.urgency_multiplier(multiplier_state(1.0, 3.7), 'a') == ' ×3.7'
+
+
+def test_a_cadence_longer_than_the_implied_interval_reports_the_division():
+    assert pursuits.urgency_multiplier(multiplier_state(7.0, 3.7), 'a') == ' ÷1.9'
+
+
+@pytest.mark.parametrize('declared', [3.4, 3.7, 4.0])
+def test_a_cadence_within_a_tenth_of_the_implied_interval_says_nothing(declared):
+    # That close is the measured logging rate wobbling, not a decision.
+    assert pursuits.urgency_multiplier(multiplier_state(declared, 3.7), 'a') == ''
+
+
+def test_a_pursuit_with_no_cadence_has_no_multiplier():
+    assert pursuits.urgency_multiplier(multiplier_state(None, 3.7), 'a') == ''
+
+
+def test_an_infinite_implied_interval_has_no_multiplier():
+    # A zero-weight pursuit implies an infinite interval; dividing by it is not a
+    # ratio anyone can read.
+    assert pursuits.urgency_multiplier(multiplier_state(3.0, math.inf), 'a') == ''
+
+
+def answers(monkeypatch, *replies: str) -> list[str]:
+    """Feed the prompts a script, recording what each one asked."""
+    asked: list[str] = []
+    queued = list(replies)
+
+    def fake_input(prompt: str = '') -> str:
+        asked.append(prompt)
+        return queued.pop(0)
+
+    monkeypatch.setattr(pursuits.console, 'input', fake_input)
+    monkeypatch.setattr(render, '_no_input', False)
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: True)
+    return asked
+
+
+def test_log_without_a_pursuit_asks_which_one(sandbox, monkeypatch):
+    asked = answers(monkeypatch, 'chores', '', '')
+    assert pursuits.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 0
+    assert journal.read_all(sandbox / 'state')[0]['pursuit'] == 'chores'
+    assert any('pursuit' in prompt for prompt in asked)
+
+
+def test_log_asks_for_minutes_when_the_flag_is_absent(sandbox, monkeypatch):
+    # The whole reason for the prompt: --minutes is the input drift and forecast
+    # both need, and nobody finds it in a help screen they never open.
+    answers(monkeypatch, '', '45')
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
+    assert journal.read_all(sandbox / 'state')[0]['duration_minutes'] == 45
+
+
+def test_a_field_passed_as_a_flag_is_never_asked_about(sandbox, monkeypatch):
+    asked = answers(monkeypatch)
+    assert pursuits.cmd_log('chores', ['trimmed'], None, 20, assume_yes=True, no_write=True) == 0
+    assert asked == []
+    record = journal.read_all(sandbox / 'state')[0]
+    assert record['note'] == 'trimmed'
+    assert record['duration_minutes'] == 20
+
+
+def test_enter_at_the_minutes_prompt_records_nothing_rather_than_the_estimate(sandbox, monkeypatch):
+    # Defaulting to the register's estimate would write a guess into the journal
+    # as a measurement, and the forecast reading it back would quote itself.
+    answers(monkeypatch, '', '')
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
+    assert journal.read_all(sandbox / 'state')[0]['duration_minutes'] is None
+
+
+def test_log_without_a_pursuit_and_without_a_terminal_names_the_argument(sandbox, monkeypatch):
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
+    assert pursuits.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 1
+    assert journal.read_all(sandbox / 'state') == []
+
+
+def test_abandoning_the_pursuit_prompt_logs_nothing(sandbox, monkeypatch):
+    answers(monkeypatch, '')
+    assert pursuits.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 1
+    assert journal.read_all(sandbox / 'state') == []
+
+
+def test_the_minutes_prompt_refuses_what_is_not_a_positive_whole_number(monkeypatch):
+    answers(monkeypatch, 'ages', '-3', '0', '30')
+    assert pursuits.prompt_for_minutes() == 30
+
+
+def test_the_pursuit_prompt_marks_what_the_draw_offered(sandbox, monkeypatch, capsys):
+    answers(monkeypatch, 'chores')
+    assert pursuits.prompt_for_pursuit(pursuits.load_pursuits(), ['chores']) == 'chores'
+    printed = capsys.readouterr().out
+    assert '› chores' in printed
+
+
+def test_skipping_a_pinned_pursuit_says_it_will_come_back(sandbox, monkeypatch, capsys):
+    # pinned() reads cadence alone and never consults the effective weight, so the
+    # suppression a skip applies cannot reach one. Promising otherwise is a lie the
+    # next draw exposes immediately.
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('chores') == 0
+    assert 'still pinned' in capsys.readouterr().out
+
+
+def test_skipping_a_sampled_pursuit_still_reports_suppression(sandbox, monkeypatch, capsys):
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('read-library') == 0
+    assert 'suppressed' in capsys.readouterr().out

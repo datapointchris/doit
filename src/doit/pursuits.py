@@ -131,6 +131,7 @@ KNOWN_FIELDS = {
     'evidence_items',
     'evidence_where',
     'credit',
+    'minutes',
 }
 
 TEMPLATE = """\
@@ -145,8 +146,14 @@ TEMPLATE = """\
 #   cadence      optional hard schedule (2w / 1mo); overdue pins it above the draw
 #   until        optional end date; after it the pursuit pauses and says so
 #   paused       optional; keeps it in the file but out of the draw
+#   minutes      optional; how long one of these takes, until enough logs carry
+#                --minutes for the journal to answer it. `doit forecast` reads it
 #   resolve      optional command answering "specifically what?" — see below
 #   on_log       optional command run after logging, e.g. completing the task
+#
+# A cadence replaces the interval the weight implies rather than sitting beside
+# it, so declaring one shorter than that interval multiplies how urgent the
+# pursuit gets, and one longer divides it. `doit pursuits list` names both.
 #
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
@@ -238,6 +245,9 @@ def load_pursuits(path: Path | None = None) -> dict:
             raise RegisterError(f'{name}: cadence must look like 10d / 2w / 1mo / 1y')
         if config.get('until') and not isinstance(config['until'], date):
             raise RegisterError(f'{name}: until must be a date (YYYY-MM-DD)')
+        estimate = config.get('minutes')
+        if estimate is not None and (not isinstance(estimate, int) or isinstance(estimate, bool) or estimate <= 0):
+            raise RegisterError(f'{name}: minutes must be a positive whole number')
         if config.get('on_log') and not config.get('resolve'):
             raise RegisterError(f'{name}: on_log needs resolve — there is no item to act on without it')
         if (config.get('context') or config.get('detail')) and not config.get('label'):
@@ -245,6 +255,26 @@ def load_pursuits(path: Path | None = None) -> dict:
         if config.get('view') and not config.get('resolve'):
             raise RegisterError(f'{name}: view needs resolve — there is no item to look at without it')
     return pursuits
+
+
+def load_settings(path: Path | None = None) -> dict:
+    """The register's `forecast:` block — what a day is assumed to hold.
+
+    A sibling of `pursuits:` rather than a key on one, because a daily budget is a
+    fact about the person and not about any single strand. Read from the same file
+    so there is one thing to hand-edit and one thing to sync.
+    """
+    path = REGISTER if path is None else path
+    if not path.exists():
+        return {}
+    document = yaml.safe_load(path.read_text()) or {}
+    settings = document.get('forecast') or {}
+    if not isinstance(settings, dict):
+        raise RegisterError(f'{path}: `forecast` must be a mapping of settings')
+    budget = settings.get('budget_minutes')
+    if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
+        raise RegisterError(f'{path}: forecast.budget_minutes must be a positive whole number')
+    return settings
 
 
 def term_ended(config: dict, today: date) -> bool:
@@ -260,34 +290,52 @@ def is_active(config: dict, today: date) -> bool:
     return not config.get('paused') and not term_ended(config, today) and config.get('weight', 0) > 0
 
 
-def build_state(pursuits: dict, now: datetime) -> dict:
+def build_state(
+    pursuits: dict,
+    now: datetime,
+    records: list[dict] | None = None,
+    observed: dict[str, datetime] | None = None,
+) -> dict:
     """Everything the draw and every view need: rates, intervals, urgency, weights.
 
     Assembled in one place and passed around, because the same numbers are what
     gets drawn on, what gets displayed by `--explain`, and what gets recorded into
     the journal as the state at the moment of a log. Recomputing them per view is
     how those three drift apart.
+
+    ``records`` and ``observed`` default to the journal on disk and a live round
+    trip to every backend. :mod:`doit.forecast` supplies both instead, which is
+    what lets a simulated day run this function rather than a second copy of the
+    model — a copy is the only way the forecast could come to disagree with the
+    draw it claims to predict. Injecting them is also what keeps a thirty-day
+    simulation from making thirty evidence calls per replicate.
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
     weights = {name: float(config['weight']) for name, config in active.items()}
 
-    records = journal.read_all(JOURNAL_DIR) if JOURNAL_DIR.exists() else []
+    if records is None:
+        records = journal.read_all(JOURNAL_DIR) if JOURNAL_DIR.exists() else []
     measured_rate = rate_per_day(records, now)
     logs_per_day = measured_rate if measured_rate is not None else FALLBACK_LOGS_PER_DAY
 
     shares = implied_shares(weights)
-    intervals = implied_intervals(weights, logs_per_day)
+    implied = implied_intervals(weights, logs_per_day)
+    intervals = dict(implied)
     # An explicit cadence is a statement about the world, not about relative
-    # attention, so it wins over the interval the weight implies.
+    # attention, so it wins over the interval the weight implies. Both are kept
+    # because urgency divides by the one that won: declaring a cadence shorter
+    # than the implied interval multiplies how urgent the pursuit gets by the
+    # ratio between them, and a register cannot be read without seeing that.
     for name, config in active.items():
         if config.get('cadence'):
             intervals[name] = float(parse_cadence(config['cadence']))
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
-    observations = evidence.refresh(active, CACHE_DIR, now)
-    last_done = evidence.merged(latest_occurrence(records, 'done'), evidence.observed(observations))
+    observations = {} if observed is not None else evidence.refresh(active, CACHE_DIR, now)
+    seen = evidence.observed(observations) if observed is None else observed
+    last_done = evidence.merged(latest_occurrence(records, 'done'), seen)
     last_skip = latest_occurrence(records, 'skip')
     elapsed = days_since(last_done, list(active), now)
     elapsed_skip = days_since(last_skip, list(active), now)
@@ -327,6 +375,7 @@ def build_state(pursuits: dict, now: datetime) -> dict:
         'weights': weights,
         'shares': shares,
         'intervals': intervals,
+        'implied_intervals': implied,
         'days_since': elapsed,
         'days_banked': banked,
         'banked_position': positions,
@@ -337,7 +386,7 @@ def build_state(pursuits: dict, now: datetime) -> dict:
         'measured_rate': measured_rate,
         'last_done': {name: when.isoformat() for name, when in last_done.items()},
         'records': records,
-        'observed': evidence.observed(observations),
+        'observed': seen,
         'evidence_errors': evidence.problems(observations),
     }
 
@@ -600,6 +649,28 @@ def format_elapsed(days: float | None) -> str:
     return f'{int(days / 30)}mo ago'
 
 
+def urgency_multiplier(state: dict, name: str) -> str:
+    """What a declared cadence does to urgency, when it does anything worth saying.
+
+    Urgency divides elapsed time by whichever interval won, so a cadence shorter
+    than the one the weight implies multiplies the pursuit's effective weight by
+    that ratio raised to alpha, and a longer one divides it. The stated weight is
+    then not what the pursuit gets, and nothing else on the row says so — which
+    is how a `1d` beside `weight: 25` came to take a third of every draw.
+
+    Silent inside a tenth, because a ratio that close is the measured logging
+    rate wobbling rather than a decision anyone made.
+    """
+    declared = state['intervals'].get(name)
+    implied = state['implied_intervals'].get(name)
+    if not declared or not implied or math.isinf(implied):
+        return ''
+    ratio = implied / declared
+    if 0.9 <= ratio <= 1.1:
+        return ''
+    return f' ×{ratio:.1f}' if ratio > 1 else f' ÷{1 / ratio:.1f}'
+
+
 def behind_summary(state: dict) -> str:
     """How many completions would bring every banking pursuit back to current.
 
@@ -830,6 +901,65 @@ def match_pursuit(needle: str, pursuits: dict) -> str | None:
     return None
 
 
+class Abandoned(Exception):
+    """The prompt was interrupted, so nothing should be written."""
+
+
+def ask(prompt: str) -> str:
+    """One line of input, treating an interrupt as abandoning rather than crashing.
+
+    Ctrl-C and Ctrl-D at a prompt both mean "forget it", and a traceback there
+    would print a stack over a half-answered question.
+    """
+    try:
+        return console.input(prompt).strip()
+    except (KeyboardInterrupt, EOFError) as interrupted:
+        raise Abandoned from interrupted
+
+
+def prompt_for_pursuit(pursuits: dict, offered: list[str]) -> str:
+    """Ask which pursuit, listing them with what each means.
+
+    The draw that is still on screen is marked, because the overwhelmingly common
+    path is reading five rows and then logging one of them — and a name typed from
+    memory is where a prefix collides with a pursuit that was never offered.
+    """
+    width = max(len(name) for name in pursuits)
+    console.print()
+    for name, config in sorted(pursuits.items(), key=lambda row: -row[1].get('weight', 0)):
+        row = Text('  ')
+        row.append('›' if name in offered else ' ', style='cyan')
+        row.append(f' {name.ljust(width)}  ', style='white' if name in offered else 'dim')
+        row.append(first_sentence(config.get('description', '')), style='dim')
+        console.print(row)
+    while True:
+        answer = ask('\n  pursuit: ')
+        if not answer:
+            raise Abandoned
+        matched = match_pursuit(answer, pursuits)
+        if matched:
+            return matched
+        if answer not in pursuits and not [name for name in pursuits if name.startswith(answer)]:
+            error_console.print(f'  No pursuit starts with {answer}.')
+
+
+def prompt_for_minutes() -> int | None:
+    """Ask how long it took, accepting nothing as an answer.
+
+    Deliberately not defaulted to the register's `minutes:` estimate. Enter would
+    then write that estimate into the journal as a measurement, and the forecast
+    reading it back would be quoting its own assumption. An unrecorded duration
+    is a gap the forecast can say it has; a fabricated one is a gap it cannot see.
+    """
+    while True:
+        answer = ask('  minutes, or Enter to skip: ')
+        if not answer:
+            return None
+        if answer.isdigit() and int(answer) > 0:
+            return int(answer)
+        error_console.print('  A whole number of minutes, or Enter.')
+
+
 def parse_ago(token: str) -> timedelta | None:
     """'3h' → 3 hours, '2d' → 2 days, '90m' → 90 minutes. None if unparsable."""
     units = {'m': 'minutes', 'h': 'hours', 'd': 'days', 'w': 'weeks'}
@@ -900,14 +1030,46 @@ def record_event(event: str, name: str, state: dict, extra: dict) -> dict:
     return journal.append(journal_path(JOURNAL_DIR, machine_name()), record)
 
 
-def cmd_log(name: str, words: list[str], ago: str | None, minutes: int | None, assume_yes: bool, no_write: bool) -> int:
+def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | None, assume_yes: bool, no_write: bool) -> int:
+    """Record having done one, asking for whatever was not passed as a flag.
+
+    Anything given on the command line is never asked about, so the fast path
+    stays one line. What is asked for is the pursuit, the note and the duration —
+    the duration because `--minutes` is the input `drift` and `doit forecast`
+    both need and the one nobody discovers from a help screen they never open.
+    """
     pursuits = load_pursuits()
-    matched = match_pursuit(name, pursuits)
-    if not matched:
-        error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
+    if not pursuits:
+        error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
         return 1
 
     now = datetime.now().astimezone()
+    # Read before the prompt rather than after: this is a file read, where
+    # build_state is a round trip to every backend, and the question should
+    # appear at typing speed.
+    cached = load_cached_draw(now) or {}
+    offered = cached.get('pinned', []) + cached.get('drawn', [])
+
+    try:
+        if name is None:
+            if not can_prompt():
+                error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit log <pursuit>[/]')
+                return 1
+            matched = prompt_for_pursuit(pursuits, offered)
+        else:
+            matched = match_pursuit(name, pursuits) or ''
+            if not matched:
+                error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
+                return 1
+        if not words and can_prompt():
+            answer = ask('  note, or Enter to skip: ')
+            words = answer.split() if answer else []
+        if minutes is None and can_prompt():
+            minutes = prompt_for_minutes()
+    except Abandoned:
+        error_console.print('  Nothing logged.')
+        return 1
+
     state = build_state(pursuits, now)
     occurred = now
     if ago:
@@ -919,7 +1081,6 @@ def cmd_log(name: str, words: list[str], ago: str | None, minutes: int | None, a
     # The cached draw is what was on screen, so it already knows which concrete
     # item this pursuit meant — no second resolve, and no chance of acting on
     # something different from what was offered.
-    cached = load_cached_draw(now) or {}
     item = (cached.get('resolved') or {}).get(matched) or {}
     # A cached failure is truthy and carries no id, so it satisfies the guard below
     # and the write-through to the owning CLI is skipped without saying so.
@@ -961,21 +1122,42 @@ def cmd_log(name: str, words: list[str], ago: str | None, minutes: int | None, a
     return 0
 
 
-def cmd_skip(name: str) -> int:
+def cmd_skip(name: str | None) -> int:
     pursuits = load_pursuits()
-    matched = match_pursuit(name, pursuits)
-    if not matched:
-        error_console.print(f'No pursuit named {name}.')
+    if not pursuits:
+        error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
         return 1
     now = datetime.now().astimezone()
-    state = build_state(pursuits, now)
     cached = load_cached_draw(now) or {}
+    try:
+        if name is None:
+            if not can_prompt():
+                error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit skip <pursuit>[/]')
+                return 1
+            matched = prompt_for_pursuit(pursuits, cached.get('pinned', []) + cached.get('drawn', []))
+        else:
+            matched = match_pursuit(name, pursuits) or ''
+            if not matched:
+                error_console.print(f'No pursuit named {name}.')
+                return 1
+    except Abandoned:
+        error_console.print('  Nothing skipped.')
+        return 1
+
+    state = build_state(pursuits, now)
     record_event('skip', matched, state, {'draw_id': cached.get('draw_id')})
     # The pass only means something against a new draw, and the suppression it
     # applies is already in the journal, so the stale cache goes.
     DRAW_CACHE.unlink(missing_ok=True)
     passed = Text.from_markup('[yellow]Passed[/] ')
-    passed.append(f'{matched} — suppressed for about one interval, weight untouched.')
+    # A pin is decided by cadence alone and never consults the effective weight, so
+    # suppression cannot reach one. Saying "suppressed" there would be a promise
+    # the next draw breaks immediately, and the pursuit reappearing at the top
+    # would read as the skip having been dropped.
+    if matched in pinned(state):
+        passed.append(f'{matched} — still pinned by its {pursuits[matched]["cadence"]} cadence, so it will be offered again.')
+    else:
+        passed.append(f'{matched} — suppressed for about one interval, weight untouched.')
     console.print(passed)
     return 0
 
@@ -998,7 +1180,7 @@ def cmd_list(as_json: bool) -> int:
     for name, config in sorted(pursuits.items(), key=lambda row: -row[1].get('weight', 0)):
         share = state['shares'].get(name)
         share_text = f'{share * 100:>5.1f}%' if share else '    —'
-        cadence = f' · {config["cadence"]}' if config.get('cadence') else ''
+        cadence = f' · {config["cadence"]}{urgency_multiplier(state, name)}' if config.get('cadence') else ''
         last = format_elapsed(state['days_since'].get(name))
         line = Text('  ')
         line.append(name.ljust(width), style='white')
@@ -1008,7 +1190,7 @@ def cmd_list(as_json: bool) -> int:
         elif term_ended(config, state['today']):
             line.append(f'  term ended {config["until"]}', style='yellow')
         console.print(line)
-    console.print('\n  share is what each weight implies against the rest · [cyan]doit pursuits edit[/]')
+    console.print('\n  share is what each weight implies · ×n is a cadence outrunning it\n  [cyan]doit pursuits edit[/]')
     return 0
 
 
@@ -1221,19 +1403,27 @@ def next_command(
 
 
 def log_command(
-    pursuit: Annotated[str, typer.Argument(help='The pursuit, by name or unambiguous prefix.')],
-    note: Annotated[list[str] | None, typer.Argument(help='Free text recorded with the entry.')] = None,
+    pursuit: Annotated[str | None, typer.Argument(help='The pursuit, by name or unambiguous prefix (asked for when omitted).')] = None,
+    note: Annotated[list[str] | None, typer.Argument(help='Free text recorded with the entry (asked for when omitted).')] = None,
     ago: Annotated[str | None, typer.Option('--ago', help='Log something you did earlier: 90m / 3h / 2d / 1w.')] = None,
-    minutes: Annotated[int | None, typer.Option('--minutes', help='How long it took, so drift can weigh time not count.')] = None,
+    minutes: Annotated[
+        int | None,
+        typer.Option('--minutes', help='How long it took, so drift and forecast weigh time (asked for when omitted).'),
+    ] = None,
     assume_yes: Annotated[bool, typer.Option('-y', '--yes', help="Run the pursuit's on_log command without asking.")] = False,
     no_write: Annotated[bool, typer.Option('--no-write', help='Log only; never touch the owning app.')] = False,
 ) -> None:
-    """Record having done one, writing through to the app that owns it."""
+    """Record having done one, writing through to the app that owns it.
+
+    Pass every field to log in one line. Leave one out at a terminal and it is
+    asked for, with the pursuits listed and the current draw marked. A field
+    already passed is never asked about, and --no-input skips every question.
+    """
     run(lambda: cmd_log(pursuit, note or [], ago, minutes, assume_yes, no_write))
 
 
 def skip_command(
-    pursuit: Annotated[str, typer.Argument(help='The pursuit, by name or unambiguous prefix.')],
+    pursuit: Annotated[str | None, typer.Argument(help='The pursuit, by name or unambiguous prefix (asked for when omitted).')] = None,
 ) -> None:
     """Pass on one — suppressed for about an interval, weight untouched."""
     run(lambda: cmd_skip(pursuit))
