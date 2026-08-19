@@ -1,6 +1,209 @@
 # CHANGELOG
 
 
+## v2.16.0 (2026-08-19)
+
+### Build System
+
+- Add task setup so a fresh worktree is runnable
+  ([`c9ba0eb`](https://github.com/datapointchris/doit/commit/c9ba0eba93e690fc42a54d28a6e52299f5e50a1d))
+
+A worktree is a clean checkout, so everything gitignored is absent. The virtualenv comes back from
+  uv.lock; .planning has no manifest and is recreated from wherever the primary points.
+
+The primary is derived from --git-common-dir rather than configured, so the target resolves from any
+  worktree and no-ops when run in the primary.
+
+### Continuous Integration
+
+- Regenerate validate.yml at toolchain 16
+  ([`6e0dafa`](https://github.com/datapointchris/doit/commit/6e0dafa7443967db5a4198722beb28b19f56807a))
+
+Catches this repo up with the version manifest: StyLua pinned to a release rather than latest, a
+  reworded bats discovery note, and double quotes in the node block. Only the blocks this repo
+  declares are affected.
+
+Triggers and job structure are unchanged.
+
+### Documentation
+
+- **forecast**: Name the two verbs in the command list
+  ([`7776d03`](https://github.com/datapointchris/doit/commit/7776d03954cbb2ed277102ed2823f5f848bcac2b))
+
+The forecast is the one part of the tree you would not find by walking it, because what it answers
+  is a question about the register rather than about anything outstanding.
+
+### Features
+
+- **forecast**: Run the pursuits register forward, and measure what a day costs
+  ([#3](https://github.com/datapointchris/doit/pull/3),
+  [`faac1f2`](https://github.com/datapointchris/doit/commit/faac1f29c9b35db202231689641af0866bb8243f))
+
+A pursuits register can only be argued with after the fact. `doit pursuits drift` compares stated
+  weight against what happened, needs a season of days before it says anything, and can weigh only
+  counts because no log has ever carried a duration. This adds a forecast that runs the register
+  forward against the real allocator, a `--minutes` prompt that gives the forecast something to
+  measure, and a display of what a declared cadence does to a stated weight.
+
+## What to look at
+
+- `src/doit/forecast.py` — `simulate` calls `pursuits.build_state` and `pursuits.compute_draw` per
+  simulated day rather than reimplementing them. Check that no allocator arithmetic has been copied
+  into this module, since a copy is the only way the forecast could come to disagree with the draw
+  it predicts. - `src/doit/pursuits.py` in `0ee816d` — `build_state` grows `records` and `observed`
+  parameters. Both default to the previous behaviour (journal on disk, live evidence refresh). Check
+  that the live path is unchanged: `observed=None` still calls `evidence.refresh`, and
+  `state['observed']` still carries what it did. - `spend_a_day` in `forecast.py` — the whole
+  behavioural model, and the one function whose correctness is a judgement rather than a proof. It
+  walks the offered list top-down, steps over what does not fit, and never does anything in part. -
+  `prompt_for_minutes` in `pursuits.py` — Enter returns `None`, not the register's estimate. That
+  distinction is what keeps a declared number out of the journal. - `cmd_skip` in `pursuits.py` —
+  the pinned branch. `pinned()` reads cadence alone and consults neither `effective` nor the skip
+  record, so the previous message described a suppression that never happened.
+
+## How it was verified
+
+667 tests pass, 40 of them new in `tests/test_forecast.py` and 13 in `tests/test_pursuits.py`. `task
+  lint` clean: ruff format, ruff check, mypy, bandit at zero issues across every severity.
+
+The allocator reimplementation used to derive the numbers below was checked against `doit next
+  --explain --json` on the live register before any of this was written — every interval, effective
+  weight and first-draw probability matched to the printed precision.
+
+`spend_a_day` is proved able to fail:
+  `test_something_that_does_not_fit_is_stepped_over_rather_than_ending_the_day` fails if the loop
+  `break`s instead of `continue`s, and `test_nothing_is_ever_done_in_part` fails if a partial slice
+  is ever taken.
+
+`forecast run` takes 1.9s at 300 replicates over a 30-day horizon on an eight-pursuit register. Run
+  under the `fleet-schedule.service` environment (`env -i` plus that unit's PATH) to confirm the
+  scheduled invocation resolves `doit`.
+
+## What changes
+
+`doit log` and `doit skip` now take their pursuit argument optionally. Omit any field at a terminal
+  and it is asked for; a field passed on the command line is never asked about, so `doit log chore
+  vacuumed --minutes 20` is unchanged. `--no-input` and a non-TTY stdin both fail naming the
+  argument rather than blocking.
+
+The register accepts `minutes:` per pursuit and a top-level `forecast:` block with `budget_minutes`.
+  Both are optional. A register that declares neither still forecasts, against a 45-minute default
+  and a 120-minute day.
+
+`doit pursuits list` prints `×n` or `÷n` beside a cadence that is more than a tenth away from the
+  interval the weight implies. A register whose cadences agree with its weights shows nothing new.
+
+`doit skip` on a pinned pursuit now says it will be offered again. The behaviour is unchanged — it
+  never could suppress a pin.
+
+`fleet schedule` gains `attention-forecast` every four hours on archlinux, declared in the
+  `terminal-library-fleet` repo rather than here.
+
+## Decisions, and what they rejected
+
+- **The simulation runs the real allocator** — rejected a standalone model of the draw, which reads
+  better and starts disagreeing with `pursuits.py` the first time either moves. A forecast that has
+  quietly diverged is worse than no forecast, because it is still confident. - **Evidence is frozen
+  at the moment of the forecast** — rejected simulating evidence forward. The backends cannot be
+  asked about a future, and an invented answer would decide the result: a pursuit whose evidence
+  keeps reporting it freshly done never comes up at all. - **Enter at the minutes prompt records
+  nothing** — rejected defaulting to the register's `minutes:`. That would write an estimate into
+  the journal as a measurement, and the forecast reading it back at three samples would be quoting
+  its own assumption. An unrecorded duration is a gap the forecast reports; a fabricated one is a
+  gap it cannot see. - **Durations are point estimates** — rejected sampling from a spread. The
+  variance across replicates is then the draw's, which is a real random process, rather than a
+  distribution nobody chose presented as a confidence interval. - **Duration provenance is stored
+  per pursuit and printed** — rejected reporting only the number. A forecast resting on eight
+  estimates is a different claim from one resting on eight measurements, and nothing else on screen
+  would say which is being read. - **`minutes:` is a pursuit field, `budget_minutes` is a file-level
+  one** — rejected putting the budget on each pursuit. A daily budget is a fact about the person,
+  not about any single strand. - **`run`/`show`/`list`/`trend` rather than one verb with flags** —
+  follows `kit digest`, and for the same reason: a reading cannot be recomputed, because a second
+  call reads a register and a journal that have since moved. `show` works with nothing installed,
+  which is what proves it is a read. - **Four hours for the schedule** — rejected daily. The
+  measured logging rate and the register both move within a day, and a reading costs one local
+  simulation plus an evidence refresh the interactive draw wants warm anyway.
+
+## Risk and rollback
+
+Nothing deploys. A revert removes two commands and the two register fields; a register still
+  declaring `minutes:` would then fail `load_pursuits` on the unknown-field check, so a revert means
+  editing `pursuits.yml` too. The stored readings under
+  `$XDG_STATE_HOME/doit/forecast-<machine>.jsonl` survive a revert and are inert without the module.
+
+The `build_state` signature change is additive and every existing caller passes neither new
+  argument.
+
+## What this does not do
+
+It does not adjust a weight, and must not. Stated and revealed preference are separate signals, and
+  `drift` exists because blending them destroys the only honest comparison available.
+
+It does not model what a pursuit resolves to. `build` predicts occasions and hours, never which
+  project item finishes — the register's `on_log` treats one log as one completed item, and a
+  multi-session item is not represented anywhere in this model.
+
+It does not forecast a register whose durations are unknown any better than the estimates it is
+  given. Until logs carry `--minutes`, every hour figure is a declared number restated.
+
+- **forecast**: Run the register forward and store what it predicted
+  ([`0e08109`](https://github.com/datapointchris/doit/commit/0e081095b69a8ebba0a2fa240fb6c26403439cd0))
+
+drift answers this backwards and needs a season of days before it says anything. A weight is
+  arguable now, and only if the answer arrives before the month that would have proved it wrong.
+
+Every simulated day calls build_state and compute_draw, so the forecast runs the allocator rather
+  than a model of one. A copy would be easier to read and would start disagreeing with the draw the
+  first time either moved. build_state grows two injection points for it: records and observed,
+  defaulting to the journal and a live evidence refresh.
+
+The loop is what makes this worth simulating. Logging moves the measured rate, the rate sets every
+  implied interval, the intervals set urgency, and urgency sets the draw — so a register cannot be
+  read off the page.
+
+Two inputs it cannot derive. How long a pursuit takes comes from duration_minutes once three logs
+  carry one and from the register's minutes: until then, and which answered is recorded per pursuit
+  so a forecast resting on estimates is not mistaken for one resting on measurements. What a day
+  holds comes from forecast.budget_minutes.
+
+run stores a reading, show and list read them back, and trend grades the ones whose window has
+  closed against what the journal recorded. A reading is state rather than cache for the reason
+  digest gives: a recompute would read a register and a journal that have since moved.
+
+- **log**: Ask for whatever was not passed, so --minutes gets discovered
+  ([`8b21ff4`](https://github.com/datapointchris/doit/commit/8b21ff4496a0704b6b133c69dbb792020eb39f60))
+
+doit log took a required pursuit and two optional flags, and a flag nobody opens the help for is a
+  flag nobody uses: every entry in the journal carries duration_minutes null, so drift can only
+  weigh count.
+
+Leave a field out at a terminal and it is asked for — the pursuit with every name listed and the
+  current draw marked, then the note, then the duration. A field passed on the command line is never
+  asked about, so the one-line form is unchanged, and --no-input fails naming the argument rather
+  than blocking.
+
+Enter at the minutes prompt records nothing rather than the register's estimate. Defaulting to the
+  estimate would write a guess into the journal as a measurement, and a forecast reading it back
+  would be quoting its own assumption.
+
+skip gets the same prompt, and stops promising a suppression it cannot deliver: pinned() reads
+  cadence alone and never consults the effective weight, so a skip cannot reach a pinned pursuit. It
+  now says the pursuit is still pinned and will be offered again.
+
+- **pursuits**: A minutes estimate, and what a cadence does to urgency
+  ([`0ee816d`](https://github.com/datapointchris/doit/commit/0ee816dec32da347fa559b2319a40281d48102bb))
+
+A cadence replaces the interval the weight implies rather than sitting beside it, so urgency divides
+  by whichever won. Declaring one shorter than the implied interval multiplies the pursuit's
+  effective weight; longer divides it. Nothing on screen said so, and a 1d beside weight 25 was
+  taking a third of every draw against the ninth its share claimed.
+
+pursuits list now prints that ratio next to the cadence when it is more than a tenth from 1.
+
+minutes is what one occasion of a pursuit costs, read by the forecast until enough logs carry
+  --minutes for the journal to answer it.
+
+
 ## v2.15.0 (2026-08-19)
 
 ### Documentation
