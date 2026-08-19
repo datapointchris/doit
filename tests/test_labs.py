@@ -4,6 +4,7 @@ An autouse fixture points the deck at a committed fixture directory and the stat
 at a file that does not exist, so every Lab reads as never-practiced.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -49,54 +50,53 @@ def test_is_due_row():
     assert labs.is_due_row(rows['ondemand-lab']) is False
 
 
-def test_nudge_is_a_single_line(capsys):
-    """The nudge runs inside the review nudge, so it holds to one line.
-
-    It used to reuse the browse renderer and print the whole due deck — the bulk
-    of what shell startup emitted. `doit labs list` remains the view for the rest.
-    """
-    assert labs.cmd_nudge() == 0
-
-    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-    assert len(lines) == 1
-    assert '1 due' in lines[0]
-    assert 'scheduled-lab' in lines[0]
-
-
-def test_nudge_samples_and_counts_a_large_deck(tmp_path, monkeypatch, capsys):
-    """However much of the deck is due, the nudge names a few and counts the rest."""
-    for i in range(labs.NUDGE_SAMPLE + 4):
+@pytest.fixture
+def big_deck(tmp_path, monkeypatch):
+    """Seven scheduled Labs, none practiced, so all seven are due."""
+    for i in range(7):
         (tmp_path / f'lab-{i}.md').write_text(f'---\ntags: []\ncadence: 1w\n---\n\n# Lab {i}\n')
     monkeypatch.setattr(labs, 'LABS_DIR', tmp_path)
-
-    assert labs.cmd_nudge() == 0
-
-    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-    assert len(lines) == 1
-    assert f'{labs.NUDGE_SAMPLE + 4} due' in lines[0]
-    assert lines[0].count('lab-') == labs.NUDGE_SAMPLE
+    return tmp_path
 
 
-def test_nudge_clips_rather_than_wraps_on_a_narrow_pane(tmp_path, monkeypatch, capsys):
-    """One line has to mean one line, or the nudge silently grows back."""
-    for i in range(6):
-        (tmp_path / f'a-very-long-lab-name-{i}.md').write_text(f'---\ntags: []\ncadence: 1w\n---\n\n# Lab {i}\n')
-    monkeypatch.setattr(labs, 'LABS_DIR', tmp_path)
-    monkeypatch.setenv('COLUMNS', '60')
+def test_due_bounded_renders_that_many_and_counts_the_rest(big_deck, capsys):
+    """The bound is what makes this view affordable in a startup nudge.
 
-    assert labs.cmd_nudge() == 0
+    Anything unbounded there is a catalogue rather than a prompt, and the deck
+    comes due in clumps.
+    """
+    assert labs.cmd_due(limit=3) == 0
 
-    line = capsys.readouterr().out.rstrip('\n')
-    assert len(line) <= 60, line
+    out = capsys.readouterr().out
+    assert [line.split()[0] for line in out.splitlines() if line.startswith('  lab-')] == ['lab-0', 'lab-1', 'lab-2']
+    assert '+4 more' in out
+    assert 'doit labs due' in out
 
 
-def test_nudge_is_silent_when_nothing_is_due(tmp_path, monkeypatch, capsys):
-    """On-demand Labs are never due, so a deck of them nudges not at all."""
+def test_due_unbounded_renders_the_whole_deck(big_deck, capsys):
+    """A browse view you asked for carries every row, and says nothing was held back."""
+    assert labs.cmd_due() == 0
+
+    out = capsys.readouterr().out
+    assert len([line for line in out.splitlines() if line.startswith('  lab-')]) == 7
+    assert 'more' not in out
+
+
+def test_due_says_so_when_nothing_is_due(tmp_path, monkeypatch, capsys):
+    """On-demand Labs are never due, so a deck of them has nothing to practice."""
     (tmp_path / 'ondemand.md').write_text('---\ntags: []\n---\n\n# On Demand\n')
     monkeypatch.setattr(labs, 'LABS_DIR', tmp_path)
 
-    assert labs.cmd_nudge() == 0
-    assert capsys.readouterr().out == ''
+    assert labs.cmd_due(limit=3) == 0
+    assert 'No Labs due' in capsys.readouterr().out
+
+
+def test_limit_bounds_json_as_well_as_the_render(big_deck, capsys):
+    """A flag that silently does nothing under --json is a knob that lies."""
+    assert labs.cmd_list(as_json=True, limit=2) == 0
+
+    rows = json.loads(capsys.readouterr().out)
+    assert [row['id'] for row in rows] == ['lab-0', 'lab-1']
 
 
 def test_load_flashcards_all():

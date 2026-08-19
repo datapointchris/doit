@@ -55,11 +55,6 @@ STATE = Path(os.environ.get('DOIT_LABS_STATE') or xdg_state_home() / 'doit' / 'l
 # beats long cramming — so a session samples at most this many cards.
 FLASH_SESSION = 10
 
-# How many Lab ids the nudge names before it stops. The deck comes due in clumps,
-# and a startup nudge asking you to pick one of fifteen is a catalogue, not a
-# prompt — three is enough to make the choice concrete.
-NUDGE_SAMPLE = 3
-
 TEMPLATE = """\
 ---
 tags: []
@@ -183,21 +178,40 @@ def cmd_render_preview(lab_id: str) -> int:
     return 0
 
 
-def cmd_due() -> int:
+def bounded(rows: list[dict], limit: int | None) -> list[dict]:
+    """The first `limit` rows, or all of them when no limit was asked for."""
+    return rows[:limit] if limit else rows
+
+
+def more_line(shown: int, total: int, browse: str) -> None:
+    """Say what the limit held back, and name the command that shows it."""
+    if shown < total:
+        console.print(f'  +{total - shown} more  ·  [cyan]{browse}[/]')
+
+
+def cmd_due(limit: int | None = None) -> int:
+    """What's due to practice, bounded to the first `limit` rows when given.
+
+    The bound is what lets this same view serve a review item's `show:`. That
+    slot runs at shell startup, where an unbounded deck is a catalogue rather
+    than a prompt, and the deck comes due in clumps.
+    """
     if not load_labs():
         return warn_no_labs()
     console.rule('[cyan]Labs — due to practice', align='left')
     due = [r for r in statuses() if is_due_row(r)]
-    if due:
-        for row in due:
-            render_row(row)
-        console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   mark done:  [cyan]doit labs done <id>[/]')
+    if not due:
+        console.print('[green]✓[/] No Labs due. Browse them all with [cyan]doit labs list[/].')
         return 0
-    console.print('[green]✓[/] No Labs due. Browse them all with [cyan]doit labs list[/].')
+    shown = bounded(due, limit)
+    for row in shown:
+        render_row(row)
+    more_line(len(shown), len(due), 'doit labs due')
+    console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   mark done:  [cyan]doit labs done <id>[/]')
     return 0
 
 
-def cmd_list(as_json: bool = False) -> int:
+def cmd_list(as_json: bool = False, limit: int | None = None) -> int:
     # --json emits the whole deck with each Lab's derived status, so a consumer
     # (the dashboard) filters on `overdue`/`scheduled` itself. An empty deck is
     # an empty list, not the prose hint: --json must always be parsable.
@@ -205,37 +219,17 @@ def cmd_list(as_json: bool = False) -> int:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings and hand a consumer
         # a parse error instead of data.
-        print(json.dumps(statuses(), indent=2))
+        print(json.dumps(bounded(statuses(), limit), indent=2))
         return 0
     if not load_labs():
         return warn_no_labs()
     console.rule('[cyan]Labs — full deck', align='left')
-    for row in statuses():
+    deck = statuses()
+    shown = bounded(deck, limit)
+    for row in shown:
         render_row(row)
+    more_line(len(shown), len(deck), 'doit labs list')
     console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   choose interactively:  [cyan]doit labs choose[/]')
-    return 0
-
-
-def cmd_nudge() -> int:
-    """Startup nudge: one line naming a few due Labs, silent when caught up.
-
-    Runs inside the review nudge (the `practice-a-lab` item's `show:`), so it has
-    to hold to a line or two however much of the deck is due. `doit labs list` is
-    the browse view for the rest — this only has to get you to open it.
-    """
-    if not load_labs():
-        return 0
-    due = [r for r in statuses() if is_due_row(r)]
-    if not due:
-        return 0
-    sample = ', '.join(row['id'] for row in due[:NUDGE_SAMPLE])
-    if len(due) > NUDGE_SAMPLE:
-        sample += ', …'
-    line = Text('  ')
-    line.append(f'Labs · {len(due)} due', style='cyan')
-    line.append(f'   {sample}')
-    line.append('   ↳ doit labs show <id>', style='cyan')
-    console.print(line, no_wrap=True, overflow='ellipsis')
     return 0
 
 
@@ -398,18 +392,22 @@ def cmd_flash(subject: str | None = None) -> int:
 app = typer.Typer(name='labs', no_args_is_help=True, help='Hands-on practice Labs.')
 
 
+LimitOption = Annotated[int | None, typer.Option('--limit', '-n', help='Show at most this many, then say how many are left.')]
+
+
 @app.command('due')
-def due_command() -> None:
+def due_command(limit: LimitOption = None) -> None:
     """What's due to practice now."""
-    raise typer.Exit(cmd_due())
+    raise typer.Exit(cmd_due(limit))
 
 
 @app.command('list')
 def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
+    limit: LimitOption = None,
 ) -> None:
     """Every Lab and its schedule status."""
-    raise typer.Exit(cmd_list(as_json))
+    raise typer.Exit(cmd_list(as_json, limit))
 
 
 @app.command('show')
@@ -448,12 +446,6 @@ def new_command(name: Annotated[list[str], typer.Argument(help='The new Lab name
 def edit_command(lab_id: Annotated[str, typer.Argument(help='The Lab to edit.')]) -> None:
     """Edit an existing Lab in $EDITOR."""
     raise typer.Exit(cmd_edit(lab_id))
-
-
-@app.command('nudge', hidden=True)
-def nudge_command() -> None:
-    """The startup nudge, called by the review nudge rather than by hand."""
-    raise typer.Exit(cmd_nudge())
 
 
 @app.command('__render', hidden=True)
