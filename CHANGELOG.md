@@ -1,6 +1,24 @@
 # CHANGELOG
 
 
+## v2.14.0 (2026-08-19)
+
+### Features
+
+- **labs**: --limit/-n on due and list, replacing the one-line nudge
+  ([`fea66e6`](https://github.com/datapointchris/doit/commit/fea66e6a71b07420be4526cd7688bddbf288b007))
+
+The register's practice-a-lab item runs its show: inside the startup nudge, where the unbounded due
+  view printed the whole clump of due Labs. labs nudge answered that with a second renderer and a
+  one-line sample, which reads as a counter rather than as something to pick from.
+
+A bound on the view that already exists carries the rows the browse view does and holds to the same
+  few lines. The deck grows outside the binary, so cli-design.md "--limit/-n goes on every list"
+  reaches it.
+
+--limit bounds --json too: a flag that silently does nothing there is a knob that lies.
+
+
 ## v2.13.0 (2026-08-17)
 
 ### Documentation
