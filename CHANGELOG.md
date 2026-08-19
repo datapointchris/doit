@@ -1,6 +1,52 @@
 # CHANGELOG
 
 
+## v2.15.0 (2026-08-19)
+
+### Documentation
+
+- **help**: The root screen says which of next, dashboard and review due to type
+  ([`c9e3fa5`](https://github.com/datapointchris/doit/commit/c9e3fa5ccb11a53ae6ac07aeb1197069bb3d81a0))
+
+An accurate command list leaves the reader to work out the order, and the reader arrives with "what
+  do I do now" rather than "what is there". Both the root help screen and the README now name the
+  comparison that gets got wrong: next ranks across everything on weights you declared, dashboard
+  ranks across nothing, and review due is one dashboard lane at full depth.
+
+help.md "The root screen says when to reach for what, not only what exists" measured this gap
+  against doit on 2026-08-17.
+
+rich_markup_mode is markdown so the routing block can bold the commands. Checked every help screen
+  in the tree: two docstrings carry backticks, which render as code spans, and nothing carries an
+  asterisk or underscore.
+
+### Features
+
+- **kit**: A row another machine declares is not rot on this one
+  ([`15affaf`](https://github.com/datapointchris/doit/commit/15affaf7b64c492036db53cc8b59b661b5e6dc34))
+
+The tools registry is one flat file for the whole fleet, and everything it was checked against is
+  already scoped to one box — PATH is, and index.shell_files is because the symlink layer links only
+  what applies here. So a row for another machine's tool had nowhere to be filed except rot: bbkt
+  and jira read as broken entries on all three personal desks, and the ten registry heads only the
+  personal manifests declare would have read the same way on the work box.
+
+doit.machine asks dotfiles what this machine declares. classify gains a third bucket, keyed on
+  installed_via: dotfiles means the shell tree already scopes the row, anything else names a package
+  manager and the manifest is what says whether the box was ever meant to have the tool.
+
+Unknown is a third state and not an empty set. A box without dotfiles judges rows by PATH alone,
+  because reading "declares nothing" as the answer would file every package-installed row as foreign
+  and empty the report.
+
+The manifest is asked only when something already failed to resolve, and cached for a day, so a
+  clean index costs nothing and the dashboard render is unchanged.
+
+A register item takes requires: too. brew-maintenance had reached 18 days overdue on Arch and could
+  never clear, because observe: {scope: machine} means no other desk can clear it and this one has
+  no brew.
+
+
 ## v2.14.0 (2026-08-19)
 
 ### Features
