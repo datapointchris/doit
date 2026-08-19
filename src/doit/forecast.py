@@ -433,8 +433,8 @@ def emit(reading: Reading) -> None:
         f'\n  {reading.logs_per_day:.2f} logs/day ({rate}) · '
         f'{reading.unspent_minutes_per_day:.0f} min/day left unspent · {reading.replicates} runs'
     )
-    console.print(f'  estimates: {source_summary(reading)} · [cyan]doit log --minutes[/] turns declared into measured')
-    console.print('  got is the share of occasions the draw actually spends · said is what the weight claims')
+    console.print('  got is the share of occasions spent · said is what the weight claims')
+    console.print(f'  estimates: {source_summary(reading)} · [cyan]doit log --minutes[/] measures them')
 
 
 def emit_trend(verdicts: list[Verdict], days: int, readings: int) -> None:

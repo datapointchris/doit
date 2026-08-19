@@ -19,6 +19,8 @@ doit tools show <n>   # what one tool is, and what to type
 doit kit unused       # what you own, can run, and never reach for
 doit kit remind       # resurface one of them, a lens at a time
 doit log              # record what actually happened
+doit forecast run     # what the weights would have you do over the next month
+doit forecast trend   # what earlier forecasts predicted, against what got logged
 ```
 
 Bare `doit` prints help, and so does every namespace under it — you can walk down one token at a
