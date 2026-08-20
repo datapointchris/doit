@@ -198,6 +198,68 @@ def test_a_cached_draw_expires(sandbox):
     assert pursuits.load_cached_draw(NOW + timedelta(minutes=pursuits.CACHE_MINUTES + 1)) is None
 
 
+def stand_a_draw(drawn: list[str], resolved: dict | None = None, logged: list[str] | None = None) -> None:
+    """Cache a draw created now, so it is live for the rest of the window."""
+    payload = {
+        'draw_id': 'abc',
+        'created_at': datetime.now().astimezone().isoformat(),
+        'pinned': [],
+        'drawn': drawn,
+        'resolved': resolved or {},
+    }
+    if logged is not None:
+        payload['logged'] = logged
+    pursuits.save_cached_draw(payload)
+
+
+def test_logging_takes_the_pursuit_off_the_standing_draw(sandbox, monkeypatch):
+    """The draw outlives the log by up to a quarter of an hour.
+
+    Nothing marked it, so a pursuit done inside that window was offered again on
+    the very next run — with its own status column reading `today`, which reads as
+    the log having gone nowhere.
+    """
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    stand_a_draw(['chores', 'read-library'])
+
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+
+    cached = pursuits.load_cached_draw(datetime.now().astimezone())
+    assert pursuits.without_logged(cached)['drawn'] == ['read-library']
+
+
+def test_a_logged_pursuit_leaves_the_draw_record_intact(sandbox, monkeypatch):
+    """Marked, never cleared, because three things still read the draw it is on.
+
+    `was_offered` and `rank_in_draw` read the drawn list, and the item written
+    through to the owning CLI comes from the resolved map rather than a second
+    ask. Unlinking the cache the way a skip does would take all three.
+    """
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    stand_a_draw(['chores', 'read-library'], resolved={'read-library': {'label': 'Dune', 'id': '7'}})
+
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+    assert pursuits.cmd_log('read-library', [], None, None, assume_yes=True, no_write=False) == 0
+
+    second = journal.read_all(sandbox / 'state')[1]
+    assert second['pursuit'] == 'read-library'
+    assert second['draw_id'] == 'abc'
+    assert second['was_offered'] is True
+    assert second['rank_in_draw'] == 2
+    assert second['item']['label'] == 'Dune'
+
+
+def test_a_fully_logged_draw_is_replaced_rather_than_shown_empty(sandbox, monkeypatch):
+    """Everything offered is done, so the standing draw has no answer left to give."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    monkeypatch.setattr(pursuits, 'todays_context', list)
+    stand_a_draw(['chores'], logged=['chores'])
+
+    assert pursuits.cmd_next(False, False, False) == 0
+
+    assert pursuits.load_cached_draw(datetime.now().astimezone())['draw_id'] != 'abc'
+
+
 def test_a_cached_failure_is_asked_again_without_disturbing_the_draw(sandbox, tmp_path):
     """A backend that recovers must show through the window, and rerolling is not
     the way — it changes the draw, which is what the cache exists to hold still."""

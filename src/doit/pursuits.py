@@ -452,6 +452,35 @@ def save_cached_draw(payload: dict) -> None:
     DRAW_CACHE.write_text(json.dumps(payload, indent=2) + '\n')
 
 
+def mark_logged(name: str, now: datetime) -> None:
+    """Note that a pursuit has been done against the standing draw.
+
+    Marked rather than dropped, and the draw kept rather than discarded. A log
+    reads the drawn list for `was_offered` and `rank_in_draw`, and the next log in
+    the same window takes its item from the resolved map instead of asking the
+    backend again — both need the draw to survive being partly done.
+    """
+    cached = load_cached_draw(now)
+    if cached is None:
+        return
+    cached['logged'] = sorted(set(cached.get('logged') or []) | {name})
+    save_cached_draw(cached)
+
+
+def without_logged(selection: dict) -> dict:
+    """The draw as it should be shown: everything already logged taken out.
+
+    A shallow copy sharing the resolved map, so repairing a failed row still
+    reaches the rows on screen.
+    """
+    logged = set(selection.get('logged') or [])
+    return {
+        **selection,
+        'pinned': [name for name in selection.get('pinned', []) if name not in logged],
+        'drawn': [name for name in selection.get('drawn', []) if name not in logged],
+    }
+
+
 def write_names_cache(pursuits: dict) -> None:
     """Rewrite the name<TAB>description file the shell completion reads.
 
@@ -791,6 +820,16 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
         return 1
 
     cached = None if reroll else load_cached_draw(now)
+    if cached is not None:
+        # Repaired against the whole draw, before anything is filtered out of it —
+        # this writes the payload back, and a filtered one would erase the record
+        # every later log reads its provenance from.
+        retry_failed_resolves(cached, pursuits)
+        cached = without_logged(cached)
+        # Nothing offered is still outstanding, so the standing draw has no answer
+        # left to give and the question earns a fresh one.
+        if not cached['pinned'] and not cached['drawn']:
+            cached = None
     if cached is None:
         selection = compute_draw(state)
         names = selection['pinned'] + selection['drawn']
@@ -800,7 +839,6 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
     else:
         selection = cached
         names = selection['pinned'] + selection['drawn']
-        retry_failed_resolves(selection, pursuits)
 
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
@@ -1108,6 +1146,9 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
             'rank_in_draw': (cached.get('drawn', []).index(matched) + 1) if matched in cached.get('drawn', []) else None,
         },
     )
+    # The draw outlives the log by up to a quarter of an hour, and re-offering
+    # something just done reads as the log having gone nowhere.
+    mark_logged(matched, now)
 
     interval = state['intervals'].get(matched)
     when = '' if interval is None or math.isinf(interval) else f' · due again in ~{interval:.0f}d'

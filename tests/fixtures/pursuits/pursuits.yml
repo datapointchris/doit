@@ -1,4 +1,4 @@
-# Fixture register for tests/apps/test_menu_next.py. Deliberately covers one of
+# Fixture register for tests/test_pursuits.py. Deliberately covers one of
 # each shape: a hard cadence, a plain weight, a paused entry, and a term that has
 # already ended.
 pursuits:
