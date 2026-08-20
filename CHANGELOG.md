@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v2.16.2 (2026-08-20)
+
+### Bug Fixes
+
+- **next**: A logged pursuit leaves the standing draw
+  ([`4870e48`](https://github.com/datapointchris/doit/commit/4870e489b85c29f330ee0135483ffd340b717b11))
+
+The draw is cached for fifteen minutes so that re-reading it while deciding does not reshuffle it.
+  Nothing took a pursuit off that cache when it was logged, so anything done inside the window was
+  offered again on the next run — with its own status column reading 'today', which reads as the log
+  having gone nowhere.
+
+Marked rather than cleared. A skip unlinks the cache, and a log cannot: 'was_offered' and
+  'rank_in_draw' read the drawn list, and a second log in the same window takes its item from the
+  resolved map instead of asking the backend again. The draw keeps its record and grows a 'logged'
+  list; the display filters on it, and falls through to a fresh draw once everything offered has
+  been done.
+
+
 ## v2.16.1 (2026-08-19)
 
 ### Bug Fixes
