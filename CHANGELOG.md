@@ -1,6 +1,36 @@
 # CHANGELOG
 
 
+## v2.19.0 (2026-08-21)
+
+### Features
+
+- **evidence**: An answer keeps every date its app reported, not just the last
+  ([`1b0bb62`](https://github.com/datapointchris/doit/commit/1b0bb628e1444ba74d4c4afedbd5432562d808d8))
+
+Fetching the rows already had every occurrence in hand and returned the maximum of them. Each answer
+  now stores the distinct local dates on which its app reported a matching row, beside the existing
+  `last` and bounded to ninety days.
+
+Dates rather than a count of rows, because row counts are not commensurable across apps: `icb habits
+  completed` answers with hundreds and a finished book with one, so a count would call reading three
+  hundred times rarer than habits. A date either carries evidence or does not, whichever app was
+  asked, which is the absolute anchor standards/data.md asks to score against.
+
+Ninety days is the window `doit pursuits drift` measures over, so it is the one a consumer would ask
+  for, and bounding it stops a pursuit's cache growing for as long as its app has history. A failed
+  read keeps the dates it already had, on the same policy that keeps `last`.
+
+One parse feeds both fields: `stamps_in` returns every comparable timestamp and `latest_in` folds
+  it, so the latest date and the set of dates cannot come to disagree about whether a pursuit
+  happened.
+
+Nothing reads the new field yet, and the schema version is unchanged because neither direction needs
+  a migration: an answer carrying no dates reads as an empty window, and a field this doit does not
+  know does not stop it answering `last`. `doit pursuits evidence`, `drift`, `dormant`, `list` and
+  `next` print byte-identical output against a fixed register.
+
+
 ## v2.18.0 (2026-08-21)
 
 ### Documentation
