@@ -88,6 +88,13 @@ class Lane:
     `total` is the pre-cap size, so a capped lane never lies about the pile it
     sits above. `hints` are what you would run to see the rest — a remainder
     count says a lane was truncated without giving you anything to type.
+
+    `alert` says the lane carries problems rather than work. It draws first and
+    in red, and it is omitted entirely while it is empty, because a standing row
+    reading "nothing wrong" is what teaches you to stop looking at the one place
+    that says something is. An alert lane that could not be built is still drawn:
+    the omission is for a lane that answered and had nothing, never for one that
+    failed to answer.
     """
 
     name: str
@@ -99,6 +106,7 @@ class Lane:
     hints: list[str] = field(default_factory=list)
     reason: str = ''
     available: bool = True
+    alert: bool = False
 
 
 def unavailable(name: str, title: str, reason: str) -> Lane:
@@ -153,6 +161,7 @@ def lane_from(payload: dict) -> Lane:
         hints=[str(hint) for hint in payload.get('hints') or []],
         reason=str(payload.get('reason') or ''),
         available=payload.get('status', 'ok') != 'unavailable',
+        alert=bool(payload.get('alert')),
     )
 
 
@@ -182,6 +191,7 @@ def to_document(lanes: list[Lane], generated_at: datetime) -> dict:
                 'title': lane.title,
                 'meta': lane.meta,
                 'status': 'ok' if lane.available else 'unavailable',
+                'alert': lane.alert,
                 'reason': lane.reason or None,
                 'rows': [
                     {'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency), 'handle': row.handle}

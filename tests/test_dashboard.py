@@ -10,6 +10,7 @@ unlike its siblings it needs no fixture repointing at all.
 
 import json
 from datetime import date
+from datetime import datetime
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -17,6 +18,7 @@ from typer.testing import CliRunner
 from doit import dashboard
 from doit import sources
 from doit.cli import app as cli_app
+from doit.lanes import Row
 from doit.lanes import Urgency
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'dashboard'
@@ -811,3 +813,150 @@ def test_a_source_that_did_not_answer_says_so_rather_than_vanishing() -> None:
 
     assert lane.name == 'dotfiles'
     assert lane.rows == []
+
+
+def inbox(*problems: dict) -> sources.Result:
+    return sources.Result(source='errors', payload=list(problems), exit_code=0)
+
+
+def problem(key: str, title: str, *, machines=('archlinux',), count: int = 1, archived: bool = False, last: str = '') -> dict:
+    return {
+        'key': key,
+        'title': title,
+        'machines': list(machines),
+        'count': count,
+        'is_archived': archived,
+        'last_seen_ts': last or date.today().isoformat(),
+    }
+
+
+def test_the_errors_lane_is_an_alert_carrying_one_row_per_open_problem() -> None:
+    result = inbox(problem('hosts-drift', 'hosts does not match the inventory', machines=('scheduler-lxc',)))
+
+    lane = dashboard.errors_adapter(result)[0]
+
+    assert lane.alert is True
+    assert [row.text for row in lane.rows] == ['hosts does not match the inventory']
+    assert lane.rows[0].note == 'scheduler-lxc'
+    assert lane.rows[0].handle == 'fleet errors show hosts-drift'
+
+
+def test_an_archived_problem_is_not_a_row() -> None:
+    """Archiving is how a problem is dealt with, so a dismissed one reappearing
+    on the dashboard would make archiving pointless."""
+    result = inbox(problem('gone', 'dealt with', archived=True), problem('live', 'still wrong'))
+
+    lane = dashboard.errors_adapter(result)[0]
+
+    assert [row.text for row in lane.rows] == ['still wrong']
+    assert lane.total == 1
+
+
+def test_a_problem_seen_more_than_once_says_so_beside_its_machine() -> None:
+    lane = dashboard.errors_adapter(inbox(problem('hosts-drift', 'drifted', count=3)))[0]
+
+    assert lane.rows[0].note == 'archlinux ×3'
+
+
+def test_an_empty_inbox_still_builds_its_lane() -> None:
+    """Returning no lane would make `lanes_from` fall back to reporting the lane
+    unavailable, and an empty inbox is the healthy answer rather than a broken
+    one. The renderer is what drops it from sight."""
+    lane = dashboard.errors_adapter(inbox())[0]
+
+    assert lane.alert is True
+    assert lane.available is True
+    assert lane.rows == []
+    assert dashboard.quiet_alert(lane) is True
+
+
+def test_an_inbox_that_could_not_be_read_is_unavailable_rather_than_quiet() -> None:
+    """The omission is for a lane that answered and had nothing, never for one
+    that failed to answer."""
+    failed = sources.Result(source='errors', exit_code=1, stderr='nope', failure=sources.Failure.FAILED)
+
+    lane = dashboard.errors_adapter(failed)[0]
+
+    assert lane.available is False
+    assert lane.alert is True, 'a lane that could not answer is still the alert lane'
+    assert dashboard.quiet_alert(lane) is False
+
+
+def test_an_ordinary_lane_is_never_quiet_even_when_empty() -> None:
+    """Only an alert lane disappears. A work lane with nothing in it still says
+    so, which is what `—` is for."""
+    lane = dashboard.LaneView(name='tasks', title='TASKS')
+
+    assert dashboard.quiet_alert(lane) is False
+
+
+def alert_lane(name: str = 'errors', rows: int = 1) -> dashboard.LaneView:
+    made = [Row('5d', f'problem {n}', 'archlinux', Urgency.OVERDUE, '') for n in range(rows)]
+    return dashboard.LaneView(name=name, title=name.upper(), rows=made, total=rows, alert=True)
+
+
+def test_an_alert_lane_draws_before_every_work_lane(monkeypatch) -> None:
+    """A problem you scroll to is one you read after deciding what to do."""
+    work = [dashboard.LaneView(name=n, title=n.upper()) for n in ('tasks', 'habits')]
+    monkeypatch.setattr(dashboard.sources, 'fetch', lambda _: {})
+    monkeypatch.setattr(dashboard, 'local_lanes', lambda: [*work, alert_lane()])
+
+    ordered = dashboard.collect(sources.Registry(), None)
+
+    assert [lane.name for lane in ordered] == ['errors', 'tasks', 'habits']
+
+
+def test_config_still_decides_the_order_among_alert_lanes(monkeypatch) -> None:
+    """The sort is stable, so it lifts the alerts without reshuffling them."""
+    monkeypatch.setattr(dashboard.sources, 'fetch', lambda _: {})
+    monkeypatch.setattr(dashboard, 'local_lanes', lambda: [alert_lane('second'), alert_lane('first')])
+
+    assert [lane.name for lane in dashboard.collect(sources.Registry(), None)] == ['second', 'first']
+
+
+def test_the_terminal_drops_an_alert_lane_with_nothing_open(capsys) -> None:
+    """Seeing it every day while it is empty is what teaches you to stop reading
+    the one place that says something is wrong."""
+    quiet = alert_lane(rows=0)
+
+    dashboard.render_lanes([quiet, dashboard.LaneView(name='tasks', title='TASKS')], date.today(), 5)
+
+    printed = capsys.readouterr().out
+    assert 'ERRORS' not in printed
+    assert 'TASKS' in printed
+
+
+def test_an_alert_lane_with_something_open_is_drawn(capsys) -> None:
+    dashboard.render_lanes([alert_lane()], date.today(), 5)
+
+    assert 'ERRORS' in capsys.readouterr().out
+
+
+def test_an_alert_lane_that_failed_is_drawn_rather_than_dropped(capsys) -> None:
+    """A lane that could not answer is never omitted, alert or not — a dashboard
+    that quietly drops one reads as nothing outstanding. It carries no rows, so
+    only `available` separates it from the alert that answered and had none."""
+    broken = dashboard.lanemodel.unavailable('errors', 'ERRORS', 'fleet is not installed')
+    broken.alert = True
+
+    dashboard.render_lanes([broken], date.today(), 5)
+
+    assert dashboard.quiet_alert(broken) is False
+    assert 'errors' in capsys.readouterr().out
+
+
+def test_json_keeps_an_alert_lane_the_terminal_would_drop() -> None:
+    """A consumer asking what doit knows wants the empty answer too."""
+    document = json.loads(dashboard.lanemodel.dumps([alert_lane(rows=0)], datetime.now()))
+
+    assert [lane['name'] for lane in document['lanes']] == ['errors']
+    assert document['lanes'][0]['alert'] is True
+
+
+def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
+    """A source emitting doit's own lane document can declare it without an adapter."""
+    document = json.loads(dashboard.lanemodel.dumps([alert_lane(), dashboard.LaneView(name='t', title='T')], datetime.now()))
+
+    read_back = dashboard.lanemodel.from_document(document)
+
+    assert [lane.alert for lane in read_back] == [True, False]

@@ -909,12 +909,74 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
+def elapsed_label(timestamp: object, today: date) -> str:
+    """How long a problem has been standing, short enough for the label column."""
+    elapsed = days_away_from(str(timestamp), today) if timestamp else None
+    if elapsed is None:
+        return '—'
+    return 'today' if elapsed < 1 else f'{int(elapsed)}d' if elapsed < 14 else f'{int(elapsed / 7)}w'
+
+
+def problem_where(problem: dict) -> str:
+    """Which boxes reported it, and how many times if more than once."""
+    boxes = ', '.join(str(box) for box in problem.get('machines') or []) or '—'
+    seen = int(problem.get('count') or 0)
+    return f'{boxes} ×{seen}' if seen > 1 else boxes
+
+
+def errors_adapter(result: sources.Result) -> list[LaneView]:
+    """An error inbox's open problems, as an alert lane.
+
+    Shaped for what `fleet errors list --json` emits, and named for the shape
+    rather than for that binary: doit ships to boxes outside the fleet, where
+    nothing declares this source and the adapter is never reached. The lane is
+    declared in `sources.yml` like any other, so a machine without the producer
+    simply does not have the line.
+
+    Always one lane while the call succeeded, even with nothing open. Returning
+    none would make `lanes_from` fall back to reporting the lane unavailable,
+    and an empty inbox is the healthy answer rather than a broken one — the
+    renderer is what drops it from sight.
+    """
+    payload = result.payload
+    if not isinstance(payload, list):
+        broken = unavailable('errors', 'ERRORS', sources.reason('errors', result))
+        broken.alert = True
+        return [broken]
+
+    today = date.today()
+    open_problems = [row for row in payload if isinstance(row, dict) and not row.get('is_archived')]
+    rows = [
+        Row(
+            elapsed_label(problem.get('last_seen_ts'), today),
+            str(problem.get('title', '')),
+            problem_where(problem),
+            Urgency.OVERDUE,
+            f'fleet errors show {problem.get("key", "")}',
+        )
+        for problem in open_problems
+    ]
+    plural = '' if len(rows) == 1 else 's'
+    return [
+        LaneView(
+            name='errors',
+            title='ERRORS',
+            meta=f'{len(rows)} unresolved problem{plural}',
+            rows=rows,
+            total=len(rows),
+            hints=['fleet errors list'] if rows else [],
+            alert=True,
+        )
+    ]
+
+
 def learning_adapter(result: sources.Result) -> list[LaneView]:
     """learning's overview model, as one lane."""
     return [build_learning_lane({'learning': result}, date.today())]
 
 
 sources.register_adapter('icb', icb_adapter)
+sources.register_adapter('errors', errors_adapter)
 sources.register_adapter('learning', learning_adapter)
 sources.register_adapter('meso', meso_adapter)
 sources.register_adapter('prs', prs_adapter)
@@ -946,6 +1008,10 @@ def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneVi
 
     Order is config's, not a constant here — that is what makes it yours to
     change. doit's own lanes come last because nothing in the file governs them.
+
+    Alert lanes are the one exception and they come first, because a problem you
+    scroll to is a problem you read after deciding what to do rather than before.
+    The sort is stable, so config still decides the order among them.
     """
     configured = list(registry.sources.values())
     results = sources.fetch(configured)
@@ -955,7 +1021,7 @@ def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneVi
     collected.extend(local_lanes())
     if wanted:
         collected = [lane for lane in collected if lane.name in wanted]
-    return collected
+    return sorted(collected, key=lambda lane: not lane.alert)
 
 
 def terminal_width() -> int:
@@ -988,11 +1054,20 @@ def fitted(text: str, width: int, *, pad: bool = False) -> Text:
     return fitted_text
 
 
+def quiet_alert(lane: LaneView) -> bool:
+    """An alert lane that answered and had nothing to report.
+
+    Only the terminal drops it. `--json` keeps every lane, because a consumer
+    asking what doit knows wants the empty answer as much as the full one.
+    """
+    return lane.alert and lane.available and not lane.rows and not lane.grid
+
+
 def render_lanes(lanes: list[LaneView], today: date, row_cap: int) -> None:
     width = terminal_width()
     console.rule(f'[cyan]Dashboard[/] · {today.strftime("%a %d %b")}', align='left')
 
-    for lane in (lane for lane in lanes if lane.available):
+    for lane in (lane for lane in lanes if lane.available and not quiet_alert(lane)):
         render_lane(lane, width, cap_for(lane.name, row_cap))
 
     degraded = [lane for lane in lanes if not lane.available]
@@ -1008,7 +1083,7 @@ def render_lanes(lanes: list[LaneView], today: date, row_cap: int) -> None:
 def render_lane(lane: LaneView, width: int, row_cap: int) -> None:
     console.print()
     heading = Text()
-    heading.append(lane.title, style='cyan')
+    heading.append(lane.title, style='bold red' if lane.alert else 'cyan')
     if lane.meta:
         heading.append(f'  {lane.meta}')
     console.print(heading)
