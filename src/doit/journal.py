@@ -202,6 +202,19 @@ def load_counts(directory: Path) -> dict[str, int]:
     return totals
 
 
+def counts_by_machine(directory: Path) -> dict[str, dict[str, int]]:
+    """Offered counts kept per machine rather than summed.
+
+    :func:`load_counts` answers how often something came up. This answers where
+    the record sits, which is what a reader needs when the repair is to edit a
+    file and the file belongs to another box.
+    """
+    found: dict[str, dict[str, int]] = {}
+    for path in sorted(directory.glob('next-offers-*.json')):
+        found[path.stem.removeprefix('next-offers-')] = {name: int(count) for name, count in load_state(path).items()}
+    return found
+
+
 def bump_counts(path: Path, names: list[str]) -> dict[str, int]:
     """Increment this machine's offered count for each named pursuit."""
     counts = {name: int(count) for name, count in load_state(path).items()}

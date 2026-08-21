@@ -1143,3 +1143,31 @@ def test_a_paused_pursuit_renders_a_dash_rather_than_a_share(sandbox, capsys):
 
     printed = [line for line in capsys.readouterr().out.splitlines() if 'paused-thing' in line]
     assert printed and '—' in printed[0], printed
+
+
+def test_the_orphan_warning_names_the_box_holding_each_stranded_count(sandbox, monkeypatch, capsys):
+    """Every box writes its own counter file, so one this box did not write is not
+    this box's to edit — and editing it anyway is what gives a synced file two
+    writers. Saying whose it is turns a nag into an instruction."""
+    counts = sandbox / 'state'
+    counts.mkdir(parents=True, exist_ok=True)
+    (counts / 'next-offers-testbox.json').write_text(json.dumps({'retired-here': 8}))
+    (counts / 'next-offers-otherbox.json').write_text(json.dumps({'retired-there': 7}))
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+
+    pursuits.render_orphaned_counters(pursuits.load_pursuits())
+
+    printed = capsys.readouterr().out
+    assert 'retired-here  8  testbox' in printed
+    assert 'another box' not in printed.split('retired-here')[1].split('\n')[0]
+    assert 'retired-there  7  otherbox (another box — clear it there)' in printed
+
+
+def test_the_orphan_warning_stays_silent_when_every_count_has_a_pursuit(sandbox, capsys):
+    counts = sandbox / 'state'
+    counts.mkdir(parents=True, exist_ok=True)
+    (counts / 'next-offers-testbox.json').write_text(json.dumps({'chores': 4}))
+
+    pursuits.render_orphaned_counters(pursuits.load_pursuits())
+
+    assert capsys.readouterr().out == ''

@@ -182,3 +182,17 @@ def test_days_reads_a_stamp_in_the_offset_now_carries():
     records = [done_at('chores', NOW.astimezone(timezone(timedelta(hours=6))))]
 
     assert journal.days(records, 'chores', 'done', NOW) == [NOW.date()]
+
+
+def test_counts_by_machine_keeps_each_box_separate(tmp_path):
+    """`load_counts` sums, which cannot say where a record sits — and where it
+    sits is what decides whether this box may edit it."""
+    (tmp_path / 'next-offers-archlinux.json').write_text(json.dumps({'chores': 4, 'gone': 8}))
+    (tmp_path / 'next-offers-macmini.json').write_text(json.dumps({'chores': 3}))
+
+    assert journal.counts_by_machine(tmp_path) == {'archlinux': {'chores': 4, 'gone': 8}, 'macmini': {'chores': 3}}
+    assert journal.load_counts(tmp_path) == {'chores': 7, 'gone': 8}
+
+
+def test_counts_by_machine_is_empty_without_any_files(tmp_path):
+    assert journal.counts_by_machine(tmp_path) == {}

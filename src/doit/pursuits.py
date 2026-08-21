@@ -64,6 +64,7 @@ from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
 from doit.cadence import status_label
 from doit.journal import bump_counts
+from doit.journal import counts_by_machine
 from doit.journal import counts_path
 from doit.journal import days_since
 from doit.journal import journal_path
@@ -1300,7 +1301,19 @@ def render_orphaned_counters(register: dict) -> None:
     orphans = orphaned_offer_counts(register)
     if not orphans:
         return
-    console.print(Text(f'\n  Offer counts with no pursuit: {", ".join(orphans)}', style='yellow'))
+    here = machine_name()
+    by_machine = counts_by_machine(JOURNAL_DIR)
+    console.print(Text('\n  Offer counts with no pursuit:', style='yellow'))
+    for name in orphans:
+        for machine, counts in sorted(by_machine.items()):
+            if name not in counts:
+                continue
+            # Every box writes its own counter file, so one this box did not write
+            # is not this box's to edit. Without saying so the warning reads as a
+            # repair you keep failing to make, and editing it anyway is what gives
+            # a synced file two writers.
+            whose = '' if machine == here else ' [dim](another box — clear it there)[/]'
+            console.print(f'    [yellow]{name}[/]  {counts[name]}  {machine}{whose}')
     console.print('  Renaming a pursuit strands its total — rename the key in the counter to keep it.')
     console.print(f'  [cyan]{JOURNAL_DIR}[/]')
 
