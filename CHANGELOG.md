@@ -1,6 +1,43 @@
 # CHANGELOG
 
 
+## v2.22.0 (2026-08-21)
+
+### Features
+
+- **dashboard**: An alert lane draws first, in red, and hides while it is clean
+  ([`9704d71`](https://github.com/datapointchris/doit/commit/9704d717593ca0203ec815d2167abd5e980fd20d))
+
+`fleet errors` holds two unresolved problems and neither reached a surface read daily. One of them,
+  `/etc/hosts does not match the fleet's host inventory` on scheduler-lxc, had been standing five
+  days.
+
+`Lane.alert` says a lane carries problems rather than work. It sorts ahead of every work lane, heads
+  in red, and is omitted from the terminal entirely while it has nothing — a standing row reading
+  "nothing wrong" is what teaches you to stop looking at the one place that says something is. The
+  sort is stable, so sources.yml still decides the order among alerts.
+
+Omission is for a lane that answered and had nothing, never for one that failed to answer: an
+  unavailable alert still draws, and `--json` keeps every lane because a consumer asking what doit
+  knows wants the empty answer too.
+
+`errors_adapter` shapes the inbox document, named for the shape rather than for the binary that
+  emits it. The command lives in sources.yml, so a box outside the fleet declares no such source and
+  doit never learns the tool exists.
+
+### Refactoring
+
+- **update**: Let pyselfupdate resolve the credential
+  ([`3a76c6c`](https://github.com/datapointchris/doit/commit/3a76c6c1e32536cf708b60c7ad9f7a26b2f6a2ff))
+
+pyselfupdate now runs gh auth token itself, so the local helper was a second implementation of the
+  library's default. GITHUB_TOKEN_COMMAND redirects or empties it and belongs to whoever runs doit,
+  which a hardcoded token_func could not offer.
+
+Removes the subprocess import with it. The tests that covered the helper move to the library, where
+  the behaviour now lives; what is left asserts doit configures no credential of its own.
+
+
 ## v2.21.1 (2026-08-21)
 
 ### Bug Fixes
