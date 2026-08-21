@@ -120,6 +120,7 @@ KNOWN_FIELDS = {
     'paused',
     'alpha',
     'resolve',
+    'resolve_where',
     'items',
     'label',
     'id',
@@ -173,6 +174,10 @@ TEMPLATE = """\
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
 # and `items` when the list is nested inside the document.
+#
+#   resolve_where  optional field: value pairs keeping only the rows that are
+#                  this pursuit. Narrow the command itself where the backend can;
+#                  reach for this where it has no filter for the distinction.
 #
 # A title alone rarely says enough to pick something, so two more fields put the
 # rest of the resolved row on screen. Both take dotted paths, and a number in one
@@ -607,6 +612,13 @@ def resolve_one(name: str, config: dict) -> dict | None:
     if isinstance(rows, dict):
         rows = [rows]
     if not isinstance(rows, list) or not rows:
+        return None
+    # The counterpart to `evidence_where`, for the same reason: a backend with no
+    # filter for the distinction you are drawing returns everything and only some
+    # of it is the pursuit. Narrow the command first where the API can — this is
+    # what is left when it cannot.
+    rows = evidence.matching(rows, config.get('resolve_where'))
+    if not rows:
         return None
     row = rows[0]
     if not isinstance(row, dict):

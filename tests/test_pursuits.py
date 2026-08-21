@@ -1171,3 +1171,46 @@ def test_the_orphan_warning_stays_silent_when_every_count_has_a_pursuit(sandbox,
     pursuits.render_orphaned_counters(pursuits.load_pursuits())
 
     assert capsys.readouterr().out == ''
+
+
+def resolving(tmp_path, rows, **config) -> dict | None:
+    """resolve_one against a payload on disk, with no subprocess of our own."""
+    payload = tmp_path / 'rows.json'
+    payload.write_text(json.dumps(rows))
+    return pursuits.resolve_one('journal', {'resolve': f'cat {payload}', 'label': 'name', 'id': 'id', **config})
+
+
+def test_resolve_where_keeps_only_the_rows_that_are_this_pursuit(tmp_path):
+    """A backend with no filter for the distinction returns everything and only
+    some of it is the pursuit. `icb tasks` carries no tag, so what marks a prompt
+    is its name."""
+    rows = [
+        {'name': 'Self Authoring', 'id': 344},
+        {'name': 'Journal', 'id': 474},
+    ]
+
+    resolved = resolving(tmp_path, rows, resolve_where={'name': 'Journal'})
+
+    assert resolved['label'] == 'Journal'
+    assert resolved['id'] == '474'
+
+
+def test_resolve_where_matching_nothing_resolves_to_nothing(tmp_path):
+    """Not an error: the pursuit is due and there is no prompt written down, which
+    is a true answer and the description is what shows instead."""
+    assert resolving(tmp_path, [{'name': 'Self Authoring', 'id': 344}], resolve_where={'name': 'Journal'}) is None
+
+
+def test_resolve_without_a_where_takes_the_first_row_as_before(tmp_path):
+    """The generalisation has to leave every register without it untouched."""
+    rows = [{'name': 'Self Authoring', 'id': 344}, {'name': 'Journal', 'id': 474}]
+
+    assert resolving(tmp_path, rows)['label'] == 'Self Authoring'
+
+
+def test_resolve_where_matches_across_types_the_way_evidence_does(tmp_path):
+    """A config file has no types, so an id that is 474 in JSON and "474" in YAML
+    is the same id — the same rule `evidence_where` applies."""
+    rows = [{'name': 'Journal', 'id': 474}]
+
+    assert resolving(tmp_path, rows, resolve_where={'id': '474'})['id'] == '474'
