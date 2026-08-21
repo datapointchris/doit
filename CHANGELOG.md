@@ -1,6 +1,26 @@
 # CHANGELOG
 
 
+## v2.20.1 (2026-08-21)
+
+### Bug Fixes
+
+- **credit**: An occurrence outside the window no longer drags a burst backwards
+  ([`82b445d`](https://github.com/datapointchris/doit/commit/82b445d7c3a49d7ae0fa7af10a10efab5df58c66))
+
+The carry starts at the oldest occurrence and each step ceilings at that occurrence plus the cap, so
+  one completion from months ago set a ceiling no burst inside the window could climb back from.
+  With a 3d interval and a 1w cap, three done in the last five days read as +4d ahead alone and -7d
+  — maximally behind — with a single sixtieth-day entry beside them.
+
+The cap already promises to forgive anything older than the window, so those occurrences are dropped
+  from the carry rather than only clamped at the end. The most recent is kept when none are inside,
+  or a pursuit idle for a year would read as never done instead of as far behind.
+
+Latent today: chore is the only pursuit declaring credit and the journal it reads is days old, so
+  every occurrence is inside the window.
+
+
 ## v2.20.0 (2026-08-21)
 
 ### Features
