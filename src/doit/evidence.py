@@ -14,6 +14,10 @@ key holding the rows when they are nested, and `evidence_where` filters rows to
 the ones that count. That last one is what makes a habit usable — twenty of them
 come back from one call and only one of them is the pursuit.
 
+`evidence_files` is the other form, for a practice whose output is files rather
+than rows in an app. It names a directory and reads the timestamps there, so no
+app has to exist and nothing has to be ticked off twice.
+
 Every read is a subprocess against a remote API, so answers are cached and
 refreshed on a TTL rather than gathered per render. A refresh that fails leaves
 the previous answer standing: evidence an hour stale costs a slightly worse draw,
@@ -80,13 +84,19 @@ def save(directory: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
 
-def declared(pursuits: dict) -> dict[str, dict]:
-    """The pursuits that name both a command and the field to read from it.
+def answerable(config: dict) -> bool:
+    """Whether a pursuit declared something that can say when it last happened.
 
     A command without `evidence_time` cannot answer when, so it is not evidence
-    and is skipped rather than guessed at.
+    and is skipped rather than guessed at. `evidence_files` needs no such pairing
+    — a file's own timestamp is the field.
     """
-    return {name: config for name, config in pursuits.items() if config.get('evidence') and config.get('evidence_time')}
+    return bool(config.get('evidence_files')) or bool(config.get('evidence') and config.get('evidence_time'))
+
+
+def declared(pursuits: dict) -> dict[str, dict]:
+    """The pursuits that declared evidence doit can actually read."""
+    return {name: config for name, config in pursuits.items() if answerable(config)}
 
 
 def matching(rows: list, where: dict | None) -> list:
@@ -167,12 +177,43 @@ def dates_of(stamps: list[datetime], now: datetime, window: int = OCCURRENCE_WIN
     return sorted(day.isoformat() for day in days if 0 <= (today - day).days < window)
 
 
+def read_files(name: str, directory: str, now: datetime) -> tuple[str, dict]:
+    """When a pursuit whose output is files last produced one.
+
+    For practices that write rather than tick something off in an app — a journal
+    of dated entries, a folder of drafts. The file is the record already, so a
+    second one you have to remember to make would be the thing that goes stale.
+
+    Top level only, and mtime rather than a date parsed out of the filename.
+    Non-recursive keeps a `topics/` beside the entries from counting as entries.
+    mtime means reworking an old piece counts as having done the thing, which is
+    true of writing and is why no filename convention is imposed.
+    """
+    entry: dict = {'checked_at': now.isoformat()}
+    root = Path(directory).expanduser()
+    try:
+        stamps = [
+            datetime.fromtimestamp(child.stat().st_mtime).astimezone()
+            for child in root.iterdir()
+            if child.is_file() and not child.name.startswith('.')
+        ]
+    except OSError as error:
+        entry['error'] = str(error)
+        return name, entry
+    when = max(stamps) if stamps else None
+    entry['last'] = None if when is None else when.isoformat()
+    entry['dates'] = dates_of(stamps, now)
+    return name, entry
+
+
 def read_one(name: str, config: dict, now: datetime) -> tuple[str, dict]:
     """Ask one app when this pursuit last happened.
 
     Never `shell=True`: the command comes from a config file, and a tool that
     hands config text to a shell has a class of bug you cannot audit away later.
     """
+    if config.get('evidence_files'):
+        return read_files(name, str(config['evidence_files']), now)
     command = config['evidence']
     entry: dict = {'checked_at': now.isoformat()}
     try:

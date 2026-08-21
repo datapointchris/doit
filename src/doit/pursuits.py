@@ -131,6 +131,7 @@ KNOWN_FIELDS = {
     'evidence_time',
     'evidence_items',
     'evidence_where',
+    'evidence_files',
     'credit',
     'minutes',
 }
@@ -191,6 +192,8 @@ TEMPLATE = """\
 #   evidence_time   the timestamp field on each row
 #   evidence_items  optional key holding the rows when they are nested
 #   evidence_where  optional field: value pairs selecting the rows that count
+#   evidence_files  a directory instead of a command, for a practice whose
+#                   output is files — the newest one is when it last happened
 
 pursuits:
   chores:

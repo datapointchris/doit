@@ -8,6 +8,7 @@ journal, never silently report "never done".
 """
 
 import json
+import os
 import shlex
 import sys
 from datetime import datetime
@@ -278,3 +279,97 @@ def test_a_day_that_is_not_a_date_is_dropped_rather_than_fatal(tmp_path):
         },
     }
     assert evidence.occurrences(payload) == {'tasks': [NOW.date()]}
+
+
+def written(directory, name: str, days_ago: float) -> None:
+    """A file whose mtime is the moment that entry was written."""
+    path = directory / name
+    path.write_text('an entry')
+    when = (NOW - timedelta(days=days_ago)).timestamp()
+    os.utime(path, (when, when))
+
+
+def test_a_directory_of_files_answers_when_the_practice_last_happened(tmp_path):
+    """The file is the record already. A second one you have to remember to make
+    is the thing that goes stale."""
+    written(tmp_path, '2026-07-01-in-love-with-a-boy.md', 3)
+    written(tmp_path, '2024-11-05-addictions.md', 40)
+
+    _, entry = evidence.read_files('journal', str(tmp_path), NOW)
+
+    assert entry['last'].startswith((NOW - timedelta(days=3)).date().isoformat())
+    assert entry['dates'] == [(NOW - timedelta(days=40)).date().isoformat(), (NOW - timedelta(days=3)).date().isoformat()]
+
+
+def test_a_subdirectory_beside_the_entries_is_not_an_entry(tmp_path):
+    """Non-recursive, so a topics folder living with the journal does not read as
+    having journalled."""
+    written(tmp_path, 'entry.md', 5)
+    nested = tmp_path / 'topics'
+    nested.mkdir()
+    written(nested, 'something-to-write-about.md', 0)
+
+    _, entry = evidence.read_files('journal', str(tmp_path), NOW)
+
+    assert entry['dates'] == [(NOW - timedelta(days=5)).date().isoformat()]
+
+
+def test_a_dotfile_is_not_an_entry(tmp_path):
+    written(tmp_path, '.stfolder-marker', 0)
+    written(tmp_path, 'entry.md', 5)
+
+    _, entry = evidence.read_files('journal', str(tmp_path), NOW)
+
+    assert entry['dates'] == [(NOW - timedelta(days=5)).date().isoformat()]
+
+
+def test_an_empty_directory_reads_as_never_rather_than_broken(tmp_path):
+    """Nothing written yet is a true answer, and an error would keep the previous
+    one standing instead."""
+    _, entry = evidence.read_files('journal', str(tmp_path), NOW)
+
+    assert entry['last'] is None
+    assert entry['dates'] == []
+    assert 'error' not in entry
+
+
+def test_a_directory_that_is_not_there_is_an_error_not_a_crash(tmp_path):
+    _, entry = evidence.read_files('journal', str(tmp_path / 'nope'), NOW)
+
+    assert 'error' in entry
+    assert 'last' not in entry
+
+
+def test_the_path_is_read_the_way_it_is_written(tmp_path, monkeypatch):
+    """A config file says ~/notes/journal, and nothing expands it on the way in."""
+    monkeypatch.setenv('HOME', str(tmp_path))
+    written(tmp_path, 'entry.md', 2)
+
+    _, entry = evidence.read_files('journal', '~', NOW)
+
+    assert entry['dates'] == [(NOW - timedelta(days=2)).date().isoformat()]
+
+
+def test_a_pursuit_naming_files_needs_no_timestamp_field():
+    """A file's own timestamp is the field, so pairing it with evidence_time
+    would be a second way to say the same thing."""
+    register = {
+        'journal': {'evidence_files': '~/notes/journal'},
+        'chore': {},
+        'half': {'evidence': 'icb tasks list --json'},
+    }
+
+    assert set(evidence.declared(register)) == {'journal'}
+
+
+def test_files_evidence_travels_through_the_cache_like_any_other(tmp_path):
+    """`refresh` is the only writer, so a form it cannot reach would answer once
+    and never be stored."""
+    entries = tmp_path / 'journal'
+    entries.mkdir()
+    written(entries, 'entry.md', 1)
+
+    payload = evidence.refresh({'journal': {'evidence_files': str(entries)}}, tmp_path / 'cache', NOW)
+
+    assert evidence.observed(payload)['journal'].date() == (NOW - timedelta(days=1)).date()
+    assert evidence.occurrences(payload)['journal'] == [(NOW - timedelta(days=1)).date()]
