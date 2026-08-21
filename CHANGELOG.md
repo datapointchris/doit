@@ -1,6 +1,24 @@
 # CHANGELOG
 
 
+## v2.24.0 (2026-08-21)
+
+### Features
+
+- **pursuits**: Resolve_where narrows what a backend cannot
+  ([`adef806`](https://github.com/datapointchris/doit/commit/adef806af40725e439abfb755e52d2dce39db4db))
+
+The counterpart to `evidence_where`, added for the same reason. A backend with no filter for the
+  distinction being drawn returns everything and only some of it is the pursuit — `icb habits
+  completed` hands back twenty and one of them is Read, and `icb tasks list` hands back a category
+  and some of those rows are journal prompts. A task carries id, name, notes, category, priority and
+  dates, so nothing marks a prompt except its name.
+
+Applied after the command runs and after `items` digs in, so the command still narrows first
+  wherever the API can. No match resolves to nothing rather than falling through to the first row,
+  which would hand you a different pursuit's work under this one's name.
+
+
 ## v2.23.0 (2026-08-21)
 
 ### Features
