@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v2.23.0 (2026-08-21)
+
+### Features
+
+- **evidence**: A directory of files can be a pursuit's evidence
+  ([`12efba0`](https://github.com/datapointchris/doit/commit/12efba02f89dfd880cd61ad36202567ea99966f5))
+
+Some practices write rather than tick something off in an app. A journal of dated entries has no
+  backend to ask, and the only forms available were a command printing JSON rows or nothing — so the
+  choice was a second record you have to remember to make, or no record at all.
+
+`evidence_files` names a directory instead of a command. The newest timestamp in it is when the
+  practice last happened, and every distinct date feeds credit and drift like any other evidence. It
+  pairs with no `evidence_time`, because a file's own timestamp is the field.
+
+Top level only, so a `topics/` folder living beside the entries does not read as having written one.
+  mtime rather than a date parsed out of the filename: it imposes no naming convention, and
+  reworking an old piece counts as having done the thing, which is true of writing.
+
+An empty directory reads as never rather than broken, so the first entry is what starts the record.
+  A directory that is not there is an error, which leaves the previous answer standing rather than
+  reporting a practice as abandoned.
+
+
 ## v2.22.0 (2026-08-21)
 
 ### Features
