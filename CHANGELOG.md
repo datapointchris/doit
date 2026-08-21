@@ -1,6 +1,32 @@
 # CHANGELOG
 
 
+## v2.21.0 (2026-08-21)
+
+### Features
+
+- **credit**: Both records feed the banked position
+  ([`63b68a6`](https://github.com/datapointchris/doit/commit/63b68a65ef10ba9ebe025c39d5fb56d804080a68))
+
+`banked` starts as the app-informed elapsed and the credit branch overwrote it with a journal-only
+  reading, so declaring credit on a pursuit with a backend was a downgrade: `tasks` came out 4.7
+  days overdue on a day eight of them were completed inside `icb`. Six of the eight pursuits are in
+  that shape, which left the ahead-or-behind line reaching one.
+
+`credit_ages` merges them. Typed entries keep their own timestamps, because three chores in one
+  evening is three days of credit and that burst is what credit exists to reward. An app day the
+  journal already carries is one act reported by both records, so it is dropped rather than banked
+  twice. An app answers in days, which keeps a backend emitting a row per task from outrunning one
+  emitting a row per session at the same interval.
+
+`journal.days` is the shared parser for the date half. Drift's inline loop reads through it too, so
+  a typed entry and an app date can never disagree about which day one act landed on.
+
+Drift also stops printing a row for a paused pursuit with no days in the window. Pausing drops its
+  evidence entry, so an untouched one sat there as `said 0% · did 0% · 0 days` — and 0% reads as a
+  claim it never made. One paused mid-window keeps its row and reports no stated share.
+
+
 ## v2.20.1 (2026-08-21)
 
 ### Bug Fixes
