@@ -373,3 +373,25 @@ def test_files_evidence_travels_through_the_cache_like_any_other(tmp_path):
 
     assert evidence.observed(payload)['journal'].date() == (NOW - timedelta(days=1)).date()
     assert evidence.occurrences(payload)['journal'] == [(NOW - timedelta(days=1)).date()]
+
+
+def test_a_filter_matches_regardless_of_case():
+    """The value is typed into a config file and the row is written by an app, so
+    a miss on capitalisation reads as a pursuit nobody has done."""
+    rows = [{'name': 'journal'}, {'name': 'Self Authoring'}]
+
+    assert evidence.matching(rows, {'name': 'Journal'}) == [{'name': 'journal'}]
+    assert evidence.matching(rows, {'name': 'JOURNAL'}) == [{'name': 'journal'}]
+
+
+def test_a_filter_still_distinguishes_different_words():
+    """Folding case must not fold meaning — a near-miss stays a miss."""
+    rows = [{'name': 'Journalling'}, {'name': 'Journal'}]
+
+    assert evidence.matching(rows, {'name': 'Journal'}) == [{'name': 'Journal'}]
+
+
+def test_a_filter_on_a_number_is_unaffected_by_the_fold():
+    rows = [{'id': 474}, {'id': 344}]
+
+    assert evidence.matching(rows, {'id': '474'}) == [{'id': 474}]

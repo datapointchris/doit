@@ -103,7 +103,11 @@ def matching(rows: list, where: dict | None) -> list:
     """Rows whose named fields all equal what the filter asks for.
 
     Compared as strings, because a config file has no types and an id that is 14
-    in YAML and "14" in JSON is the same id.
+    in YAML and "14" in JSON is the same id. Case-insensitively, because the
+    value was typed into a config file by hand and the row was written by an app
+    — a habit named `read` and a filter saying `Read` are the same habit, and a
+    silent miss reads as a pursuit nobody has done. `prompt.OneOf` in `icb` folds
+    case for the same reason on the way in.
     """
     if not where:
         return rows
@@ -111,7 +115,7 @@ def matching(rows: list, where: dict | None) -> list:
     for row in rows:
         if not isinstance(row, dict):
             continue
-        if all(str(row.get(field, '')) == str(value) for field, value in where.items()):
+        if all(str(row.get(field, '')).casefold() == str(value).casefold() for field, value in where.items()):
             kept.append(row)
     return kept
 
