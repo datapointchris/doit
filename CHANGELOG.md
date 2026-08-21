@@ -1,6 +1,30 @@
 # CHANGELOG
 
 
+## v2.20.0 (2026-08-21)
+
+### Features
+
+- **drift**: Did counts the days both records saw, not the entries you typed
+  ([`ad46b75`](https://github.com/datapointchris/doit/commit/ad46b751bf496e27179ba0eeabd36b6a17f0fc9c))
+
+A pursuit with a backend is done inside that backend and never reaches the journal, so a share of
+  journal entries measured what got retyped. It reported build at 0% over ninety days on a machine
+  that committed on thirty of the last thirty, while evidence held eight days for the same window.
+
+A day is the only unit both records can express. `did` is now a pursuit's share of the active days
+  in the window, unioned across the journal and the dates each app reported, with `days` beside it
+  as the count that share is taken from. `logs` and `time` stay typed-only and the footer says so.
+
+The denominator runs over the register rather than over every record: a retired pursuit still
+  holding journal days can never get a row, so counting it left every visible share short of the
+  total.
+
+`--json` gains days, app_days, typed_days and total_days. The empty-window guard reads the day
+  count, because app days with no typed logs is the ordinary window for a pursuit with a backend and
+  a guard on the log count suppressed the whole report there.
+
+
 ## v2.19.1 (2026-08-21)
 
 ### Bug Fixes
