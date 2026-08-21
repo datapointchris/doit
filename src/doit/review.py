@@ -58,6 +58,11 @@ TEMPLATE = """\
 #   description  what to revisit or run
 #   cadence      how often: <n>d / <n>w / <n>mo / <n>y  (e.g. 2w, 1mo)
 #   command      optional; shown so you know what to run (not auto-run)
+#   show         optional command the nudge runs to print a card inline, where
+#                the item's name alone does not say enough to act on
+#   requires     optional; software the item is about. The item is hidden on a
+#                machine that has neither it on PATH nor a manifest declaring it,
+#                because one that cannot be done here counts overdue days forever
 #   observe      where "I did this" is observed from; default is the command
 #
 # Last-done is observed, not declared: an item is done when its `command` last
@@ -66,6 +71,7 @@ TEMPLATE = """\
 #
 #   observe: {newest-date-in: <path>}   newest date in a {name: date} JSON map
 #   observe: {history: <command>}       watch a different command than `command`
+#   observe: {scope: machine}           only runs on this machine count
 #   observe: false                      observe nothing; only `review done` counts
 
 items:

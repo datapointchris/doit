@@ -9,6 +9,7 @@ overdue days are derived from today and a committed state file would rot.
 """
 
 import json
+import re
 from datetime import date
 from datetime import datetime
 from datetime import timedelta
@@ -111,6 +112,19 @@ def test_a_stamp_still_wins_when_it_is_the_later_evidence(tmp_path, monkeypatch)
 
     assert row['last'] == today.isoformat()
     assert row['observed'] is False
+
+
+def test_the_template_names_every_field_an_item_may_declare():
+    """The template is the whole schema documentation — it is what a fresh
+    install writes and what the file being hand-edited carries at its head.
+
+    The list is spelled out rather than derived, because this register has no
+    KNOWN_FIELDS to check against: `load_items` hands whatever YAML holds
+    straight to `statuses`, so a typo drops an observer silently and the item
+    reads as never done. `show` and `requires` were both read by the code and
+    named nowhere here."""
+    for field in ('description', 'cadence', 'command', 'show', 'requires', 'observe'):
+        assert re.search(rf'\b{field}\b', review.TEMPLATE), f'{field} is read by review and absent from its template'
 
 
 def test_orphaned_state_ids_names_history_a_rename_stranded(tmp_path, monkeypatch):
