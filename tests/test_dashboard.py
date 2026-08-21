@@ -135,6 +135,44 @@ def test_articles_are_their_own_lane():
     assert lane.total == 61, '60 queued plus the one being read'
 
 
+def dotfiles_lane_from(runs: list) -> object:
+    return dashboard.dotfiles_adapter(sources.Result(source='', payload=runs, exit_code=0))[0]
+
+
+def test_two_boxes_sharing_a_manifest_are_two_rows():
+    """Both Macs declare macos-personal-workstation, so a fold on the manifest
+    counts them as one and the newer run hides the older."""
+    lane = dotfiles_lane_from(
+        [
+            {'host': 'macmini', 'machine': 'macos-personal-workstation', 'outcome': 'ok'},
+            {'host': 'mbp', 'machine': 'macos-personal-workstation', 'outcome': 'issue'},
+        ]
+    )
+
+    assert lane.meta == '1 of 2 need a look'
+    assert [row.label for row in lane.rows] == ['mbp']
+
+
+def test_a_run_written_before_the_host_field_still_folds():
+    """dotfiles and doit install independently, so a payload from either side of
+    the field must fold rather than vanish."""
+    lane = dotfiles_lane_from([{'machine': 'archlinux-personal-workstation', 'outcome': 'ok'}])
+
+    assert lane.meta == '1 machine(s) reporting'
+
+
+def test_the_newest_run_per_box_is_the_one_that_counts():
+    """The listing is every run from every machine, newest first."""
+    lane = dotfiles_lane_from(
+        [
+            {'host': 'archlinux', 'machine': 'a', 'outcome': 'ok'},
+            {'host': 'archlinux', 'machine': 'a', 'outcome': 'issue'},
+        ]
+    )
+
+    assert lane.meta == '1 machine(s) reporting', 'the older issue must not resurface'
+
+
 def articles_lane_with(**fields) -> object:
     """The articles lane built from the fixture with its section patched.
 

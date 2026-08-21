@@ -851,8 +851,23 @@ def pr_urgency(age: int) -> Urgency:
     return Urgency.DUE if age >= PR_DUE else Urgency.NONE
 
 
+def run_box(run: dict) -> str:
+    """Which box wrote a run, preferring the field that identifies one.
+
+    `machine` names the manifest a box converges to, and two boxes can share one —
+    both Macs declare `macos-personal-workstation`, so folding on it counts them
+    as one and the newer run hides the older. `host` is the bare hostname and is
+    what makes the writes unique, which `standards/data.md` § "A reader of a shared
+    directory selects by the key that made the writes unique" asks a reader to use.
+
+    A run written before dotfiles carried `host` falls back to `machine`, which is
+    what this fold has always used.
+    """
+    return run.get('host') or run.get('machine', '')
+
+
 def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
-    """`dotfiles report list --json` as one row per machine, newest run only.
+    """`dotfiles report list --json` as one row per box, newest run only.
 
     That listing is every run from every machine, newest first, because `runs/` is
     shared across the fleet. What a dashboard wants from it is the current state
@@ -872,14 +887,14 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
 
     latest: dict[str, dict] = {}
     for run in payload:
-        machine = run.get('machine', '')
-        if machine and machine not in latest:
-            latest[machine] = run
+        box = run_box(run)
+        if box and box not in latest:
+            latest[box] = run
 
-    wrong = [(machine, run) for machine, run in sorted(latest.items()) if run.get('outcome') != 'ok']
+    wrong = [(box, run) for box, run in sorted(latest.items()) if run.get('outcome') != 'ok']
     rows = [
-        Row(machine, run.get('outcome', ''), run.get('verb', ''), Urgency.DUE, f'dotfiles report show {run.get("run", "")}')
-        for machine, run in wrong
+        Row(box, run.get('outcome', ''), run.get('verb', ''), Urgency.DUE, f'dotfiles report show {run.get("run", "")}')
+        for box, run in wrong
     ]
     healthy = len(latest) - len(wrong)
     return [
