@@ -10,6 +10,7 @@ import json
 import random
 from datetime import datetime
 from datetime import timedelta
+from datetime import timezone
 from pathlib import Path
 
 from doit import journal
@@ -149,3 +150,35 @@ def test_appended_records_are_valid_json_lines(tmp_path):
     path = write_entries(tmp_path, 'mbp', [entry('chores', note='has "quotes" and, commas')])
     parsed = json.loads(path.read_text().strip())
     assert parsed['note'] == 'has "quotes" and, commas'
+
+
+def done_at(pursuit: str, when: datetime) -> dict:
+    return {'pursuit': pursuit, 'event': 'done', 'occurred_at': when.isoformat()}
+
+
+def test_days_collapses_two_records_on_one_date():
+    """Two typed entries in an evening are one day, which is the unit an app's
+    answer also comes in."""
+    records = [done_at('chores', NOW), done_at('chores', NOW - timedelta(hours=6))]
+
+    assert journal.days(records, 'chores', 'done', NOW) == [NOW.date()]
+
+
+def test_days_keeps_each_distinct_date_oldest_first():
+    records = [done_at('chores', NOW), done_at('chores', NOW - timedelta(days=2))]
+
+    assert journal.days(records, 'chores', 'done', NOW) == [(NOW - timedelta(days=2)).date(), NOW.date()]
+
+
+def test_days_reads_another_pursuit_and_another_event_as_absent():
+    records = [done_at('other', NOW), {'pursuit': 'chores', 'event': 'skip', 'occurred_at': NOW.isoformat()}]
+
+    assert journal.days(records, 'chores', 'done', NOW) == []
+
+
+def test_days_reads_a_stamp_in_the_offset_now_carries():
+    """A record written on a machine six hours ahead lands on the day `now` is
+    in, or one act would sit on two dates depending which record carried it."""
+    records = [done_at('chores', NOW.astimezone(timezone(timedelta(hours=6))))]
+
+    assert journal.days(records, 'chores', 'done', NOW) == [NOW.date()]

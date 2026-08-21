@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from doit import allocate
 from doit import journal
 from doit import pursuits
 from doit import render
@@ -1053,3 +1054,92 @@ def test_the_table_renders_when_only_an_app_recorded_anything(sandbox, monkeypat
 def test_a_window_with_nothing_in_it_says_so_rather_than_drawing_an_empty_table(sandbox, capsys):
     assert pursuits.cmd_drift(days=90, as_json=False) == 0
     assert 'Nothing recorded in the window yet' in capsys.readouterr().out
+
+
+BACKED_REGISTER = """\
+pursuits:
+  backed:
+    description: Done inside its own app, never typed here
+    weight: 25
+    cadence: 3d
+    credit: 1w
+    evidence: echo []
+"""
+
+
+def test_credit_ages_keeps_each_typed_occurrence_whole():
+    """Three in one evening is three days of credit. Collapsing them to a date
+    is the burst credit exists to reward."""
+    now = datetime.now().astimezone()
+    records = [{'pursuit': 'chores', 'event': 'done', 'occurred_at': (now - timedelta(hours=h)).isoformat()} for h in (1, 3, 5)]
+
+    assert len(pursuits.credit_ages(records, [], 'chores', now)) == 3
+
+
+def test_credit_ages_drops_an_app_day_the_journal_already_carries():
+    """One act reported by both records banks once, or logging what the app
+    already saw would pay it forward twice."""
+    now = datetime.now().astimezone()
+    records = [{'pursuit': 'chores', 'event': 'done', 'occurred_at': now.isoformat()}]
+
+    assert pursuits.credit_ages(records, [now.date()], 'chores', now) == [0.0]
+
+
+def test_credit_ages_adds_an_app_day_the_journal_never_saw():
+    now = datetime.now().astimezone()
+
+    ages = pursuits.credit_ages([], [now.date() - timedelta(days=n) for n in (1, 2)], 'chores', now)
+
+    assert ages == [1.0, 2.0]
+
+
+def test_credit_on_a_backed_pursuit_reads_the_days_its_app_reported(tmp_path, sandbox, monkeypatch):
+    """`banked` starts as the app-informed elapsed and the credit branch
+    overwrites it, so reading the journal alone made a pursuit finished inside
+    its own app four days running come out overdue."""
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER))
+    stub_evidence_days(monkeypatch, {'backed': [days_ago_iso(n) for n in (0, 1, 2, 3)]})
+
+    state = pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())
+
+    assert state['banked_position']['backed'] > 0, 'four days running is ahead, not overdue'
+    assert allocate.urgency(state['days_banked']['backed'], state['intervals']['backed']) == 0.0
+
+
+def test_a_backed_pursuit_with_no_record_anywhere_keeps_its_none(tmp_path, sandbox, monkeypatch):
+    """Never done stays the most urgent state rather than becoming a position."""
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER))
+    stub_evidence_days(monkeypatch, {})
+
+    state = pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())
+
+    assert state['banked_position'].get('backed') is None
+    assert state['days_banked']['backed'] is None
+
+
+def test_a_paused_pursuit_with_no_days_gets_no_row(sandbox, monkeypatch, capsys):
+    """Pausing drops its evidence entry too, so an untouched one would sit here
+    as a hollow row forever — said 0%, did 0%, no days."""
+    stub_evidence_days(monkeypatch, {'chores': [days_ago_iso(1)]})
+
+    assert 'paused-thing' not in drift_rows(capsys)
+
+
+def test_a_paused_pursuit_with_days_keeps_them_and_states_no_share(sandbox, capsys):
+    """Paused mid-window, its history is still history. It stated nothing for the
+    window though, and 0% would read as a claim it never made."""
+    log_days_ago(sandbox / 'state', 'paused-thing', 1)
+
+    row = drift_rows(capsys)['paused-thing']
+
+    assert row['days'] == 1
+    assert row['stated_share'] is None
+
+
+def test_a_paused_pursuit_renders_a_dash_rather_than_a_share(sandbox, capsys):
+    log_days_ago(sandbox / 'state', 'paused-thing', 1)
+
+    assert pursuits.cmd_drift(days=90, as_json=False) == 0
+
+    printed = [line for line in capsys.readouterr().out.splitlines() if 'paused-thing' in line]
+    assert printed and '—' in printed[0], printed

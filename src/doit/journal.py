@@ -29,6 +29,7 @@ read.
 import json
 import random
 import uuid
+from datetime import date
 from datetime import datetime
 from pathlib import Path
 
@@ -142,6 +143,24 @@ def ages(records: list[dict], pursuit: str, event: str, now: datetime) -> list[f
             continue
         found.append(max((now - when).total_seconds() / 86400.0, 0.0))
     return found
+
+
+def days(records: list[dict], pursuit: str, event: str, now: datetime) -> list[date]:
+    """The distinct local dates one pursuit has a matching record on.
+
+    The unit an app's answer can also be expressed in, so anything lining a typed
+    entry up against a date a backend reported reads both through this. Local by
+    ``now``'s offset, matching :func:`doit.evidence.dates_of`, or the same act
+    would land on two different days depending which record carried it.
+    """
+    found = set()
+    for record in records:
+        if record.get('event') != event or record.get('pursuit') != pursuit:
+            continue
+        when = parse_time(record.get('occurred_at') or record.get('logged_at'))
+        if when is not None:
+            found.add(when.astimezone(now.tzinfo).date())
+    return sorted(found)
 
 
 def days_since(latest: dict[str, datetime], names: list[str], now: datetime) -> dict[str, float | None]:

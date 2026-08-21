@@ -303,6 +303,26 @@ def is_active(config: dict, today: date) -> bool:
     return not config.get('paused') and not term_ended(config, today) and config.get('weight', 0) > 0
 
 
+def credit_ages(records: list[dict], app_days: list[date], pursuit: str, now: datetime) -> list[float]:
+    """Every occurrence credit banks: each typed one whole, plus the app days the
+    journal does not already carry.
+
+    Typed entries keep their own timestamps rather than collapsing to a date,
+    because three chores in one evening is three days of credit and that burst is
+    what credit exists to reward. An app day the journal already covers is one act
+    reported by both records, so it is dropped rather than banked twice.
+
+    An app answers in days, so a pursuit done five times inside one of them banks
+    one. Which is what keeps a backend that emits a row per task from outrunning
+    one that emits a row per session at the same interval.
+    """
+    typed = journal.ages(records, pursuit, 'done', now)
+    covered = set(journal.days(records, pursuit, 'done', now))
+    today = now.date()
+    extra = [float((today - day).days) for day in app_days if day not in covered]
+    return sorted(typed + extra)
+
+
 def build_state(
     pursuits: dict,
     now: datetime,
@@ -348,6 +368,7 @@ def build_state(
     # own CLI stops being offered without anyone retyping it here.
     observations = {} if observed is not None else evidence.refresh(active, CACHE_DIR, now)
     seen = evidence.observed(observations) if observed is None else observed
+    seen_days = evidence.occurrences(observations)
     last_done = evidence.merged(latest_occurrence(records, 'done'), seen)
     last_skip = latest_occurrence(records, 'skip')
     elapsed = days_since(last_done, list(active), now)
@@ -356,13 +377,18 @@ def build_state(
     # A pursuit declaring credit is stating a rate rather than a rhythm, so doing
     # several at once pays several forward. Only urgency reads this — `days_since`
     # stays the honest time since the last one, because that is what gets shown.
+    #
+    # Both records feed it, or declaring credit on a pursuit with a backend would
+    # be a downgrade: `banked` starts as the app-informed elapsed and the branch
+    # below overwrites it, so a journal-only reading made `tasks` overdue on a day
+    # eight of them were completed inside `icb`.
     banked = dict(elapsed)
     positions: dict[str, float | None] = {}
     for name, config in active.items():
         if not config.get('credit'):
             continue
         cap = float(parse_cadence(config['credit']))
-        occurrences = journal.ages(records, name, 'done', now)
+        occurrences = credit_ages(records, seen_days.get(name, []), name, now)
         if not occurrences:
             continue
         banked[name] = banked_days_since(occurrences, intervals[name], cap)
@@ -402,7 +428,7 @@ def build_state(
         'observed': seen,
         # Folded from the refresh above rather than re-read, so `drift` and the
         # draw can never disagree about which days an app reported.
-        'evidence_days': evidence.occurrences(observations),
+        'evidence_days': seen_days,
         'evidence_errors': evidence.problems(observations),
     }
 
@@ -1329,31 +1355,32 @@ def cmd_drift(days: int, as_json: bool) -> int:
     # A day is the unit both records can express. A pursuit with an app behind it
     # is done inside that app and never reaches the journal, so counting entries
     # measures what got retyped and reports the busiest strand as the idle one.
-    typed_days: dict[str, set[date]] = {}
-    for record in done:
-        when = journal.parse_time(record.get('occurred_at'))
-        if when is not None:
-            typed_days.setdefault(record.get('pursuit'), set()).add(when.astimezone().date())
+    typed_days = {name: set(journal.days(done, name, 'done', now)) for name in pursuits}
     app_days = {name: {day for day in seen if day >= cutoff.date()} for name, seen in state['evidence_days'].items()}
     # Over the register rather than over every record, so the shares sum to what
     # the table shows: a retired pursuit still holding journal days would
     # otherwise take a slice of the denominator and never appear in a row.
-    active_days = {name: typed_days.get(name, set()) | app_days.get(name, set()) for name in pursuits}
-    total_days = sum(len(seen) for seen in active_days.values())
+    active_days = {name: typed_days[name] | app_days.get(name, set()) for name in pursuits}
+    # A paused or expired pursuit stated nothing for this window, so it keeps a row
+    # only while it still has days in one — and reports no stated share rather than
+    # 0%, which reads as a claim it never made. Pausing also drops its evidence
+    # entry, so an untouched one would sit here as a hollow row forever.
+    shown = [name for name in pursuits if name in state['active'] or active_days[name]]
+    total_days = sum(len(active_days[name]) for name in shown)
 
     rows = []
-    for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
-        stated = state['shares'].get(name, 0.0) * 100
+    for name in sorted(shown, key=lambda key: -pursuits[key].get('weight', 0)):
+        stated = state['shares'].get(name, 0.0) * 100 if name in state['active'] else None
         realized = (len(active_days[name]) / total_days * 100) if total_days else 0.0
         time_share = (by_minutes.get(name, 0) / total_minutes * 100) if total_minutes else None
         rows.append(
             {
                 'pursuit': name,
-                'stated_share': round(stated, 1),
+                'stated_share': None if stated is None else round(stated, 1),
                 'realized_share': round(realized, 1),
                 'days': len(active_days[name]),
                 'app_days': len(app_days.get(name, set())),
-                'typed_days': len(typed_days.get(name, set())),
+                'typed_days': len(typed_days[name]),
                 'time_share': None if time_share is None else round(time_share, 1),
                 'logs': by_count.get(name, 0),
                 'minutes': by_minutes.get(name, 0),
@@ -1377,12 +1404,17 @@ def cmd_drift(days: int, as_json: bool) -> int:
     for heading in ('said', 'did', 'days', 'logs', 'time', 'offered', 'passed'):
         table.add_column(heading, justify='right')
     for row in rows:
-        gap = row['realized_share'] - row['stated_share']
+        stated = row['stated_share']
         did = f'{row["realized_share"]:.0f}%'
+        # A paused pursuit has no claim to have missed, so its days are reported
+        # without a verdict rather than coloured against a share it never stated.
+        if stated is not None:
+            gap = row['realized_share'] - stated
+            did = f'[green]{did}[/]' if abs(gap) < 10 else f'[yellow]{did}[/]'
         table.add_row(
             row['pursuit'],
-            f'{row["stated_share"]:.0f}%',
-            f'[green]{did}[/]' if abs(gap) < 10 else f'[yellow]{did}[/]',
+            '—' if stated is None else f'{stated:.0f}%',
+            did,
             str(row['days']),
             str(row['logs']),
             '—' if row['time_share'] is None else f'{row["time_share"]:.0f}%',
