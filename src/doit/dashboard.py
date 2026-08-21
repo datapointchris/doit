@@ -324,12 +324,42 @@ def build_articles_lane(results: dict[str, sources.Result], today: date) -> Lane
     return LaneView(
         name='articles',
         title='ARTICLES',
-        meta=f'{unread_total} unread',
+        meta=f'{unread_total} unread{article_reading(section, today)}',
         rows=rows,
         total=unread_total + (1 if current else 0),
         hints=['icb articles list'],
         reason=reason,
     )
+
+
+def article_reading(section: dict, today: date) -> str:
+    """Whether the pile is moving, appended to the unread count.
+
+    Three states rather than one number, because the useful fact changes with the
+    answer. Reads inside the window are a rate. None inside it makes the date the
+    only thing worth saying, and it is the case the lane exists for. Nothing ever
+    read leaves the count to speak for itself — a bare "0 read" says less than the
+    backlog already did.
+
+    Older icb releases carry neither field, so both are read defensively and their
+    absence renders exactly what this lane rendered before them.
+    """
+    read_recently = section.get('read_last_30_days')
+    if read_recently:
+        return f' · {read_recently} read in 30d'
+    last = section.get('last_read_at')
+    elapsed = days_away_from(last, today) if last else None
+    if elapsed is None:
+        return ''
+    return f' · last read {pursuits.format_elapsed(elapsed)}'
+
+
+def days_away_from(timestamp: str, today: date) -> float | None:
+    """Days between a stamp and today, for the elapsed formatter."""
+    try:
+        return float((today - date.fromisoformat(str(timestamp)[:10])).days)
+    except ValueError:
+        return None
 
 
 def article_row(label: str, article: dict) -> Row:

@@ -135,6 +135,54 @@ def test_articles_are_their_own_lane():
     assert lane.total == 61, '60 queued plus the one being read'
 
 
+def articles_lane_with(**fields) -> object:
+    """The articles lane built from the fixture with its section patched.
+
+    The committed fixture carries neither read field, so patching here is what
+    keeps `test_articles_are_their_own_lane` a live guard on the older payload.
+    """
+    payload = fixture('icb-overview.json')
+    payload['articles'].update(fields)
+    results = all_results()
+    results['icb'] = sources.Result(source='', payload=payload, exit_code=0)
+    return lanes_by_name(results)['articles']
+
+
+def test_reads_inside_the_window_are_reported_as_a_rate():
+    """An unread count only climbs, so the lane says whether any of it moves."""
+    lane = articles_lane_with(read_last_30_days=3, last_read_at='2026-07-22T00:24:29Z')
+
+    assert lane.meta == '60 unread · 3 read in 30d'
+
+
+def test_no_reads_in_the_window_makes_the_date_the_thing_worth_saying():
+    """A zero is the answer to "am I getting to these", and a bare zero does not
+    say how long it has been."""
+    lane = articles_lane_with(read_last_30_days=0, last_read_at='2026-04-02T20:36:18Z')
+
+    assert lane.meta == '60 unread · last read 3mo ago'
+
+
+def test_a_recent_last_read_keeps_the_day_unit():
+    lane = articles_lane_with(read_last_30_days=0, last_read_at='2026-07-20T09:00:00Z')
+
+    assert lane.meta == '60 unread · last read 4d ago'
+
+
+def test_an_article_list_nobody_has_read_claims_no_rate():
+    """Reporting "0 read" over a list never touched adds nothing the backlog
+    count did not already carry."""
+    lane = articles_lane_with(read_last_30_days=0, last_read_at=None)
+
+    assert lane.meta == '60 unread'
+
+
+def test_an_unparsable_read_stamp_drops_the_clause_rather_than_saying_never():
+    lane = articles_lane_with(read_last_30_days=0, last_read_at='not-a-date')
+
+    assert lane.meta == '60 unread'
+
+
 def test_article_titles_are_collapsed_onto_one_line():
     """Scraped titles arrive wrapped in the source page's newlines and tabs."""
     lane = lanes_by_name(all_results())['articles']
