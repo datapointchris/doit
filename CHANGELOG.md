@@ -1,6 +1,40 @@
 # CHANGELOG
 
 
+## v2.19.1 (2026-08-21)
+
+### Bug Fixes
+
+- **dashboard**: Fold dotfiles runs by box, not by manifest
+  ([`b5110d5`](https://github.com/datapointchris/doit/commit/b5110d5c26c046be28e51b4b88dcb4bfa263ff4a))
+
+Both Macs declare macos-personal-workstation, so folding the run listing on `machine` counted them
+  as one box. The lane said 3 machines reporting where four write runs, and worse, a fault on one
+  Mac was hidden by the other's later ok run — the fold keeps the first row a key appears in, and
+  the key was shared.
+
+dotfiles carries `host` now, the bare hostname that made the writes unique. standards/data.md asks a
+  reader of a shared directory to select by that key, and this is the reader.
+
+A run written before the field falls back to `machine`, which is what this fold has always used.
+  dotfiles and doit install independently, so a payload from either side has to fold rather than
+  vanish.
+
+### Documentation
+
+- **review**: The register template names show, requires and scope
+  ([`b29ecb8`](https://github.com/datapointchris/doit/commit/b29ecb8bfa8f697d6d17de5d24a908aef259c8fc))
+
+show and requires are both read by statuses() and named nowhere in the header the file carries at
+  its head. show is what the nudge runs to print a card inline, which is the field that makes a
+  nudge worth reading when an item's name does not say enough to act on. The observe form scope:
+  machine was in the same position — used by the live register, absent from the template.
+
+The test spells the field list out rather than deriving it. This register has no KNOWN_FIELDS to
+  check against: load_items hands whatever the YAML holds straight to statuses, so a typo drops an
+  observer silently and the item reads as never done.
+
+
 ## v2.19.0 (2026-08-21)
 
 ### Features
