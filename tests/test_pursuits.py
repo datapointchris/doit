@@ -100,6 +100,24 @@ def test_the_template_names_no_field_the_register_would_refuse():
     assert not unknown, f'named in the template but the loader would refuse it: {", ".join(unknown)}'
 
 
+def test_orphaned_offer_counts_names_a_total_a_retirement_stranded(sandbox, monkeypatch):
+    """Retiring a pursuit leaves its offer count behind under the old key, and
+    drift iterates the register — so the row never appears there again."""
+    counts = sandbox / 'state'
+    counts.mkdir(parents=True, exist_ok=True)
+    (counts / 'next-offers-testbox.json').write_text(json.dumps({'chores': 4, 'retired-thing': 8}))
+
+    assert pursuits.orphaned_offer_counts(pursuits.load_pursuits()) == ['retired-thing']
+
+
+def test_a_counter_matching_the_register_is_not_orphaned(sandbox):
+    counts = sandbox / 'state'
+    counts.mkdir(parents=True, exist_ok=True)
+    (counts / 'next-offers-testbox.json').write_text(json.dumps({'chores': 4}))
+
+    assert pursuits.orphaned_offer_counts(pursuits.load_pursuits()) == []
+
+
 def test_a_missing_weight_is_refused(tmp_path):
     path = write_register(tmp_path, 'pursuits:\n  a:\n    description: no weight\n')
     with pytest.raises(pursuits.RegisterError, match='weight'):

@@ -1245,7 +1245,35 @@ def cmd_list(as_json: bool) -> int:
             line.append(f'  term ended {config["until"]}', style='yellow')
         console.print(line)
     console.print('\n  share is what each weight implies · ×n is a cadence outrunning it\n  [cyan]doit pursuits edit[/]')
+    render_orphaned_counters(pursuits)
     return 0
+
+
+def orphaned_offer_counts(register: dict) -> list[str]:
+    """Offer counts whose pursuit is no longer in the register.
+
+    The counter is keyed by name, so retiring or renaming a pursuit strands its
+    total. ``drift`` iterates the register, so the row never appears there again
+    and nothing else would ever mention it. The review deck has the same failure
+    and already warns about it; this is the other half of the pair.
+    """
+    return sorted(name for name in load_counts(JOURNAL_DIR) if name not in register)
+
+
+def render_orphaned_counters(register: dict) -> None:
+    """Name any stranded counts, in the one view that is about the register
+    itself rather than about what to do next.
+
+    ``next`` and the nudge stay silent, for the reason :func:`review.render_orphans`
+    gives: a misfiled record is not a task, and an interrupt that reports
+    bookkeeping is the kind you stop reading.
+    """
+    orphans = orphaned_offer_counts(register)
+    if not orphans:
+        return
+    console.print(Text(f'\n  Offer counts with no pursuit: {", ".join(orphans)}', style='yellow'))
+    console.print('  Renaming a pursuit strands its total — rename the key in the counter to keep it.')
+    console.print(f'  [cyan]{JOURNAL_DIR}[/]')
 
 
 def cmd_drift(days: int, as_json: bool) -> int:
