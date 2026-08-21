@@ -400,6 +400,9 @@ def build_state(
         'last_done': {name: when.isoformat() for name, when in last_done.items()},
         'records': records,
         'observed': seen,
+        # Folded from the refresh above rather than re-read, so `drift` and the
+        # draw can never disagree about which days an app reported.
+        'evidence_days': evidence.occurrences(observations),
         'evidence_errors': evidence.problems(observations),
     }
 
@@ -1284,6 +1287,12 @@ def cmd_drift(days: int, as_json: bool) -> int:
     only honest comparison available. Offered counts sit next to realized share
     because they separate the two failures that look identical from the outside: a
     pursuit that never comes up, and one that comes up and gets ignored.
+
+    ``did`` is a share of active days, not of journal entries. A day is the only
+    unit both records can express, so it is what makes a pursuit with an app
+    behind it comparable to one whose journal is its whole history. It cannot
+    tell one commit from eight hours, which is what ``time`` and ``logs`` are
+    beside it — both typed, and both blank for a pursuit done inside its app.
     """
     pursuits = load_pursuits()
     if not pursuits:
@@ -1317,16 +1326,34 @@ def cmd_drift(days: int, as_json: bool) -> int:
         name = record.get('pursuit')
         skips[name] = skips.get(name, 0) + 1
 
+    # A day is the unit both records can express. A pursuit with an app behind it
+    # is done inside that app and never reaches the journal, so counting entries
+    # measures what got retyped and reports the busiest strand as the idle one.
+    typed_days: dict[str, set[date]] = {}
+    for record in done:
+        when = journal.parse_time(record.get('occurred_at'))
+        if when is not None:
+            typed_days.setdefault(record.get('pursuit'), set()).add(when.astimezone().date())
+    app_days = {name: {day for day in seen if day >= cutoff.date()} for name, seen in state['evidence_days'].items()}
+    # Over the register rather than over every record, so the shares sum to what
+    # the table shows: a retired pursuit still holding journal days would
+    # otherwise take a slice of the denominator and never appear in a row.
+    active_days = {name: typed_days.get(name, set()) | app_days.get(name, set()) for name in pursuits}
+    total_days = sum(len(seen) for seen in active_days.values())
+
     rows = []
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
         stated = state['shares'].get(name, 0.0) * 100
-        realized = (by_count.get(name, 0) / total_logs * 100) if total_logs else 0.0
+        realized = (len(active_days[name]) / total_days * 100) if total_days else 0.0
         time_share = (by_minutes.get(name, 0) / total_minutes * 100) if total_minutes else None
         rows.append(
             {
                 'pursuit': name,
                 'stated_share': round(stated, 1),
                 'realized_share': round(realized, 1),
+                'days': len(active_days[name]),
+                'app_days': len(app_days.get(name, set())),
+                'typed_days': len(typed_days.get(name, set())),
                 'time_share': None if time_share is None else round(time_share, 1),
                 'logs': by_count.get(name, 0),
                 'minutes': by_minutes.get(name, 0),
@@ -1337,17 +1364,17 @@ def cmd_drift(days: int, as_json: bool) -> int:
 
     if as_json:
         # See cmd_next: a Console would soft-wrap this into invalid JSON.
-        print(json.dumps({'window_days': days, 'total_logs': total_logs, 'rows': rows}, indent=2))
+        print(json.dumps({'window_days': days, 'total_logs': total_logs, 'total_days': total_days, 'rows': rows}, indent=2))
         return 0
 
     console.rule(f'[cyan]Drift · last {days} days', align='left')
-    if not total_logs:
-        console.print('Nothing logged in the window yet — drift needs history before it can say anything.\n')
+    if not total_days:
+        console.print('Nothing recorded in the window yet — drift needs history before it can say anything.\n')
         return 0
 
     table = Table(box=None, pad_edge=False)
     table.add_column('pursuit')
-    for heading in ('said', 'did', 'time', 'logs', 'offered', 'passed'):
+    for heading in ('said', 'did', 'days', 'logs', 'time', 'offered', 'passed'):
         table.add_column(heading, justify='right')
     for row in rows:
         gap = row['realized_share'] - row['stated_share']
@@ -1356,14 +1383,19 @@ def cmd_drift(days: int, as_json: bool) -> int:
             row['pursuit'],
             f'{row["stated_share"]:.0f}%',
             f'[green]{did}[/]' if abs(gap) < 10 else f'[yellow]{did}[/]',
-            '—' if row['time_share'] is None else f'{row["time_share"]:.0f}%',
+            str(row['days']),
             str(row['logs']),
+            '—' if row['time_share'] is None else f'{row["time_share"]:.0f}%',
             str(row['offered']),
             str(row['skips']),
         )
     console.print(table)
-    plural = '' if total_logs == 1 else 's'
-    console.print(f'\n  {total_logs} log{plural} · {total_minutes} recorded minutes · weights are never auto-adjusted\n')
+    plural = '' if total_days == 1 else 's'
+    console.print(f'\n  {total_days} active day{plural} across the register · weights are never auto-adjusted')
+    console.print(f'  [dim]did = share of those days · logs and minutes are typed only ({total_logs} logs, {total_minutes} min)[/]')
+    if days > evidence.OCCURRENCE_WINDOW_DAYS:
+        console.print(f'  [yellow]Apps keep {evidence.OCCURRENCE_WINDOW_DAYS} days of dates, so days before that are typed logs alone.[/]')
+    console.print()
     return 0
 
 

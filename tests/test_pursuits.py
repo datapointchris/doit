@@ -968,3 +968,88 @@ def test_skipping_a_sampled_pursuit_still_reports_suppression(sandbox, monkeypat
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
     assert pursuits.cmd_skip('read-library') == 0
     assert 'suppressed' in capsys.readouterr().out
+
+
+def log_days_ago(directory: Path, pursuit: str, count: int) -> None:
+    when = datetime.now().astimezone() - timedelta(days=count)
+    journal.append(
+        journal.journal_path(directory, 'testbox'),
+        {'pursuit': pursuit, 'event': 'done', 'occurred_at': when.isoformat()},
+    )
+
+
+def days_ago_iso(count: int) -> str:
+    return (datetime.now().astimezone() - timedelta(days=count)).date().isoformat()
+
+
+def stub_evidence_days(monkeypatch, dates_by_pursuit: dict[str, list[str]]) -> None:
+    """Answer as the cache would, without asking any app.
+
+    `cmd_drift` reads the clock itself, so its window is real time — a fixture
+    date would age out of the window and the test would pass until it didn't.
+    """
+    payload = {'pursuits': {name: {'dates': dates} for name, dates in dates_by_pursuit.items()}}
+    monkeypatch.setattr(pursuits.evidence, 'refresh', lambda *args, **kwargs: payload)
+
+
+def drift_rows(capsys, days: int = 90) -> dict:
+    assert pursuits.cmd_drift(days=days, as_json=True) == 0
+    return {row['pursuit']: row for row in json.loads(capsys.readouterr().out)['rows']}
+
+
+def test_did_counts_the_days_an_app_saw_and_the_journal_never_did(sandbox, monkeypatch, capsys):
+    """The inversion this column exists to end: a pursuit with a backend is done
+    inside that backend, so counting journal entries reported the busiest strand
+    as the idle one."""
+    stub_evidence_days(monkeypatch, {'study-computer-science': [days_ago_iso(n) for n in range(1, 9)]})
+
+    row = drift_rows(capsys)['study-computer-science']
+
+    assert row['days'] == 8
+    assert row['logs'] == 0, 'nothing was ever typed for it'
+    assert row['realized_share'] == 100.0
+
+
+def test_a_day_carried_by_both_records_counts_once(sandbox, monkeypatch, capsys):
+    """Union, not sum. Logging what an app already reported would double it."""
+    log_days_ago(sandbox / 'state', 'chores', 1)
+    stub_evidence_days(monkeypatch, {'chores': [days_ago_iso(1)]})
+
+    row = drift_rows(capsys)['chores']
+
+    assert (row['days'], row['app_days'], row['typed_days']) == (1, 1, 1)
+
+
+def test_a_retired_pursuit_takes_no_slice_of_the_denominator(sandbox, capsys):
+    """drift iterates the register, so a stranded name can never get a row — and
+    days counted into the total it never appears in leave every share short."""
+    log_days_ago(sandbox / 'state', 'chores', 1)
+    log_days_ago(sandbox / 'state', 'gone-from-the-register', 2)
+
+    rows = drift_rows(capsys)
+
+    assert 'gone-from-the-register' not in rows
+    assert sum(row['realized_share'] for row in rows.values()) == 100.0
+
+
+def test_an_app_date_older_than_the_window_is_not_counted(sandbox, monkeypatch, capsys):
+    stub_evidence_days(monkeypatch, {'chores': [days_ago_iso(3), days_ago_iso(40)]})
+
+    assert drift_rows(capsys, days=7)['chores']['days'] == 1
+
+
+def test_the_table_renders_when_only_an_app_recorded_anything(sandbox, monkeypatch, capsys):
+    """App days and no typed logs is the ordinary window for a pursuit with a
+    backend, and a guard on the log count suppressed the whole report there."""
+    stub_evidence_days(monkeypatch, {'chores': [days_ago_iso(1)]})
+
+    assert pursuits.cmd_drift(days=90, as_json=False) == 0
+
+    printed = capsys.readouterr().out
+    assert 'chores' in printed
+    assert '1 active day ' in printed
+
+
+def test_a_window_with_nothing_in_it_says_so_rather_than_drawing_an_empty_table(sandbox, capsys):
+    assert pursuits.cmd_drift(days=90, as_json=False) == 0
+    assert 'Nothing recorded in the window yet' in capsys.readouterr().out
