@@ -1,6 +1,27 @@
 # CHANGELOG
 
 
+## v2.21.1 (2026-08-21)
+
+### Bug Fixes
+
+- **pursuits**: The orphan warning names the box holding each stranded count
+  ([`8e2886f`](https://github.com/datapointchris/doit/commit/8e2886fa5e4c79884c849b39ff0d69d3157c6855))
+
+Counter files are per-machine and the state directory is synced, so a warning that named only the
+  directory left the reader unable to tell a count they may clear from one belonging to another box.
+  Editing another box's file anyway is what gives a synced file two writers, which is the failure
+  the per-machine split exists to prevent.
+
+Each orphan now lists its count, the machine whose file holds it, and whether that machine is this
+  one.
+
+Offer counts with no pursuit: scout 7 macmini (another box — clear it there)
+
+`journal.counts_by_machine` is the reader. `load_counts` sums across files and so cannot answer
+  where a record sits, which is the question when the repair is an edit rather than a rename.
+
+
 ## v2.21.0 (2026-08-21)
 
 ### Features
