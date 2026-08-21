@@ -18,12 +18,16 @@ Every read is a subprocess against a remote API, so answers are cached and
 refreshed on a TTL rather than gathered per render. A refresh that fails leaves
 the previous answer standing: evidence an hour stale costs a slightly worse draw,
 evidence missing costs a wrong one.
+
+Each answer keeps the dates it was built from as well as the latest of them, so a
+reader asking how often a pursuit happens has something to ask.
 """
 
 import json
 import shlex
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from datetime import datetime
 from pathlib import Path
 
@@ -41,6 +45,11 @@ REFRESH_TTL_SECONDS = 1800.0
 TIMEOUT_SECONDS = 8.0
 
 MAX_WORKERS = 6
+
+# How far back an answer keeps its dates. `doit pursuits drift` measures ninety
+# days, so it is the window a consumer would ask for, and bounding it is what
+# stops one pursuit's cache growing for as long as its app has history.
+OCCURRENCE_WINDOW_DAYS = 90
 
 
 def cache_path(directory: Path) -> Path:
@@ -122,13 +131,40 @@ def aware(when: datetime | None, now: datetime) -> datetime | None:
     return when if when.tzinfo is not None else when.replace(tzinfo=now.tzinfo)
 
 
-def latest_in(document, config: dict, now: datetime) -> datetime | None:
-    """The most recent timestamp among the rows that count, or None."""
+def stamps_in(document, config: dict, now: datetime) -> list[datetime]:
+    """Every timestamp among the rows that count, comparable.
+
+    One read of the rows feeds both fields an answer records. A second parser
+    would drift from this one, and then the latest date and the set of dates
+    would disagree about whether a pursuit happened.
+    """
     rows = matching(rows_of(document, config.get('evidence_items')), config.get('evidence_where'))
     field = config['evidence_time']
     stamps = [aware(parse_time(str(row.get(field))), now) for row in rows if isinstance(row, dict) and row.get(field)]
-    found = [stamp for stamp in stamps if stamp is not None]
+    return [stamp for stamp in stamps if stamp is not None]
+
+
+def latest_in(document, config: dict, now: datetime) -> datetime | None:
+    """The most recent timestamp among the rows that count, or None."""
+    found = stamps_in(document, config, now)
     return max(found) if found else None
+
+
+def dates_of(stamps: list[datetime], now: datetime, window: int = OCCURRENCE_WINDOW_DAYS) -> list[str]:
+    """The distinct local dates inside the window, oldest first.
+
+    Dates rather than a count of rows, because row counts are not commensurable
+    across apps: a habits backend answers with hundreds and a books backend with
+    one, so counting would call reading three hundred times rarer than habits. A
+    date either carries evidence or does not, whichever app was asked.
+
+    Local by the same reading `aware` gives an offset-less stamp, so one machine's
+    notion of a day is used throughout. The window ends today, so a stamp the
+    backend dated ahead of now is outside it.
+    """
+    today = now.date()
+    days = {stamp.astimezone(now.tzinfo).date() for stamp in stamps}
+    return sorted(day.isoformat() for day in days if 0 <= (today - day).days < window)
 
 
 def read_one(name: str, config: dict, now: datetime) -> tuple[str, dict]:
@@ -160,8 +196,10 @@ def read_one(name: str, config: dict, now: datetime) -> tuple[str, dict]:
         entry['error'] = 'evidence did not return JSON'
         return name, entry
 
-    when = latest_in(document, config, now)
+    stamps = stamps_in(document, config, now)
+    when = max(stamps) if stamps else None
     entry['last'] = None if when is None else when.isoformat()
+    entry['dates'] = dates_of(stamps, now)
     return name, entry
 
 
@@ -183,8 +221,9 @@ def refresh(
 ) -> dict:
     """Bring the cache up to date, asking only the apps whose answer has aged out.
 
-    A failed read keeps the previous `last` and records why, so one logged-out CLI
-    degrades that pursuit to its journal rather than emptying the whole document.
+    A failed read keeps the previous `last` and its dates and records why, so one
+    logged-out CLI degrades that pursuit to its journal rather than emptying the
+    whole document.
     """
     payload = load(directory)
     entries = payload.setdefault('pursuits', {})
@@ -208,6 +247,8 @@ def refresh(
             previous = entries.get(name) or {}
             if 'error' in entry and previous.get('last'):
                 entry['last'] = previous['last']
+            if 'error' in entry and previous.get('dates'):
+                entry['dates'] = previous['dates']
             entries[name] = entry
 
     payload['schema_version'] = SCHEMA_VERSION
@@ -222,6 +263,29 @@ def observed(payload: dict) -> dict[str, datetime]:
         when = parse_time((entry or {}).get('last'))
         if when is not None:
             found[name] = when
+    return found
+
+
+def occurrences(payload: dict) -> dict[str, list[date]]:
+    """Pursuit to the distinct local dates its app reported something on.
+
+    An answer carrying no dates reads as an empty window rather than as damage,
+    and a date that will not parse is dropped rather than raising. The cache is
+    derived, so anything missing from it costs a refresh and never an answer.
+    """
+    found = {}
+    for name, entry in (payload.get('pursuits') or {}).items():
+        days = (entry or {}).get('dates')
+        if not isinstance(days, list):
+            continue
+        parsed = []
+        for value in days:
+            try:
+                parsed.append(date.fromisoformat(str(value)))
+            except ValueError:
+                continue
+        if parsed:
+            found[name] = sorted(parsed)
     return found
 
 

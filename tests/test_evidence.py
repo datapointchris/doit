@@ -162,3 +162,119 @@ def test_the_cache_round_trips(tmp_path):
     written = json.loads(evidence.cache_path(tmp_path).read_text())
     assert written['schema_version'] == evidence.SCHEMA_VERSION
     assert written['pursuits']['tasks']['last']
+
+
+def test_every_day_the_app_reported_survives_the_read(tmp_path):
+    """The occurrences are what `latest_in` alone throws away."""
+    rows = [
+        {'at': (NOW - timedelta(hours=1)).isoformat()},
+        {'at': (NOW - timedelta(hours=2)).isoformat()},
+        {'at': (NOW - timedelta(days=3)).isoformat()},
+        {'at': (NOW - timedelta(days=11)).isoformat()},
+    ]
+    pursuits = {'build': {'weight': 35, 'evidence': emitting(rows), 'evidence_time': 'at'}}
+    payload = evidence.refresh(pursuits, tmp_path, NOW)
+
+    assert evidence.occurrences(payload)['build'] == [
+        (NOW - timedelta(days=11)).date(),
+        (NOW - timedelta(days=3)).date(),
+        NOW.date(),
+    ], 'twice in one evening is one day, and the days arrive oldest first'
+    assert evidence.observed(payload)['build'] == NOW - timedelta(hours=1), 'the latest answer is unchanged'
+
+
+def test_a_day_outside_the_window_is_not_kept(tmp_path):
+    """Bounded, so one pursuit cannot grow a cache for as long as its app has history."""
+    inside = NOW - timedelta(days=evidence.OCCURRENCE_WINDOW_DAYS - 1)
+    outside = NOW - timedelta(days=evidence.OCCURRENCE_WINDOW_DAYS)
+    rows = [{'at': inside.isoformat()}, {'at': outside.isoformat()}]
+    pursuits = {'build': {'weight': 35, 'evidence': emitting(rows), 'evidence_time': 'at'}}
+    payload = evidence.refresh(pursuits, tmp_path, NOW)
+
+    assert evidence.occurrences(payload)['build'] == [inside.date()]
+
+
+def test_a_day_the_backend_dated_ahead_of_now_is_outside_the_window():
+    """The window ends today, so a row stamped tomorrow is not in it."""
+    assert evidence.dates_of([NOW + timedelta(days=1)], NOW) == []
+    assert evidence.dates_of([NOW], NOW) == [NOW.date().isoformat()]
+
+
+def test_the_row_filter_bounds_the_days_as_well_as_the_last_one(tmp_path):
+    """Yoga today must not put a day into the reading pursuit."""
+    rows = [
+        {'name': 'Read', 'complete_date': (NOW - timedelta(days=2)).isoformat()},
+        {'name': 'Yoga', 'complete_date': NOW.isoformat()},
+    ]
+    pursuits = {
+        'read': {
+            'weight': 25,
+            'evidence': emitting(rows),
+            'evidence_time': 'complete_date',
+            'evidence_where': {'name': 'Read'},
+        }
+    }
+    payload = evidence.refresh(pursuits, tmp_path, NOW)
+    assert evidence.occurrences(payload)['read'] == [(NOW - timedelta(days=2)).date()]
+
+
+def test_a_failed_read_keeps_the_previous_days(tmp_path):
+    """The same policy as `last`: an unreachable backend degrades, it does not empty."""
+    rows = [{'at': (NOW - timedelta(days=1)).isoformat()}, {'at': (NOW - timedelta(days=4)).isoformat()}]
+    working = {'train': {'weight': 25, 'evidence': emitting(rows), 'evidence_time': 'at'}}
+    evidence.refresh(working, tmp_path, NOW)
+
+    broken = {'train': {'weight': 25, 'evidence': failing(), 'evidence_time': 'at'}}
+    payload = evidence.refresh(broken, tmp_path, NOW, force=True)
+
+    assert evidence.occurrences(payload)['train'] == [
+        (NOW - timedelta(days=4)).date(),
+        (NOW - timedelta(days=1)).date(),
+    ]
+    assert 'not logged in' in evidence.problems(payload)['train']
+
+
+def test_the_days_are_written_as_plain_dates(tmp_path):
+    pursuits = {'tasks': {'weight': 25, 'evidence': emitting([{'at': NOW.isoformat()}]), 'evidence_time': 'at'}}
+    evidence.refresh(pursuits, tmp_path, NOW)
+    written = json.loads(evidence.cache_path(tmp_path).read_text())
+    assert written['pursuits']['tasks']['dates'] == [NOW.date().isoformat()]
+
+
+def test_a_cache_from_either_side_of_this_still_reads(tmp_path):
+    """A cache is written by whichever doit ran last, and both must read it.
+
+    An older one wrote no days, and reads as no occurrences rather than as damage.
+    A newer one writes a field the older one never asks for, and answering `last`
+    must not depend on knowing every key in the entry.
+    """
+    older = {
+        'schema_version': evidence.SCHEMA_VERSION,
+        'pursuits': {'tasks': {'checked_at': NOW.isoformat(), 'last': (NOW - timedelta(days=2)).isoformat()}},
+    }
+    evidence.save(tmp_path, older)
+    loaded = evidence.load(tmp_path)
+    assert loaded == older, 'a missing field is absence, not a malformed document'
+    assert evidence.observed(loaded)['tasks'] == NOW - timedelta(days=2)
+    assert evidence.occurrences(loaded) == {}
+
+    newer = evidence.load(tmp_path)
+    newer['pursuits']['tasks']['dates'] = [NOW.date().isoformat()]
+    newer['pursuits']['tasks']['something_later'] = 'a field this doit does not know'
+    evidence.save(tmp_path, newer)
+    reloaded = evidence.load(tmp_path)
+    assert evidence.observed(reloaded)['tasks'] == NOW - timedelta(days=2)
+    assert evidence.occurrences(reloaded)['tasks'] == [NOW.date()]
+    assert evidence.problems(reloaded) == {}
+
+
+def test_a_day_that_is_not_a_date_is_dropped_rather_than_fatal(tmp_path):
+    payload = {
+        'schema_version': evidence.SCHEMA_VERSION,
+        'pursuits': {
+            'tasks': {'checked_at': NOW.isoformat(), 'dates': ['not a date', NOW.date().isoformat()]},
+            'read': {'checked_at': NOW.isoformat(), 'dates': None},
+            'train': {'checked_at': NOW.isoformat(), 'dates': 'yesterday'},
+        },
+    }
+    assert evidence.occurrences(payload) == {'tasks': [NOW.date()]}
