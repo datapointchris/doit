@@ -100,30 +100,15 @@ def test_every_other_path_notifies(monkeypatch):
     assert calls == [doit.cli.UPDATE_CONFIG]
 
 
-class _Completed:
-    """What `subprocess.run` hands back, in the two fields github_token reads."""
+def test_the_credential_is_left_to_pyselfupdate():
+    """pyselfupdate runs `gh auth token` itself, and `$GITHUB_TOKEN_COMMAND` is
+    what redirects or empties it — a lever that belongs to whoever runs doit.
 
-    def __init__(self, stdout, returncode=0):
-        self.stdout = stdout
-        self.returncode = returncode
-
-
-def test_the_gh_credential_is_offered_lazily(monkeypatch):
-    """Eager resolution would put a `gh` spawn in front of every doit command."""
-    spawns = []
-    monkeypatch.setattr('doit.cli.subprocess.run', lambda *args, **kwargs: spawns.append(args) or _Completed('  tok\n'))
-
-    assert doit.cli.UPDATE_CONFIG.token_func is doit.cli.github_token
-    assert spawns == [], 'building the config must not have asked gh for anything'
-    assert doit.cli.github_token() == 'tok'
-
-
-def test_a_missing_gh_leaves_the_lookup_unauthenticated(monkeypatch):
-    """Anonymous is 60 requests an hour, which is worse than a token and better
-    than an update command that cannot run without one."""
-    monkeypatch.setattr('doit.cli.subprocess.run', lambda *args, **kwargs: _Completed('', returncode=1))
-
-    assert doit.cli.github_token() == ''
+    A helper here would be a second implementation of that, and the reason the
+    library grew one is that eleven tools never pasted it.
+    """
+    assert doit.cli.UPDATE_CONFIG.token == ''
+    assert doit.cli.UPDATE_CONFIG.token_func is None
 
 
 def test_version_is_unknown_without_installed_metadata(monkeypatch):
