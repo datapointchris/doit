@@ -91,6 +91,15 @@ SYSTEM_PROMPT = (
 # rather than hang a scheduled run forever.
 DEFAULT_TIMEOUT_SECONDS = 300
 
+# Short, because it only stamps a reading. A CLI too slow to say its own version
+# is one this call gives up on rather than one that delays the reading itself.
+VERSION_TIMEOUT_SECONDS = 10
+
+# Empty because the call names no model and the CLI's default is whatever the
+# session resolves. Recording a guess would be worse than recording nothing —
+# a wrong attribution is read as fact and cannot be told from a right one.
+MODEL = ''
+
 # How many handles a miss names before it points at `list` instead. An error is
 # read at a glance, and readings accumulate for as long as the schedule runs, so
 # printing the whole record buries the sentence that says what went wrong.
@@ -145,6 +154,16 @@ class Digest:
     against the table that produced it: a digest naming three cold tools means
     something different when the threshold was a fortnight than when it was a
     season.
+
+    ``model`` and ``claude_version`` are the other half of the same question. A
+    reading that moved because the model changed is otherwise indistinguishable
+    from one that moved because your kit did, and that comparison is the whole
+    reason readings are kept rather than printed and dropped.
+
+    Both may be empty and every reader carries on regardless. ``model`` is empty
+    wherever the call named none, which leaves the choice to the CLI and doit
+    with nothing it can honestly record. ``claude_version`` is empty where that
+    CLI would not answer. A digest stored before the fields carries neither.
     """
 
     generated: str
@@ -152,6 +171,8 @@ class Digest:
     rows: int
     days: int
     text: str
+    model: str = ''
+    claude_version: str = ''
 
 
 def row_payload(row: usage.Row, today: dt.date) -> dict[str, object]:
@@ -217,6 +238,25 @@ Rules:
   of concluding disuse.
 - At most six short paragraphs of plain text.
 """
+
+
+def claude_version(timeout: float = VERSION_TIMEOUT_SECONDS) -> str:
+    """The version of the claude on PATH, or '' where it will not answer.
+
+    The first field alone: `claude --version` says "2.1.238 (Claude Code)" and
+    the rest of the line is the product name. A failure here is never fatal — a
+    reading is worth more than its attribution, and one taken by a CLI that
+    cannot say its own version is still a reading.
+    """
+    if not shutil.which('claude'):
+        return ''
+    try:
+        result = subprocess.run(['claude', '--version'], capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+    if result.returncode != 0:
+        return ''
+    return next(iter(result.stdout.split()), '')
 
 
 def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
@@ -316,7 +356,19 @@ def read_all(directory: Path) -> list[Digest]:
                 continue
             fields = {name: record.get(name) for name in ('generated', 'machine', 'rows', 'days', 'text')}
             if fields['generated'] and fields['text']:
-                stored.append(Digest(**fields))
+                stored.append(
+                    Digest(
+                        generated=str(fields['generated']),
+                        machine=str(fields['machine'] or ''),
+                        rows=int(fields['rows'] or 0),
+                        days=int(fields['days'] or 0),
+                        text=str(fields['text']),
+                        # Defaulted rather than required: a line written before
+                        # these fields existed carries neither and must still load.
+                        model=str(record.get('model') or ''),
+                        claude_version=str(record.get('claude_version') or ''),
+                    )
+                )
     return sorted(stored, key=lambda digest: digest.generated)
 
 
@@ -352,6 +404,8 @@ def cmd_run(days: int, directory: Path) -> int:
         rows=len(rows),
         days=days,
         text=text,
+        model=MODEL,
+        claude_version=claude_version(),
     )
     print(digest.text)
     return 0 if store(digest_path(directory, digest.machine), digest) else 1

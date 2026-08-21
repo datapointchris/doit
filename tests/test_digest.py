@@ -388,6 +388,8 @@ def test_list_emits_every_record_whole_as_json(tmp_path, capsys):
             'rows': 2,
             'days': 90,
             'text': 'a reading',
+            'model': '',
+            'claude_version': '',
         }
     ]
 
@@ -419,6 +421,9 @@ def test_json_emits_the_stored_record_whole(tmp_path, capsys):
         'rows': 2,
         'days': 90,
         'text': 'a reading',
+        # Written before the attribution fields existed, and still readable.
+        'model': '',
+        'claude_version': '',
     }
 
 
@@ -442,3 +447,58 @@ def test_a_kit_with_nothing_measurable_fails_rather_than_reading_an_empty_table(
     monkeypatch.setattr(digest, 'ask', lambda prompt: pytest.fail('asked the model about an empty table'))
 
     assert digest.cmd_run(days=90, directory=tmp_path) == 1
+
+
+def fake_claude(tmp_path, monkeypatch, version_line: str, exit_code: int = 0) -> None:
+    """A `claude` on PATH answering --version from the given line."""
+    binary = tmp_path / 'bin' / 'claude'
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    binary.write_text(f'#!/bin/sh\nprintf "%s\\n" {version_line!r}\nexit {exit_code}\n')
+    binary.chmod(0o755)
+    monkeypatch.setenv('PATH', str(binary.parent), prepend=False)
+
+
+def test_claude_version_keeps_the_number_and_drops_the_product_name(tmp_path, monkeypatch):
+    """`claude --version` says "2.1.238 (Claude Code)" and the rest of the line
+    is the product, which every record would then carry."""
+    fake_claude(tmp_path, monkeypatch, '2.1.238 (Claude Code)')
+
+    assert digest.claude_version() == '2.1.238'
+
+
+def test_claude_version_is_empty_when_the_cli_will_not_answer(tmp_path, monkeypatch):
+    """A reading is worth more than its attribution, so this never raises."""
+    fake_claude(tmp_path, monkeypatch, 'broken', exit_code=1)
+
+    assert digest.claude_version() == ''
+
+
+def test_claude_version_is_empty_with_no_claude_on_path(tmp_path, monkeypatch):
+    monkeypatch.setenv('PATH', str(tmp_path / 'empty'))
+
+    assert digest.claude_version() == ''
+
+
+def test_a_record_written_before_the_fields_still_loads(tmp_path):
+    """Every digest already stored carries neither, and losing them all to a
+    schema addition would destroy the readings the field exists to compare."""
+    stored(tmp_path, '2026-08-12T09:00:00+00:00', text='a reading')
+
+    loaded = digest.read_all(tmp_path)
+
+    assert len(loaded) == 1
+    assert loaded[0].model == ''
+    assert loaded[0].claude_version == ''
+
+
+def test_a_stored_reading_records_the_cli_that_took_it(tmp_path, monkeypatch):
+    """A reading that moved because the model changed is otherwise
+    indistinguishable from one that moved because the kit did."""
+    fake_claude(tmp_path, monkeypatch, '2.1.238 (Claude Code)')
+    monkeypatch.setattr(digest, 'ask', lambda _: 'a reading')
+    monkeypatch.setattr(digest.usage, 'measure', lambda: [row('fd')])
+    monkeypatch.setattr(digest, 'machine_name', lambda: 'archlinux')
+
+    assert digest.cmd_run(days=90, directory=tmp_path) == 0
+
+    assert digest.read_all(tmp_path)[0].claude_version == '2.1.238'
