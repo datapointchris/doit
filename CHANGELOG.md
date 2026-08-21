@@ -1,6 +1,39 @@
 # CHANGELOG
 
 
+## v2.18.0 (2026-08-21)
+
+### Documentation
+
+- **pursuits**: The register template names every field it accepts
+  ([`c5528d6`](https://github.com/datapointchris/doit/commit/c5528d6812f66acc14ce1fbe54b49e790e018829))
+
+credit and alpha were accepted by the loader and named nowhere in the header the file carries at its
+  head. credit is the field that produces the standing line the dashboard prints, so the one surface
+  answering how far behind a pursuit stands was reachable only by reading the source.
+
+Two tests hold the schema and its documentation together in both directions. A field added to
+  KNOWN_FIELDS and not named in the template now fails, and so does a name in the template the
+  loader would refuse — the header is copied when a pursuit is added, so a drifted name gets pasted
+  into a register that then will not load.
+
+Whole-word matching, because id is two letters and a substring test finds it inside "consider".
+
+### Features
+
+- **pursuits**: List names an offer count whose pursuit is gone
+  ([`f003e64`](https://github.com/datapointchris/doit/commit/f003e64c51b26925fdf3ccd4260443d859b93ee8))
+
+The counter is keyed by pursuit name, so retiring or renaming one strands its total. drift iterates
+  the register, so that row never appears there again and nothing else mentions it — the live
+  counter still holds pr: 8 for a pursuit removed some time ago.
+
+The review deck has the same failure and has warned about it since it was built. This is the other
+  half of the pair, and it follows review's shape exactly: a detector, a renderer, and only the view
+  that is about the register itself calls it. next and the nudge stay silent, because a misfiled
+  record is not a task and an interrupt reporting bookkeeping is the kind you stop reading.
+
+
 ## v2.17.0 (2026-08-21)
 
 ### Features
