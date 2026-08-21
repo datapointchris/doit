@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v2.25.0 (2026-08-21)
+
+### Features
+
+- **digest**: A stored reading records the CLI that took it
+  ([`8480db8`](https://github.com/datapointchris/doit/commit/8480db88da791a717604cbeef810bdffd5630931))
+
+A reading that moved because the model changed is indistinguishable from one that moved because your
+  kit did, and that comparison is the whole reason readings are kept rather than printed and
+  dropped. fleet's Grade gained the same two fields in fe950d6; this is doit's half.
+
+`model` is empty, deliberately. The call names no model, so the choice is the CLI's and doit has
+  nothing it can honestly record — a guess would be read as fact and could not be told from a real
+  attribution. The field exists so that a call which does name one has somewhere to put it.
+
+`claude_version` is the first field of `claude --version`; the rest of that line is the product
+  name. Resolved with a short timeout and never fatal — a reading is worth more than its
+  attribution, and one taken by a CLI too slow to say its own version is still a reading.
+
+Both default to empty when read, so every digest already stored loads unchanged.
+
+
 ## v2.24.1 (2026-08-21)
 
 ### Bug Fixes
