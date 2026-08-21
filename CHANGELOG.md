@@ -1,6 +1,23 @@
 # CHANGELOG
 
 
+## v2.24.1 (2026-08-21)
+
+### Bug Fixes
+
+- **evidence**: A row filter matches regardless of case
+  ([`945f3c4`](https://github.com/datapointchris/doit/commit/945f3c48bdb1e1c0804f15eb59b0f6385879a457))
+
+`evidence_where` and `resolve_where` compare a value typed into a config file by hand against a row
+  an app wrote. A habit named `read` and a filter saying `Read` are the same habit, and the miss is
+  silent — the pursuit reads as one nobody has ever done rather than as a filter that matched
+  nothing.
+
+Folded, not loosened. A near-miss stays a miss, so `Journal` does not match `Journalling`, and a
+  numeric id is unaffected. `prompt.OneOf` in icb folds case for the same reason on the way in, so a
+  category accepted there and a filter written here now agree.
+
+
 ## v2.24.0 (2026-08-21)
 
 ### Features
