@@ -144,8 +144,13 @@ TEMPLATE = """\
 #   weight       required; how much attention this deserves relative to the rest
 #   description  what it means, shown when there is nothing resolved to show
 #   cadence      optional hard schedule (2w / 1mo); overdue pins it above the draw
+#   credit       optional window (1w); banks each completion forward, so three in
+#                one evening pay three intervals rather than one
 #   until        optional end date; after it the pursuit pauses and says so
 #   paused       optional; keeps it in the file but out of the draw
+#   alpha        optional; how sharply urgency climbs once past the interval.
+#                Superlinear above 1, so the 1.5 default lets something well
+#                overdue outrun a heavier pursuit done recently
 #   minutes      optional; how long one of these takes, until enough logs carry
 #                --minutes for the journal to answer it. `doit forecast` reads it
 #   resolve      optional command answering "specifically what?" — see below
@@ -154,6 +159,14 @@ TEMPLATE = """\
 # A cadence replaces the interval the weight implies rather than sitting beside
 # it, so declaring one shorter than that interval multiplies how urgent the
 # pursuit gets, and one longer divides it. `doit pursuits list` names both.
+#
+# credit makes that cadence a rate rather than a rhythm. Each completion advances
+# the satisfied-through point one interval from wherever it already stood, so a
+# burst counts for what it was. The window caps the position both ways: far
+# enough ahead cannot silence a daily prompt for a month, and a fortnight away
+# cannot accrue a debt no evening can clear. Only pursuits declaring it reach the
+# standing line `doit dashboard` prints, which says how many completions would
+# bring them back to current.
 #
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,

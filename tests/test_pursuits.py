@@ -12,6 +12,7 @@ froze the path at import and needed env vars set before the module loaded.
 
 import json
 import math
+import re
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
@@ -73,6 +74,30 @@ def test_an_unknown_field_is_refused(tmp_path):
     path = write_register(tmp_path, 'pursuits:\n  a:\n    weght: 5\n')
     with pytest.raises(pursuits.RegisterError, match='weght'):
         pursuits.load_pursuits(path)
+
+
+def test_every_field_the_register_accepts_is_named_in_the_template():
+    # The template is the whole schema documentation: it is what a fresh install
+    # writes and what the file being hand-edited carries at its head. A field the
+    # loader accepts and the header never names is a feature nobody can find, and
+    # `credit` sat that way while it was the only source of the standing line.
+    # Matched as a whole word: `id` is two letters and a substring test would
+    # find it inside "consider" and call the field documented.
+    undocumented = sorted(field for field in pursuits.KNOWN_FIELDS if not re.search(rf'\b{re.escape(field)}\b', pursuits.TEMPLATE))
+
+    assert not undocumented, f'accepted but never named in the template: {", ".join(undocumented)}'
+
+
+def test_the_template_names_no_field_the_register_would_refuse():
+    # The inverse, and the reason a typo here is worse than a missing line: the
+    # header is copied when a pursuit is added, so a name that drifted out of
+    # KNOWN_FIELDS would be pasted into a register that then refuses to load.
+    documented = {
+        word.strip('#').strip() for line in pursuits.TEMPLATE.splitlines() if line.startswith('#   ') for word in [line[4:].split(' ')[0]]
+    }
+    unknown = sorted(name for name in documented if name and name.islower() and name.isidentifier() and name not in pursuits.KNOWN_FIELDS)
+
+    assert not unknown, f'named in the template but the loader would refuse it: {", ".join(unknown)}'
 
 
 def test_a_missing_weight_is_refused(tmp_path):
