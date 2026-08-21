@@ -222,7 +222,7 @@ wheels = [
 
 [[package]]
 name = "doit"
-version = "2.16.2"
+version = "2.17.0"
 source = { editable = "." }
 dependencies = [
     { name = "pyselfupdate", extra = ["typer"] },

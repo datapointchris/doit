@@ -1,6 +1,28 @@
 # CHANGELOG
 
 
+## v2.17.0 (2026-08-21)
+
+### Features
+
+- **dashboard**: The articles lane says whether the pile is moving
+  ([`bf469ab`](https://github.com/datapointchris/doit/commit/bf469ab33f91eae47c38496df6496f99c4ad79b4))
+
+A backlog count only ever climbs, so "307 unread" cannot answer the question the lane is kept for —
+  am I getting to these ever or not. The meta now carries the reading beside the count.
+
+Three states, because the useful fact changes with the answer. Reads inside the window are a rate.
+  None inside it makes the date the only thing worth saying, and that is the case the lane exists
+  for. Nothing ever read leaves the count to speak for itself, since a bare "0 read" over an
+  untouched list carries no fact the backlog did not.
+
+Both fields are read defensively, so an icb that predates them renders exactly what this lane
+  rendered before — asserted by the fixture, which carries neither.
+
+Elapsed time comes from pursuits.format_elapsed rather than the lane's own relative_day: that one
+  changes unit only for future dates, so a read four months back would have rendered as 141d ago.
+
+
 ## v2.16.2 (2026-08-20)
 
 ### Bug Fixes
