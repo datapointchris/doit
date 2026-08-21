@@ -167,3 +167,25 @@ def test_a_missed_stretch_is_owed_and_paid_down_one_at_a_time():
 def test_never_done_stays_none_rather_than_becoming_a_debt():
     assert allocate.banked_days_since([], interval=1.0, cap=7.0) is None
     assert allocate.banked_position(None, 1.0) is None
+
+
+def test_an_occurrence_outside_the_window_does_not_drag_a_burst_backwards():
+    """The carry starts at the oldest occurrence, so one from months ago set a
+    ceiling that three tonight could not climb back from — and the pursuit read
+    as maximally behind on the evening it was worked hardest."""
+    interval, cap = 3.0, 7.0
+    recent = allocate.banked_position(allocate.banked_days_since([1.0, 3.0, 5.0], interval, cap), interval)
+
+    with_an_old_one = allocate.banked_position(allocate.banked_days_since([1.0, 3.0, 5.0, 60.0], interval, cap), interval)
+
+    assert recent == 4.0
+    assert with_an_old_one == recent
+
+
+def test_the_most_recent_is_kept_when_none_are_inside_the_window():
+    """Dropping every occurrence would read as never done, which is the state a
+    pursuit idle for a year is furthest from."""
+    banked = allocate.banked_days_since([30.0, 90.0], interval=1.0, cap=7.0)
+
+    assert allocate.banked_position(banked, 1.0) == -7.0
+    assert allocate.urgency(banked, interval=1.0) == allocate.URGENCY_CEILING

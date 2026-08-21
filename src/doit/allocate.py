@@ -99,14 +99,20 @@ def banked_days_since(ages: list[float], interval: float, cap: float) -> float |
     month, which is half of what a daily cadence is for. Behind, it stops a
     fortnight away from accruing a debt no evening can clear — a backlog only
     directs attention while it is payable, and past that it just reads as
-    failure. So the pursuit forgives anything older than the window.
+    failure. So the pursuit forgives anything older than the window, and drops
+    those occurrences from the carry rather than only clamping the result. The
+    most recent one is kept when none are inside, or a pursuit idle for a year
+    would read as never done instead of as far behind.
 
     Returned in the units :func:`urgency` reads, so a pursuit banked ahead of
     itself reports a negative age and falls inside the cooldown.
     """
     if not ages:
         return None
-    stamps = sorted(-age for age in ages)
+    # The carry starts at the oldest occurrence, so one from outside the window
+    # sets a ceiling no burst inside it can climb back from.
+    inside = [age for age in ages if age <= cap]
+    stamps = sorted(-age for age in (inside or [min(ages)]))
     # Carried from where the pursuit already stood, never reset to the moment each
     # completion happened — resetting is what makes a single chore erase a week of
     # missed ones, which is the same collapse credit exists to undo.
