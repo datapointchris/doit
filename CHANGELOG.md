@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v2.25.1 (2026-08-22)
+
+### Bug Fixes
+
+- A help screen no longer clones or pulls the cards
+  ([`5b4ce56`](https://github.com/datapointchris/doit/commit/5b4ce5608806b5dc4edc059d93a88f312b2f0ace))
+
+Typer runs the root callback before answering a subcommand's --help, so every help screen ran
+  ensure_cloned and started a detached pull. On a new machine that means `doit anything --help`
+  clones a repo.
+
+It lands hardest on a reader that walks the whole tree: reading doit's twenty commands was
+  twenty-one invocations, each one reaching this.
+
+driven_by_a_person becomes worth_a_pull, which is what it decides. The existing reason was another
+  program driving — an fzf preview redrawing per keystroke, completion firing per TAB. Asking for
+  help is a second reason, and a person typing it is still a person.
+
+
 ## v2.25.0 (2026-08-21)
 
 ### Features
