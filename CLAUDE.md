@@ -76,6 +76,7 @@ lane reads as "nothing outstanding", which is the worst available failure.
 
 `.pre-commit-config.yaml`, `.github/workflows/validate.yml`, `.editorconfig`, `.markdownlint.json`
 and the `pyproject.toml` keys listed under `[tool.forge] managed` are generated from this repo's
-declared toolchain components. Regenerate with
-`forge dies run maintenance/sync-{pre-commit,ci}.sh -F doit`. Anything edited outside a
-`# > custom:` marker is overwritten on the next sync.
+declared toolchain components. Regenerate with `forge repos apply precommit -F doit` and
+`forge repos apply ci -F doit` — `forge dies` is the library and carries no `run` verb; a
+reconcile verb takes the die name. Anything edited outside a `# > custom:` marker is overwritten
+on the next sync.
