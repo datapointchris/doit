@@ -6,6 +6,7 @@ tree is built this way. Each subcommand module owns its own `app`; this file
 only assembles them.
 """
 
+import sys
 from typing import Annotated
 
 import typer
@@ -120,9 +121,14 @@ def root(
     tree being rewritten underneath it.
     """
     set_no_input(no_input)
-    content.ensure_cloned()
-    if ctx.invoked_subcommand != 'content':
-        content.autosync()
+    # A help screen reads no cards, so neither the clone nor the pull belongs on
+    # one. Typer runs this callback before answering a subcommand's --help, so
+    # without the guard `doit anything --help` clones a repo on a new machine
+    # and starts a pull on every other.
+    if content.worth_a_pull(sys.argv):
+        content.ensure_cloned()
+        if ctx.invoked_subcommand != 'content':
+            content.autosync()
 
     # `update` runs its own check, so notifying too would ask the releases API
     # twice for one command and let the notice contradict what `--check` just

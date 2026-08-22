@@ -54,6 +54,12 @@ STALE_LOCK_SECONDS = 5 * 60
 # TAB. Everything else is a person typing, which is exactly when a pull is free.
 MACHINE_DRIVEN = frozenset({'__preview', '__render', 'names'})
 
+# Asking what a command does is not asking doit to do anything. A help screen
+# reads no cards, so a pull started for one is work nobody asked for — and a
+# reader that walks a tool's help fires it once per screen, which is how reading
+# doit's twenty commands became twenty-one pulls.
+HELP_FLAGS = frozenset({'--help', '-h'})
+
 # Where the cards come from on a machine that has none yet. Overridable so a
 # fork, a mirror, or a test can point somewhere else without patching code.
 CONTENT_REMOTE = os.environ.get('DOIT_CONTENT_REMOTE') or 'https://github.com/datapointchris/terminal-library.git'
@@ -107,8 +113,13 @@ def record_sync() -> None:
     SYNC_LOG.write_text('')
 
 
-def driven_by_a_person(argv: list[str]) -> bool:
-    return MACHINE_DRIVEN.isdisjoint(argv)
+def worth_a_pull(argv: list[str]) -> bool:
+    """Whether this invocation is one where fetching the cards earns its cost.
+
+    Two ways it does not: another program is driving, so "once per run" is not
+    once per command; or the line asks for help, which reads no cards at all.
+    """
+    return MACHINE_DRIVEN.isdisjoint(argv) and HELP_FLAGS.isdisjoint(argv)
 
 
 def claim_sync() -> bool:
@@ -168,7 +179,7 @@ def autosync(argv: list[str] | None = None) -> bool:
     if not is_checkout(CONTENT_DIR):
         return False
     report_last_sync_failure()
-    if not driven_by_a_person(sys.argv if argv is None else argv):
+    if not worth_a_pull(sys.argv if argv is None else argv):
         return False
     SYNC_LOG.parent.mkdir(parents=True, exist_ok=True)
     if not claim_sync():

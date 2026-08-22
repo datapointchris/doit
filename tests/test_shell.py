@@ -334,3 +334,15 @@ def test_syncing_by_hand_clears_a_failure_already_fixed(synced, capsys):
     assert content.SYNC_LOG.read_text() == ''
     content.autosync()
     assert 'last failed to sync' not in capsys.readouterr().err
+
+
+def test_a_help_screen_does_not_pull(synced):
+    """Typer runs the root callback before answering a subcommand's --help, so
+    without this every help screen starts a git pull. A reader walking doit's
+    twenty commands made that twenty-one pulls in one sitting."""
+    assert content.autosync(argv=['doit', '--help']) is False
+    assert content.autosync(argv=['doit', '-h']) is False
+    assert content.autosync(argv=['doit', 'next', '--help']) is False
+    assert content.autosync(argv=['doit', 'workflows', 'show', '-h']) is False
+
+    assert content.autosync(argv=['doit', 'next']) is True
