@@ -20,7 +20,7 @@ classifiers = [
 requires-python = ">=3.12"
 
 # typer owns the command tree and rich renders everything, matching
-# syncer/indy/relate/ypl/dectl. rich is declared rather than leaned on as typer's
+# syncer/indy/ypl/dectl. rich is declared rather than leaned on as typer's
 # transitive dependency, because doit uses Console directly and a reader should
 # not have to check typer's pins to learn that.
 #
