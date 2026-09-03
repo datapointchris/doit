@@ -263,7 +263,7 @@ def test_atuin_rows_are_parsed_with_host_and_date():
     )
 
 
-def test_atuin_host_is_canonicalised_to_the_recorded_form():
+def test_atuin_host_is_canonicalized_to_the_recorded_form():
     """atuin reports the fully qualified name; a bare comparison would match no
     host at all and report that nothing ever ran anywhere."""
     stdout = '2026-08-07 21:38:53|macmini.trusted|doit kit remind\n'
