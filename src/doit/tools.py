@@ -274,7 +274,7 @@ def unknown_tool(name: str) -> int:
 
 def category_of(meta: dict | None) -> str:
     """The category a row is grouped under, named for the ones that authored none."""
-    return (meta or {}).get('category') or 'uncategorised'
+    return (meta or {}).get('category') or 'uncategorized'
 
 
 def category_names(registry: dict) -> list[str]:

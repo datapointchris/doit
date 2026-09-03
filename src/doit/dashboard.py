@@ -1043,7 +1043,7 @@ def cap_for(lane_name: str, row_cap: int) -> int:
 
 
 def fitted(text: str, width: int, *, pad: bool = False) -> Text:
-    """`text` as a Text no wider than `width`, ellipsised and optionally padded.
+    """`text` as a Text no wider than `width`, ellipsized and optionally padded.
 
     A column's width is arithmetic the layout owns, so this truncates to a
     computed width rather than to the terminal's — `console.print` still clips

@@ -201,8 +201,8 @@ def test_an_unknown_category_is_caught_before_json_is_emitted():
     assert '[]' not in result.output
 
 
-def test_uncategorised_selects_the_same_rows_on_both_paths(monkeypatch, tmp_path):
-    """A row authoring no category is grouped under `uncategorised`, so `--category` must reach it.
+def test_uncategorized_selects_the_same_rows_on_both_paths(monkeypatch, tmp_path):
+    """A row authoring no category is grouped under `uncategorized`, so `--category` must reach it.
 
     The JSON filter read the raw key, where the human path reads the bucket, so
     the name the listing prints was the one name the JSON path could not select.
@@ -211,7 +211,7 @@ def test_uncategorised_selects_the_same_rows_on_both_paths(monkeypatch, tmp_path
     path.write_text('tools:\n  homeless:\n    description: No category authored\n')
     monkeypatch.setattr(tools, 'REGISTRY', path)
 
-    result = runner.invoke(app, ['tools', 'list', '--category', 'uncategorised', '--json'])
+    result = runner.invoke(app, ['tools', 'list', '--category', 'uncategorized', '--json'])
 
     assert result.exit_code == 0
     assert [row['name'] for row in json.loads(result.stdout)] == ['homeless']
