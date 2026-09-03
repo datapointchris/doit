@@ -1202,7 +1202,7 @@ def test_resolve_where_matching_nothing_resolves_to_nothing(tmp_path):
 
 
 def test_resolve_without_a_where_takes_the_first_row_as_before(tmp_path):
-    """The generalisation has to leave every register without it untouched."""
+    """The generalization has to leave every register without it untouched."""
     rows = [{'name': 'Self Authoring', 'id': 344}, {'name': 'Journal', 'id': 474}]
 
     assert resolving(tmp_path, rows)['label'] == 'Self Authoring'

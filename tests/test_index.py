@@ -357,7 +357,7 @@ def test_the_dormant_editing_mode_is_not_indexed():
     assert not any(key.startswith('main ') for key in keys), 'reported under its real name'
 
 
-def test_an_unrecognised_editing_mode_is_reported_as_main():
+def test_an_unrecognized_editing_mode_is_reported_as_main():
     """A keymap linked to main under some other name is still what you press."""
     bindings = {('main', '^G'): 'gwip', ('mine', '^G'): 'gwip'}
 

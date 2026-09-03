@@ -66,7 +66,7 @@ def resolve_path(env_var: str, key: str, default: Path, config: dict[str, Any] |
     """Resolve a shared path: $env_var, then the config key, then the default.
 
     ``or`` rather than a two-argument get, for the reason the XDG resolvers use
-    it: a variable exported as empty is what a partially-initialised shell
+    it: a variable exported as empty is what a partially-initialized shell
     produces, and taking that as an answer resolves the path to the root.
     """
     config = load_config() if config is None else config

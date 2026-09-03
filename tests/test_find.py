@@ -6,7 +6,7 @@ landed on, which is the only part of the interaction that matters here.
 
 What is asserted hardest is the split between the two terminal acts. `find` hands
 its pick to the composite renderer and `choose` prints one line to stdout, and a
-`$(doit choose)` that captured a rule, a colour or a second line would put that
+`$(doit choose)` that captured a rule, a color or a second line would put that
 on the command line verbatim.
 """
 

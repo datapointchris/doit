@@ -74,9 +74,9 @@ LAUNCH_HEADER = 'Your areas and tools · Enter shows it'
 
 
 def run_fzf(lines: list[str], query: str, preview: str, header: str) -> str | None:
-    """Pick one line with fzf: the row, '' when the pick was cancelled, None when fzf is missing.
+    """Pick one line with fzf: the row, '' when the pick was canceled, None when fzf is missing.
 
-    Cancelling and having no picker are different answers and every caller has
+    Canceling and having no picker are different answers and every caller has
     to tell them apart. `choose` is read back through `$(...)`, where exit status
     is the caller's only signal — a missing binary reported as success is an
     empty command line with no explanation of why.

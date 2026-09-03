@@ -1435,7 +1435,7 @@ def cmd_drift(days: int, as_json: bool) -> int:
         stated = row['stated_share']
         did = f'{row["realized_share"]:.0f}%'
         # A paused pursuit has no claim to have missed, so its days are reported
-        # without a verdict rather than coloured against a share it never stated.
+        # without a verdict rather than colored against a share it never stated.
         if stated is not None:
             gap = row['realized_share'] - stated
             did = f'[green]{did}[/]' if abs(gap) < 10 else f'[yellow]{did}[/]'

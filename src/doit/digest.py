@@ -3,11 +3,11 @@
 ``kit usage`` ranks what you reach for and ``kit unused`` is its tail. Both
 answer a question about one row at a time; neither answers the question about
 the shape of the whole table — what you learned and then dropped, what you
-catalogued and never ran, where two rows are one habit spelled twice. That is a
+catalogd and never ran, where two rows are one habit spelled twice. That is a
 reading task rather than a counting one, so it is handed to a model.
 
 **The payload is aggregate by construction, and that is what makes sending it
-acceptable.** A :class:`doit.usage.Row` is your catalogue joined to history:
+acceptable.** A :class:`doit.usage.Row` is your catalog joined to history:
 ``typed``, ``sources`` and ``names`` are built from the registry and the shell
 files, and history contributes a count and a date and nothing else. No recorded
 command line ever reaches a Row, so none can reach a prompt built from Rows.
@@ -64,7 +64,7 @@ SCHEMA_VERSION = 1
 
 # The only fields that may reach the prompt. Applied to a serialized row rather
 # than written out by hand, so a field added to `usage.Row` has to be added here
-# too before it can travel. Every string here originates in the catalogue and
+# too before it can travel. Every string here originates in the catalog and
 # every number in the counts, which is the property that makes the payload safe
 # to send at all — `last` is excluded because a date says when you were at a
 # keyboard and `days_since` answers the same question about the row.
@@ -204,12 +204,12 @@ def build_prompt(rows: list[usage.Row], today: dt.date, days: int) -> str:
     table = json.dumps(payload(rows, today), separators=(',', ':'))
     return f"""Read one person's command-line toolkit and say what it shows.
 
-Each row is something they have catalogued as theirs, joined to how often they
+Each row is something they have catalogd as theirs, joined to how often they
 have typed it at a shell prompt. A row counts as cold after {days} days.
 
 FIELDS
   typed       what they type to invoke it
-  sources     which collections catalogue it — tool is a registry entry, func and
+  sources     which collections catalog it — tool is a registry entry, func and
               alias are shell definitions they wrote, git and forgit are git aliases
   count       times it was typed
   days_since  days since it last ran, or null if it never has
@@ -223,9 +223,9 @@ Answer these in order, as continuous prose:
 
 1. What is genuinely being reached for, and what that pattern says about how they work.
 2. What was learned and then dropped — rows with a real count that have since gone
-   cold. These are the most interesting, because someone bothered to catalogue and
+   cold. These are the most interesting, because someone bothered to catalog and
    use them before stopping.
-3. What is catalogued and has never run at all. Separate the ones worth resurfacing
+3. What is catalogd and has never run at all. Separate the ones worth resurfacing
    from the ones that look like stale entries to delete, and say which is which.
 4. Where two rows look like one habit spelled twice — an alias beside the tool it
    wraps, or two rows doing the same job.

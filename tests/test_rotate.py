@@ -78,8 +78,8 @@ def test_a_lens_with_no_candidates_surfaces_nothing_rather_than_failing():
     assert rotate.next_up('tmux', [], []) is None
 
 
-def test_the_cursor_is_keyed_on_what_you_type_not_on_the_catalogue_name():
-    """A registry key can be recatalogued while the command stays the same."""
+def test_the_cursor_is_keyed_on_what_you_type_not_on_the_catalog_name():
+    """A registry key can be recatalogd while the command stays the same."""
     rotate.record('tool', tool('ripgrep', 'rg [pattern]'), TODAY)
 
     assert rotate.cursor_path('tool').exists()
@@ -111,7 +111,7 @@ def test_a_lens_with_no_cursor_inherits_what_toolbox_recorded(tmp_path, monkeypa
     assert rotate.cursor_path('tool').read_text().strip().startswith('{')
     carried = rotate.cursor_path('tool').read_text()
     assert '"rg"' in carried, 'rekeyed onto what you type'
-    assert 'gone' not in carried, 'a name that catalogues nothing takes its stamp with it'
+    assert 'gone' not in carried, 'a name that catalogs nothing takes its stamp with it'
     assert 'fd' not in carried, 'never shown by toolbox either, so it stays unshown'
 
 

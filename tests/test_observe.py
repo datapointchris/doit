@@ -128,7 +128,7 @@ def test_observed_takes_an_explicit_observer_over_the_command(tmp_path, monkeypa
     assert observe.observed({'newest-date-in': path}, 'doit kit remind').date == '2026-08-07'
 
 
-def test_observed_reports_an_observer_it_does_not_recognise():
+def test_observed_reports_an_observer_it_does_not_recognize():
     """The register is hand-edited, so a typo must degrade one item's date and
     say so — not fail silently as a task apparently never done."""
     result = observe.observed({'psychic': 'x'}, 'cmd')

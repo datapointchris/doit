@@ -5,7 +5,7 @@ The bound these hold is the whole point of a nudge: a row that wraps is two rows
 so a clip that is off by a column silently doubles what shell startup prints. The
 callers' own tests cover their assembly; these cover the primitive.
 
-Colour is rich's concern and is not asserted here.
+Color is rich's concern and is not asserted here.
 """
 
 from doit import render

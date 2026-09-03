@@ -16,15 +16,15 @@ not here — it is the register item that runs this, one per lens.
 pressed and a workflow card is read, so neither reaches a shell prompt;
 :mod:`doit.usage` excludes them deliberately, and filtering those lenses on
 coldness would find every row equally cold and be no filter at all. They rotate
-over their whole set instead, which is the right behaviour for a drill anyway.
+over their whole set instead, which is the right behavior for a drill anyway.
 
 The cursor is a ``{typed: last_shown}`` map per lens, in the shape
 :mod:`doit.state` already writes and :mod:`doit.observe` already reads — so a
 register item observes a lens through ``newest-date-in`` with no new observer.
 It is deliberately not merged into ``review-state.json``: removing a register
-item orphans a stamp and has to warn, while dropping a tool from the catalogue
+item orphans a stamp and has to warn, while dropping a tool from the catalog
 should drop its cursor entry in silence. One operation, opposite correct
-behaviours.
+behaviors.
 """
 
 from datetime import date
@@ -46,7 +46,7 @@ ROTATION_DIR = xdg_state_home() / 'doit' / 'rotation'
 # has gone cold; the rest rotate whole.
 LENSES = ('tool', 'func', 'alias', 'git', 'forgit', 'workflow', 'tmux', 'zsh')
 
-# The rotation toolbox kept: one file across every lens, keyed by catalogue name.
+# The rotation toolbox kept: one file across every lens, keyed by catalog name.
 # A lens with no cursor of its own takes what belongs to it from here, so a
 # machine keeps its history across the switch instead of spending eighty weeks
 # re-showing tools it was shown this summer. Reading it on demand rather than
@@ -78,9 +78,9 @@ def candidates(lens: str, entries: list[Entry] | None = None, rows: list[usage.R
 def seed(lens: str, pool: list[Entry]) -> None:
     """Give a lens with no cursor whatever toolbox recorded for its rows.
 
-    Names that no longer catalogue anything are dropped rather than carried:
+    Names that no longer catalog anything are dropped rather than carried:
     a row leaving the registry should take its cursor entry with it silently,
-    which is the behaviour that made this a separate file from the register's
+    which is the behavior that made this a separate file from the register's
     own state in the first place.
 
     Writing is not advancing. A peek may trigger this, because importing history
@@ -112,7 +112,7 @@ def next_up(lens: str, entries: list[Entry] | None = None, rows: list[usage.Row]
 def record(lens: str, entry: Entry, today: date | None = None) -> None:
     """Stamp this row as shown, advancing the lens's rotation by one.
 
-    Keyed on the typed form so the cursor survives a row being recatalogued —
+    Keyed on the typed form so the cursor survives a row being recatalogd —
     a registry key can change while what you type does not.
     """
     path = cursor_path(lens)

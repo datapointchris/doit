@@ -93,7 +93,7 @@ class Row:
     """One thing you can type, beside how often you have.
 
     ``typed`` is both the handle and the join key. ``names`` and ``sources`` are
-    plural because one typed command can be catalogued more than once — the
+    plural because one typed command can be catalogd more than once — the
     registry documents several of your own shell functions, so they arrive as a
     ``tool`` row and a ``func`` row naming one thing.
     """
@@ -170,8 +170,8 @@ def measure(entries: list[Entry] | None = None, invocations: tuple[Invocation, .
     """Every measurable row of your kit, joined to what history says about it.
 
     Rows sharing a typed form are merged, because the unit of the answer is a
-    thing you can type: showing ``checknode`` twice because it is catalogued
-    twice would be reporting the catalogue, not your usage.
+    thing you can type: showing ``checknode`` twice because it is catalogd
+    twice would be reporting the catalog, not your usage.
 
     A row absent from history is kept with a zero count rather than dropped —
     never having run it is the answer this exists to surface, so it has to be

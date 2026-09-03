@@ -193,7 +193,7 @@ def cmd_due(limit: int | None = None) -> int:
     """What's due to practice, bounded to the first `limit` rows when given.
 
     The bound is what lets this same view serve a review item's `show:`. That
-    slot runs at shell startup, where an unbounded deck is a catalogue rather
+    slot runs at shell startup, where an unbounded deck is a catalog rather
     than a prompt, and the deck comes due in clumps.
     """
     if not load_labs():

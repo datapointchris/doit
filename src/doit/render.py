@@ -20,7 +20,7 @@ import sys
 from rich.console import Console
 from rich.text import Text
 
-# highlight=False: rich's automatic highlighter colours anything that looks like
+# highlight=False: rich's automatic highlighter colors anything that looks like
 # a number, path or URL, which turns a register id into a surprise.
 console = Console(highlight=False)
 

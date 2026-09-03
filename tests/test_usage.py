@@ -3,7 +3,7 @@
 The join is the whole of this module; the arithmetic on either side of it is a
 count and a max. So the cases below are almost all about the key: a subcommand
 row that must not inherit its parent's count, a git alias spelled differently in
-the catalogue and in history, and a name made entirely of punctuation.
+the catalog and in history, and a name made entirely of punctuation.
 """
 
 from datetime import date
@@ -45,7 +45,7 @@ def test_a_subcommand_row_does_not_inherit_its_parents_count():
 
 
 def test_a_git_alias_is_matched_as_git_plus_its_name():
-    """The catalogue calls it `co`; history records `git co`."""
+    """The catalog calls it `co`; history records `git co`."""
     entries = [Entry(source='git', name='co', invocation='git co')]
 
     rows = usage.measure(entries, (ran('git co main'), ran('git status')))
@@ -81,10 +81,10 @@ def test_an_alias_whose_name_is_dots_survives():
     assert rows[0].count == 1
 
 
-def test_one_thing_catalogued_twice_is_one_row():
+def test_one_thing_catalogd_twice_is_one_row():
     """The registry documents Chris's own shell functions, so several arrive twice.
 
-    Showing `checknode` twice would be reporting the catalogue, not the usage.
+    Showing `checknode` twice would be reporting the catalog, not the usage.
     """
     entries = [tool('checknode', 'checknode'), Entry(source='func', name='checknode', invocation='checknode')]
 

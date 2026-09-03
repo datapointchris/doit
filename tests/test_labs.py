@@ -62,7 +62,7 @@ def big_deck(tmp_path, monkeypatch):
 def test_due_bounded_renders_that_many_and_counts_the_rest(big_deck, capsys):
     """The bound is what makes this view affordable in a startup nudge.
 
-    Anything unbounded there is a catalogue rather than a prompt, and the deck
+    Anything unbounded there is a catalog rather than a prompt, and the deck
     comes due in clumps.
     """
     assert labs.cmd_due(limit=3) == 0
@@ -159,7 +159,7 @@ def test_new_writes_straight_into_the_deck(tmp_path, monkeypatch):
 def test_a_bare_argument_is_no_longer_a_lab_id():
     """`menu labs <arg>` meant "a Lab id, or failing that a tool name".
 
-    That overload is gone: a Lab is `show <id>`, and an unrecognised word is a
+    That overload is gone: a Lab is `show <id>`, and an unrecognized word is a
     typo rather than a tool subject to federate on.
     """
     result = CliRunner().invoke(labs.app, ['scheduled-lab'])

@@ -3,7 +3,7 @@
 These arrived from dotfiles untested. The empty-string case is the one worth
 holding: the module reads ``os.environ.get(VAR) or default`` rather than
 ``os.environ.get(VAR, default)``, because a variable exported as empty is the
-shape a partially-initialised shell actually produces, and the two-argument form
+shape a partially-initialized shell actually produces, and the two-argument form
 would resolve every path to the filesystem root.
 """
 

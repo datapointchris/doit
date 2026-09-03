@@ -1,7 +1,7 @@
 """The lane contract — the one shape doit renders, and the one shape it emits.
 
 A lane is a titled, independently-ordered list of things you could act on. This
-module defines it, parses it, and serialises it, and it is deliberately the only
+module defines it, parses it, and serializes it, and it is deliberately the only
 place that knows what a lane is.
 
 **The contract is symmetric, and that is the point.** What `doit dashboard --json`
@@ -36,9 +36,9 @@ SCHEMA_VERSION = 1
 class Urgency(StrEnum):
     """How hard a row's note should push.
 
-    Colour is derived from this, never from matching the note text, so wording
+    Color is derived from this, never from matching the note text, so wording
     and emphasis stay independent — a source can reword "3d overdue" without
-    silently changing what colour it renders.
+    silently changing what color it renders.
     """
 
     NONE = 'none'

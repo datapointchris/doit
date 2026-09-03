@@ -65,7 +65,7 @@ def load(directory: Path) -> dict:
     """The last answers, or an empty document when there are none yet.
 
     A malformed or unreadable file reads as empty rather than fatal. This is an
-    optimisation over asking the apps directly, so losing it must cost a refresh
+    optimization over asking the apps directly, so losing it must cost a refresh
     and nothing else.
     """
     path = cache_path(directory)

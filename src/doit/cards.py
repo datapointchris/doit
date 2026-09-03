@@ -71,7 +71,7 @@ def slugify(name: str) -> str:
 def render_body(path: Path, *, for_preview: bool = False) -> None:
     """Render a card's markdown body (frontmatter stripped) through bat.
 
-    Colour is forced because the output is often piped — into a pager, into an
+    Color is forced because the output is often piped — into a pager, into an
     fzf preview pane — and bat would otherwise strip it on seeing no terminal.
     A preview additionally suppresses paging, which would hang the pane.
     """

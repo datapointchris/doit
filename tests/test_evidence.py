@@ -377,7 +377,7 @@ def test_files_evidence_travels_through_the_cache_like_any_other(tmp_path):
 
 def test_a_filter_matches_regardless_of_case():
     """The value is typed into a config file and the row is written by an app, so
-    a miss on capitalisation reads as a pursuit nobody has done."""
+    a miss on capitalization reads as a pursuit nobody has done."""
     rows = [{'name': 'journal'}, {'name': 'Self Authoring'}]
 
     assert evidence.matching(rows, {'name': 'Journal'}) == [{'name': 'journal'}]

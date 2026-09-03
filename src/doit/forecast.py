@@ -30,7 +30,7 @@ say which you are reading.
 **What a day holds.** ``forecast.budget_minutes`` in the register. Discretionary
 time the draw is allowed to spend, not the length of a day.
 
-The behavioural model is one rule: walk the offered list from the top, do what
+The behavioral model is one rule: walk the offered list from the top, do what
 fits in what is left, stop when nothing left fits. Pins come first because that is
 where the draw puts them, which is the whole reason a cadence pursuit can crowd
 out the sampled half — the budget runs out before the list does.
@@ -165,7 +165,7 @@ def durations(register: dict, records: list[dict]) -> dict[str, Duration]:
 def spend_a_day(offered: list[str], cost: dict[str, Duration], budget: float) -> list[tuple[str, float]]:
     """Walk the offered list from the top, taking what fits in what is left.
 
-    The whole behavioural model, and the one place a reader should argue with it.
+    The whole behavioral model, and the one place a reader should argue with it.
     Top-down is what makes pins expensive: they are prepended to the list, so they
     are served before the sampled half is reached, and a five-row draw that only
     ever reaches its third row spends two of those rows on whatever the cadences

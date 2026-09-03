@@ -115,7 +115,7 @@ def test_first_draw_probabilities_sum_to_one_and_exclude_zeros():
 
 
 def test_one_completion_banks_exactly_what_days_since_already_said():
-    """The generalisation has to leave the ordinary case untouched.
+    """The generalization has to leave the ordinary case untouched.
 
     A pursuit done once, with credit configured, must weigh identically to one
     without — otherwise turning credit on silently re-times everything else.
