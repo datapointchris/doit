@@ -175,6 +175,12 @@ TEMPLATE = """\
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
 # and `items` when the list is nested inside the document.
 #
+# How many rows come back is the register saying whether it means one thing or
+# several. One row is a decision, so the draw shows it and `doit log` records it.
+# Several are candidates: the first still renders as context, the row says how
+# many more there are, and the log names none of them — an hour of reading is not
+# a claim about which book. Narrow the command to one where you mean one.
+#
 #   resolve_where  optional field: value pairs keeping only the rows that are
 #                  this pursuit. Narrow the command itself where the backend can;
 #                  reach for this where it has no filter for the distinction.
