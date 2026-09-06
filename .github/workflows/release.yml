@@ -4,11 +4,9 @@ on:
   push:
     branches: [main]
 
-# Two pushes to main inside one run's window race: the second moves the branch
-# while the first is computing a version, and semantic-release then pushes its
-# bump commit onto a ref that has already moved. Queue instead, so the later run
-# reads the branch the earlier one left. cancel-in-progress stays false because
-# canceling mid-flight can leave a tag pushed and the release never created.
+# Two pushes to main inside one run's window would otherwise race, and the later
+# run fails pushing its version bump onto a ref that has already moved.
+# Never cancel-in-progress: a canceled release can leave a tag with no release.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
