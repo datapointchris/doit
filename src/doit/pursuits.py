@@ -622,10 +622,15 @@ def resolve_one(name: str, config: dict) -> dict | None:
         return None
     row = rows[0]
     if not isinstance(row, dict):
-        return {'pursuit': name, 'label': str(row)}
+        return {'pursuit': name, 'candidates': len(rows), 'label': str(row)}
     identifier = row.get(config['id']) if config.get('id') else None
     return {
         'pursuit': name,
+        # How many rows the backend matched, not how many are shown. A resolve
+        # narrowed to one thing is a decision the register asked for; three books
+        # equally in progress are candidates, and the first is not the answer to
+        # anything. Everything downstream reads this before claiming a pick.
+        'candidates': len(rows),
         'label': str(row.get(label_field, '')).strip(),
         'id': None if identifier is None else str(identifier),
         'context': row_context(row, config.get('context')),
@@ -850,13 +855,19 @@ def render_context(detail: dict, width: int) -> None:
     indent = ' ' * (width + CONTINUATION_INDENT)
     context = detail.get('context') or ''
     about = detail.get('detail') or ''
-    if context or about:
+    rest = max(int(detail.get('candidates') or 1) - 1, 0)
+    if context or about or rest:
         line = Text(indent)
         if context:
             line.append(context, style='cyan')
         if context and about:
             line.append(' — ')
         line.append(about)
+        # The title above is the first of several equally valid rows, and without
+        # this the row reads as the backend having chosen. Three books in progress
+        # have no next one; showing one of them silently picks for you.
+        if rest:
+            line.append(f'  +{rest} more', style='yellow')
         console.print(line, no_wrap=True, overflow='ellipsis')
     if detail.get('view'):
         line = Text(indent)
@@ -1189,6 +1200,13 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     if not no_write:
         downstream = run_on_log(pursuits[matched], item, ' '.join(words), minutes, assume_yes)
 
+    # Logging a pursuit says the pursuit happened. It does not say which of its
+    # candidates did, and the log has no way to find out — the note is prose. So
+    # the item is only named where naming it is a fact: the backend matched one
+    # row, or the write-through completed the one it offered.
+    acted = bool((downstream or {}).get('ran'))
+    named = item if item and (int(item.get('candidates') or 1) == 1 or acted) else {}
+
     record_event(
         'done',
         matched,
@@ -1197,7 +1215,7 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
             'occurred_at': occurred.isoformat(),
             'note': ' '.join(words) or None,
             'duration_minutes': minutes,
-            'item': item or None,
+            'item': named or None,
             'downstream': downstream,
             'draw_id': cached.get('draw_id'),
             'was_offered': matched in (cached.get('pinned', []) + cached.get('drawn', [])),
@@ -1210,7 +1228,7 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
 
     interval = state['intervals'].get(matched)
     when = '' if interval is None or math.isinf(interval) else f' · due again in ~{interval:.0f}d'
-    label = f' — {item["label"]}' if item.get('label') else ''
+    label = f' — {named["label"]}' if named.get('label') else ''
     logged = Text.from_markup('[green]Logged[/] ')
     logged.append(f'{matched}{label}{when}')
     console.print(logged)

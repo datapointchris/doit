@@ -564,6 +564,26 @@ def test_resolve_one_returns_none_for_an_empty_result(tmp_path):
     assert pursuits.resolve_one('p', {'resolve': f'cat {payload}', 'label': 'name'}) is None
 
 
+def test_resolve_one_counts_the_rows_that_matched(tmp_path):
+    """Three books equally in progress are candidates, not a decision.
+
+    The first row still renders, because a title is better context than none. What
+    the count buys is everything downstream knowing the backend did not choose.
+    """
+    payload = tmp_path / 'books.json'
+    payload.write_text(json.dumps([{'title': 'Ego and Archetype'}, {'title': 'Lucid Dreaming'}]))
+    resolved = pursuits.resolve_one('read', {'resolve': f'cat {payload}', 'label': 'title'})
+    assert resolved['label'] == 'Ego and Archetype'
+    assert resolved['candidates'] == 2
+
+
+def test_resolve_one_counts_after_the_register_narrows_the_rows(tmp_path):
+    payload = tmp_path / 'tasks.json'
+    payload.write_text(json.dumps([{'name': 'Journal'}, {'name': 'Pumice Stone'}]))
+    config = {'resolve': f'cat {payload}', 'label': 'name', 'resolve_where': {'name': 'Journal'}}
+    assert pursuits.resolve_one('journal', config)['candidates'] == 1
+
+
 def test_resolve_all_only_asks_pursuits_that_declare_a_resolver():
     register = {'a': {'resolve': 'echo hello'}, 'b': {'description': 'no resolver'}}
     resolved = pursuits.resolve_all(['a', 'b'], register)
@@ -638,6 +658,45 @@ def test_logging_re_resolves_past_a_cached_failure(sandbox, tmp_path, monkeypatc
 
     assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
     assert marker.read_text().strip() == '422'
+
+
+def test_logging_names_no_item_when_the_backend_matched_several(sandbox, monkeypatch):
+    """Logging `read` says an hour of reading happened, never which book.
+
+    Three books are in progress and the note is prose, so nothing here can tell
+    which one it was. Naming the first put a book in the journal that the reader
+    had not opened.
+    """
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    offered = {'label': 'Difficult Conversations', 'id': '269', 'candidates': 3}
+    stand_a_draw(['read-library'], resolved={'read-library': offered})
+
+    assert pursuits.cmd_log('read-library', ['ego', 'and', 'archetype'], None, None, assume_yes=True, no_write=False) == 0
+
+    record = journal.read_all(sandbox / 'state')[0]
+    assert record['note'] == 'ego and archetype'
+    assert record['item'] is None
+
+
+def test_logging_names_the_item_the_write_through_completed(sandbox, monkeypatch, tmp_path):
+    """A completed row is a fact about what was done, however many were offered."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    marker = tmp_path / 'completed'
+    register = write_register(
+        tmp_path,
+        'pursuits:\n'
+        '  chores:\n'
+        '    weight: 25\n'
+        '    resolve: echo unused-the-draw-already-resolved-it\n'
+        f'    on_log: sh -c "echo {{id}} > {marker}"\n',
+    )
+    monkeypatch.setattr(pursuits, 'REGISTER', register)
+    stand_a_draw(['chores'], resolved={'chores': {'label': 'Pumice Stone', 'id': '7', 'candidates': 3}})
+
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+
+    assert marker.read_text().strip() == '7'
+    assert journal.read_all(sandbox / 'state')[0]['item']['label'] == 'Pumice Stone'
 
 
 def test_on_log_is_skipped_when_the_pursuit_declares_none():
@@ -722,6 +781,21 @@ def test_a_drawn_row_prints_the_command_that_opens_the_item(monkeypatch, capsys)
     pursuits.render_row(1, 'chores', state, resolved, False, 6)
 
     assert f'↳ {view}' in capsys.readouterr().out
+
+
+def test_a_row_says_how_many_more_the_backend_matched(monkeypatch, capsys):
+    """Without the count the title reads as the backend having chosen.
+
+    Three books are equally in progress, so the first is one of three rather than
+    the next one. The count is what stops a scan reading it as a decision.
+    """
+    monkeypatch.setenv('COLUMNS', '200')
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    resolved = {'chores': {'label': 'Difficult Conversations', 'context': 'Douglas Stone', 'candidates': 3}}
+
+    pursuits.render_row(1, 'chores', state, resolved, False, 6)
+
+    assert '+2 more' in capsys.readouterr().out
 
 
 def test_a_row_with_nothing_extra_to_say_stays_one_line(capsys):
