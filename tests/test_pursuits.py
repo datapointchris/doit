@@ -1787,3 +1787,18 @@ def test_the_register_names_a_checkoff_size_and_the_log_names_a_measurement():
     assert 'checkoff_minutes' in pursuits.KNOWN_FIELDS
     assert 'minutes' not in pursuits.KNOWN_FIELDS
     assert '--minutes' in pursuits.TEMPLATE, 'the template says which is which'
+
+
+def test_a_paused_timed_pursuit_keeps_its_unit_in_drift(tmp_path, sandbox, monkeypatch, capsys):
+    """A record keeps the size it was logged under. Reading the sizes off the
+    active set drops a paused pursuit's, so its row lands in the counted table
+    and reports 3 completions where it did 135 minutes."""
+    register = 'pursuits:\n  read:\n    weight: 30\n    checkoff_minutes: 45\n    paused: true\n  chores:\n    weight: 25\n'
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
+    for _ in range(3):
+        log_days_ago(sandbox / 'state', 'read', 1, minutes=45)
+
+    row = drift_rows(capsys)['read']
+
+    assert (row['unit'], row['amount']) == ('minutes', 135.0)
+    assert row['checkoff_minutes'] == 45.0
