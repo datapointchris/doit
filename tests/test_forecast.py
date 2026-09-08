@@ -125,7 +125,7 @@ def test_the_simulation_feeds_its_own_logs_back_into_the_next_day(register):
     # the rate moves every implied interval, and the intervals move the draw.
     active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
     cost = forecast.durations(active, [])
-    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 5, 120, replicate=1)
+    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 5, 120, replicate=1, balance_settings={})
     assert run
     assert {day for day, _, _ in run} <= set(range(5))
     # Nothing is done twice in one day: the draw samples without replacement.
@@ -140,7 +140,7 @@ def test_the_simulation_reaches_the_pursuit_the_real_draw_pins(register):
     # simulation had stopped running the same draw.
     active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
     cost = forecast.durations(active, [])
-    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 3, 120, replicate=1)
+    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 3, 120, replicate=1, balance_settings={})
     assert 'chores' in {name for _, name, _ in run}
 
 

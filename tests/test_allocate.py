@@ -90,9 +90,8 @@ def test_urgency_is_one_at_exactly_one_checkoff_behind():
 
 
 def test_urgency_is_zero_for_anything_current_or_ahead():
-    # What a cooldown floor used to buy, without one: doing a pursuit that was on
-    # schedule takes its balance to zero, so it cannot be the heaviest candidate
-    # again a minute later.
+    # Doing a pursuit that was on schedule takes its balance to zero, so it
+    # cannot be the heaviest candidate again a minute later.
     assert allocate.urgency(0.0, 45.0) == 0.0
     assert allocate.urgency(-90.0, 45.0) == 0.0
 
@@ -136,18 +135,41 @@ def test_a_steeper_catchup_exponent_makes_the_same_debt_weigh_more():
     assert steep['a'] > flat['a']
 
 
-def test_the_draw_falls_back_to_stated_weight_when_nothing_is_owed():
+def test_the_pool_falls_back_to_stated_weight_when_nothing_is_owed():
     # A register with no debt anywhere would otherwise offer nothing at all, and
     # a blank screen reads as the tool having broken rather than as being current.
-    assert allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, ()) == {'a': 30.0, 'b': 10.0}
+    assert allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, {'a': 0.0, 'b': 0.0}, (), 5) == {'a': 30.0, 'b': 10.0}
 
 
-def test_the_fallback_still_leaves_a_skipped_pursuit_out():
-    assert allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, ['b']) == {'a': 30.0}
+def test_the_pool_leaves_a_skipped_pursuit_out_of_both_tiers():
+    assert allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, {'a': 0.0, 'b': 0.0}, ['b'], 5) == {'a': 30.0}
+    assert 'b' not in allocate.candidates({'a': 4.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, {'a': 4.0, 'b': 0.0}, ['b'], 5)
 
 
-def test_anything_owed_at_all_wins_over_the_fallback():
-    assert allocate.candidates({'a': 0.0, 'b': 4.0}, {'a': 30.0, 'b': 10.0}, ()) == {'a': 0.0, 'b': 4.0}
+def test_one_pursuit_owing_does_not_empty_the_screen():
+    """The failure this guards: `any owed` as a switch made the pool the owed set,
+    so one pursuit a minute past its interval put one row on a screen sized for
+    five — the queue the weighted draw exists not to be."""
+    pool = allocate.candidates(
+        {'a': 0.0, 'b': 0.0, 'c': 0.0, 'd': 0.0, 'e': 4.0}, dict.fromkeys('abcde', 20.0), dict.fromkeys('abcde', 0.0) | {'e': 4.0}, (), 5
+    )
+
+    assert sorted(pool) == ['a', 'b', 'c', 'd', 'e']
+    assert all(value > 0 for value in pool.values())
+
+
+def test_what_is_owed_always_outranks_what_is_resting():
+    pool = allocate.candidates({'light': 0.5, 'heavy': 0.0}, {'light': 1.0, 'heavy': 100.0}, {'light': 0.5, 'heavy': 0.0}, (), 5)
+
+    assert pool['light'] > pool['heavy'], 'a weight of 100 that owes nothing sits under one of 1 that does'
+    assert pool['heavy'] == 0.5 * allocate.RESTING_SHARE
+
+
+def test_the_pool_stops_topping_up_once_it_is_full():
+    owed = {'a': 3.0, 'b': 2.0, 'c': 1.0}
+    pool = allocate.candidates({**owed, 'd': 0.0}, {'a': 10.0, 'b': 10.0, 'c': 10.0, 'd': 10.0}, {**owed, 'd': 0.0}, (), 3)
+
+    assert pool == owed
 
 
 def test_draw_returns_distinct_names_up_to_size():
@@ -183,3 +205,26 @@ def test_first_draw_probabilities_sum_to_one_and_exclude_zeros():
     assert probabilities['cooling'] == 0.0
     assert abs(sum(probabilities.values()) - 1.0) < 1e-9
     assert probabilities['a'] == 0.75
+
+
+def test_a_pursuit_a_whole_checkoff_ahead_is_not_offered_back():
+    """It is the thing just done, and offering it back reads as the log having
+    gone nowhere. One merely level with its schedule still fills a row."""
+    pool = allocate.candidates(
+        {'owed': 2.0, 'ahead': 0.0, 'level': 0.0},
+        {'owed': 10.0, 'ahead': 10.0, 'level': 10.0},
+        {'owed': 2.0, 'ahead': -2.0, 'level': -0.1},
+        (),
+        5,
+    )
+
+    assert 'ahead' not in pool
+    assert sorted(pool) == ['level', 'owed']
+
+
+def test_the_whole_register_is_offered_rather_than_a_blank_screen():
+    """Holding that line where everything is ahead would leave nothing on offer,
+    and a blank screen says the tool broke rather than that you are done."""
+    pool = allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 10.0, 'b': 20.0}, {'a': -3.0, 'b': -4.0}, (), 5)
+
+    assert pool == {'a': 10.0, 'b': 20.0}

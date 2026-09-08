@@ -52,6 +52,11 @@ FALLBACK_LOGS_PER_DAY = 2.0
 # in, so it is the shortest one a surplus or a debt can be read against.
 PERIOD_DAYS = 7.0
 
+# What the heaviest pursuit that owes nothing is worth against the least urgent
+# one that does. A tenth, so a resting row is an order of magnitude off being
+# picked first — on the screen to be seen, never to be pressed.
+RESTING_SHARE = 0.1
+
 
 def implied_shares(weights: dict[str, float]) -> dict[str, float]:
     """Each pursuit's fraction of the total weight.
@@ -121,10 +126,10 @@ def urgency(owed: float, size: float, catchup_exponent: float = DEFAULT_CATCHUP_
     dominate every draw is a weight nobody has revisited, and a ceiling there
     suppresses the one signal saying the register needs editing.
 
-    The zero at current is what a cooldown floor used to buy. Doing a pursuit that
-    was on schedule takes its balance to zero or below, so the thing just logged
-    cannot be the heaviest candidate a minute later — and one that was three
-    checkoffs behind still is, which is correct.
+    The zero at current is what keeps a pursuit just done off the next screen.
+    Doing one that was on schedule takes its balance to zero or below, so it
+    cannot be the heaviest candidate a minute later — while one that was three
+    checkoffs behind still is, which is the answer that has to survive.
     """
     if size <= 0:
         return 0.0
@@ -159,23 +164,47 @@ def effective_weights(
     return effective
 
 
-def candidates(effective: dict[str, float], weights: dict[str, float], suppressed: Iterable[str]) -> dict[str, float]:
-    """What to sample from, falling back to stated weight when nothing is owed.
+def candidates(
+    effective: dict[str, float],
+    weights: dict[str, float],
+    ratios: dict[str, float],
+    suppressed: Iterable[str],
+    size: int,
+) -> dict[str, float]:
+    """What to sample from: everything owed, topped up to ``size`` from what is not.
 
-    Urgency is zero for everything current, so a register with no debt anywhere
-    would offer nothing at all — and a blank screen reads as the tool having
-    broken rather than as being caught up. Falling back keeps five things on
-    offer while every row's balance says none of them is owed, which is the
-    reading that lets an evening be spent deliberately rather than dutifully.
+    Urgency is zero for anything current, so the owed set alone is a queue — one
+    pursuit a minute past its interval puts one row on a screen sized for five,
+    and the same row every run until it is cleared. That is the shape the whole
+    weighted draw exists not to be.
 
-    A skip is excluded from the fallback too. It is the one statement about a
-    pursuit that is not about being behind, so it has to survive a state where
-    nothing is.
+    So a resting tier sits underneath, scaled to :data:`RESTING_SHARE` of the
+    least urgent owed pursuit: visible without competing to be picked first. That
+    is what makes an evening spendable deliberately — seeing what else there is
+    says the register is current, which a one-row screen cannot.
+
+    **A pursuit a whole checkoff or more ahead is not in it.** That is the thing
+    just done, and offering it back reads as the log having gone nowhere. Where
+    holding that line would empty the pool, the whole register is offered instead
+    — a blank screen says the tool broke rather than that you are done.
+
+    A skip is in neither tier. It is the one statement about a pursuit that is
+    not about being behind, so it has to survive a state where nothing is.
     """
-    if any(value > 0 for value in effective.values()):
-        return effective
     passed = set(suppressed)
-    return {name: max(weight, 0.0) for name, weight in weights.items() if name not in passed}
+    owed = {name: value for name, value in effective.items() if value > 0 and name not in passed}
+    if len(owed) >= size:
+        return owed
+    available = [name for name in weights if name not in owed and name not in passed and weights[name] > 0]
+    resting = {name: weights[name] for name in available if ratios[name] > -1.0}
+    if not resting:
+        resting = {name: weights[name] for name in available}
+    if not resting:
+        return owed
+    if owed:
+        scale = min(owed.values()) * RESTING_SHARE / max(resting.values())
+        resting = {name: value * scale for name, value in resting.items()}
+    return {**owed, **resting}
 
 
 def draw(effective: dict[str, float], size: int, rng: random.Random | None = None) -> list[str]:

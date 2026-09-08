@@ -31,12 +31,28 @@ import random
 import uuid
 from datetime import date
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 from doit.state import load_state
 from doit.state import save_state
 
 SCHEMA_VERSION = 1
+
+
+class Event(StrEnum):
+    """What a journal record says happened. The whole vocabulary, in one place.
+
+    Roughly fifteen functions across three modules select on this field and none
+    of them is a dispatch, so nothing mechanical finds them. Naming the members
+    here makes adding a fourth kind a search on one name rather than an audit
+    somebody has to remember to run.
+    """
+
+    DONE = 'done'
+    SKIP = 'skip'
+    RESET = 'reset'
+
 
 # Trailing window for the measured logging rate. Long enough that a quiet week
 # does not swing the implied intervals, short enough to follow a real change of
@@ -127,27 +143,6 @@ def latest_occurrence(records: list[dict], event: str) -> dict[str, datetime]:
     return latest
 
 
-def earliest_occurrence(records: list[dict], event: str) -> dict[str, datetime]:
-    """Oldest time per pursuit for one event kind.
-
-    The counterpart to :func:`latest_occurrence`, and what a balance falls back to
-    for its origin. A pursuit nobody has zeroed is still answerable from the first
-    thing it ever recorded, which is the only honest starting point available
-    without asking.
-    """
-    earliest: dict[str, datetime] = {}
-    for record in records:
-        if record.get('event') != event:
-            continue
-        pursuit = record.get('pursuit')
-        when = parse_time(record.get('occurred_at') or record.get('logged_at'))
-        if not pursuit or when is None:
-            continue
-        if pursuit not in earliest or when < earliest[pursuit]:
-            earliest[pursuit] = when
-    return earliest
-
-
 def local_day(record: dict, now: datetime) -> date | None:
     """The local date a record landed on, by ``now``'s offset.
 
@@ -158,18 +153,6 @@ def local_day(record: dict, now: datetime) -> date | None:
     """
     when = parse_time(record.get('occurred_at') or record.get('logged_at'))
     return None if when is None else when.astimezone(now.tzinfo).date()
-
-
-def days(records: list[dict], pursuit: str, event: str, now: datetime) -> list[date]:
-    """The distinct local dates one pursuit has a matching record on."""
-    found = set()
-    for record in records:
-        if record.get('event') != event or record.get('pursuit') != pursuit:
-            continue
-        day = local_day(record, now)
-        if day is not None:
-            found.add(day)
-    return sorted(found)
 
 
 def days_since(latest: dict[str, datetime], names: list[str], now: datetime) -> dict[str, float | None]:
@@ -215,7 +198,7 @@ def rate_per_day(records: list[dict], now: datetime, sizes: dict[str, float]) ->
     """
     within = []
     for record in records:
-        if record.get('event') != 'done':
+        if record.get('event') != Event.DONE:
             continue
         when = parse_time(record.get('occurred_at') or record.get('logged_at'))
         if when is None or (now - when).days >= RATE_WINDOW_DAYS:

@@ -18,10 +18,14 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from doit import journal
 from doit import pursuits
 from doit import render
+from doit.cli import app as cli_app
+
+runner = CliRunner()
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'pursuits'
 NOW = datetime.fromisoformat('2026-08-04T12:00:00-04:00')
@@ -223,11 +227,16 @@ def test_the_draw_fills_up_to_the_screen_size_across_pins_and_samples(sandbox):
     assert len(selection['pinned']) + len(selection['drawn']) <= pursuits.DRAW_SIZE
 
 
-def test_a_just_logged_pursuit_is_not_drawn_again(sandbox):
+def test_a_just_logged_pursuit_is_never_the_heaviest_candidate(sandbox):
+    """It can still fill a row — the screen is sized for five and a one-row draw
+    is a queue. What it cannot do is outrank anything that is actually owed,
+    which is what reads as the tool not having noticed the log."""
     log_done(sandbox / 'state', 'read-library', 0.0)
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+
     assert state['effective']['read-library'] == 0.0
-    assert 'read-library' not in pursuits.compute_draw(state, seed=1)['drawn']
+    owed = [value for name, value in state['pool'].items() if state['effective'][name] > 0]
+    assert owed and state['pool']['read-library'] < min(owed)
 
 
 def test_a_cached_draw_is_reused_inside_the_window(sandbox):
@@ -940,14 +949,47 @@ def test_days_since_stays_the_honest_elapsed_time(tmp_path, monkeypatch):
     assert state['balance']['chore'] == -3.0, 'and the draw sees three days of cover'
 
 
-def test_the_zero_point_is_the_reset_rather_than_the_journals_first_entry(tmp_path, monkeypatch):
+def test_the_zero_point_is_the_reset_and_a_payment_cannot_move_it(tmp_path, monkeypatch):
     """Shipping writes one for every pursuit, so history accrued against targets
     that have since moved cannot open a pursuit at a debt nobody agreed to."""
-    without = balance_state(tmp_path, monkeypatch, [done('chore', 100.0)])
     after = balance_state(tmp_path, monkeypatch, [done('chore', 100.0), zeroed('chore', 2.0)])
 
-    assert without['balance']['chore'] == 99.0
-    assert after['balance']['chore'] == 2.0
+    assert after['balance']['chore'] == 2.0, 'billed from the reset, and the 100-day-old entry pays nothing'
+
+
+def test_recording_something_never_increases_what_is_owed(tmp_path, monkeypatch):
+    """Deriving the origin from the oldest record let a backdated log drag it
+    behind itself: the schedule billed for the span the entry opened up and the
+    entry paid one checkoff against it, so logging doubled the debt."""
+    before = balance_state(tmp_path, monkeypatch, [done('chore', 200.0)])
+    after = balance_state(tmp_path, monkeypatch, [done('chore', 200.0), done('chore', 400.0)])
+
+    assert after['balance']['chore'] <= before['balance']['chore']
+
+
+def test_a_pursuit_with_no_reset_is_billed_for_one_interval(tmp_path, monkeypatch):
+    """The origin cannot come from the records, so it is a single interval back —
+    a pursuit doit has never been told the start of owes exactly one checkoff."""
+    fresh = balance_state(tmp_path, monkeypatch, [])
+    old = balance_state(tmp_path, monkeypatch, [done('chore', 100.0)])
+
+    assert fresh['balance']['chore'] == 1.0
+    assert old['balance']['chore'] == 1.0, 'a century of history does not open a century of debt'
+
+
+def test_an_evidence_backed_pursuit_is_billed_only_over_what_its_app_remembers(tmp_path, sandbox, monkeypatch):
+    """The credit side is a 90-day cache. Billing over a longer span accrues a
+    debt by construction, on the pursuit most reliably done."""
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER))
+    window = pursuits.evidence.OCCURRENCE_WINDOW_DAYS
+    now = datetime.now().astimezone()
+    write_records(sandbox / 'state', [{'pursuit': 'backed', 'event': 'reset', 'occurred_at': (now - timedelta(days=400)).isoformat()}])
+    stub_evidence_days(monkeypatch, {'backed': [days_ago_iso(n) for n in range(window)]})
+
+    state = pursuits.build_state(pursuits.load_pursuits(), now)
+
+    assert (now - state['origins']['backed']).days == window
+    assert state['balance']['backed'] < 0, 'done every day it can be asked about is ahead, not 300 checkoffs behind'
 
 
 def test_a_pursuit_with_no_record_anywhere_opens_one_checkoff_behind(tmp_path, monkeypatch):
@@ -1008,8 +1050,7 @@ def test_a_balance_past_its_band_is_reported(tmp_path, monkeypatch):
     """A daily chore asks for seven a week, so two weeks of band is fourteen."""
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 30.0), zeroed('read', 0.0)])
 
-    assert [name for name, _, _ in pursuits.out_of_band(state, weeks=2.0)] == ['chore']
-    assert pursuits.out_of_band(state, weeks=5.0) == []
+    assert [name for name, _, _ in pursuits.out_of_band(state)] == ['chore']
 
 
 def test_a_surplus_is_reported_as_loudly_as_a_debt(tmp_path, monkeypatch):
@@ -1018,7 +1059,7 @@ def test_a_surplus_is_reported_as_loudly_as_a_debt(tmp_path, monkeypatch):
     state = balance_state(tmp_path, monkeypatch, burst)
 
     assert state['balance']['chore'] == -29.0
-    assert [name for name, _, _ in pursuits.out_of_band(state, weeks=2.0)] == ['chore']
+    assert [name for name, _, _ in pursuits.out_of_band(state)] == ['chore']
 
 
 def test_a_pursuit_declaring_its_own_band_is_judged_by_that_one(tmp_path, monkeypatch):
@@ -1026,7 +1067,7 @@ def test_a_pursuit_declaring_its_own_band_is_judged_by_that_one(tmp_path, monkey
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 30.0), zeroed('read', 0.0)], register=wider)
 
     assert state['balance']['chore'] == 30.0
-    assert pursuits.out_of_band(state, weeks=2.0) == []
+    assert pursuits.out_of_band(state) == []
 
 
 def test_the_balance_spans_every_machines_journal(tmp_path, monkeypatch):
@@ -1063,8 +1104,8 @@ def test_the_standing_line_counts_the_names_it_does_not_spell_out(tmp_path, monk
 
     line = pursuits.standing_line(state)
 
-    assert line.count(',') == pursuits.STANDING_NAMES
-    assert line.endswith(f'+{6 - pursuits.STANDING_NAMES} more')
+    assert line.count(',') == pursuits.STANDING_NAMES - 1
+    assert line.endswith('doit pursuits list'), 'a typeable command, never a remainder count'
 
 
 def test_format_balance_carries_the_unit_and_always_the_sign(tmp_path, monkeypatch):
@@ -1142,18 +1183,23 @@ def test_a_counted_pursuit_is_never_asked_how_long_it_took(sandbox, monkeypatch)
     assert journal.read_all(sandbox / 'state')[0]['duration_minutes'] is None
 
 
-def test_minutes_on_a_counted_pursuit_is_refused_rather_than_recorded(sandbox, monkeypatch):
-    # The register's declaration is what makes a pursuit measured in time, so a
-    # duration on one that is not has nothing to be a fraction of.
+def test_minutes_on_a_counted_pursuit_is_a_usage_error(sandbox, monkeypatch):
+    """The register's declaration is what makes a pursuit measured in time, so a
+    duration on one that is not has nothing to be a fraction of. A flag the run
+    cannot honor exits 2, the way every other misuse of this verb does."""
     answers(monkeypatch)
-    assert pursuits.cmd_log('chores', [], None, 20, assume_yes=True, no_write=True) == 1
+    ran = runner.invoke(cli_app, ['log', 'chores', '--minutes', '20', '--yes', '--no-write'])
+
+    assert ran.exit_code == 2
     assert journal.read_all(sandbox / 'state') == []
 
 
-def test_a_timed_pursuit_without_a_terminal_names_the_flag_it_needs(sandbox, monkeypatch, capsys):
+def test_a_timed_pursuit_without_a_terminal_names_the_flag_it_needs(sandbox, monkeypatch):
     monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
-    assert pursuits.cmd_log('read-library', [], None, None, assume_yes=True, no_write=True) == 1
-    assert '--minutes' in capsys.readouterr().err
+    ran = runner.invoke(cli_app, ['log', 'read-library', '--yes', '--no-write'])
+
+    assert ran.exit_code == 2
+    assert '--minutes' in ran.output
     assert journal.read_all(sandbox / 'state') == []
 
 
@@ -1215,8 +1261,9 @@ def test_a_skip_names_when_the_pursuit_returns(sandbox, monkeypatch, capsys):
     assert pursuits.cmd_skip('read-library', '3d') == 0
 
     printed = capsys.readouterr().out
-    assert 'out of the draw until' in printed
-    assert 'Weight untouched' in printed
+    assert 'out of the draw for 3d, until 11 Sep 2026' in printed, 'a year and a day must not read the same'
+    assert 'weight untouched' in printed
+    assert 'doit pursuits resume read-library' in printed, 'the verb that retires the mark is on the screen that writes it'
 
 
 def test_skip_span_falls_back_to_a_day_where_the_weight_implies_no_interval():
@@ -1229,7 +1276,7 @@ def test_a_reset_writes_a_zero_point_without_touching_what_happened(sandbox, mon
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
     log_days_ago(sandbox / 'state', 'chores', 3)
 
-    assert pursuits.cmd_reset('chores') == 0
+    assert pursuits.cmd_reset('chores', assume_yes=False) == 0
 
     records = journal.read_all(sandbox / 'state')
     assert [record['event'] for record in records] == ['done', 'reset']
@@ -1241,7 +1288,7 @@ def test_a_reset_with_no_name_zeroes_every_pursuit(sandbox, monkeypatch):
     at zero rather than being backfilled from history."""
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
 
-    assert pursuits.cmd_reset(None) == 0
+    assert pursuits.cmd_reset(None, assume_yes=True) == 0
 
     zeroed = {record['pursuit'] for record in journal.read_all(sandbox / 'state') if record['event'] == 'reset'}
     assert zeroed == set(pursuits.load_pursuits())
@@ -1249,7 +1296,7 @@ def test_a_reset_with_no_name_zeroes_every_pursuit(sandbox, monkeypatch):
 
 def test_resetting_a_pursuit_that_does_not_exist_writes_nothing(sandbox, monkeypatch):
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
-    assert pursuits.cmd_reset('nonesuch') == 1
+    assert pursuits.cmd_reset('nonesuch', assume_yes=False) == 1
     assert journal.read_all(sandbox / 'state') == []
 
 
@@ -1359,6 +1406,7 @@ pursuits:
     weight: 25
     cadence: 3d
     evidence: echo []
+    evidence_time: completed_at
 """
 
 
@@ -1530,3 +1578,185 @@ def test_resolve_where_matches_across_types_the_way_evidence_does(tmp_path):
     rows = [{'name': 'Journal', 'id': 474}]
 
     assert resolving(tmp_path, rows, resolve_where={'id': '474'})['id'] == '474'
+
+
+def test_the_odds_reported_are_the_odds_the_draw_ran_on(tmp_path, monkeypatch):
+    """Reporting `probability` from the urgency-multiplied weights while sampling
+    something else put five chosen rows on screen at 0.0% each, under a legend
+    calling that number the chance of being drawn first."""
+    current = [zeroed('chore', 0.0), done('chore', 0.0), zeroed('read', 0.0), done('read', 0.0, minutes=60)]
+    state = balance_state(tmp_path, monkeypatch, current)
+
+    drawn = pursuits.compute_draw(state, seed=1)['drawn']
+
+    assert drawn, 'the pool is what fills the screen'
+    assert all(state['probability'][name] > 0 for name in drawn)
+    assert abs(sum(state['probability'].values()) - 1.0) < 1e-9
+
+
+def test_pausing_a_timed_pursuit_does_not_move_every_other_interval(tmp_path, monkeypatch):
+    """The measured rate walks every record in the journal, so the size map it
+    reads is register-wide. Scoping it to the active set reclassified a paused
+    pursuit's whole history as one-checkoff-per-entry and tripled the divisor
+    every other pursuit's interval is derived from."""
+    logs = [done('read', days_ago=index / 2, minutes=90) for index in range(20)]
+    running = balance_state(tmp_path, monkeypatch, logs)
+    paused = balance_state(tmp_path, monkeypatch, logs, register=BALANCE_REGISTER + '    paused: true\n')
+
+    assert 'read' not in paused['active']
+    assert paused['logs_per_day'] == running['logs_per_day']
+
+
+def test_the_register_wide_size_map_covers_a_pursuit_the_active_set_drops():
+    register = {'read': {'weight': 1, 'minutes': 30}, 'gone': {'weight': 0, 'minutes': 45}}
+    assert pursuits.declared_minutes(register) == {'read': 30.0, 'gone': 45.0}
+
+
+def test_a_row_the_register_dropped_renders_rather_than_crashing(sandbox, monkeypatch, capsys):
+    """The draw outlives the register by up to a quarter of an hour, so pausing a
+    drawn pursuit inside that window left `doit next` dying on a traceback."""
+    pursuits.save_cached_draw({'draw_id': 'abc', 'created_at': NOW.isoformat(), 'pinned': [], 'drawn': ['paused-thing']})
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+
+    pursuits.render_row(1, 'paused-thing', state, {}, pin=False, width=12)
+
+    assert 'paused-thing' in capsys.readouterr().out
+
+
+def test_the_warning_band_never_falls_below_one_checkoff(tmp_path, monkeypatch):
+    """Weeks and checkoffs are different units, so two weeks of band on a monthly
+    cadence is 0.47 of a chore — one chore coming due pinned as overdue and
+    reported as a weight that is not true, on the same screen."""
+    monthly = BALANCE_REGISTER.replace('cadence: 1d', 'cadence: 1mo')
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 30.0), zeroed('read', 0.0)], register=monthly)
+
+    assert state['balance']['chore'] == 1.0
+    assert pursuits.warn_threshold(state, 'chore') == 1.0
+    assert pursuits.out_of_band(state) == [], 'exactly one checkoff owed is due, not a wrong weight'
+
+
+def test_the_standing_line_needs_a_whole_checkoff_before_it_says_behind(tmp_path, monkeypatch):
+    """A balance climbs continuously from zero, so every pursuit passes through
+    the fraction just above it. `behind · read +0m` names nothing anyone can act on."""
+    barely = balance_state(tmp_path, monkeypatch, [zeroed('chore', 0.2), zeroed('read', 0.02)])
+
+    assert barely['balance']['chore'] > 0 and barely['balance']['read'] > 0
+    assert pursuits.standing_line(barely) == ''
+
+
+def test_a_backdated_log_reports_the_standing_the_next_command_will(sandbox, monkeypatch, capsys):
+    """Subtracting what was logged printed a number the model disagreed with: an
+    entry before the zero point pays nothing off and arithmetic cannot see that."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_reset('chores', assume_yes=True) == 0
+    capsys.readouterr()
+
+    assert pursuits.cmd_log('chores', [], '3d', None, assume_yes=True, no_write=True) == 0
+    printed = capsys.readouterr().out
+
+    state = pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())
+    assert pursuits.format_balance(state['balance']['chores'], None) in printed
+
+
+def test_resume_ends_a_standing_skip(sandbox, monkeypatch):
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('chores', '1y') == 0
+    assert 'chores' in pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())['suppressed']
+
+    assert pursuits.cmd_resume('chores') == 0
+
+    assert pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())['suppressed'] == []
+
+
+def test_a_later_skip_shortens_an_earlier_one(sandbox, monkeypatch):
+    """Taking the furthest-reaching expiry made a mistyped `--for 1y` unreachable
+    by any command the tool ships, on a file that is never rewritten."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('chores', '1y') == 0
+    assert pursuits.cmd_skip('chores', '1d') == 0
+
+    now = datetime.now().astimezone()
+    own = pursuits.records_by_pursuit(journal.read_all(sandbox / 'state'))['chores']
+    assert (pursuits.skip_expiry(own) - now).days == 0
+
+
+def test_resume_with_no_name_brings_back_everything_skipped(sandbox, monkeypatch):
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('chores', '2w') == 0
+    assert pursuits.cmd_skip('read-library', '2w') == 0
+
+    assert pursuits.cmd_resume(None) == 0
+
+    assert pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())['suppressed'] == []
+
+
+def test_zeroing_the_whole_register_is_refused_where_nobody_can_answer(sandbox, monkeypatch):
+    """Every accrued balance goes at once and nothing the tool ships puts one back."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
+
+    assert pursuits.cmd_reset(None, assume_yes=False) == 1
+    assert journal.read_all(sandbox / 'state') == []
+
+
+def test_zeroing_one_pursuit_goes_through_unasked(sandbox, monkeypatch):
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
+
+    assert pursuits.cmd_reset('chores', assume_yes=False) == 0
+    assert [record['pursuit'] for record in journal.read_all(sandbox / 'state')] == ['chores']
+
+
+def test_zeroing_the_register_writes_one_state_snapshot_not_one_per_pursuit(sandbox, monkeypatch):
+    """The vector describes the register rather than the pursuit being zeroed, so
+    a copy per name writes the same payload N times into a synced append-only file."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_reset(None, assume_yes=True) == 0
+
+    records = journal.read_all(sandbox / 'state')
+    assert len(records) == len(pursuits.load_pursuits())
+    assert sum('state_at_log' in record for record in records) == 1
+
+
+def test_an_unknown_key_in_a_sibling_block_is_refused(tmp_path):
+    """A file that refuses one typo and silently defaults another teaches the
+    reader it is strict, and they stop proofreading the half that is not."""
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 1\nbalance:\n  warn_weekz: 2\n')
+
+    with pytest.raises(pursuits.RegisterError, match='warn_weekz'):
+        pursuits.load_balance_settings(path)
+
+
+def test_a_negative_duration_never_reaches_the_journal(sandbox, monkeypatch):
+    """`checkoff_equivalent` reads a non-positive duration as one whole checkoff,
+    so `--minutes -5` credited 30 minutes and printed `+5m`."""
+    ran = runner.invoke(cli_app, ['log', 'read-library', '--minutes', '-5', '--yes', '--no-write'])
+
+    assert ran.exit_code == 2
+    assert journal.read_all(sandbox / 'state') == []
+
+
+def test_the_explain_payload_carries_the_band_each_row_is_judged_against(sandbox):
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    payload = pursuits.explain_payload(state)
+
+    assert set(payload['warn_bands']) == set(state['active'])
+    assert payload['pool'] and set(payload['pool']) <= set(state['active'])
+
+
+def test_drift_compares_both_shares_against_the_same_population(sandbox, capsys):
+    """Reading `said` off the register-wide weights while `did` runs inside one
+    unit compares two denominators, so a register lived exactly to its weights
+    was flagged yellow — and a pursuit alone in its unit read 100% whatever it did."""
+    # The counted weights are 25 / 5 / 35, so this is the register lived to plan.
+    for name, times in (('chores', 5), ('read-longform', 1), ('study-computer-science', 7)):
+        for _ in range(times):
+            log_days_ago(sandbox / 'state', name, 1)
+    log_days_ago(sandbox / 'state', 'read-library', 1, minutes=45)
+
+    rows = drift_rows(capsys)
+    counted = [row for row in rows.values() if row['unit'] == 'checkoffs']
+
+    assert round(sum(row['stated_share'] for row in counted)) == 100
+    assert all(abs(row['stated_share'] - row['realized_share']) < 1 for row in counted), 'lived to plan is not drift'
+    assert rows['read-library']['stated_share'] == 100.0, 'the only timed pursuit is the whole of its unit'

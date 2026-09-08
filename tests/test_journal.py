@@ -10,7 +10,6 @@ import json
 import random
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone
 from pathlib import Path
 
 from doit import journal
@@ -153,13 +152,6 @@ def test_checkoff_equivalent_is_the_fraction_of_a_checkoff_the_entry_was():
     assert journal.checkoff_equivalent({'duration_minutes': True}, 45.0) == 1.0
 
 
-def test_earliest_occurrence_keeps_the_oldest_where_latest_keeps_the_newest(tmp_path):
-    write_entries(tmp_path, 'mbp', [entry('chores', days_ago=9), entry('chores', days_ago=1)])
-    records = journal.read_all(tmp_path)
-    assert round((NOW - journal.earliest_occurrence(records, 'done')['chores']).days) == 9
-    assert round((NOW - journal.latest_occurrence(records, 'done')['chores']).days) == 1
-
-
 def test_counts_are_summed_across_machines(tmp_path):
     journal.bump_counts(journal.counts_path(tmp_path, 'mbp'), ['chores', 'chores'])
     journal.bump_counts(journal.counts_path(tmp_path, 'archlinux'), ['chores'])
@@ -197,34 +189,6 @@ def test_appended_records_are_valid_json_lines(tmp_path):
 
 def done_at(pursuit: str, when: datetime) -> dict:
     return {'pursuit': pursuit, 'event': 'done', 'occurred_at': when.isoformat()}
-
-
-def test_days_collapses_two_records_on_one_date():
-    """Two typed entries in an evening are one day, which is the unit an app's
-    answer also comes in."""
-    records = [done_at('chores', NOW), done_at('chores', NOW - timedelta(hours=6))]
-
-    assert journal.days(records, 'chores', 'done', NOW) == [NOW.date()]
-
-
-def test_days_keeps_each_distinct_date_oldest_first():
-    records = [done_at('chores', NOW), done_at('chores', NOW - timedelta(days=2))]
-
-    assert journal.days(records, 'chores', 'done', NOW) == [(NOW - timedelta(days=2)).date(), NOW.date()]
-
-
-def test_days_reads_another_pursuit_and_another_event_as_absent():
-    records = [done_at('other', NOW), {'pursuit': 'chores', 'event': 'skip', 'occurred_at': NOW.isoformat()}]
-
-    assert journal.days(records, 'chores', 'done', NOW) == []
-
-
-def test_days_reads_a_stamp_in_the_offset_now_carries():
-    """A record written on a machine six hours ahead lands on the day `now` is
-    in, or one act would sit on two dates depending which record carried it."""
-    records = [done_at('chores', NOW.astimezone(timezone(timedelta(hours=6))))]
-
-    assert journal.days(records, 'chores', 'done', NOW) == [NOW.date()]
 
 
 def test_counts_by_machine_keeps_each_box_separate(tmp_path):
