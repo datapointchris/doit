@@ -37,46 +37,117 @@ def test_implied_interval_of_a_weightless_pursuit_is_infinite():
     assert math.isinf(allocate.implied_interval(0.0, 2.0))
 
 
-def test_urgency_is_one_at_exactly_the_interval():
-    assert allocate.urgency(10.0, 10.0) == 1.0
+def test_one_checkoff_an_interval_is_exactly_current():
+    assert allocate.balance(elapsed=3.0, interval=3.0, size=1.0, done=1.0) == 0.0
+    assert allocate.balance(elapsed=7.0, interval=7.0, size=45.0, done=45.0) == 0.0
 
 
-def test_urgency_is_zero_inside_the_cooldown():
-    # Just logged: it must not be the heaviest candidate again minutes later.
-    assert allocate.urgency(0.5, 10.0) == 0.0
-    assert allocate.urgency(10.0 * allocate.COOLDOWN_FRACTION, 10.0) > 0.0
+def test_a_burst_counts_for_every_checkoff_it_was():
+    # Three chores in one evening is three days of cover at a daily interval, and
+    # nothing caps how far forward that reaches.
+    owed = allocate.balance(elapsed=0.0, interval=1.0, size=1.0, done=3.0)
+    assert owed == -3.0
+    assert allocate.urgency(owed, 1.0) == 0.0
 
 
-def test_urgency_climbs_superlinearly_past_the_interval():
-    single = allocate.urgency(10.0, 10.0)
-    double = allocate.urgency(20.0, 10.0)
+def test_partial_time_rolls_over_rather_than_stranding():
+    # 20 minutes against a 45-minute checkoff pays 20 minutes off the balance.
+    # The fragment is not rounded away and is not held aside as a remainder.
+    assert allocate.balance(elapsed=1.0, interval=1.0, size=45.0, done=20.0) == 25.0
+    assert allocate.balance(elapsed=1.0, interval=1.0, size=45.0, done=45.0) == 0.0
+
+
+def test_four_fragments_and_one_sitting_pay_the_same_amount():
+    fragments = allocate.balance(elapsed=1.0, interval=1.0, size=45.0, done=15.0 * 4)
+    sitting = allocate.balance(elapsed=1.0, interval=1.0, size=45.0, done=60.0)
+    assert fragments == sitting
+
+
+def test_a_fortnight_away_is_owed_in_full():
+    assert allocate.balance(elapsed=14.0, interval=1.0, size=1.0, done=0.0) == 14.0
+
+
+def test_being_far_ahead_is_not_forgiven_either():
+    assert allocate.balance(elapsed=1.0, interval=1.0, size=1.0, done=20.0) == -19.0
+
+
+def test_a_weightless_pursuit_owes_nothing():
+    assert allocate.balance(3.0, math.inf, 1.0, 0.0) == 0.0
+
+
+def test_period_amount_is_what_a_week_of_the_schedule_asks_for():
+    # A 45-minute checkoff every day and a half is 210 minutes a week.
+    assert allocate.period_amount(1.5, 45.0, 7.0) == 210.0
+
+
+def test_period_amount_of_a_weightless_pursuit_is_nothing():
+    assert allocate.period_amount(math.inf, 45.0, 7.0) == 0.0
+
+
+def test_urgency_is_one_at_exactly_one_checkoff_behind():
+    assert allocate.urgency(1.0, 1.0) == 1.0
+    assert allocate.urgency(45.0, 45.0) == 1.0
+
+
+def test_urgency_is_zero_for_anything_current_or_ahead():
+    # What a cooldown floor used to buy, without one: doing a pursuit that was on
+    # schedule takes its balance to zero, so it cannot be the heaviest candidate
+    # again a minute later.
+    assert allocate.urgency(0.0, 45.0) == 0.0
+    assert allocate.urgency(-90.0, 45.0) == 0.0
+
+
+def test_a_pursuit_already_behind_stays_urgent_after_one_checkoff():
+    behind = allocate.balance(elapsed=4.0, interval=1.0, size=1.0, done=1.0)
+    assert allocate.urgency(behind, 1.0) > 1.0
+
+
+def test_urgency_climbs_superlinearly_past_one_checkoff():
+    single = allocate.urgency(45.0, 45.0)
+    double = allocate.urgency(90.0, 45.0)
     assert double > 2 * single
 
 
-def test_urgency_is_capped():
-    assert allocate.urgency(10_000.0, 1.0) == allocate.URGENCY_CEILING
+def test_urgency_is_unbounded():
+    # A ceiling would cap the one signal saying the register needs editing, so a
+    # long-neglected pursuit is meant to dominate until someone edits it.
+    assert allocate.urgency(10_000.0, 1.0) > 100_000
 
 
-def test_never_done_is_the_most_urgent_state():
-    assert allocate.urgency(None, 10.0) == allocate.URGENCY_CEILING
+def test_a_pursuit_with_no_checkoff_to_owe_is_never_urgent():
+    assert allocate.urgency(5.0, 0.0) == 0.0
 
 
 def test_effective_weight_multiplies_stated_weight_by_urgency():
-    effective = allocate.effective_weights({'a': 30}, {'a': 10.0}, {'a': 20.0})
-    assert effective['a'] == 30 * allocate.urgency(20.0, 10.0)
+    effective = allocate.effective_weights({'a': 30}, {'a': 2.0}, {'a': 1.0}, {'a': 1.5}, ())
+    assert effective['a'] == 30 * allocate.urgency(2.0, 1.0)
 
 
-def test_a_skip_suppresses_but_does_not_remove():
-    plain = allocate.effective_weights({'a': 30}, {'a': 10.0}, {'a': 20.0})
-    skipped = allocate.effective_weights({'a': 30}, {'a': 10.0}, {'a': 20.0}, {'a': 1.0})
-    assert skipped['a'] == plain['a'] * allocate.SKIP_SUPPRESSION
-    assert skipped['a'] > 0
+def test_a_skip_removes_a_pursuit_rather_than_suppressing_it():
+    plain = allocate.effective_weights({'a': 30}, {'a': 2.0}, {'a': 1.0}, {'a': 1.5}, ())
+    skipped = allocate.effective_weights({'a': 30}, {'a': 2.0}, {'a': 1.0}, {'a': 1.5}, ['a'])
+    assert plain['a'] > 0
+    assert skipped['a'] == 0.0
 
 
-def test_skip_suppression_lapses_after_one_interval():
-    plain = allocate.effective_weights({'a': 30}, {'a': 10.0}, {'a': 20.0})
-    stale = allocate.effective_weights({'a': 30}, {'a': 10.0}, {'a': 20.0}, {'a': 11.0})
-    assert stale['a'] == plain['a']
+def test_a_steeper_catchup_exponent_makes_the_same_debt_weigh_more():
+    steep = allocate.effective_weights({'a': 10}, {'a': 4.0}, {'a': 1.0}, {'a': 3.0}, ())
+    flat = allocate.effective_weights({'a': 10}, {'a': 4.0}, {'a': 1.0}, {'a': 1.0}, ())
+    assert steep['a'] > flat['a']
+
+
+def test_the_draw_falls_back_to_stated_weight_when_nothing_is_owed():
+    # A register with no debt anywhere would otherwise offer nothing at all, and
+    # a blank screen reads as the tool having broken rather than as being current.
+    assert allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, ()) == {'a': 30.0, 'b': 10.0}
+
+
+def test_the_fallback_still_leaves_a_skipped_pursuit_out():
+    assert allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, ['b']) == {'a': 30.0}
+
+
+def test_anything_owed_at_all_wins_over_the_fallback():
+    assert allocate.candidates({'a': 0.0, 'b': 4.0}, {'a': 30.0, 'b': 10.0}, ()) == {'a': 0.0, 'b': 4.0}
 
 
 def test_draw_returns_distinct_names_up_to_size():
@@ -112,80 +183,3 @@ def test_first_draw_probabilities_sum_to_one_and_exclude_zeros():
     assert probabilities['cooling'] == 0.0
     assert abs(sum(probabilities.values()) - 1.0) < 1e-9
     assert probabilities['a'] == 0.75
-
-
-def test_one_completion_banks_exactly_what_days_since_already_said():
-    """The generalization has to leave the ordinary case untouched.
-
-    A pursuit done once, with credit configured, must weigh identically to one
-    without — otherwise turning credit on silently re-times everything else.
-    """
-    assert allocate.banked_days_since([3.0], interval=1.0, cap=7.0) == 3.0
-    assert allocate.banked_days_since([0.0], interval=1.0, cap=7.0) == 0.0
-
-
-def test_three_completions_in_one_evening_cover_three_days():
-    """The whole point: a burst is credited, not collapsed to its last entry."""
-    banked = allocate.banked_days_since([0.0, 0.0, 0.0], interval=1.0, cap=7.0)
-    assert banked == -2.0, 'satisfied two days past today, so due again on the third'
-    assert allocate.urgency(banked, interval=1.0) == 0.0, 'and cannot be drawn meanwhile'
-
-
-def test_the_bank_runs_out_and_the_pursuit_comes_back():
-    three_days_ago = [3.0, 3.0, 3.0]
-    assert allocate.banked_days_since(three_days_ago, interval=1.0, cap=7.0) == 1.0
-    assert allocate.urgency(1.0, interval=1.0) == 1.0, 'exactly due, not overdue'
-
-
-def test_credit_cannot_be_hoarded_past_the_cap():
-    """A spring clean must not silence a daily prompt for a month."""
-    twenty = [0.0] * 20
-    banked = allocate.banked_days_since(twenty, interval=1.0, cap=7.0)
-    assert allocate.banked_position(banked, 1.0) == 7.0
-
-
-def test_debt_is_forgiven_past_the_cap_too():
-    """A fortnight away must not accrue a backlog no evening can clear."""
-    banked = allocate.banked_days_since([30.0], interval=1.0, cap=7.0)
-    assert allocate.banked_position(banked, 1.0) == -7.0
-    assert allocate.urgency(banked, interval=1.0) == allocate.URGENCY_CEILING
-
-
-def test_a_missed_stretch_is_owed_and_paid_down_one_at_a_time():
-    """Debt carries. One chore clears one, not the whole backlog."""
-    interval, cap = 1.0, 7.0
-    owed = allocate.banked_position(allocate.banked_days_since([4.0], interval, cap), interval)
-    assert owed == -3.0, 'one done four days ago covers that day, leaving three'
-
-    paid = allocate.banked_position(allocate.banked_days_since([4.0, 0.0], interval, cap), interval)
-    assert paid == -2.0, 'doing one now pays exactly one of them down'
-
-    cleared = [4.0, 0.0, 0.0, 0.0]
-    assert allocate.banked_position(allocate.banked_days_since(cleared, interval, cap), interval) == 0.0
-
-
-def test_never_done_stays_none_rather_than_becoming_a_debt():
-    assert allocate.banked_days_since([], interval=1.0, cap=7.0) is None
-    assert allocate.banked_position(None, 1.0) is None
-
-
-def test_an_occurrence_outside_the_window_does_not_drag_a_burst_backwards():
-    """The carry starts at the oldest occurrence, so one from months ago set a
-    ceiling that three tonight could not climb back from — and the pursuit read
-    as maximally behind on the evening it was worked hardest."""
-    interval, cap = 3.0, 7.0
-    recent = allocate.banked_position(allocate.banked_days_since([1.0, 3.0, 5.0], interval, cap), interval)
-
-    with_an_old_one = allocate.banked_position(allocate.banked_days_since([1.0, 3.0, 5.0, 60.0], interval, cap), interval)
-
-    assert recent == 4.0
-    assert with_an_old_one == recent
-
-
-def test_the_most_recent_is_kept_when_none_are_inside_the_window():
-    """Dropping every occurrence would read as never done, which is the state a
-    pursuit idle for a year is furthest from."""
-    banked = allocate.banked_days_since([30.0, 90.0], interval=1.0, cap=7.0)
-
-    assert allocate.banked_position(banked, 1.0) == -7.0
-    assert allocate.urgency(banked, interval=1.0) == allocate.URGENCY_CEILING

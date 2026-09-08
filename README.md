@@ -37,6 +37,24 @@ time and never hit a cryptic error.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
 
+## A pursuit is measured in minutes or in occurrences
+
+A pursuit that declares `minutes:` is measured in time and one that does not is measured in
+completions. That declaration is the whole of the distinction: `doit log` asks a timed pursuit how
+long it took and never asks a counted one.
+
+Standing is one running balance in whichever unit applies — what the weight-derived schedule has
+asked for since the pursuit's zero point, less what has been done. `+90m` is ninety minutes owed and
+`-2.0` is two checkoffs ahead. Nothing is capped in either direction, so three chores in one evening
+count as three, twenty minutes of reading pays twenty minutes off a longer checkoff, and a fortnight
+away is owed in full. A balance further from current than two weeks of that pursuit's own schedule
+is reported, because nothing in the model bends to absorb it any more: the weight is what is wrong.
+
+`doit skip <pursuit> --for 2w` takes one out of the draw until it expires, and it owes nothing
+meanwhile. `doit pursuits reset <pursuit>` moves the zero point to now, which is what to reach for
+after a long pause or a change of target; with no name it moves every one. The journal is
+append-only either way — a reset is a marker written into it, never a rewrite of what happened.
+
 ## Sources are configuration
 
 `doit` knows nothing about which apps exist. `~/.config/doit/sources.yml` declares each source's id,

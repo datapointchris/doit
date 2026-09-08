@@ -22,10 +22,12 @@ Two inputs it cannot derive and does not pretend to:
 
 **How long a pursuit takes.** Measured from ``duration_minutes`` in the journal
 once :data:`MEASURED_MINIMUM` logs carry one, and taken from the register's
-``minutes:`` until then. Which of the two answered is recorded per pursuit and
-printed, because a forecast resting on eight declared estimates is a different
-claim from one resting on eight measurements, and nothing else on screen would
-say which you are reading.
+``minutes:`` — its checkoff size — until then. A pursuit counted in occurrences
+declares no size, so it rests on :data:`FALLBACK_MINUTES` until the journal can
+answer. Which of the three answered is recorded per pursuit and printed, because
+a forecast resting on eight declared estimates is a different claim from one
+resting on eight measurements, and nothing else on screen would say which you
+are reading.
 
 **What a day holds.** ``forecast.budget_minutes`` in the register. Discretionary
 time the draw is allowed to spend, not the length of a day.
