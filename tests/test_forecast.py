@@ -59,12 +59,12 @@ def reading(generated: datetime, horizons: dict, machine: str = 'testbox') -> fo
 
 
 def test_a_declared_estimate_is_used_until_the_journal_can_answer():
-    register = {'a': {'weight': 5, 'minutes': 30}}
+    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
     assert forecast.durations(register, [done('a', 90)]).get('a') == forecast.Duration(30.0, 'declared', 1)
 
 
 def test_the_journal_outranks_the_estimate_once_it_has_enough_samples():
-    register = {'a': {'weight': 5, 'minutes': 30}}
+    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
     records = [done('a', 60), done('a', 90), done('a', 120)]
     measured = forecast.durations(register, records)['a']
     assert measured.source == 'measured'
@@ -85,7 +85,7 @@ def test_a_pursuit_declaring_nothing_falls_back_rather_than_costing_nothing():
 
 @pytest.mark.parametrize('bad', [0, -10, None, True])
 def test_a_duration_that_is_not_a_positive_number_is_not_a_sample(bad):
-    register = {'a': {'weight': 5, 'minutes': 30}}
+    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
     records = [done('a', bad), done('a', bad), done('a', bad)]
     assert forecast.durations(register, records)['a'].source == 'declared'
 

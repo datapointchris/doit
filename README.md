@@ -39,9 +39,13 @@ time and never hit a cryptic error.
 
 ## A pursuit is measured in minutes or in occurrences
 
-A pursuit that declares `minutes:` is measured in time and one that does not is measured in
+A pursuit that declares `checkoff_minutes:` is measured in time and one that does not is measured in
 completions. That declaration is the whole of the distinction: `doit log` asks a timed pursuit how
 long it took and never asks a counted one.
+
+The two are different quantities and have different names. `checkoff_minutes:` is how much of a
+pursuit counts as one checkoff; `doit log --minutes` is how long one sitting actually took, measured
+against it.
 
 Standing is one running balance in whichever unit applies — what the weight-derived schedule has
 asked for since the pursuit's zero point, less what has been done. `+90m` is ninety minutes owed and

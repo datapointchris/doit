@@ -147,14 +147,14 @@ def test_on_log_without_resolve_is_refused(tmp_path):
 
 
 def test_minutes_is_read_as_an_estimate(tmp_path):
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    minutes: 40\n')
-    assert pursuits.load_pursuits(path)['a']['minutes'] == 40
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    checkoff_minutes: 40\n')
+    assert pursuits.load_pursuits(path)['a']['checkoff_minutes'] == 40
 
 
 @pytest.mark.parametrize('value', ['0', '-5', 'true', '"40"', '12.5'])
 def test_a_minutes_that_is_not_a_positive_whole_number_is_refused(tmp_path, value):
-    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    minutes: {value}\n')
-    with pytest.raises(pursuits.RegisterError, match='minutes'):
+    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    checkoff_minutes: {value}\n')
+    with pytest.raises(pursuits.RegisterError, match='checkoff_minutes'):
         pursuits.load_pursuits(path)
 
 
@@ -859,7 +859,7 @@ pursuits:
     description: The same schedule, measured in minutes rather than occurrences
     weight: 25
     cadence: 1d
-    minutes: 45
+    checkoff_minutes: 45
 """
 
 
@@ -1617,7 +1617,7 @@ def test_pausing_a_timed_pursuit_does_not_move_every_other_interval(tmp_path, mo
 
 
 def test_the_register_wide_size_map_covers_a_pursuit_the_active_set_drops():
-    register = {'read': {'weight': 1, 'minutes': 30}, 'gone': {'weight': 0, 'minutes': 45}}
+    register = {'read': {'weight': 1, 'checkoff_minutes': 30}, 'gone': {'weight': 0, 'checkoff_minutes': 45}}
     assert pursuits.declared_minutes(register) == {'read': 30.0, 'gone': 45.0}
 
 
@@ -1779,3 +1779,11 @@ def test_drift_reads_an_unparsable_timestamp_one_way(sandbox, capsys):
     row = drift_rows(capsys).get('chores')
 
     assert row is None or (row['logs'], row['amount']) == (0, 0.0)
+
+
+def test_the_register_names_a_checkoff_size_and_the_log_names_a_measurement():
+    """Two different quantities, so they do not share a word. `checkoff_minutes:`
+    is how much counts as one checkoff; `--minutes` is what a sitting took."""
+    assert 'checkoff_minutes' in pursuits.KNOWN_FIELDS
+    assert 'minutes' not in pursuits.KNOWN_FIELDS
+    assert '--minutes' in pursuits.TEMPLATE, 'the template says which is which'

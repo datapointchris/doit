@@ -153,7 +153,7 @@ KNOWN_FIELDS = {
     'evidence_items',
     'evidence_where',
     'evidence_files',
-    'minutes',
+    'checkoff_minutes',
 }
 
 TEMPLATE = """\
@@ -165,8 +165,10 @@ TEMPLATE = """\
 #
 #   weight       required; how much attention this deserves relative to the rest
 #   description  what it means, shown when there is nothing resolved to show
-#   minutes      optional; the size of one checkoff, in minutes. Declaring it is
-#                what makes a pursuit measured in time rather than in occurrences
+#   checkoff_minutes  optional; the size of one checkoff, in minutes. Declaring
+#                it is what makes a pursuit measured in time rather than in
+#                occurrences. `doit log --minutes` is the other quantity — what
+#                one sitting actually took, measured against this
 #   cadence      optional hard schedule (2w / 1mo); a checkoff owed pins it above
 #                the draw
 #   until        optional end date; after it the pursuit pauses and says so
@@ -187,8 +189,8 @@ TEMPLATE = """\
 #
 # Standing is one running balance per pursuit: what the schedule has asked for
 # since its zero point, less what has been done. Positive is behind and negative
-# is ahead, in minutes where `minutes:` is declared and in checkoffs where it is
-# not. Nothing is capped, so a burst counts for what it was and partial time
+# is ahead, in minutes where `checkoff_minutes:` is declared and in checkoffs
+# where it is not. Nothing is capped, so a burst counts for what it was and partial time
 # always rolls over — a 20-minute read against a 45-minute checkoff pays 20
 # minutes off the balance. `doit pursuits reset <pursuit>` moves the zero point to
 # now, which is what to do after a long pause; with no name it moves every one.
@@ -249,7 +251,7 @@ pursuits:
   read-library:
     description: Read what is already on the shelf
     weight: 30
-    minutes: 30
+    checkoff_minutes: 30
     resolve: icb books list --progress reading --json
     label: title
     context: author
@@ -257,7 +259,7 @@ pursuits:
   study-computer-science:
     description: Work the CS track rather than reading about working it
     weight: 35
-    minutes: 45
+    checkoff_minutes: 45
     resolve: learning overview --json
     items: in_progress_resources
     label: title
@@ -311,9 +313,9 @@ def load_pursuits(path: Path | None = None) -> dict:
             raise RegisterError(f'{name}: cadence must look like 10d / 2w / 1mo / 1y')
         if config.get('until') and not isinstance(config['until'], date):
             raise RegisterError(f'{name}: until must be a date (YYYY-MM-DD)')
-        size = config.get('minutes')
+        size = config.get('checkoff_minutes')
         if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size <= 0):
-            raise RegisterError(f'{name}: minutes must be a positive whole number')
+            raise RegisterError(f'{name}: checkoff_minutes must be a positive whole number')
         exponent = config.get('catchup_exponent')
         if exponent is not None and (not isinstance(exponent, int | float) or isinstance(exponent, bool) or exponent <= 0):
             raise RegisterError(f'{name}: catchup_exponent must be a positive number')
@@ -394,7 +396,7 @@ def declared_minutes(register: dict) -> dict[str, float]:
     pursuit reclassify its entire history as one-checkoff-per-entry, and that
     number is the single divisor every other pursuit's interval is derived from.
     """
-    return {name: float(config['minutes']) for name, config in register.items() if config.get('minutes')}
+    return {name: float(config['checkoff_minutes']) for name, config in register.items() if config.get('checkoff_minutes')}
 
 
 def records_by_pursuit(records: list[dict]) -> dict[str, list[dict]]:
@@ -552,7 +554,7 @@ def build_state(
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
     weights = {name: float(config['weight']) for name, config in active.items()}
-    # Declaring `minutes:` is the only thing that makes a pursuit measured in
+    # Declaring `checkoff_minutes:` is the only thing that makes a pursuit measured in
     # time, and the register is what says so. Scoped to the whole file rather
     # than to the active set, because the rate below walks every record in the
     # journal: a paused pursuit's history has to keep the size it was logged
@@ -1479,8 +1481,8 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
                 return 1
         # Declaring a checkoff size is the only thing that makes a pursuit
         # measured in time, so the register decides this and nothing here keeps a
-        # list of which kind each one is.
-        timed = bool(pursuits[matched].get('minutes'))
+        # list of which kind each one is. `--minutes` is the measurement against it.
+        timed = bool(pursuits[matched].get('checkoff_minutes'))
         if minutes is not None and not timed:
             raise typer.BadParameter(f'{matched} is counted in completions, so --minutes has nothing to measure')
         if not words and can_prompt():
@@ -1800,7 +1802,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     """
     now = state['now']
     cutoff = now - timedelta(days=days)
-    sizes = {name: float(config['minutes']) for name, config in pursuits.items() if config.get('minutes')}
+    sizes = declared_minutes(pursuits)
     mine = records_by_pursuit(state['records'])
     counts = load_counts(JOURNAL_DIR)
 

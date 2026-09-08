@@ -22,7 +22,7 @@ Two inputs it cannot derive and does not pretend to:
 
 **How long a pursuit takes.** Measured from ``duration_minutes`` in the journal
 once :data:`MEASURED_MINIMUM` logs carry one, and taken from the register's
-``minutes:`` — its checkoff size — until then. A pursuit counted in occurrences
+``checkoff_minutes:`` until then. A pursuit counted in occurrences
 declares no size, so it rests on :data:`FALLBACK_MINUTES` until the journal can
 answer. Which of the three answered is recorded per pursuit and printed, because
 a forecast resting on eight declared estimates is a different claim from one
@@ -157,8 +157,8 @@ def durations(register: dict, records: list[dict]) -> dict[str, Duration]:
         samples = logged.get(name, [])
         if len(samples) >= MEASURED_MINIMUM:
             answer[name] = Duration(statistics.median(samples), 'measured', len(samples))
-        elif config.get('minutes'):
-            answer[name] = Duration(float(config['minutes']), 'declared', len(samples))
+        elif config.get('checkoff_minutes'):
+            answer[name] = Duration(float(config['checkoff_minutes']), 'declared', len(samples))
         else:
             answer[name] = Duration(float(FALLBACK_MINUTES), 'default', len(samples))
     return answer

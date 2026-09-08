@@ -10,7 +10,7 @@ pursuits:
   read-library:
     description: Read what is on the shelf
     weight: 30
-    minutes: 45
+    checkoff_minutes: 45
 
   read-longform:
     description: Shares a prefix with read-library, to test ambiguity
