@@ -22,10 +22,12 @@ Two inputs it cannot derive and does not pretend to:
 
 **How long a pursuit takes.** Measured from ``duration_minutes`` in the journal
 once :data:`MEASURED_MINIMUM` logs carry one, and taken from the register's
-``minutes:`` until then. Which of the two answered is recorded per pursuit and
-printed, because a forecast resting on eight declared estimates is a different
-claim from one resting on eight measurements, and nothing else on screen would
-say which you are reading.
+``checkoff_minutes:`` until then. A pursuit counted in occurrences
+declares no size, so it rests on :data:`FALLBACK_MINUTES` until the journal can
+answer. Which of the three answered is recorded per pursuit and printed, because
+a forecast resting on eight declared estimates is a different claim from one
+resting on eight measurements, and nothing else on screen would say which you
+are reading.
 
 **What a day holds.** ``forecast.budget_minutes`` in the register. Discretionary
 time the draw is allowed to spend, not the length of a day.
@@ -144,7 +146,7 @@ def durations(register: dict, records: list[dict]) -> dict[str, Duration]:
     """
     logged: dict[str, list[float]] = {}
     for record in records:
-        if record.get('event') != 'done':
+        if record.get('event') != journal.Event.DONE:
             continue
         minutes = record.get('duration_minutes')
         if isinstance(minutes, int | float) and not isinstance(minutes, bool) and minutes > 0:
@@ -155,8 +157,8 @@ def durations(register: dict, records: list[dict]) -> dict[str, Duration]:
         samples = logged.get(name, [])
         if len(samples) >= MEASURED_MINIMUM:
             answer[name] = Duration(statistics.median(samples), 'measured', len(samples))
-        elif config.get('minutes'):
-            answer[name] = Duration(float(config['minutes']), 'declared', len(samples))
+        elif config.get('checkoff_minutes'):
+            answer[name] = Duration(float(config['checkoff_minutes']), 'declared', len(samples))
         else:
             answer[name] = Duration(float(FALLBACK_MINUTES), 'default', len(samples))
     return answer
@@ -195,6 +197,7 @@ def simulate(
     days: int,
     budget: float,
     replicate: int,
+    balance_settings: dict,
 ) -> list[tuple[int, str, float]]:
     """One replicate: the real draw, run forward a day at a time against its own journal.
 
@@ -202,12 +205,16 @@ def simulate(
     have to be invented for a future the backends cannot be asked about, and an
     invented one would decide the answer — a pursuit whose backend keeps reporting
     it as freshly done never comes up at all.
+
+    ``balance_settings`` is read once and handed down for the same reason the
+    records are: a simulated day that re-read the register would be measuring a
+    file the simulation is not running against, thirty times per replicate.
     """
     records = list(seed_records)
     done: list[tuple[int, str, float]] = []
     for day in range(days):
         when = start + timedelta(days=day)
-        state = pursuits.build_state(register, when, records=records, observed=observed)
+        state = pursuits.build_state(register, when, records=records, observed=observed, balance_settings=balance_settings)
         selection = pursuits.compute_draw(state, seed=replicate * 100_003 + day)
         offered = selection['pinned'] + selection['drawn']
         for name, minutes in spend_a_day(offered, cost, budget):
@@ -215,7 +222,7 @@ def simulate(
             records.append(
                 {
                     'pursuit': name,
-                    'event': 'done',
+                    'event': journal.Event.DONE,
                     'occurred_at': when.isoformat(),
                     'duration_minutes': minutes,
                 }
@@ -235,12 +242,13 @@ def percentile(values: list[float], fraction: float) -> float:
 def forecast(register: dict, now: datetime, budget: float, replicates: int = REPLICATES) -> Reading:
     """Run every replicate and fold them into one reading."""
     records = journal.read_all(pursuits.JOURNAL_DIR) if pursuits.JOURNAL_DIR.exists() else []
-    live = pursuits.build_state(register, now)
+    bands = pursuits.load_balance_settings()
+    live = pursuits.build_state(register, now, balance_settings=bands)
     active = live['active']
     cost = durations(active, records)
     horizon = max(HORIZONS)
 
-    runs = [simulate(register, records, live['observed'], cost, now, horizon, budget, replicate) for replicate in range(replicates)]
+    runs = [simulate(register, records, live['observed'], cost, now, horizon, budget, replicate, bands) for replicate in range(replicates)]
 
     horizons: dict[str, dict[str, dict]] = {}
     for days in HORIZONS:
@@ -345,7 +353,7 @@ def actual_occasions(records: list[dict], start: datetime, days: int) -> dict[st
     finish = start + timedelta(days=days)
     counted: dict[str, int] = {}
     for record in records:
-        if record.get('event') != 'done':
+        if record.get('event') != journal.Event.DONE:
             continue
         when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
         if when is None or not (start <= when < finish):

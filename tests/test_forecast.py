@@ -59,12 +59,12 @@ def reading(generated: datetime, horizons: dict, machine: str = 'testbox') -> fo
 
 
 def test_a_declared_estimate_is_used_until_the_journal_can_answer():
-    register = {'a': {'weight': 5, 'minutes': 30}}
+    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
     assert forecast.durations(register, [done('a', 90)]).get('a') == forecast.Duration(30.0, 'declared', 1)
 
 
 def test_the_journal_outranks_the_estimate_once_it_has_enough_samples():
-    register = {'a': {'weight': 5, 'minutes': 30}}
+    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
     records = [done('a', 60), done('a', 90), done('a', 120)]
     measured = forecast.durations(register, records)['a']
     assert measured.source == 'measured'
@@ -85,7 +85,7 @@ def test_a_pursuit_declaring_nothing_falls_back_rather_than_costing_nothing():
 
 @pytest.mark.parametrize('bad', [0, -10, None, True])
 def test_a_duration_that_is_not_a_positive_number_is_not_a_sample(bad):
-    register = {'a': {'weight': 5, 'minutes': 30}}
+    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
     records = [done('a', bad), done('a', bad), done('a', bad)]
     assert forecast.durations(register, records)['a'].source == 'declared'
 
@@ -125,7 +125,7 @@ def test_the_simulation_feeds_its_own_logs_back_into_the_next_day(register):
     # the rate moves every implied interval, and the intervals move the draw.
     active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
     cost = forecast.durations(active, [])
-    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 5, 120, replicate=1)
+    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 5, 120, replicate=1, balance_settings={})
     assert run
     assert {day for day, _, _ in run} <= set(range(5))
     # Nothing is done twice in one day: the draw samples without replacement.
@@ -140,7 +140,7 @@ def test_the_simulation_reaches_the_pursuit_the_real_draw_pins(register):
     # simulation had stopped running the same draw.
     active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
     cost = forecast.durations(active, [])
-    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 3, 120, replicate=1)
+    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 3, 120, replicate=1, balance_settings={})
     assert 'chores' in {name for _, name, _ in run}
 
 

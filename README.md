@@ -37,6 +37,35 @@ time and never hit a cryptic error.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
 
+## A pursuit is measured in minutes or in occurrences
+
+A pursuit that declares `checkoff_minutes:` is measured in time and one that does not is measured in
+completions. That declaration is the whole of the distinction: `doit log` asks a timed pursuit how
+long it took and never asks a counted one.
+
+The two are different quantities and have different names. `checkoff_minutes:` is how much of a
+pursuit counts as one checkoff; `doit log --minutes` is how long one sitting actually took, measured
+against it.
+
+Standing is one running balance in whichever unit applies — what the weight-derived schedule has
+asked for since the pursuit's zero point, less what has been done. `+90m` is ninety minutes owed and
+`-2.0` is two checkoffs ahead. Nothing is capped in either direction, so three chores in one evening
+count as three, twenty minutes of reading pays twenty minutes off a longer checkoff, and a fortnight
+away is owed in full. A balance further from current than two weeks of that pursuit's own schedule
+is reported, with the band beside it — nothing in the model bends to absorb such a drift, so the
+weight is what it is evidence about. The band never falls below one whole checkoff, because a
+pursuit that is simply due is not a pursuit whose weight is wrong.
+
+`doit skip <pursuit> --for 2w` takes one out of the draw until it expires, and it owes nothing
+meanwhile; `doit pursuits resume <pursuit>` ends the skip early. `doit pursuits reset <pursuit>`
+moves the zero point to now, which is what to reach for after a long pause or a change of target;
+with no name it moves every one, after confirming. The journal is append-only either way — both are
+markers written into it, never a rewrite of what happened.
+
+The draw always offers a full screen. What is owed orders it, and what is current fills the rest
+underneath, so a register with nothing outstanding still says what there is rather than going
+blank — and a pursuit you are a whole checkoff ahead on stays out of it.
+
 ## Sources are configuration
 
 `doit` knows nothing about which apps exist. `~/.config/doit/sources.yml` declares each source's id,

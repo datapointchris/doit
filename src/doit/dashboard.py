@@ -1230,7 +1230,7 @@ def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
 
 
 def pursuit_standing() -> str:
-    """How far behind the banking pursuits stand, or nothing when they are current.
+    """What the pursuits owe, each in its own unit, or nothing when none owes anything.
 
     Guarded rather than trusted. A register that refuses to load is a real and
     deliberate failure mode, and it must cost this one line rather than the whole
@@ -1240,7 +1240,7 @@ def pursuit_standing() -> str:
         register = pursuits.load_pursuits()
         if not register:
             return ''
-        return pursuits.behind_summary(pursuits.build_state(register, datetime.now().astimezone()))
+        return pursuits.standing_line(pursuits.build_state(register, datetime.now().astimezone()))
     except (pursuits.RegisterError, OSError, ValueError):
         return ''
 

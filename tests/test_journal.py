@@ -10,7 +10,6 @@ import json
 import random
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone
 from pathlib import Path
 
 from doit import journal
@@ -99,22 +98,58 @@ def test_days_since_reports_none_for_a_pursuit_never_logged(tmp_path):
 def test_rate_per_day_divides_by_the_journal_age_not_the_window(tmp_path):
     # Six entries over three days is two a day, not six over thirty.
     write_entries(tmp_path, 'mbp', [entry(f'p{index}', days_ago=index / 2) for index in range(6)])
-    rate = journal.rate_per_day(journal.read_all(tmp_path), NOW)
+    rate = journal.rate_per_day(journal.read_all(tmp_path), NOW, {})
     assert 1.5 < rate < 2.5
 
 
 def test_rate_per_day_is_none_with_nothing_to_measure(tmp_path):
-    assert journal.rate_per_day([], NOW) is None
+    assert journal.rate_per_day([], NOW, {}) is None
 
 
 def test_rate_per_day_ignores_entries_outside_the_window(tmp_path):
     write_entries(tmp_path, 'mbp', [entry('old', days_ago=400)])
-    assert journal.rate_per_day(journal.read_all(tmp_path), NOW) is None
+    assert journal.rate_per_day(journal.read_all(tmp_path), NOW, {}) is None
 
 
 def test_rate_per_day_counts_only_done_events(tmp_path):
     write_entries(tmp_path, 'mbp', [entry('a', 'skip', 1), entry('b', 'skip', 2)])
-    assert journal.rate_per_day(journal.read_all(tmp_path), NOW) is None
+    assert journal.rate_per_day(journal.read_all(tmp_path), NOW, {}) is None
+
+
+def test_fragmenting_an_hour_does_not_move_the_measured_rate(tmp_path):
+    """The rate divides every pursuit's implied interval, so typing has to be
+    invisible to it. Four 15-minute entries and one 60-minute entry are the same
+    hour, and counting entries would report the first as four times the pace."""
+    # Both arms open at the same age, so the divisor is the same two days and the
+    # only thing varying is how the hour was typed.
+    sizes = {'read': 45.0}
+    fragments = [entry('read', days_ago=2, duration_minutes=15) for _ in range(4)]
+    sitting = [entry('read', days_ago=2, duration_minutes=60)]
+
+    assert journal.rate_per_day(fragments, NOW, sizes) == journal.rate_per_day(sitting, NOW, sizes)
+    assert journal.rate_per_day(fragments, NOW, sizes) == (60.0 / 45.0) / 2.0
+    # Counting entries instead is what the equality above rules out.
+    assert journal.rate_per_day(fragments, NOW, {}) == 4 / 2.0
+
+
+def test_a_pursuit_with_no_declared_size_counts_one_per_entry(tmp_path):
+    write_entries(tmp_path, 'mbp', [entry('chores', days_ago=0.5), entry('chores', days_ago=0.5)])
+    assert journal.rate_per_day(journal.read_all(tmp_path), NOW, {}) == 2.0
+
+
+def test_a_timed_entry_with_no_duration_counts_one_whole_checkoff(tmp_path):
+    # What it claimed when it was typed, which is the only reading available for
+    # an entry written before the pursuit declared a size.
+    write_entries(tmp_path, 'mbp', [entry('read', days_ago=0.5)])
+    assert journal.rate_per_day(journal.read_all(tmp_path), NOW, {'read': 45.0}) == 1.0
+
+
+def test_checkoff_equivalent_is_the_fraction_of_a_checkoff_the_entry_was():
+    assert journal.checkoff_equivalent({'duration_minutes': 20}, 45.0) == 20 / 45
+    assert journal.checkoff_equivalent({'duration_minutes': 90}, 45.0) == 2.0
+    assert journal.checkoff_equivalent({'duration_minutes': 20}, None) == 1.0
+    assert journal.checkoff_equivalent({'duration_minutes': 0}, 45.0) == 1.0
+    assert journal.checkoff_equivalent({'duration_minutes': True}, 45.0) == 1.0
 
 
 def test_counts_are_summed_across_machines(tmp_path):
@@ -154,34 +189,6 @@ def test_appended_records_are_valid_json_lines(tmp_path):
 
 def done_at(pursuit: str, when: datetime) -> dict:
     return {'pursuit': pursuit, 'event': 'done', 'occurred_at': when.isoformat()}
-
-
-def test_days_collapses_two_records_on_one_date():
-    """Two typed entries in an evening are one day, which is the unit an app's
-    answer also comes in."""
-    records = [done_at('chores', NOW), done_at('chores', NOW - timedelta(hours=6))]
-
-    assert journal.days(records, 'chores', 'done', NOW) == [NOW.date()]
-
-
-def test_days_keeps_each_distinct_date_oldest_first():
-    records = [done_at('chores', NOW), done_at('chores', NOW - timedelta(days=2))]
-
-    assert journal.days(records, 'chores', 'done', NOW) == [(NOW - timedelta(days=2)).date(), NOW.date()]
-
-
-def test_days_reads_another_pursuit_and_another_event_as_absent():
-    records = [done_at('other', NOW), {'pursuit': 'chores', 'event': 'skip', 'occurred_at': NOW.isoformat()}]
-
-    assert journal.days(records, 'chores', 'done', NOW) == []
-
-
-def test_days_reads_a_stamp_in_the_offset_now_carries():
-    """A record written on a machine six hours ahead lands on the day `now` is
-    in, or one act would sit on two dates depending which record carried it."""
-    records = [done_at('chores', NOW.astimezone(timezone(timedelta(hours=6))))]
-
-    assert journal.days(records, 'chores', 'done', NOW) == [NOW.date()]
 
 
 def test_counts_by_machine_keeps_each_box_separate(tmp_path):

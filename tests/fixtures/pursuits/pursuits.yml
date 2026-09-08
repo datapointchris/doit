@@ -1,6 +1,6 @@
 # Fixture register for tests/test_pursuits.py. Deliberately covers one of
-# each shape: a hard cadence, a plain weight, a paused entry, and a term that has
-# already ended.
+# each shape: a hard cadence, a plain weight, a paused entry, a term that has
+# already ended, and one pursuit measured in minutes beside the counted ones.
 pursuits:
   chores:
     description: The maintenance list
@@ -10,6 +10,7 @@ pursuits:
   read-library:
     description: Read what is on the shelf
     weight: 30
+    checkoff_minutes: 45
 
   read-longform:
     description: Shares a prefix with read-library, to test ambiguity

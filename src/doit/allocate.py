@@ -2,15 +2,22 @@
 
 ``cadence`` is the deterministic half: a declared interval, a derived due date, an
 item that is either due or not. This module is for pursuits whose weight states a
-*share of attention* rather than a deadline. Two consequences follow, and they are
-the whole design:
+*share of attention* rather than a deadline. Three consequences follow, and they
+are the whole design:
 
 **How often something should come up is derived, not declared.** A pursuit's share
-of the total weight, against how many things actually get logged per day, gives the
-interval at which it would come up if you were living exactly as you said. So a
-weight is the only number to hand-maintain; the schedule falls out of it. An
+of the total weight, against how many checkoffs actually get done per day, gives
+the interval at which it would come up if you were living exactly as you said. So
+a weight is the only number to hand-maintain; the schedule falls out of it. An
 explicit cadence overrides the implied interval for the things that genuinely are
 weekly.
+
+**Standing is a running balance, in the pursuit's own unit.** The schedule asks
+for one checkoff per interval; what a checkoff *is* is a fixed number of minutes
+where the pursuit declares one, and a single completion where it does not. The
+difference between what has been asked for and what has been done is the balance,
+and it is unbounded in both directions. So a burst counts for exactly what it was,
+a fortnight away is owed in full, and no fragment of time can strand.
 
 **What to do next is drawn, not ranked.** A ranked list is a queue: the same five
 items every run until one is cleared. A weighted draw makes a heavy pursuit likely
@@ -25,25 +32,12 @@ numbers, so the model is testable without a journal or a register.
 
 import math
 import random
+from collections.abc import Iterable
 
-# How sharply urgency climbs once a pursuit is past its interval. Superlinear, so
-# something well overdue outruns a merely heavier pursuit that was done recently.
-DEFAULT_ALPHA = 1.5
-
-# Below this fraction of its interval a pursuit cannot be drawn at all. Without it
-# the thing just logged is still the heaviest candidate and gets offered again
-# minutes later, which reads as the tool not having noticed.
-COOLDOWN_FRACTION = 0.2
-
-# Urgency cannot exceed this multiple of the base weight. A pursuit dormant for a
-# year would otherwise dominate every draw forever, crowding out the whole
-# register on the strength of one number nobody has revisited.
-URGENCY_CEILING = 8.0
-
-# What a skip does to the next draw: suppressed, not removed, and only until the
-# pursuit's interval has passed. Skips never touch the stated weight — revealed and
-# stated preference stay separate signals, and divergence surfaces in `drift`.
-SKIP_SUPPRESSION = 0.25
+# How sharply urgency climbs once a pursuit owes more than one checkoff.
+# Superlinear, so something well behind outruns a merely heavier pursuit that is
+# current.
+DEFAULT_CATCHUP_EXPONENT = 1.5
 
 # Guard for the interval divisor. A brand-new or long-idle journal reports a rate
 # near zero, and 1/(share × rate) would blow the implied interval up to years.
@@ -52,6 +46,16 @@ MIN_LOGS_PER_DAY = 0.25
 # Assumed rate when the journal has nothing to measure yet, so a fresh install
 # still produces sane intervals on its first run.
 FALLBACK_LOGS_PER_DAY = 2.0
+
+# Days a period covers when a balance is judged against what the schedule asks
+# for over one. A week is the shortest span a weekly cadence can express itself
+# in, so it is the shortest one a surplus or a debt can be read against.
+PERIOD_DAYS = 7.0
+
+# What the heaviest pursuit that owes nothing is worth against the least urgent
+# one that does. A tenth, so a resting row is an order of magnitude off being
+# picked first — on the screen to be seen, never to be pressed.
+RESTING_SHARE = 0.1
 
 
 def implied_shares(weights: dict[str, float]) -> dict[str, float]:
@@ -71,7 +75,7 @@ def implied_shares(weights: dict[str, float]) -> dict[str, float]:
 def implied_interval(share: float, logs_per_day: float) -> float:
     """Days between appearances for a pursuit holding ``share`` of the attention.
 
-    At ``logs_per_day`` entries a day, a pursuit owed ``share`` of them comes up
+    At ``logs_per_day`` checkoffs a day, a pursuit owed ``share`` of them comes up
     every ``1 / (share × rate)`` days. The rate is measured from the journal rather
     than configured, so the whole register retunes itself as the real pace changes.
     """
@@ -85,93 +89,122 @@ def implied_intervals(weights: dict[str, float], logs_per_day: float) -> dict[st
     return {name: implied_interval(share, logs_per_day) for name, share in implied_shares(weights).items()}
 
 
-def banked_days_since(ages: list[float], interval: float, cap: float) -> float | None:
-    """Effective age when each completion banks one interval of credit forward.
+def balance(elapsed: float, interval: float, size: float, done: float) -> float:
+    """What the schedule has asked for over ``elapsed`` days, less what was done.
 
-    A pursuit stating a rate rather than a rhythm should let that rate be met
-    early. Three chores in one evening is three days of a daily cadence, and
-    counting them as one is what makes a burst feel unrewarded — so each
-    completion advances the satisfied-through point by one interval from wherever
-    it already stood, rather than from the moment it happened.
+    Positive is behind and negative is ahead, in whatever unit ``size`` counts in:
+    minutes for a pursuit that declares a checkoff size, whole checkoffs for one
+    that does not. A pursuit whose weight implies no interval at all is owed
+    nothing, since there is no schedule to fall behind.
 
-    ``cap`` bounds the position in both directions, and the symmetry is the
-    point. Ahead, it stops a spring clean from silencing the daily prompt for a
-    month, which is half of what a daily cadence is for. Behind, it stops a
-    fortnight away from accruing a debt no evening can clear — a backlog only
-    directs attention while it is payable, and past that it just reads as
-    failure. So the pursuit forgives anything older than the window, and drops
-    those occurrences from the carry rather than only clamping the result. The
-    most recent one is kept when none are inside, or a pursuit idle for a year
-    would read as never done instead of as far behind.
-
-    Returned in the units :func:`urgency` reads, so a pursuit banked ahead of
-    itself reports a negative age and falls inside the cooldown.
+    Nothing is clamped, dropped or forgiven at either end. A balance far enough
+    from zero to look wrong is the register saying its weight is wrong, and that
+    is the one reading that has to survive to be acted on.
     """
-    if not ages:
-        return None
-    # The carry starts at the oldest occurrence, so one from outside the window
-    # sets a ceiling no burst inside it can climb back from.
-    inside = [age for age in ages if age <= cap]
-    stamps = sorted(-age for age in (inside or [min(ages)]))
-    # Carried from where the pursuit already stood, never reset to the moment each
-    # completion happened — resetting is what makes a single chore erase a week of
-    # missed ones, which is the same collapse credit exists to undo.
-    through = stamps[0]
-    for when in stamps:
-        through = min(through + interval, when + cap)
-    return interval - max(through, -cap)
-
-
-def banked_position(banked: float | None, interval: float) -> float | None:
-    """Days a pursuit is satisfied into the future, negative when it is behind.
-
-    The same number :func:`banked_days_since` works in, read the way a person
-    asks it: how far ahead am I, or how much do I owe.
-    """
-    return None if banked is None else interval - banked
-
-
-def urgency(days_since: float | None, interval: float, alpha: float = DEFAULT_ALPHA) -> float:
-    """How much a pursuit's weight is multiplied by, given how long it has been.
-
-    Zero inside the cooldown, 1.0 at exactly the interval, climbing as ``ratio ^
-    alpha`` past it and clamped at :data:`URGENCY_CEILING`. Never logged is treated
-    as the most urgent state rather than as an error, so a pursuit added today is
-    drawn without needing a seeded date.
-    """
-    if days_since is None:
-        return URGENCY_CEILING
     if interval <= 0 or math.isinf(interval):
         return 0.0
-    ratio = days_since / interval
-    if ratio < COOLDOWN_FRACTION:
+    return (elapsed / interval) * size - done
+
+
+def period_amount(interval: float, size: float, period_days: float = PERIOD_DAYS) -> float:
+    """How much of its own unit a pursuit's schedule asks for over ``period_days``.
+
+    The scale a balance is read against. A heavy strand and a light one are both
+    judged by how many periods of their own schedule they have drifted, so one
+    threshold covers a register whose pursuits ask for wildly different amounts.
+    """
+    if interval <= 0 or math.isinf(interval):
         return 0.0
-    return min(ratio**alpha, URGENCY_CEILING)
+    return period_days / interval * size
+
+
+def urgency(owed: float, size: float, catchup_exponent: float = DEFAULT_CATCHUP_EXPONENT) -> float:
+    """How much a pursuit's weight is multiplied by, given what it owes.
+
+    Zero for anything current or ahead, 1.0 at exactly one checkoff behind, and
+    ``ratio ^ exponent`` past that. Unbounded above: a pursuit left long enough to
+    dominate every draw is a weight nobody has revisited, and a ceiling there
+    suppresses the one signal saying the register needs editing.
+
+    The zero at current is what keeps a pursuit just done off the next screen.
+    Doing one that was on schedule takes its balance to zero or below, so it
+    cannot be the heaviest candidate a minute later — while one that was three
+    checkoffs behind still is, which is the answer that has to survive.
+    """
+    if size <= 0:
+        return 0.0
+    ratio = owed / size
+    if ratio <= 0:
+        return 0.0
+    return ratio**catchup_exponent
 
 
 def effective_weights(
     weights: dict[str, float],
-    intervals: dict[str, float],
-    days_since: dict[str, float | None],
-    days_since_skip: dict[str, float | None] | None = None,
-    alpha: float = DEFAULT_ALPHA,
+    balances: dict[str, float],
+    sizes: dict[str, float],
+    exponents: dict[str, float],
+    suppressed: Iterable[str],
 ) -> dict[str, float]:
     """The weights the draw actually runs on: stated weight × urgency, minus skips.
 
-    A skip suppresses rather than excludes, and only until the pursuit's interval
-    has elapsed — long enough that a pass reads as a pass, short enough that one
-    reflexive skip cannot bury something for a season.
+    A skip is a hard zero for as long as it runs rather than a factor that decays,
+    because a pass with an expiry is a decision about a span of time and a
+    suppression multiplier is a guess about one draw. Skips never touch the stated
+    weight — revealed and stated preference stay separate signals, and divergence
+    surfaces in `drift`.
     """
-    skips = days_since_skip or {}
+    passed = set(suppressed)
     effective = {}
     for name, weight in weights.items():
-        interval = intervals.get(name, math.inf)
-        value = max(weight, 0.0) * urgency(days_since.get(name), interval, alpha)
-        skipped = skips.get(name)
-        if skipped is not None and not math.isinf(interval) and skipped < interval:
-            value *= SKIP_SUPPRESSION
-        effective[name] = value
+        if name in passed:
+            effective[name] = 0.0
+            continue
+        effective[name] = max(weight, 0.0) * urgency(balances[name], sizes[name], exponents[name])
     return effective
+
+
+def candidates(
+    effective: dict[str, float],
+    weights: dict[str, float],
+    ratios: dict[str, float],
+    suppressed: Iterable[str],
+    size: int,
+) -> dict[str, float]:
+    """What to sample from: everything owed, topped up to ``size`` from what is not.
+
+    Urgency is zero for anything current, so the owed set alone is a queue — one
+    pursuit a minute past its interval puts one row on a screen sized for five,
+    and the same row every run until it is cleared. That is the shape the whole
+    weighted draw exists not to be.
+
+    So a resting tier sits underneath, scaled to :data:`RESTING_SHARE` of the
+    least urgent owed pursuit: visible without competing to be picked first. That
+    is what makes an evening spendable deliberately — seeing what else there is
+    says the register is current, which a one-row screen cannot.
+
+    **A pursuit a whole checkoff or more ahead is not in it.** That is the thing
+    just done, and offering it back reads as the log having gone nowhere. Where
+    holding that line would empty the pool, the whole register is offered instead
+    — a blank screen says the tool broke rather than that you are done.
+
+    A skip is in neither tier. It is the one statement about a pursuit that is
+    not about being behind, so it has to survive a state where nothing is.
+    """
+    passed = set(suppressed)
+    owed = {name: value for name, value in effective.items() if value > 0 and name not in passed}
+    if len(owed) >= size:
+        return owed
+    available = [name for name in weights if name not in owed and name not in passed and weights[name] > 0]
+    resting = {name: weights[name] for name in available if ratios[name] > -1.0}
+    if not resting:
+        resting = {name: weights[name] for name in available}
+    if not resting:
+        return owed
+    if owed:
+        scale = min(owed.values()) * RESTING_SHARE / max(resting.values())
+        resting = {name: value * scale for name, value in resting.items()}
+    return {**owed, **resting}
 
 
 def draw(effective: dict[str, float], size: int, rng: random.Random | None = None) -> list[str]:
@@ -180,7 +213,7 @@ def draw(effective: dict[str, float], size: int, rng: random.Random | None = Non
     Efraimidis–Spirakis: the smallest ``k`` of the keys ``-ln(U_i)/w_i`` is exactly a
     weighted sample without replacement, so one pass over the candidates does it —
     no rejection loop, and no renormalizing the remaining weights after each pick.
-    Anything at or below zero (cooling down, paused, weightless) is not a candidate.
+    Anything at or below zero (ahead, skipped, paused, weightless) is not a candidate.
     """
     rng = rng or random.Random()
     keys = []

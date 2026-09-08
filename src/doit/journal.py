@@ -31,12 +31,28 @@ import random
 import uuid
 from datetime import date
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 from doit.state import load_state
 from doit.state import save_state
 
 SCHEMA_VERSION = 1
+
+
+class Event(StrEnum):
+    """What a journal record says happened. The whole vocabulary, in one place.
+
+    Roughly fifteen functions across three modules select on this field and none
+    of them is a dispatch, so nothing mechanical finds them. Naming the members
+    here makes adding a fourth kind a search on one name rather than an audit
+    somebody has to remember to run.
+    """
+
+    DONE = 'done'
+    SKIP = 'skip'
+    RESET = 'reset'
+
 
 # Trailing window for the measured logging rate. Long enough that a quiet week
 # does not swing the implied intervals, short enough to follow a real change of
@@ -127,40 +143,16 @@ def latest_occurrence(records: list[dict], event: str) -> dict[str, datetime]:
     return latest
 
 
-def ages(records: list[dict], pursuit: str, event: str, now: datetime) -> list[float]:
-    """Days elapsed for every matching record of one pursuit.
-
-    The counterpart to :func:`latest_occurrence`, which keeps only the newest. A
-    pursuit banking credit needs each occurrence, because how many there were is
-    the whole question.
-    """
-    found = []
-    for record in records:
-        if record.get('event') != event or record.get('pursuit') != pursuit:
-            continue
-        when = parse_time(record.get('occurred_at') or record.get('logged_at'))
-        if when is None:
-            continue
-        found.append(max((now - when).total_seconds() / 86400.0, 0.0))
-    return found
-
-
-def days(records: list[dict], pursuit: str, event: str, now: datetime) -> list[date]:
-    """The distinct local dates one pursuit has a matching record on.
+def local_day(record: dict, now: datetime) -> date | None:
+    """The local date a record landed on, by ``now``'s offset.
 
     The unit an app's answer can also be expressed in, so anything lining a typed
-    entry up against a date a backend reported reads both through this. Local by
-    ``now``'s offset, matching :func:`doit.evidence.dates_of`, or the same act
-    would land on two different days depending which record carried it.
+    entry up against a date a backend reported reads the date through this.
+    Matching :func:`doit.evidence.dates_of`, or the same act would land on two
+    different days depending which record carried it.
     """
-    found = set()
-    for record in records:
-        if record.get('event') != event or record.get('pursuit') != pursuit:
-            continue
-        when = parse_time(record.get('occurred_at') or record.get('logged_at'))
-        if when is not None:
-            found.add(when.astimezone(now.tzinfo).date())
-    return sorted(found)
+    when = parse_time(record.get('occurred_at') or record.get('logged_at'))
+    return None if when is None else when.astimezone(now.tzinfo).date()
 
 
 def days_since(latest: dict[str, datetime], names: list[str], now: datetime) -> dict[str, float | None]:
@@ -172,20 +164,50 @@ def days_since(latest: dict[str, datetime], names: list[str], now: datetime) -> 
     return elapsed
 
 
-def rate_per_day(records: list[dict], now: datetime, window_days: int = RATE_WINDOW_DAYS) -> float | None:
-    """Measured ``done`` entries per day, or ``None`` when there is nothing to measure.
+def checkoff_equivalent(record: dict, size: float | None) -> float:
+    """One ``done`` record's share of a checkoff of ``size`` minutes.
+
+    ``None`` is a pursuit that declares no size, whose checkoff is the entry
+    itself. A timed entry carrying no duration falls back to one whole checkoff,
+    which is what it claimed when it was typed.
+    """
+    if not size:
+        return 1.0
+    minutes = record.get('duration_minutes')
+    if not isinstance(minutes, int | float) or isinstance(minutes, bool) or minutes <= 0:
+        return 1.0
+    return float(minutes) / size
+
+
+def rate_per_day(records: list[dict], now: datetime, sizes: dict[str, float]) -> float | None:
+    """Measured checkoff-equivalents per day, or ``None`` when there is nothing to measure.
+
+    Equivalents rather than entries, because this one number divides every
+    pursuit's implied interval. An hour of reading typed as four fragments would
+    otherwise count four times what the same hour counts as one sitting, and every
+    interval in the register would halve on the strength of how the typing went.
+    A 20-minute read against a 45-minute checkoff contributes 0.44.
+
+    ``sizes`` maps each pursuit measured in time to its checkoff size in minutes.
+    Anything absent from it counts one per entry, which is what a pursuit
+    satisfied in occurrences means by a log.
 
     The divisor is how long the journal has actually been running, capped at the
     window — dividing a young journal's entries by a full 30 days would report a
     pace far below the real one and stretch every implied interval to match.
     """
-    done = [record for record in records if record.get('event') == 'done']
-    times = [parse_time(record.get('occurred_at') or record.get('logged_at')) for record in done]
-    within = [when for when in times if when is not None and (now - when).days < window_days]
+    within = []
+    for record in records:
+        if record.get('event') != Event.DONE:
+            continue
+        when = parse_time(record.get('occurred_at') or record.get('logged_at'))
+        if when is None or (now - when).days >= RATE_WINDOW_DAYS:
+            continue
+        within.append((when, checkoff_equivalent(record, sizes.get(str(record.get('pursuit'))))))
     if not within:
         return None
-    span_days = (now - min(within)).total_seconds() / 86400.0
-    return len(within) / max(min(span_days, float(window_days)), 1.0)
+    span_days = (now - min(when for when, _ in within)).total_seconds() / 86400.0
+    return sum(amount for _, amount in within) / max(min(span_days, float(RATE_WINDOW_DAYS)), 1.0)
 
 
 def load_counts(directory: Path) -> dict[str, int]:

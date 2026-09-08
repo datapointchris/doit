@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 import doit
 from doit import __version__
+from doit import pursuits
 from doit.cli import app
 
 runner = CliRunner()
@@ -45,6 +46,21 @@ def test_every_node_shows_help_bare(argv):
 
     assert 'Usage:' in result.output
     assert 'Options' in result.output
+
+
+def test_the_pursuits_help_lists_every_verb_registered_under_it():
+    """Derived from the tree rather than listed, so a verb added next month is
+    covered by construction and one that never reaches the help is a failure.
+
+    A hidden command is deliberately absent from the help, so the population is
+    the visible ones — `pursuits names` feeds the shell completion and would be
+    noise on a screen a person reads.
+    """
+    registered = {command.name or command.callback.__name__ for command in pursuits.app.registered_commands if not command.hidden}
+    result = runner.invoke(app, ['pursuits', '--help'])
+
+    assert registered
+    assert not [name for name in registered if name not in result.output]
 
 
 @pytest.mark.parametrize('command', ['next', 'log', 'skip', 'dashboard', 'pursuits', 'review', 'labs'])
