@@ -1769,3 +1769,13 @@ def test_drift_compares_both_shares_against_the_same_population(sandbox, capsys)
     assert round(sum(row['stated_share'] for row in counted)) == 100
     assert all(abs(row['stated_share'] - row['realized_share']) < 1 for row in counted), 'lived to plan is not drift'
     assert rows['read-library']['stated_share'] == 100.0, 'the only timed pursuit is the whole of its unit'
+
+
+def test_drift_reads_an_unparsable_timestamp_one_way(sandbox, capsys):
+    """The amount and the log tally come from two walks over the same records, so
+    a record counted by one and skipped by the other reports work with no time in it."""
+    write_records(sandbox / 'state', [{'pursuit': 'chores', 'event': 'done', 'occurred_at': 'not a timestamp'}])
+
+    row = drift_rows(capsys).get('chores')
+
+    assert row is None or (row['logs'], row['amount']) == (0, 0.0)

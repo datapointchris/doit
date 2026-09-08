@@ -1809,8 +1809,8 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
         own = mine.get(name, [])
         seen = state['evidence_days'].get(name, [])
         amount = completed_since(own, seen, now, cutoff, sizes.get(name))
-        logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, cutoff, now))
-        passes = sum(1 for record in own if record.get('event') == journal.Event.SKIP and in_window(record, cutoff, now))
+        logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, cutoff))
+        passes = sum(1 for record in own if record.get('event') == journal.Event.SKIP and in_window(record, cutoff))
         if name not in state['active'] and not amount and not passes:
             continue
         rows.append(
@@ -1841,13 +1841,15 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     return rows
 
 
-def in_window(record: dict, cutoff: datetime, now: datetime) -> bool:
+def in_window(record: dict, cutoff: datetime) -> bool:
     """Whether a record happened inside the reporting window.
 
-    A record whose timestamp will not parse is read as having happened now, so a
-    malformed line lands in the window rather than silently outside every one.
+    A record whose timestamp will not parse is outside it, matching
+    :func:`completed_since` — one record read two ways inside one report would
+    count toward the log tally and not toward the amount.
     """
-    return (journal.parse_time(record.get('occurred_at') or record.get('logged_at')) or now) >= cutoff
+    when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+    return when is not None and when >= cutoff
 
 
 def render_drift_group(rows: list[dict], unit: str, heading: str, amount_column: str) -> None:
