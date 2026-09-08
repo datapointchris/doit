@@ -48,12 +48,19 @@ asked for since the pursuit's zero point, less what has been done. `+90m` is nin
 `-2.0` is two checkoffs ahead. Nothing is capped in either direction, so three chores in one evening
 count as three, twenty minutes of reading pays twenty minutes off a longer checkoff, and a fortnight
 away is owed in full. A balance further from current than two weeks of that pursuit's own schedule
-is reported, because nothing in the model bends to absorb it any more: the weight is what is wrong.
+is reported, with the band beside it — nothing in the model bends to absorb such a drift, so the
+weight is what it is evidence about. The band never falls below one whole checkoff, because a
+pursuit that is simply due is not a pursuit whose weight is wrong.
 
 `doit skip <pursuit> --for 2w` takes one out of the draw until it expires, and it owes nothing
-meanwhile. `doit pursuits reset <pursuit>` moves the zero point to now, which is what to reach for
-after a long pause or a change of target; with no name it moves every one. The journal is
-append-only either way — a reset is a marker written into it, never a rewrite of what happened.
+meanwhile; `doit pursuits resume <pursuit>` ends the skip early. `doit pursuits reset <pursuit>`
+moves the zero point to now, which is what to reach for after a long pause or a change of target;
+with no name it moves every one, after confirming. The journal is append-only either way — both are
+markers written into it, never a rewrite of what happened.
+
+The draw always offers a full screen. What is owed orders it, and what is current fills the rest
+underneath, so a register with nothing outstanding still says what there is rather than going
+blank — and a pursuit you are a whole checkoff ahead on stays out of it.
 
 ## Sources are configuration
 
