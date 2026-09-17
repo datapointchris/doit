@@ -35,7 +35,6 @@ a coding session. Same plumbing, different audience.
 """
 
 import math
-import shutil
 from collections.abc import Callable
 from datetime import date
 from datetime import datetime
@@ -56,9 +55,12 @@ from doit.lanes import Lane as LaneView
 from doit.lanes import Row
 from doit.lanes import Urgency
 from doit.lanes import unavailable
+from doit.render import column_width
 from doit.render import console
 from doit.render import first_sentence
+from doit.render import fitted
 from doit.render import join_context
+from doit.render import terminal_width
 
 NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'}
 
@@ -97,11 +99,6 @@ ICB_SCHEMA_VERSION = 2
 LEARNING_NOT_STARTED = 1
 LEARNING_IN_PROGRESS = 2
 
-# A cap, not a target — it stops the note column flying off to the right of an
-# ultrawide terminal. It was 100, which on any normal terminal threw away width a
-# row needed: a project name arrived as "CLI machine contract …" while thirty
-# columns sat unused to the right of it.
-MAX_WIDTH = 140
 LABEL_WIDTH = 8
 
 # A trailing column takes a share of the line rather than a fixed count. A flat
@@ -1024,10 +1021,6 @@ def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneVi
     return sorted(collected, key=lambda lane: not lane.alert)
 
 
-def terminal_width() -> int:
-    return min(shutil.get_terminal_size(fallback=(80, 24)).columns, MAX_WIDTH)
-
-
 def clip(text: str, width: int) -> str:
     if width <= 0:
         return ''
@@ -1040,18 +1033,6 @@ def cap_for(lane_name: str, row_cap: int) -> int:
     if row_cap == FOCUSED_ROW_CAP:
         return row_cap
     return LANE_ROW_CAPS.get(lane_name, row_cap)
-
-
-def fitted(text: str, width: int, *, pad: bool = False) -> Text:
-    """`text` as a Text no wider than `width`, ellipsized and optionally padded.
-
-    A column's width is arithmetic the layout owns, so this truncates to a
-    computed width rather than to the terminal's — `console.print` still clips
-    the assembled line as a backstop.
-    """
-    fitted_text = Text(text)
-    fitted_text.truncate(width, overflow='ellipsis', pad=pad)
-    return fitted_text
 
 
 def quiet_alert(lane: LaneView) -> bool:
@@ -1098,17 +1079,6 @@ def render_lane(lane: LaneView, width: int, row_cap: int) -> None:
     render_trailer(lane)
     if lane.reason:
         console.print(Text(f'  partial — {lane.reason}', style='yellow'))
-
-
-def column_width(width: int, values: list[str], share: float, minimum: int) -> int:
-    """How wide a trailing column gets: what it needs, bounded by its share.
-
-    Sized to the values actually on screen first, so a lane whose rows carry no
-    command reserves nothing for one and a lane of short notes stops stealing
-    width from its titles.
-    """
-    needed = max((len(value) for value in values), default=0)
-    return min(needed, max(minimum, int(width * share)))
 
 
 def handle_text(row: Row) -> str:
@@ -1230,7 +1200,7 @@ def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
 
 
 def pursuit_standing() -> str:
-    """What the pursuits owe, each in its own unit, or nothing when none owes anything.
+    """Which pursuits are behind, by name, or nothing when none owes anything.
 
     Guarded rather than trusted. A register that refuses to load is a real and
     deliberate failure mode, and it must cost this one line rather than the whole

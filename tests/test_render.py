@@ -82,3 +82,28 @@ def test_nudge_header_is_one_line(capsys):
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 1, 'the boxed three-line header belongs to the browse views'
     assert lines[0] == 'Review · 6 due'
+
+
+def test_a_column_takes_what_it_needs_bounded_by_its_share():
+    assert render.column_width(140, ['', ''], 0.3, 20) == 0, 'a column nothing fills reserves nothing'
+    assert render.column_width(140, ['↳ indy index'], 0.3, 20) == 12, 'what it needs, when that is under the share'
+    assert render.column_width(140, ['x' * 90], 0.3, 20) == 42, 'the share, when the content runs longer'
+    assert render.column_width(40, ['x' * 90], 0.3, 20) == 20, 'never below the minimum, however narrow the line'
+
+
+def test_fitted_truncates_to_the_width_it_was_given():
+    assert render.fitted('abcdefgh', 4).plain == 'abc…'
+    assert render.fitted('ab', 6, pad=True).plain == 'ab    '
+    assert render.fitted('ab', 6).plain == 'ab', 'unpadded, so a trailing column ends where its value does'
+
+
+def test_a_span_is_reported_in_the_coarsest_unit_that_still_says_something():
+    assert render.span_text(3) == '3d'
+    assert render.span_text(13.9) == '13d'
+    assert render.span_text(30) == '4w'
+    assert render.span_text(200) == '6mo'
+
+
+def test_a_span_ignores_the_direction_it_was_measured_in():
+    # A due date says overdue or in; the number beside it is a magnitude.
+    assert render.span_text(-21) == render.span_text(21) == '3w'
