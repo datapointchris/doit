@@ -106,6 +106,24 @@ def balance(elapsed: float, interval: float, size: float, done: float) -> float:
     return (elapsed / interval) * size - done
 
 
+def days_until_due(owed: float, interval: float, size: float) -> float | None:
+    """Days until one more checkoff is asked for. Negative is already overdue.
+
+    The balance restated on the one axis every pursuit shares. A balance counts
+    minutes for a pursuit that declares a checkoff size and whole checkoffs for
+    one that does not, so two rows cannot be compared without converting by hand.
+    Dividing by the size gives checkoffs owed; multiplying by the interval turns
+    that into time, which needs no conversion and no legend.
+
+    A rescaling and nothing more, so it preserves order: a pursuit twice as far
+    behind another in its own unit is twice as far behind in days. None where a
+    pursuit has no schedule to be due against.
+    """
+    if interval <= 0 or math.isinf(interval) or size <= 0:
+        return None
+    return (1.0 - owed / size) * interval
+
+
 def period_amount(interval: float, size: float, period_days: float = PERIOD_DAYS) -> float:
     """How much of its own unit a pursuit's schedule asks for over ``period_days``.
 

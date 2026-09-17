@@ -743,101 +743,78 @@ def test_term_ended_only_after_the_date():
     assert not pursuits.term_ended({}, NOW.date())
 
 
-def test_the_log_hint_keeps_its_optional_argument(sandbox, monkeypatch, capsys):
-    """`[note]` has to survive rich, which reads a bare bracket as a style tag.
+def test_the_draw_names_no_command_to_run(sandbox, monkeypatch, capsys):
+    """A command on the screen is a line spent on what you already know how to type.
 
-    It did not: the hint shipped as markup and rich swallowed the argument, so the
-    line told you to run `doit log <pursuit>` and never mentioned the note.
+    The screen answers what to do next. How to record having done it is `--help`,
+    and putting it here cost a row per item plus two lines of footer.
     """
     monkeypatch.setattr(pursuits, 'todays_context', list)
 
     assert pursuits.cmd_next(False, False, True) == 0
 
-    assert 'doit log <pursuit> [note]' in capsys.readouterr().out
+    assert 'doit log' not in capsys.readouterr().out
 
 
-def test_a_drawn_row_says_where_the_item_lives_and_what_it_is_about(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '200')
+def test_a_drawn_row_says_where_the_item_lives(capsys):
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     resolved = {
         'chores': {
             'label': 'Give cobracmd a usage-error exit code of 2',
             'context': 'goselfupdate · CLI machine contract conformance',
-            'detail': 'Cobra returns flag-parse failures as ordinary errors.',
         }
     }
 
-    pursuits.render_row(1, 'chores', state, resolved, False, 6)
+    row = pursuits.offer('chores', state, resolved)
 
-    printed = capsys.readouterr().out
-    assert 'goselfupdate · CLI machine contract conformance' in printed
-    assert 'Cobra returns flag-parse failures as ordinary errors.' in printed
-
-
-def test_a_drawn_row_prints_the_command_that_opens_the_item(monkeypatch, capsys):
-    """The one place a sixty-column UUID invocation fits.
-
-    The dashboard's three-row glance cannot spend the width on it, so the row
-    there carries context and the draw carries the command.
-    """
-    monkeypatch.setenv('COLUMNS', '200')
-    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    view = 'icb projects items show 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
-    resolved = {'chores': {'label': 'Give cobracmd a usage-error exit code of 2', 'view': view}}
-
-    pursuits.render_row(1, 'chores', state, resolved, False, 6)
-
-    assert f'↳ {view}' in capsys.readouterr().out
+    assert row.title == 'Give cobracmd a usage-error exit code of 2'
+    assert row.context == 'goselfupdate · CLI machine contract conformance'
 
 
-def test_a_row_says_how_many_more_the_backend_matched(monkeypatch, capsys):
+def test_a_row_says_how_many_others_the_backend_matched():
     """Without the count the title reads as the backend having chosen.
 
     Three books are equally in progress, so the first is one of three rather than
     the next one. The count is what stops a scan reading it as a decision.
     """
-    monkeypatch.setenv('COLUMNS', '200')
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     resolved = {'chores': {'label': 'Difficult Conversations', 'context': 'Douglas Stone', 'candidates': 3}}
 
-    pursuits.render_row(1, 'chores', state, resolved, False, 6)
-
-    assert '+2 more' in capsys.readouterr().out
+    assert pursuits.offer('chores', state, resolved).context == 'Douglas Stone · 2 others'
 
 
-def test_a_row_with_nothing_extra_to_say_stays_one_line(capsys):
+def test_a_row_is_one_line_whatever_the_backend_returned(capsys):
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    resolved = {'chores': {'label': 'Trim Dingo Nails', 'context': 'Dingo', 'detail': 'A paragraph about the dog.'}}
 
-    pursuits.render_row(1, 'chores', state, {'chores': {'label': 'Trim Dingo Nails'}}, False, 6)
+    pursuits.render_offers([pursuits.offer('chores', state, resolved)], 200)
 
     assert len(capsys.readouterr().out.strip().splitlines()) == 1
 
 
-def test_a_backend_that_failed_gets_no_continuation_line(capsys):
-    # The row already says the backend failed; a second line under it would be
-    # context for an item that was never resolved.
+def test_a_failed_row_drops_the_context_the_resolve_never_produced():
+    # The row says the backend failed, so a place and a gist beside it would be
+    # describing an item that was never resolved.
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     resolved = {'chores': {'error': 'exited 1', 'backend': 'icb', 'context': 'stale', 'detail': 'stale'}}
 
-    pursuits.render_row(1, 'chores', state, resolved, False, 6)
+    row = pursuits.offer('chores', state, resolved)
 
-    assert len(capsys.readouterr().out.strip().splitlines()) == 1
+    assert row.failed
+    assert row.context == ''
 
 
-def test_a_failed_row_carries_what_the_backend_said(monkeypatch, capsys):
+def test_a_failed_row_carries_what_the_backend_said():
     """A stale register entry and a logged-out CLI fail the same way.
 
     Naming the backend and calling it unavailable reads as an outage, which sends
     you to check a service that is answering fine. The message the backend printed
     is the only part that says which of the two happened.
     """
-    monkeypatch.setenv('COLUMNS', '200')
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     resolved = {'chores': {'error': 'error: unknown flag: --limit', 'backend': 'icb'}}
 
-    pursuits.render_row(1, 'chores', state, resolved, False, 6)
-
-    assert 'icb: error: unknown flag: --limit' in capsys.readouterr().out
+    assert pursuits.offer('chores', state, resolved).title == 'icb: error: unknown flag: --limit'
 
 
 def test_format_elapsed_switches_unit_rather_than_format():
@@ -1035,10 +1012,21 @@ def test_a_skip_that_has_run_out_suppresses_nothing(tmp_path, monkeypatch):
     assert state['effective']['chore'] > 0
 
 
-def test_the_standing_line_names_each_pursuit_in_its_own_unit(tmp_path, monkeypatch):
+def test_the_standing_line_names_what_is_behind_and_no_more(tmp_path, monkeypatch):
+    """Minutes and checkoffs do not add, so a list of amounts has no total behind it.
+
+    The question the line answers is which strands are slipping, and the names
+    alone answer it. How far behind each one is has a column on the row.
+    """
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 2.0)])
 
-    assert pursuits.standing_line(state) == 'behind · chore +3.0, read +90m'
+    assert pursuits.standing_line(state) == 'behind · chore · read'
+
+
+def test_the_standing_line_leaves_out_what_is_already_on_screen(tmp_path, monkeypatch):
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 2.0)])
+
+    assert pursuits.standing_line(state, exclude=['chore']) == 'behind · read'
 
 
 def test_the_standing_line_is_silent_when_nothing_is_owed(tmp_path, monkeypatch):
@@ -1104,46 +1092,49 @@ def test_the_standing_line_counts_the_names_it_does_not_spell_out(tmp_path, monk
 
     line = pursuits.standing_line(state)
 
-    assert line.count(',') == pursuits.STANDING_NAMES - 1
-    assert line.endswith('doit pursuits list'), 'a typeable command, never a remainder count'
+    assert line.count('·') == pursuits.STANDING_NAMES
+    assert line.endswith(f'and {6 - pursuits.STANDING_NAMES} more')
 
 
-def test_format_balance_carries_the_unit_and_always_the_sign(tmp_path, monkeypatch):
-    assert pursuits.format_balance(25.0, 45.0) == '+25m'
-    assert pursuits.format_balance(-90.0, 45.0) == '-90m'
-    assert pursuits.format_balance(3.0, None) == '+3.0'
-    assert pursuits.format_balance(-1.5, None) == '-1.5'
-    assert pursuits.format_balance(0.0, None) == '+0.0'
+def test_the_due_text_says_which_side_of_the_schedule_it_is_on():
+    """The sign carried the whole reading and is the first character a reader skips."""
+    assert pursuits.format_due(None) == '—'
+    assert pursuits.format_due(-21.0) == '3w overdue'
+    assert pursuits.format_due(-2.0) == '2d overdue'
+    assert pursuits.format_due(-0.4) == 'due today'
+    assert pursuits.format_due(0.6) == 'due today'
+    assert pursuits.format_due(2.4) == 'due in 2d'
+    assert pursuits.format_due(120.0) == 'due in 4mo'
 
 
-def multiplier_state(declared: float | None, implied: float) -> dict:
+def schedule_state(declared: float | None, implied: float) -> dict:
     return {'intervals': {'a': declared}, 'implied_intervals': {'a': implied}}
 
 
-def test_a_cadence_shorter_than_the_implied_interval_reports_the_multiple():
+def test_a_cadence_shorter_than_the_implied_interval_names_both():
     # The number that was invisible: `cadence: 1d` against an implied 3.7d is
     # what took a third of every draw on a weight claiming a ninth of it.
-    assert pursuits.urgency_multiplier(multiplier_state(1.0, 3.7), 'a') == ' ×3.7'
+    assert pursuits.schedule_text(schedule_state(1.0, 3.7), 'a') == 'every 1d, weight says 3d'
 
 
-def test_a_cadence_longer_than_the_implied_interval_reports_the_division():
-    assert pursuits.urgency_multiplier(multiplier_state(7.0, 3.7), 'a') == ' ÷1.9'
+def test_a_cadence_longer_than_the_implied_interval_names_both():
+    assert pursuits.schedule_text(schedule_state(7.0, 3.7), 'a') == 'every 7d, weight says 3d'
 
 
 @pytest.mark.parametrize('declared', [3.4, 3.7, 4.0])
-def test_a_cadence_within_a_tenth_of_the_implied_interval_says_nothing(declared):
+def test_a_cadence_within_a_tenth_of_the_implied_interval_names_only_itself(declared):
     # That close is the measured logging rate wobbling, not a decision.
-    assert pursuits.urgency_multiplier(multiplier_state(declared, 3.7), 'a') == ''
+    assert pursuits.schedule_text(schedule_state(declared, 3.7), 'a') == f'every {int(declared)}d'
 
 
-def test_a_pursuit_with_no_cadence_has_no_multiplier():
-    assert pursuits.urgency_multiplier(multiplier_state(None, 3.7), 'a') == ''
+def test_a_pursuit_with_no_interval_has_no_schedule_to_state():
+    assert pursuits.schedule_text(schedule_state(None, 3.7), 'a') == '—'
 
 
-def test_an_infinite_implied_interval_has_no_multiplier():
-    # A zero-weight pursuit implies an infinite interval; dividing by it is not a
-    # ratio anyone can read.
-    assert pursuits.urgency_multiplier(multiplier_state(3.0, math.inf), 'a') == ''
+def test_an_infinite_implied_interval_names_only_the_cadence():
+    # A zero-weight pursuit implies an infinite interval; comparing against it is
+    # not a reading anyone can use.
+    assert pursuits.schedule_text(schedule_state(3.0, math.inf), 'a') == 'every 3d'
 
 
 def answers(monkeypatch, *replies: str) -> list[str]:
@@ -1270,8 +1261,11 @@ def test_a_skip_names_when_the_pursuit_returns(sandbox, monkeypatch, capsys):
     # The interpolated values, never the sentence around them. A year printed as
     # `08 Sep` makes `--for 1y` and `--for 1d` read identically, and the verb that
     # retires the mark has to be reachable from the screen that writes it.
+    #
+    # Derived from the clock the command reads rather than written out. A pinned
+    # date passes on the day it is typed and fails on every day after it.
     printed = capsys.readouterr().out
-    assert '11 Sep 2026' in printed
+    assert f'{datetime.now().astimezone() + timedelta(days=3):%d %b %Y}' in printed
     assert 'doit pursuits resume read-library' in printed
 
 
@@ -1627,9 +1621,10 @@ def test_a_row_the_register_dropped_renders_rather_than_crashing(sandbox, monkey
     pursuits.save_cached_draw({'draw_id': 'abc', 'created_at': NOW.isoformat(), 'pinned': [], 'drawn': ['paused-thing']})
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
 
-    pursuits.render_row(1, 'paused-thing', state, {}, pin=False, width=12)
+    row = pursuits.offer('paused-thing', state, {})
 
-    assert 'paused-thing' in capsys.readouterr().out
+    assert row.name == 'paused-thing'
+    assert row.due == '—', 'a row outside the active set cannot be priced and still has to render'
 
 
 def test_the_warning_band_never_falls_below_one_checkoff(tmp_path, monkeypatch):
@@ -1664,7 +1659,7 @@ def test_a_backdated_log_reports_the_standing_the_next_command_will(sandbox, mon
     printed = capsys.readouterr().out
 
     state = pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())
-    assert pursuits.format_balance(state['balance']['chores'], None) in printed
+    assert pursuits.format_due(pursuits.due_in_days(state, 'chores')) in printed
 
 
 def test_resume_ends_a_standing_skip(sandbox, monkeypatch):

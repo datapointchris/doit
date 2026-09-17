@@ -48,13 +48,19 @@ pursuit counts as one checkoff; `doit log --minutes` is how long one sitting act
 against it.
 
 Standing is one running balance in whichever unit applies — what the weight-derived schedule has
-asked for since the pursuit's zero point, less what has been done. `+90m` is ninety minutes owed and
-`-2.0` is two checkoffs ahead. Nothing is capped in either direction, so three chores in one evening
-count as three, twenty minutes of reading pays twenty minutes off a longer checkoff, and a fortnight
-away is owed in full. A balance further from current than two weeks of that pursuit's own schedule
-is reported, with the band beside it — nothing in the model bends to absorb such a drift, so the
-weight is what it is evidence about. The band never falls below one whole checkoff, because a
-pursuit that is simply due is not a pursuit whose weight is wrong.
+asked for since the pursuit's zero point, less what has been done. Nothing is capped in either
+direction, so three chores in one evening count as three, twenty minutes of reading pays twenty
+minutes off a longer checkoff, and a fortnight away is owed in full. A balance further from current
+than two weeks of that pursuit's own schedule is reported as a weight that does not match how you
+live — nothing in the model bends to absorb such a drift, so the weight is what it is evidence
+about. The band never falls below one whole checkoff, because a pursuit that is simply due is not a
+pursuit whose weight is wrong.
+
+That balance is never the number on screen. Two units on one screen cannot be read against each
+other, and a signed number carries its whole meaning in the one character a reader skips. Every view
+states standing as a date — `3d overdue`, `due today`, `due in 2w` — which is the balance divided by
+the checkoff size and multiplied by the interval. The rescaling preserves order, so nothing is lost
+and no view needs a legend under it. `doit next --json` carries the raw balance.
 
 `doit skip <pursuit> --for 2w` takes one out of the draw until it expires, and it owes nothing
 meanwhile; `doit pursuits resume <pursuit>` ends the skip early. `doit pursuits reset <pursuit>`
@@ -62,9 +68,11 @@ moves the zero point to now, which is what to reach for after a long pause or a 
 with no name it moves every one, after confirming. The journal is append-only either way — both are
 markers written into it, never a rewrite of what happened.
 
-The draw always offers a full screen. What is owed orders it, and what is current fills the rest
-underneath, so a register with nothing outstanding still says what there is rather than going
-blank — and a pursuit you are a whole checkoff ahead on stays out of it.
+The draw always offers a full screen. What is owed fills it first and what is current fills the
+rest, so a register with nothing outstanding still says what there is rather than going blank — and
+a pursuit you are a whole checkoff ahead on stays out of it. The screen is one list ordered by how
+far past due each row is, pins included. Only a pursuit declaring a cadence can pin, so splitting
+the two put a weighted pursuit three days behind underneath a scheduled one due this morning.
 
 ## Sources are configuration
 
