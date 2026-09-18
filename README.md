@@ -57,9 +57,14 @@ about. The band never falls below one whole checkoff, because a pursuit that is 
 pursuit whose weight is wrong.
 
 That balance is never the number on screen. Every view states standing as a date — `3d overdue`,
-`due today`, `due in 2w`, and `3w behind what weight 25 asks for` where the two differ by an
-interval. `doit.allocate` holds both conversions and says why each is the one its caller wants.
-`doit next --json` carries the raw balance.
+`due today`, `due in 2w` — and a weight far off how you live as `behind goal by 3w`. The two differ
+by an interval, and `doit.allocate` holds both conversions and says why each is the one its caller
+wants. `doit next --json` carries the raw balance.
+
+A pursuit whose resolver matches several rows offers the first three, stacked under its name. One
+choice is a decision the register made; several are a choice you make, so `doit log` asks which one
+wherever the pursuit's `on_log` would complete it, and names none on Enter or when nobody is there
+to ask.
 
 `doit skip <pursuit> --for 2w` takes one out of the draw until it expires, and it owes nothing
 meanwhile; `doit pursuits resume <pursuit>` ends the skip early. `doit pursuits reset <pursuit>`

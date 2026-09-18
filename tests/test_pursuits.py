@@ -288,7 +288,7 @@ def test_a_logged_pursuit_leaves_the_draw_record_intact(sandbox, monkeypatch):
     ask. Unlinking the cache the way a skip does would take all three.
     """
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
-    stand_a_draw(['chores', 'read-library'], resolved={'read-library': {'label': 'Dune', 'id': '7'}})
+    stand_a_draw(['chores', 'read-library'], resolved={'read-library': {'candidates': 1, 'choices': [{'label': 'Dune', 'id': '7'}]}})
 
     assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
     assert pursuits.cmd_log('read-library', [], None, 30, assume_yes=True, no_write=False) == 0
@@ -328,9 +328,9 @@ def test_a_cached_failure_is_asked_again_without_disturbing_the_draw(sandbox, tm
     pursuits.retry_failed_resolves(selection, {'chores': {'resolve': f'cat {payload}', 'label': 'name'}})
 
     assert selection['offered'] == ['chores']
-    assert selection['resolved']['chores']['label'] == 'Trim Dingo Nails'
+    assert selection['resolved']['chores']['choices'][0]['label'] == 'Trim Dingo Nails'
     assert 'error' not in selection['resolved']['chores']
-    assert pursuits.load_cached_draw(NOW)['resolved']['chores']['label'] == 'Trim Dingo Nails'
+    assert pursuits.load_cached_draw(NOW)['resolved']['chores']['choices'][0]['label'] == 'Trim Dingo Nails'
 
 
 def test_a_retry_that_finds_nothing_drops_the_stale_error(sandbox, tmp_path):
@@ -435,23 +435,23 @@ def test_dig_dead_ends_rather_than_raising_on_a_bad_list_key(path):
 
 def test_resolve_one_reads_plain_lines_when_no_label_is_named():
     resolved = pursuits.resolve_one('p', {'resolve': 'printf "first line\\nsecond\\n"'})
-    assert resolved['label'] == 'first line'
+    assert resolved['choices'][0]['label'] == 'first line'
 
 
 def test_resolve_one_maps_json_fields(tmp_path):
     payload = tmp_path / 'tasks.json'
     payload.write_text(json.dumps([{'name': 'Trim Dingo Nails', 'id': 422}]))
     resolved = pursuits.resolve_one('chores', {'resolve': f'cat {payload}', 'label': 'name', 'id': 'id'})
-    assert resolved['label'] == 'Trim Dingo Nails'
-    assert resolved['id'] == '422'
-    assert resolved['raw']['name'] == 'Trim Dingo Nails'
+    assert resolved['choices'][0]['label'] == 'Trim Dingo Nails'
+    assert resolved['choices'][0]['id'] == '422'
+    assert resolved['choices'][0]['raw']['name'] == 'Trim Dingo Nails'
 
 
 def test_resolve_one_digs_into_a_nested_list(tmp_path):
     payload = tmp_path / 'overview.json'
     payload.write_text(json.dumps({'in_progress_resources': [{'name': 'Chapter 6'}]}))
     config = {'resolve': f'cat {payload}', 'items': 'in_progress_resources', 'label': 'name'}
-    assert pursuits.resolve_one('cs', config)['label'] == 'Chapter 6'
+    assert pursuits.resolve_one('cs', config)['choices'][0]['label'] == 'Chapter 6'
 
 
 def test_resolve_one_accepts_a_single_object_where_a_list_would_do(tmp_path):
@@ -461,8 +461,8 @@ def test_resolve_one_accepts_a_single_object_where_a_list_would_do(tmp_path):
     payload.write_text(json.dumps({'projects': {'items': {'next': {'title': 'Ship the CLI', 'id': 'abc'}}}}))
     config = {'resolve': f'cat {payload}', 'items': 'projects.items.next', 'label': 'title', 'id': 'id'}
     resolved = pursuits.resolve_one('build', config)
-    assert resolved['label'] == 'Ship the CLI'
-    assert resolved['id'] == 'abc'
+    assert resolved['choices'][0]['label'] == 'Ship the CLI'
+    assert resolved['choices'][0]['id'] == 'abc'
 
 
 def test_resolve_one_carries_where_the_item_lives_and_what_it_is_about(tmp_path):
@@ -488,8 +488,8 @@ def test_resolve_one_carries_where_the_item_lives_and_what_it_is_about(tmp_path)
 
     resolved = pursuits.resolve_one('build', config)
 
-    assert resolved['context'] == 'goselfupdate · CLI machine contract conformance'
-    assert resolved['detail'] == 'Cobra returns flag-parse failures as ordinary errors.', 'the gist, not the whole note'
+    assert resolved['choices'][0]['context'] == 'goselfupdate · CLI machine contract conformance'
+    assert resolved['choices'][0]['detail'] == 'Cobra returns flag-parse failures as ordinary errors.', 'the gist, not the whole note'
 
 
 def test_resolve_one_takes_a_single_context_path_as_well_as_several(tmp_path):
@@ -497,7 +497,7 @@ def test_resolve_one_takes_a_single_context_path_as_well_as_several(tmp_path):
     payload.write_text(json.dumps([{'name': 'Trim Dingo Nails', 'category': 'Dingo'}]))
     config = {'resolve': f'cat {payload}', 'label': 'name', 'context': 'category'}
 
-    assert pursuits.resolve_one('tasks', config)['context'] == 'Dingo'
+    assert pursuits.resolve_one('tasks', config)['choices'][0]['context'] == 'Dingo'
 
 
 def test_resolve_one_skips_a_context_field_the_row_does_not_carry(tmp_path):
@@ -507,7 +507,7 @@ def test_resolve_one_skips_a_context_field_the_row_does_not_carry(tmp_path):
     payload.write_text(json.dumps([{'title': 'Glove 80', 'repo': None, 'projects': [{'name': 'Sell Unused Shite'}]}]))
     config = {'resolve': f'cat {payload}', 'label': 'title', 'context': ['repo', 'projects.0.name']}
 
-    assert pursuits.resolve_one('build', config)['context'] == 'Sell Unused Shite'
+    assert pursuits.resolve_one('build', config)['choices'][0]['context'] == 'Sell Unused Shite'
 
 
 def test_resolve_one_fills_the_offered_items_id_into_the_view_command(tmp_path):
@@ -517,7 +517,7 @@ def test_resolve_one_fills_the_offered_items_id_into_the_view_command(tmp_path):
 
     resolved = pursuits.resolve_one('build', config)
 
-    assert resolved['view'] == 'icb projects items show 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
+    assert resolved['choices'][0]['view'] == 'icb projects items show 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
 
 
 def test_a_view_command_wanting_an_id_the_backend_withheld_is_not_printed(tmp_path):
@@ -526,7 +526,7 @@ def test_a_view_command_wanting_an_id_the_backend_withheld_is_not_printed(tmp_pa
     payload.write_text(json.dumps([{'title': 'Ship the CLI'}]))
     config = {'resolve': f'cat {payload}', 'label': 'title', 'view': 'icb projects items show {id}'}
 
-    assert pursuits.resolve_one('build', config)['view'] == ''
+    assert pursuits.resolve_one('build', config)['choices'][0]['view'] == ''
 
 
 def test_a_view_command_needing_no_id_is_printed_as_written():
@@ -575,14 +575,24 @@ def test_resolve_one_returns_none_for_an_empty_result(tmp_path):
 def test_resolve_one_counts_the_rows_that_matched(tmp_path):
     """Three books equally in progress are candidates, not a decision.
 
-    The first row still renders, because a title is better context than none. What
-    the count buys is everything downstream knowing the backend did not choose.
+    Every one is offered, because showing only the first picks for you. The count
+    is what tells everything downstream the backend did not choose.
     """
     payload = tmp_path / 'books.json'
     payload.write_text(json.dumps([{'title': 'Ego and Archetype'}, {'title': 'Lucid Dreaming'}]))
     resolved = pursuits.resolve_one('read', {'resolve': f'cat {payload}', 'label': 'title'})
-    assert resolved['label'] == 'Ego and Archetype'
+    assert [choice['label'] for choice in resolved['choices']] == ['Ego and Archetype', 'Lucid Dreaming']
     assert resolved['candidates'] == 2
+
+
+def test_resolve_one_offers_a_handful_however_many_matched(tmp_path):
+    """Fifty-four open tasks are a list, not a choice. The count still says fifty-four."""
+    payload = tmp_path / 'tasks.json'
+    payload.write_text(json.dumps([{'name': f'task {number}'} for number in range(54)]))
+    resolved = pursuits.resolve_one('tasks', {'resolve': f'cat {payload}', 'label': 'name'})
+
+    assert len(resolved['choices']) == pursuits.CANDIDATE_ROWS
+    assert resolved['candidates'] == 54
 
 
 def test_resolve_one_counts_after_the_register_narrows_the_rows(tmp_path):
@@ -699,12 +709,75 @@ def test_logging_names_the_item_the_write_through_completed(sandbox, monkeypatch
         f'    on_log: sh -c "echo {{id}} > {marker}"\n',
     )
     monkeypatch.setattr(pursuits, 'REGISTER', register)
-    stand_a_draw(['chores'], resolved={'chores': {'label': 'Pumice Stone', 'id': '7', 'candidates': 3}})
+    stand_a_draw(['chores'], resolved={'chores': {'candidates': 3, 'choices': [{'label': 'Pumice Stone', 'id': '7'}]}})
 
     assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
 
     assert marker.read_text().strip() == '7'
     assert journal.read_all(sandbox / 'state')[0]['item']['label'] == 'Pumice Stone'
+
+
+def logging_register(tmp_path, marker) -> Path:
+    return write_register(
+        tmp_path,
+        'pursuits:\n'
+        '  chores:\n'
+        '    weight: 25\n'
+        '    resolve: echo unused-the-draw-already-resolved-it\n'
+        f'    on_log: sh -c "echo {{id}} > {marker}"\n',
+    )
+
+
+THREE_TASKS = {
+    'candidates': 54,
+    'choices': [{'label': 'Face Mud', 'id': '501'}, {'label': 'Return hoodies', 'id': '512'}, {'label': 'Journal', 'id': '474'}],
+}
+
+
+def test_logging_one_of_several_choices_completes_the_one_you_named(sandbox, monkeypatch, tmp_path):
+    """Three tasks on screen, so which one got done is a question only you can
+    answer — and the write-through completes that one and no other."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: True)
+    marker = tmp_path / 'completed'
+    monkeypatch.setattr(pursuits, 'REGISTER', logging_register(tmp_path, marker))
+    stand_a_draw(['chores'], resolved={'chores': THREE_TASKS})
+    monkeypatch.setattr(pursuits, 'ask', lambda prompt: '2')
+
+    assert pursuits.cmd_log('chores', ['done'], None, None, assume_yes=True, no_write=False) == 0
+
+    assert marker.read_text().strip() == '512'
+    assert journal.read_all(sandbox / 'state')[0]['item']['label'] == 'Return hoodies'
+
+
+def test_enter_at_the_choice_completes_nothing(sandbox, monkeypatch, tmp_path):
+    """Defaulting to the top row would complete whatever sorted first, in another
+    app, on the keystroke that reads as skipping the question."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: True)
+    marker = tmp_path / 'completed'
+    monkeypatch.setattr(pursuits, 'REGISTER', logging_register(tmp_path, marker))
+    stand_a_draw(['chores'], resolved={'chores': THREE_TASKS})
+    monkeypatch.setattr(pursuits, 'ask', lambda prompt: '')
+
+    assert pursuits.cmd_log('chores', ['done'], None, None, assume_yes=True, no_write=False) == 0
+
+    assert not marker.exists()
+    assert journal.read_all(sandbox / 'state')[0]['item'] is None, 'the pursuit happened; no one item is claimed'
+
+
+def test_several_choices_with_nobody_to_ask_complete_nothing(sandbox, monkeypatch, tmp_path):
+    """Unattended, the question has no answer, and guessing it is a wrong
+    completion in another app's data."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
+    marker = tmp_path / 'completed'
+    monkeypatch.setattr(pursuits, 'REGISTER', logging_register(tmp_path, marker))
+    stand_a_draw(['chores'], resolved={'chores': THREE_TASKS})
+
+    assert pursuits.cmd_log('chores', ['done'], None, None, assume_yes=True, no_write=False) == 0
+
+    assert not marker.exists()
 
 
 def test_on_log_is_skipped_when_the_pursuit_declares_none():
@@ -753,11 +826,11 @@ def test_the_draw_carries_no_per_row_command(sandbox, monkeypatch):
     """
     monkeypatch.setattr(pursuits, 'todays_context', list)
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    resolved = {'chores': {'label': 'Trim Dingo Nails', 'context': 'Dingo', 'view': 'icb tasks show 422'}}
+    resolved = {'chores': {'choices': [{'label': 'Trim Dingo Nails', 'context': 'Dingo', 'view': 'icb tasks show 422'}]}}
 
     row = pursuits.offer('chores', state, resolved)
 
-    assert 'icb tasks show' not in f'{row.title} {row.context} {row.due}'
+    assert not any('icb tasks show' in line for line in [*row.choices, row.due])
 
 
 def test_the_draw_puts_every_offered_pursuit_on_the_screen(sandbox, monkeypatch, capsys):
@@ -773,35 +846,34 @@ def test_the_draw_puts_every_offered_pursuit_on_the_screen(sandbox, monkeypatch,
     assert all(name in printed for name in offered)
 
 
-def test_a_drawn_row_says_where_the_item_lives(capsys):
+def test_a_drawn_choice_says_where_the_item_lives_beside_its_title():
+    """On the same line, not in a column. A column is sized by the longest title
+    on screen, which put a short title's place most of a pane away from it."""
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    resolved = {
-        'chores': {
-            'label': 'Give cobracmd a usage-error exit code of 2',
-            'context': 'goselfupdate · CLI machine contract conformance',
-        }
-    }
+    resolved = {'chores': {'choices': [{'label': 'Face Mud', 'context': 'Home'}]}}
 
-    row = pursuits.offer('chores', state, resolved)
-
-    assert row.title == 'Give cobracmd a usage-error exit code of 2'
-    assert row.context == 'goselfupdate · CLI machine contract conformance'
+    assert pursuits.offer('chores', state, resolved).choices == ['Face Mud · Home']
 
 
-def test_a_row_says_how_many_others_the_backend_matched():
-    """Without the count the title reads as the backend having chosen.
-
-    Three books are equally in progress, so the first is one of three rather than
-    the next one. The count is what stops a scan reading it as a decision.
-    """
+def test_a_pursuit_offers_every_choice_its_backend_returned():
+    """Three books equally in progress have no next one. Showing only the first
+    picks for you; showing all three is what makes it a choice."""
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    resolved = {'chores': {'label': 'Difficult Conversations', 'context': 'Douglas Stone', 'candidates': 3}}
+    books = [{'label': 'Difficult Conversations', 'context': 'Douglas Stone'}, {'label': 'Ego and Archetype'}]
 
-    assert pursuits.offer('chores', state, resolved).context == 'Douglas Stone · 2 others'
+    row = pursuits.offer('chores', state, {'chores': {'candidates': 2, 'choices': books}})
+
+    assert row.choices == ['Difficult Conversations · Douglas Stone', 'Ego and Archetype']
 
 
-def a_row(name: str, due: str, title: str, context: str = '') -> pursuits.Offer:
-    return pursuits.Offer(name, due, '', title, context, False)
+def test_a_pursuit_with_nothing_resolved_offers_its_description():
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+
+    assert pursuits.offer('chores', state, {}).choices == [state['pursuits']['chores']['description']]
+
+
+def a_row(name: str, due: str, *choices: str) -> pursuits.Offer:
+    return pursuits.Offer(name, due, '', list(choices), False)
 
 
 @pytest.fixture
@@ -812,57 +884,40 @@ def unclipped(monkeypatch):
     monkeypatch.setattr(render.console, '_width', 10_000)
 
 
-@pytest.mark.parametrize('width', [40, 60, 80, 140])
+@pytest.mark.parametrize('width', [60, 80, 140])
 def test_a_row_never_assembles_wider_than_the_line_it_was_given(width, unclipped, capsys):
-    """A long name and a long due date can take the whole of a narrow line, and a
-    title floor the line cannot afford assembles a row the backstop then cuts."""
-    pursuits.render_offers([a_row('read-library-and-more!', '3w overdue', 'Difficult Conversations', 'Douglas Stone')], width)
+    """A choice takes what the name and the date leave, never more."""
+    pursuits.render_offers([a_row('read-library', '3w overdue', 'Difficult Conversations · Douglas Stone' * 3)], width)
 
     assert max(len(line) for line in capsys.readouterr().out.splitlines()) <= width
 
 
-def test_a_short_title_is_not_padded_to_the_width_of_the_terminal(unclipped, capsys):
-    """Handing the title the whole remainder strands the context against the right
-    edge, a screen away from the row it belongs to."""
-    offers = [a_row('chores', 'due today', 'Trim the hedge', 'house'), a_row('read', 'due in 2d', 'Dune', 'Herbert')]
+def test_the_name_and_date_are_said_once_per_pursuit(unclipped, capsys):
+    """Repeating them down a block reads as three pursuits rather than one with
+    three things you could do."""
+    pursuits.render_offers([a_row('tasks', 'due in 2d', 'Face Mud · Home', 'Return hoodies · Purchase')], 140)
 
-    pursuits.render_offers(offers, 140)
-
-    printed = capsys.readouterr().out
-    assert 'Trim the hedge  house' in printed
-    assert 'Dune            Herbert' in printed, 'the context column starts at one place on every row'
-
-
-def test_a_line_with_no_room_for_context_drops_it_rather_than_stubbing_it(unclipped, capsys):
-    """A column granted no width that renders an ellipsis anyway is what pushes
-    the assembled row past the line."""
-    pursuits.render_offers([a_row('read-library-and-more!', '3w overdue', 'Difficult Conversations', 'Douglas Stone')], 60)
-
-    assert 'Douglas' not in capsys.readouterr().out
+    first, second = capsys.readouterr().out.splitlines()
+    assert 'tasks' in first and 'due in 2d' in first
+    assert 'tasks' not in second and 'due in 2d' not in second
+    assert first.index('Face Mud') == second.index('Return hoodies'), 'every choice starts in one column'
 
 
-def test_a_row_is_one_line_whatever_the_backend_returned(capsys):
-    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    resolved = {'chores': {'label': 'Trim Dingo Nails', 'context': 'Dingo', 'detail': 'A paragraph about the dog.'}}
+def test_blocks_are_separated_once_any_pursuit_offers_several(unclipped, capsys):
+    """Flush blocks run the last choice of one into the name of the next."""
+    pursuits.render_offers([a_row('study', 'due in 1d', 'A', 'B'), a_row('chore', 'due in 2d', 'C')], 140)
 
-    pursuits.render_offers([pursuits.offer('chores', state, resolved)], 200)
-
-    assert len(capsys.readouterr().out.strip().splitlines()) == 1
+    assert capsys.readouterr().out.splitlines()[2] == ''
 
 
-def test_a_failed_row_drops_the_context_the_resolve_never_produced():
-    # The row says the backend failed, so a place and a gist beside it would be
-    # describing an item that was never resolved.
-    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    resolved = {'chores': {'error': 'exited 1', 'backend': 'icb', 'context': 'stale', 'detail': 'stale'}}
+def test_single_choice_pursuits_stay_one_line_apiece(unclipped, capsys):
+    """Spacing a screen of one-liners doubles its height for no grouping to show."""
+    pursuits.render_offers([a_row('socialize', '3d overdue', 'See or call someone'), a_row('chore', 'due in 2d', 'C')], 140)
 
-    row = pursuits.offer('chores', state, resolved)
-
-    assert row.failed
-    assert row.context == ''
+    assert '' not in capsys.readouterr().out.splitlines()
 
 
-def test_a_failed_row_carries_what_the_backend_said():
+def test_a_failed_row_carries_what_the_backend_said_and_nothing_else():
     """A stale register entry and a logged-out CLI fail the same way.
 
     Naming the backend and calling it unavailable reads as an outage, which sends
@@ -870,9 +925,12 @@ def test_a_failed_row_carries_what_the_backend_said():
     is the only part that says which of the two happened.
     """
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    resolved = {'chores': {'error': 'error: unknown flag: --limit', 'backend': 'icb'}}
+    resolved = {'chores': {'error': 'error: unknown flag: --limit', 'backend': 'icb', 'choices': [{'label': 'stale'}]}}
 
-    assert pursuits.offer('chores', state, resolved).title == 'icb: error: unknown flag: --limit'
+    row = pursuits.offer('chores', state, resolved)
+
+    assert row.failed
+    assert row.choices == ['icb: error: unknown flag: --limit']
 
 
 def test_format_elapsed_switches_unit_rather_than_format():
@@ -1195,7 +1253,7 @@ def test_the_weight_warning_reports_displacement_and_not_the_due_date(tmp_path, 
 
     pursuits.render_out_of_band(state)
 
-    assert '3w behind' in capsys.readouterr().out
+    assert 'behind goal by 3w' in capsys.readouterr().out
 
 
 def test_the_weight_warning_ends_with_the_repair(tmp_path, monkeypatch, capsys):
@@ -1691,8 +1749,8 @@ def test_resolve_where_keeps_only_the_rows_that_are_this_pursuit(tmp_path):
 
     resolved = resolving(tmp_path, rows, resolve_where={'name': 'Journal'})
 
-    assert resolved['label'] == 'Journal'
-    assert resolved['id'] == '474'
+    assert resolved['choices'][0]['label'] == 'Journal'
+    assert resolved['choices'][0]['id'] == '474'
 
 
 def test_resolve_where_matching_nothing_resolves_to_nothing(tmp_path):
@@ -1705,7 +1763,7 @@ def test_resolve_without_a_where_takes_the_first_row_as_before(tmp_path):
     """The generalization has to leave every register without it untouched."""
     rows = [{'name': 'Self Authoring', 'id': 344}, {'name': 'Journal', 'id': 474}]
 
-    assert resolving(tmp_path, rows)['label'] == 'Self Authoring'
+    assert resolving(tmp_path, rows)['choices'][0]['label'] == 'Self Authoring'
 
 
 def test_resolve_where_matches_across_types_the_way_evidence_does(tmp_path):
@@ -1713,7 +1771,7 @@ def test_resolve_where_matches_across_types_the_way_evidence_does(tmp_path):
     is the same id — the same rule `evidence_where` applies."""
     rows = [{'name': 'Journal', 'id': 474}]
 
-    assert resolving(tmp_path, rows, resolve_where={'id': '474'})['id'] == '474'
+    assert resolving(tmp_path, rows, resolve_where={'id': '474'})['choices'][0]['id'] == '474'
 
 
 def test_the_odds_reported_are_the_odds_the_draw_ran_on(tmp_path, monkeypatch):
