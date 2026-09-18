@@ -111,7 +111,13 @@ def fitted(text: str, width: int, *, pad: bool = False, style: str = '') -> Text
 
     The style is carried here rather than passed to `Text.append`, which refuses
     one alongside a Text instance.
+
+    A column granted no width renders nothing. `Text.truncate(0)` treats zero as
+    no limit and hands back the whole value, so a layout that computed its way
+    down to an empty column would emit its widest row there.
     """
+    if width <= 0:
+        return Text('')
     fitted_text = Text(text, style=style)
     fitted_text.truncate(width, overflow='ellipsis', pad=pad)
     return fitted_text
@@ -134,13 +140,18 @@ def span_text(days: float) -> str:
     Days up to a fortnight, then weeks, then months. A span reported in the unit
     it was measured in reads as a measurement — `43d` invites arithmetic, where
     `6w` is the answer that arithmetic was for.
+
+    Rounded, and floored at one of whatever unit it landed in. Truncating turns a
+    real quantity into `0`, which a reader takes for none: two thirds of a day is
+    a schedule this tool would have printed as `every 0d`, and nineteen days is
+    two weeks rather than the three it nearly is.
     """
     days = abs(days)
     if days < 14:
-        return f'{int(days)}d'
+        return f'{max(round(days), 1)}d'
     if days < 90:
-        return f'{int(days / 7)}w'
-    return f'{int(days / 30)}mo'
+        return f'{max(round(days / 7), 1)}w'
+    return f'{max(round(days / 30), 1)}mo'
 
 
 def nudge_header(title: str, count: int) -> None:

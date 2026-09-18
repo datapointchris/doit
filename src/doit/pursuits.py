@@ -19,12 +19,11 @@ point, less what has been done. Positive is owed. Nothing is capped in either
 direction, so a burst counts for what it was, a fortnight away is owed in full,
 and a balance too large to be true is the register saying its weight is wrong.
 
-That balance is never the number on screen. Two units on one screen cannot be
-read against each other, and a signed number carries its whole meaning in the one
-character a reader skips. Every view states standing as a date instead — when the
-pursuit next comes due — which is the balance rescaled by the checkoff size and
-the interval, so the order is unchanged and no view needs a legend under it. The
-raw balance stays in `--json` and in every journal entry.
+That balance is never the number on screen. Two units on one screen cannot be read
+against each other, and a signed number carries its whole meaning in the one
+character a reader skips. Every view states standing as a date instead, built by
+`allocate.days_adrift` and `allocate.days_until_due`. The raw balance stays in
+`--json` and in every journal entry.
 
 Three files, kept apart like the review register:
   - pursuits.yml    declarative config you hand-edit; only ever read here. Under
@@ -73,6 +72,7 @@ from doit.allocate import FALLBACK_LOGS_PER_DAY
 from doit.allocate import PERIOD_DAYS
 from doit.allocate import balance
 from doit.allocate import candidates
+from doit.allocate import days_adrift
 from doit.allocate import days_until_due
 from doit.allocate import draw
 from doit.allocate import effective_weights
@@ -129,9 +129,10 @@ STANDING_NAMES = 4
 # stated weight as the thing to argue with.
 DEFAULT_WARN_WEEKS = 2.0
 
-# Share of the line the "where it lives" column may take, and the floor a title
-# keeps whatever else is on the row. Context places an item; the title is the
-# item, so a narrow terminal spends its last columns on the title.
+# Share of the line the "where it lives" column may take, and how much the title
+# must be left before that column is granted any width at all. Context places an
+# item; the title is the item, so a narrow terminal spends its last columns on
+# the title and drops the context entirely.
 CONTEXT_WIDTH_SHARE = 0.25
 TITLE_WIDTH_MIN = 20
 
@@ -704,30 +705,47 @@ def pinned(state: dict) -> list[str]:
     return [name for name, _ in owing]
 
 
+def offered_order(state: dict, names: Iterable[str]) -> list[str]:
+    """``names`` furthest past due first, with anything unpriced last.
+
+    The one place the offered list is ordered. Every consumer reads the list this
+    produced — the screen, the forecast walking it top-down, and the rank recorded
+    against a log — so a second sort anywhere else would be a second answer to the
+    question of what was offered first.
+    """
+    return sorted(names, key=lambda name: (due_in_days(state, name) is None, due_in_days(state, name) or 0.0))
+
+
 def compute_draw(state: dict, seed: int | None = None) -> dict:
     """Draw the pins plus enough sampled pursuits to fill the screen.
 
-    The sample is ordered by how overdue each one is, furthest first. Weight
-    decides membership and the sampler's own order is noise — the key it sorts on
-    is a random draw, so reading the list top to bottom would rank five pursuits
-    by nothing. Ordering it here rather than at the renderer is what keeps
-    `rank_in_draw` describing the list that was actually on screen.
+    One ordered list, furthest past due first, with the pins among it rather than
+    above it. Pinning takes a declared cadence, so a pin is a statement that the
+    pursuit has a schedule and not that it is the most urgent thing on offer — a
+    weighted pursuit three days behind outranks a scheduled one due this morning.
+
+    `pinned` rides along as provenance: which of the offered names got there by
+    cadence rather than by sampling. Nothing reads it for order.
     """
     pins = pinned(state)
     sampled = {name: weight for name, weight in state['pool'].items() if name not in pins}
     rng = random.Random(seed) if seed is not None else random.Random()
     drawn = draw(sampled, max(DRAW_SIZE - len(pins), 0), rng)
-    drawn.sort(key=lambda name: (due_in_days(state, name) is None, due_in_days(state, name) or 0.0))
     return {
         'draw_id': new_id(state['now']),
         'created_at': state['now'].isoformat(),
         'pinned': pins,
-        'drawn': drawn,
+        'offered': offered_order(state, pins + drawn),
     }
 
 
 def load_cached_draw(now: datetime) -> dict | None:
-    """The draw from the last few minutes, or None once it has aged out."""
+    """The draw from the last few minutes, or None once it has aged out.
+
+    A payload carrying no `offered` list is treated as expired. The cache holds a
+    quarter of an hour, so a shape it no longer speaks costs one fresh draw and is
+    cheaper than a reader anywhere downstream having to know two shapes.
+    """
     if not DRAW_CACHE.exists():
         return None
     try:
@@ -737,7 +755,7 @@ def load_cached_draw(now: datetime) -> dict | None:
     created = journal.parse_time(cached.get('created_at'))
     if created is None or now - created > timedelta(minutes=CACHE_MINUTES):
         return None
-    return cached
+    return cached if isinstance(cached.get('offered'), list) else None
 
 
 def save_cached_draw(payload: dict) -> None:
@@ -749,8 +767,8 @@ def mark_logged(name: str, now: datetime) -> None:
     """Note that a pursuit has been done against the standing draw.
 
     Marked rather than dropped, and the draw kept rather than discarded. A log
-    reads the drawn list for `was_offered` and `rank_in_draw`, and the next log in
-    the same window takes its item from the resolved map instead of asking the
+    reads the offered list for `was_offered` and `rank_offered`, and the next log
+    in the same window takes its item from the resolved map instead of asking the
     backend again — both need the draw to survive being partly done.
     """
     cached = load_cached_draw(now)
@@ -770,7 +788,7 @@ def without_logged(selection: dict) -> dict:
     return {
         **selection,
         'pinned': [name for name in selection.get('pinned', []) if name not in logged],
-        'drawn': [name for name in selection.get('drawn', []) if name not in logged],
+        'offered': [name for name in selection.get('offered', []) if name not in logged],
     }
 
 
@@ -940,8 +958,8 @@ def retry_failed_resolves(selection: dict, pursuits: dict) -> None:
 def todays_context() -> list[str]:
     """Today's events and imminent countdowns — context, never candidates.
 
-    An event is something happening, not something to choose, so it renders as a
-    banner and takes no part in the draw.
+    An event is something happening rather than something to choose, so it sits
+    above the draw as one line and takes no part in it.
     """
     try:
         result = subprocess.run(
@@ -986,8 +1004,14 @@ def format_every(interval: float | None) -> str:
     return f'every {span_text(interval)}'
 
 
-def schedule_text(state: dict, name: str) -> str:
-    """How often this comes up, and what the weight alone would have asked for.
+def schedule_text(state: dict, config: dict, name: str) -> str:
+    """How often this comes up, and whether that is declared or derived.
+
+    The cadence is read from the register entry rather than from
+    ``state['intervals']``, which holds the implied interval wherever no cadence
+    is declared and holds nothing at all for a pursuit the active set drops. A
+    paused pursuit declaring `cadence: 1mo` still declares it, and this is the one
+    screen whose job is to show what the register says.
 
     A declared cadence replaces the interval the weight implies rather than
     sitting beside it, so the two can say very different things — and when they
@@ -997,8 +1021,11 @@ def schedule_text(state: dict, name: str) -> str:
     The second half is silent inside a tenth. A ratio that close is the measured
     logging rate wobbling rather than a decision anyone made.
     """
-    declared = state['intervals'].get(name)
     implied = state['implied_intervals'].get(name)
+    cadence = config.get('cadence')
+    if not cadence:
+        return '—' if implied is None or math.isinf(implied) else f'every {span_text(implied)} from its weight'
+    declared = float(parse_cadence(cadence))
     every = format_every(declared)
     if not declared or not implied or math.isinf(implied):
         return every
@@ -1008,14 +1035,31 @@ def schedule_text(state: dict, name: str) -> str:
     return f'{every}, weight says {span_text(implied)}'
 
 
-def due_in_days(state: dict, name: str) -> float | None:
-    """:func:`allocate.days_until_due` for a pursuit the state knows about."""
+def priced(state: dict, name: str) -> tuple[float, float, float] | None:
+    """A pursuit's balance, interval and checkoff size, or None where it has none.
+
+    The draw outlives the register by up to a quarter of an hour, and `cmd_list`
+    walks the whole register while the state is built from the active set alone.
+    Either way a name can reach a renderer with no schedule behind it.
+    """
     interval = state['intervals'].get(name)
     size = state['checkoff_size'].get(name)
     owed = state['balance'].get(name)
     if owed is None or size is None or interval is None:
         return None
-    return days_until_due(owed, interval, size)
+    return owed, interval, size
+
+
+def due_in_days(state: dict, name: str) -> float | None:
+    """:func:`allocate.days_until_due` for a pursuit the state knows about."""
+    found = priced(state, name)
+    return None if found is None else days_until_due(*found)
+
+
+def drift_days(state: dict, name: str) -> float | None:
+    """:func:`allocate.days_adrift` for a pursuit the state knows about."""
+    found = priced(state, name)
+    return None if found is None else days_adrift(*found)
 
 
 def format_due(days: float | None) -> str:
@@ -1032,6 +1076,24 @@ def format_due(days: float | None) -> str:
     if days < 1:
         return 'due today'
     return f'due in {span_text(days)}'
+
+
+def why_unpriced(state: dict, name: str) -> str:
+    """Why a drawn pursuit has no due date, in the words the column would show.
+
+    Four different facts otherwise arrive as one dash. The one worth telling
+    apart is a name the register no longer holds: the draw outlives the register
+    by up to a quarter of an hour, so a row can name something edited away, and
+    a dash renders it identically to a pursuit that is simply unscheduled.
+    """
+    config = state['pursuits'].get(name)
+    if config is None:
+        return 'not in register'
+    if config.get('paused'):
+        return 'paused'
+    if term_ended(config, state['today']):
+        return 'term ended'
+    return 'no schedule'
 
 
 def due_style(days: float | None) -> str:
@@ -1084,6 +1146,10 @@ def render_out_of_band(state: dict) -> None:
     Said as a gap between what the weight asks for and what is happening, never
     as a balance against a band. A band is a number from inside the model, so a
     reader shown one has to learn the model before the line means anything.
+
+    The gap is `days_adrift` and not `due_in_days`. A due date is one interval
+    further on, which is the right number for "when next", and understates a debt
+    by a whole interval when the question is "how far from what you asked for".
     """
     drifted = out_of_band(state)
     if not drifted:
@@ -1091,16 +1157,17 @@ def render_out_of_band(state: dict) -> None:
     console.print(Text('Weights that do not match how you live', style='yellow'))
     names = max(len(name) for name, _, _ in drifted)
     for name, _, _ in drifted:
-        days = due_in_days(state, name)
-        pace = 'ahead of' if days is not None and days > 0 else 'behind'
-        gap = span_text(days) if days is not None else '—'
+        days = drift_days(state, name)
+        pace = 'behind' if days is None or days > 0 else 'ahead of'
+        gap = '—' if days is None else span_text(days)
         line = Text('  ')
         line.append(name.ljust(names), style='yellow')
         line.append(f'  {gap} {pace} what weight {int(state["weights"][name])} asks for')
         console.print(line, no_wrap=True, overflow='ellipsis')
+    console.print('  Edit a weight with [cyan]doit pursuits edit[/], or [cyan]doit pursuits reset <pursuit>[/] to start it again')
 
 
-def standing_line(state: dict, exclude: Iterable[str] = ()) -> str:
+def standing_line(state: dict, exclude: Iterable[str]) -> str:
     """The pursuits owing at least one checkoff, worst first, named and no more.
 
     A whole checkoff rather than any positive balance, because a balance climbs
@@ -1112,6 +1179,14 @@ def standing_line(state: dict, exclude: Iterable[str] = ()) -> str:
     a set of numbers in different units with no total — and this line answers
     which strands are slipping, which the names alone answer. How far behind each
     one is belongs on the row that has a column for it.
+
+    ``exclude`` takes no default, because the two callers want different answers.
+    The dashboard asks about the whole register; `doit next` asks about what it
+    did not already show, and says "also" so the narrowing travels with the list.
+    A default would answer for one of them wherever a third caller forgot it.
+
+    The trailer is the command that shows the rest, never a count of it. A
+    remainder is a number to read and nothing to do.
     """
     skip = set(exclude)
     owing = [
@@ -1123,12 +1198,13 @@ def standing_line(state: dict, exclude: Iterable[str] = ()) -> str:
         return ''
     owing.sort(key=lambda row: -row[1])
     named = [name for name, _ in owing[:STANDING_NAMES]]
-    rest = len(owing) - len(named)
-    return 'behind · ' + ' · '.join(named) + (f' and {rest} more' if rest else '')
+    lead = 'also behind' if skip else 'behind'
+    trailer = '  ·  doit pursuits list' if len(owing) > len(named) else ''
+    return f'{lead} · ' + ' · '.join(named) + trailer
 
 
 class Offer(NamedTuple):
-    """One drawn pursuit as the four things a row shows, plus what it sorts on.
+    """One drawn pursuit as the four things a row shows.
 
     Assembled before anything is printed, because every column is sized against
     the values that will actually be on screen — a context column nothing fills
@@ -1136,7 +1212,6 @@ class Offer(NamedTuple):
     """
 
     name: str
-    days: float | None
     due: str
     due_style: str
     title: str
@@ -1150,10 +1225,11 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
     Every read of the state is guarded, because the draw outlives the register by
     up to a quarter of an hour. Pausing a drawn pursuit, or an `until` that passes
     at midnight, leaves a cached row naming something outside the active set — and
-    a row that cannot be priced still has to render.
+    a row that cannot be priced still has to render, saying why rather than a dash.
     """
     config = state['active'].get(name, {})
     days = due_in_days(state, name)
+    due = format_due(days) if days is not None else why_unpriced(state, name)
 
     detail = resolved.get(name) or {}
     failure = detail.get('error')
@@ -1162,7 +1238,7 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
         # naming a verb the CLI dropped fails identically to one that is logged
         # out, and only the message it printed tells the two apart.
         title = f'{detail.get("backend") or "resolve"}: {failure}'
-        return Offer(name, days, format_due(days), due_style(days), title, '', True)
+        return Offer(name, due, due_style(days), title, '', True)
 
     # The title is the first of several equally valid rows whenever the backend
     # matched more than one, and without saying so the row reads as the backend
@@ -1171,7 +1247,7 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
     others = max(int(detail.get('candidates') or 1) - 1, 0)
     title = detail.get('label') or config.get('description') or ''
     context = join_context([detail.get('context'), f'{others} others' if others else ''])
-    return Offer(name, days, format_due(days), due_style(days), title, context, False)
+    return Offer(name, due, due_style(days), title, context, False)
 
 
 def render_offers(offers: list[Offer], width: int) -> None:
@@ -1185,14 +1261,23 @@ def render_offers(offers: list[Offer], width: int) -> None:
         return
     names = max(len(row.name) for row in offers)
     dues = max(len(row.due) for row in offers)
-    context = column_width(width, [row.context for row in offers], CONTEXT_WIDTH_SHARE, 0)
+    # The context is offered what is left once the name, the due date and the
+    # title's floor are paid for, so a long name on a narrow pane drops it rather
+    # than reserving columns the assembled row runs past and the backstop clips.
+    fixed = 2 + names + 2 + dues + 2 + TITLE_WIDTH_MIN + 2
+    context = column_width(min(width, max(width - fixed, 0)), [row.context for row in offers], CONTEXT_WIDTH_SHARE, 0)
     reserved = 2 + names + 2 + dues + 2 + (context + 2 if context else 0)
-    # Capped at what the titles need, not handed the whole remainder. A title
-    # column padded to the terminal strands the context against the right edge,
-    # a screen away from the row it belongs to.
+    # Capped at what the titles need, and never more than the line has left.
+    # Taking the whole remainder pads every title to the terminal and strands the
+    # context against the right edge; taking a floor the line cannot afford
+    # assembles a row wider than the pane, which the backstop then clips anyway.
     wanted = max(len(row.title) for row in offers)
-    titles = max(TITLE_WIDTH_MIN, min(wanted, width - reserved))
+    titles = min(wanted, max(width - reserved, 0))
     for row in offers:
+        # Guarded on the width the column was granted, never on the value alone.
+        # A narrow pane grants none, and appending an ellipsized stub anyway is
+        # what pushes the assembled row past the line it was sized for.
+        places = bool(context and row.context)
         line = Text('  ')
         line.append(row.name.ljust(names), style='white')
         line.append('  ')
@@ -1200,8 +1285,8 @@ def render_offers(offers: list[Offer], width: int) -> None:
         line.append('  ')
         # Padded only where something follows it, so a row that ends at its title
         # ends at its title rather than at a run of spaces.
-        line.append(fitted(row.title, titles, pad=bool(row.context), style='red' if row.failed else 'green'))
-        if row.context:
+        line.append(fitted(row.title, titles, pad=places, style='red' if row.failed else 'green'))
+        if places:
             line.append('  ')
             line.append(fitted(row.context, context, style='cyan'))
         console.print(line, no_wrap=True, overflow='ellipsis')
@@ -1229,17 +1314,17 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
         cached = without_logged(cached)
         # Nothing offered is still outstanding, so the standing draw has no answer
         # left to give and the question earns a fresh one.
-        if not cached['pinned'] and not cached['drawn']:
+        if not cached['offered']:
             cached = None
     if cached is None:
         selection = compute_draw(state)
-        names = selection['pinned'] + selection['drawn']
+        names = selection['offered']
         selection['resolved'] = resolve_all(names, pursuits)
         save_cached_draw(selection)
         bump_counts(counts_path(JOURNAL_DIR, machine_name()), names)
     else:
         selection = cached
-        names = selection['pinned'] + selection['drawn']
+        names = selection['offered']
 
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
@@ -1257,16 +1342,11 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
         console.print(Text('  ' + ' · '.join(context), style='magenta'), no_wrap=True, overflow='ellipsis')
 
     resolved = selection.get('resolved') or {}
-    # One list, furthest past due first, rather than the pinned half above the
-    # sampled half. Only a pursuit declaring a cadence can pin, so a weighted one
-    # three days behind sat below a scheduled one due this morning — under a
-    # heading that said the rows above it were the urgent ones.
-    offers = sorted(
-        (offer(name, state, resolved) for name in names),
-        key=lambda row: (row.days is None, row.days if row.days is not None else 0.0),
-    )
+    # Rendered in the order the draw offered them, never re-sorted here. Pin
+    # membership does not rank, because pinning takes a declared cadence and a
+    # weighted pursuit can be further behind than any scheduled one.
     console.print()
-    render_offers(offers, width)
+    render_offers([offer(name, state, resolved) for name in names], width)
 
     standing = standing_line(state, exclude=names)
     drifted = out_of_band(state)
@@ -1321,7 +1401,7 @@ def render_explain(state: dict, selection: dict) -> int:
         interval = state['intervals'][name]
         every = '—' if math.isinf(interval) else f'{interval:.1f}d'
         urgency_value = state['effective'][name] / state['weights'][name] if state['weights'][name] else 0
-        chosen = name in selection['pinned'] or name in selection['drawn']
+        chosen = name in selection['offered']
         table.add_row(
             '[green]●[/]' if chosen else '',
             f'[yellow]{name}[/]' if name in passed else name,
@@ -1528,7 +1608,7 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     # build_state is a round trip to every backend, and the question should
     # appear at typing speed.
     cached = load_cached_draw(now) or {}
-    offered = cached.get('pinned', []) + cached.get('drawn', [])
+    offered = cached.get('offered', [])
 
     try:
         if name is None:
@@ -1599,8 +1679,11 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
             'item': named or None,
             'downstream': downstream,
             'draw_id': cached.get('draw_id'),
-            'was_offered': matched in (cached.get('pinned', []) + cached.get('drawn', [])),
-            'rank_in_draw': (cached.get('drawn', []).index(matched) + 1) if matched in cached.get('drawn', []) else None,
+            'was_offered': matched in cached.get('offered', []),
+            # Named for the list it indexes: every row that was on screen, pins
+            # among them. A field naming the draw instead would read as a rank
+            # among the sampled half, which is not a list anything displays.
+            'rank_offered': (cached.get('offered', []).index(matched) + 1) if matched in cached.get('offered', []) else None,
         },
     )
     # The draw outlives the log by up to a quarter of an hour, and re-offering
@@ -1639,7 +1722,7 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
             if not can_prompt():
                 error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit skip <pursuit>[/]')
                 return 1
-            matched = prompt_for_pursuit(pursuits, cached.get('pinned', []) + cached.get('drawn', []))
+            matched = prompt_for_pursuit(pursuits, cached.get('offered', []))
         else:
             matched = match_pursuit(name, pursuits) or ''
             if not matched:
@@ -1793,7 +1876,7 @@ def cmd_list(as_json: bool) -> int:
     console.rule('[cyan]Pursuits', align='left')
     ordered = sorted(pursuits.items(), key=lambda row: -row[1].get('weight', 0))
     names = max(len(name) for name in pursuits)
-    schedules = max(len(schedule_text(state, name)) for name, _ in ordered)
+    schedules = max(len(schedule_text(state, config, name)) for name, config in ordered)
     lasts = max(len(format_elapsed(state['days_since'].get(name))) for name, _ in ordered)
     for name, config in ordered:
         share = state['shares'].get(name)
@@ -1801,7 +1884,7 @@ def cmd_list(as_json: bool) -> int:
         line.append(name.ljust(names), style='white')
         line.append(f'  {int(config.get("weight", 0)):>3}')
         line.append(f'  {f"{share * 100:.1f}%" if share else "—":>6}')
-        line.append(f'  {schedule_text(state, name).ljust(schedules)}')
+        line.append(f'  {schedule_text(state, config, name).ljust(schedules)}')
         line.append(f'  last {format_elapsed(state["days_since"].get(name)).ljust(lasts)}')
         days = due_in_days(state, name)
         line.append('  ')

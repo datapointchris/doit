@@ -56,11 +56,10 @@ live — nothing in the model bends to absorb such a drift, so the weight is wha
 about. The band never falls below one whole checkoff, because a pursuit that is simply due is not a
 pursuit whose weight is wrong.
 
-That balance is never the number on screen. Two units on one screen cannot be read against each
-other, and a signed number carries its whole meaning in the one character a reader skips. Every view
-states standing as a date — `3d overdue`, `due today`, `due in 2w` — which is the balance divided by
-the checkoff size and multiplied by the interval. The rescaling preserves order, so nothing is lost
-and no view needs a legend under it. `doit next --json` carries the raw balance.
+That balance is never the number on screen. Every view states standing as a date — `3d overdue`,
+`due today`, `due in 2w`, and `3w behind what weight 25 asks for` where the two differ by an
+interval. `doit.allocate` holds both conversions and says why each is the one its caller wants.
+`doit next --json` carries the raw balance.
 
 `doit skip <pursuit> --for 2w` takes one out of the draw until it expires, and it owes nothing
 meanwhile; `doit pursuits resume <pursuit>` ends the skip early. `doit pursuits reset <pursuit>`
@@ -70,9 +69,12 @@ markers written into it, never a rewrite of what happened.
 
 The draw always offers a full screen. What is owed fills it first and what is current fills the
 rest, so a register with nothing outstanding still says what there is rather than going blank — and
-a pursuit you are a whole checkoff ahead on stays out of it. The screen is one list ordered by how
-far past due each row is, pins included. Only a pursuit declaring a cadence can pin, so splitting
-the two put a weighted pursuit three days behind underneath a scheduled one due this morning.
+a pursuit you are a whole checkoff ahead on stays out of it.
+
+The offered list is one list ordered by how far past due each row is, pins among it rather than
+above it. Pinning takes a declared cadence, so pin membership says a pursuit has a schedule and not
+that it is the most urgent thing on offer. That one order is what the screen shows, what the
+forecast walks top-down, and what `rank_offered` counts in a journal entry.
 
 ## Sources are configuration
 

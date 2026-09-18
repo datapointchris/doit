@@ -201,7 +201,7 @@ def test_no_reads_in_the_window_makes_the_date_the_thing_worth_saying():
     say how long it has been."""
     lane = articles_lane_with(read_last_30_days=0, last_read_at='2026-04-02T20:36:18Z')
 
-    assert lane.meta == '60 unread · last read 3mo ago'
+    assert lane.meta == '60 unread · last read 4mo ago'
 
 
 def test_a_recent_last_read_keeps_the_day_unit():

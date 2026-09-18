@@ -1210,7 +1210,7 @@ def pursuit_standing() -> str:
         register = pursuits.load_pursuits()
         if not register:
             return ''
-        return pursuits.standing_line(pursuits.build_state(register, datetime.now().astimezone()))
+        return pursuits.standing_line(pursuits.build_state(register, datetime.now().astimezone()), exclude=())
     except (pursuits.RegisterError, OSError, ValueError):
         return ''
 

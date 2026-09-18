@@ -33,13 +33,16 @@ are reading.
 time the draw is allowed to spend, not the length of a day.
 
 The behavioral model is one rule: walk the offered list from the top, do what
-fits in what is left, stop when nothing left fits. Pins come first because that is
-where the draw puts them, which is the whole reason a cadence pursuit can crowd
-out the sampled half — the budget runs out before the list does.
+fits in what is left, stop when nothing left fits. What that order is belongs to
+`pursuits.offered_order`, which puts the furthest past due first — so the budget
+runs out on whatever has been waiting longest, and the tail of the list is what a
+short day never reaches.
 
-Durations are point estimates rather than sampled from an invented spread. The
-variance across replicates is then the draw's, which is a real random process,
-rather than a distribution nobody chose dressed up as a confidence interval.
+Durations are point estimates rather than sampled from an invented spread. What
+varies across replicates is then which pursuits the draw offers, which is a real
+random process, rather than a distribution nobody chose dressed up as a
+confidence interval. The order within one offer does not vary, because it is
+derived from the balances that day.
 
 Readings live under the state directory for the reason :mod:`doit.digest` gives:
 a recompute cannot rebuild one, because it would read a register and a journal
@@ -167,11 +170,11 @@ def durations(register: dict, records: list[dict]) -> dict[str, Duration]:
 def spend_a_day(offered: list[str], cost: dict[str, Duration], budget: float) -> list[tuple[str, float]]:
     """Walk the offered list from the top, taking what fits in what is left.
 
-    The whole behavioral model, and the one place a reader should argue with it.
-    Top-down is what makes pins expensive: they are prepended to the list, so they
-    are served before the sampled half is reached, and a five-row draw that only
-    ever reaches its third row spends two of those rows on whatever the cadences
-    put there.
+    The whole behavior of a simulated day, and the one place a reader should argue
+    with it. What order the list arrives in is the other half and lives in
+    `pursuits.offered_order`. Top-down is what makes the head of that list
+    expensive: a five-row draw that only ever reaches its third row spends the
+    budget on the three things furthest past due.
 
     Something that does not fit is stepped over rather than ending the day — a
     short row further down is still doable — but nothing is ever done in part.
@@ -216,8 +219,7 @@ def simulate(
         when = start + timedelta(days=day)
         state = pursuits.build_state(register, when, records=records, observed=observed, balance_settings=balance_settings)
         selection = pursuits.compute_draw(state, seed=replicate * 100_003 + day)
-        offered = selection['pinned'] + selection['drawn']
-        for name, minutes in spend_a_day(offered, cost, budget):
+        for name, minutes in spend_a_day(selection['offered'], cost, budget):
             done.append((day, name, minutes))
             records.append(
                 {

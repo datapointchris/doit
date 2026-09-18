@@ -106,8 +106,8 @@ def balance(elapsed: float, interval: float, size: float, done: float) -> float:
     return (elapsed / interval) * size - done
 
 
-def days_until_due(owed: float, interval: float, size: float) -> float | None:
-    """Days until one more checkoff is asked for. Negative is already overdue.
+def days_adrift(owed: float, interval: float, size: float) -> float | None:
+    """How far from current a balance stands, in days of that pursuit's schedule.
 
     The balance restated on the one axis every pursuit shares. A balance counts
     minutes for a pursuit that declares a checkoff size and whole checkoffs for
@@ -115,13 +115,32 @@ def days_until_due(owed: float, interval: float, size: float) -> float | None:
     Dividing by the size gives checkoffs owed; multiplying by the interval turns
     that into time, which needs no conversion and no legend.
 
-    A rescaling and nothing more, so it preserves order: a pursuit twice as far
-    behind another in its own unit is twice as far behind in days. None where a
-    pursuit has no schedule to be due against.
+    Linear in ``owed``, so a pursuit twice as far behind in its own unit is twice
+    as far behind in days. That holds within one pursuit and across two only when
+    both have the same interval — the factor is each pursuit's own. None where a
+    pursuit has no schedule to drift from.
     """
     if interval <= 0 or math.isinf(interval) or size <= 0:
         return None
-    return (1.0 - owed / size) * interval
+    return owed / size * interval
+
+
+def days_until_due(owed: float, interval: float, size: float) -> float | None:
+    """Days until one more checkoff is asked for. Negative is already overdue.
+
+    One interval further on than :func:`days_adrift`, because a pursuit owing
+    nothing is due at the end of its interval rather than now. The offset makes
+    this affine in ``owed`` rather than linear, so a row twice as far behind
+    another does not read as twice the number — it is strictly decreasing in
+    ``owed``, which is all a furthest-behind-first ordering needs.
+
+    Ordering by this deliberately re-orders against checkoffs owed, because the
+    interval factor differs per pursuit. Two checkoffs owed on a daily schedule
+    is one day late; one and a half on a ten-day schedule is five. The second is
+    the one that has been waiting, and that is the question the screen asks.
+    """
+    adrift = days_adrift(owed, interval, size)
+    return None if adrift is None else interval - adrift
 
 
 def period_amount(interval: float, size: float, period_days: float = PERIOD_DAYS) -> float:

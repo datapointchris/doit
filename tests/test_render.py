@@ -99,9 +99,23 @@ def test_fitted_truncates_to_the_width_it_was_given():
 
 def test_a_span_is_reported_in_the_coarsest_unit_that_still_says_something():
     assert render.span_text(3) == '3d'
-    assert render.span_text(13.9) == '13d'
+    assert render.span_text(13.9) == '14d'
     assert render.span_text(30) == '4w'
-    assert render.span_text(200) == '6mo'
+    assert render.span_text(200) == '7mo'
+
+
+def test_a_span_rounds_rather_than_truncating():
+    """Truncating loses most of a unit at the top of every bucket, and the whole
+    value below the smallest one — where a reader takes `0` for none."""
+    assert render.span_text(20) == '3w', '20 days is nearer three weeks than two'
+    assert render.span_text(119) == '4mo'
+
+
+def test_a_span_below_its_smallest_unit_is_one_of_it_rather_than_none():
+    """A weight-implied interval goes sub-day at ordinary logging rates, and
+    `every 0d` reads as a schedule that asks for nothing."""
+    assert render.span_text(0.67) == '1d'
+    assert render.span_text(0.04) == '1d'
 
 
 def test_a_span_ignores_the_direction_it_was_measured_in():
