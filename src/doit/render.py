@@ -1,13 +1,15 @@
-"""doit's shared console, its text shaping, and its startup-nudge renderers.
+"""doit's shared console, its column arithmetic, and its startup-nudge renderers.
 
 A nudge is an interrupt you did not ask for, so it trades every browse-time field
 (description, tags, cadence, last-done) for one line per item, and every line is
 clipped to the terminal rather than wrapped. A wrapped row is two rows, which is
 how the nudge grew the first time.
 
-Clipping and column widths are rich's: `no_wrap` plus `overflow='ellipsis'`
-replaces arithmetic against `shutil.get_terminal_size`, and rich measures
-printable width, so styling cannot shift a later column.
+Two layers do the clipping. A view that wants columns sizes them here, against
+the terminal width, and `fitted` truncates each value to the width it was given.
+`console.print` then clips the assembled line with `no_wrap` and
+`overflow='ellipsis'` as the backstop. Rich measures printable width at both
+layers, so styling cannot shift a later column.
 
 Lines carrying content from a register, a Lab or a command are built as `Text`
 rather than markup strings — `Text.append` does not parse `[...]`, so a bracket
@@ -15,6 +17,7 @@ in a description cannot be swallowed as a style tag.
 """
 
 import re
+import shutil
 import sys
 
 from rich.console import Console
@@ -86,6 +89,69 @@ def first_sentence(text: str) -> str:
     collapsed = ' '.join((text or '').split())
     ended = SENTENCE_END.search(collapsed)
     return collapsed[: ended.end()] if ended else collapsed
+
+
+# A cap on how wide a row may grow, not a target. It stops a trailing column
+# flying off to the right of an ultrawide terminal, where the eye has to track
+# back across the whole line to reach the next row.
+MAX_WIDTH = 140
+
+
+def terminal_width() -> int:
+    """How much width a multi-column view may spend."""
+    return min(shutil.get_terminal_size(fallback=(80, 24)).columns, MAX_WIDTH)
+
+
+def fitted(text: str, width: int, *, pad: bool = False, style: str = '') -> Text:
+    """`text` as a Text no wider than `width`, ellipsized and optionally padded.
+
+    A column's width is arithmetic the layout owns, so this truncates to a
+    computed width rather than to the terminal's — `console.print` still clips
+    the assembled line as a backstop.
+
+    The style is carried here rather than passed to `Text.append`, which refuses
+    one alongside a Text instance.
+
+    A column granted no width renders nothing. `Text.truncate(0)` treats zero as
+    no limit and hands back the whole value, so a layout that computed its way
+    down to an empty column would emit its widest row there.
+    """
+    if width <= 0:
+        return Text('')
+    fitted_text = Text(text, style=style)
+    fitted_text.truncate(width, overflow='ellipsis', pad=pad)
+    return fitted_text
+
+
+def column_width(width: int, values: list[str], share: float, minimum: int) -> int:
+    """How wide a column gets: what it needs, bounded by its share of the line.
+
+    Sized to the values actually on screen first, so a column whose rows are all
+    empty reserves nothing and a column of short values stops stealing width from
+    the titles beside it.
+    """
+    needed = max((len(value) for value in values), default=0)
+    return min(needed, max(minimum, int(width * share)))
+
+
+def span_text(days: float) -> str:
+    """A number of days in the coarsest unit that still says something.
+
+    Days up to a fortnight, then weeks, then months. A span reported in the unit
+    it was measured in reads as a measurement — `43d` invites arithmetic, where
+    `6w` is the answer that arithmetic was for.
+
+    Rounded, and floored at one of whatever unit it landed in. Truncating turns a
+    real quantity into `0`, which a reader takes for none: two thirds of a day is
+    a schedule this tool would have printed as `every 0d`, and nineteen days is
+    two weeks rather than the three it nearly is.
+    """
+    days = abs(days)
+    if days < 14:
+        return f'{max(round(days), 1)}d'
+    if days < 90:
+        return f'{max(round(days / 7), 1)}w'
+    return f'{max(round(days / 30), 1)}mo'
 
 
 def nudge_header(title: str, count: int) -> None:

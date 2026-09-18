@@ -16,6 +16,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from doit import dashboard
+from doit import render
 from doit import sources
 from doit.cli import app as cli_app
 from doit.lanes import Row
@@ -200,7 +201,7 @@ def test_no_reads_in_the_window_makes_the_date_the_thing_worth_saying():
     say how long it has been."""
     lane = articles_lane_with(read_last_30_days=0, last_read_at='2026-04-02T20:36:18Z')
 
-    assert lane.meta == '60 unread · last read 3mo ago'
+    assert lane.meta == '60 unread · last read 4mo ago'
 
 
 def test_a_recent_last_read_keeps_the_day_unit():
@@ -685,7 +686,7 @@ def test_a_wide_terminal_spends_its_width_on_the_note(monkeypatch, capsys):
     note = 'goselfupdate · CLI machine contract conformance'
     rows = [dashboard.Row('next', 'Give cobracmd a usage-error exit code of 2', note)]
 
-    dashboard.render_rows(rows, dashboard.MAX_WIDTH)
+    dashboard.render_rows(rows, render.MAX_WIDTH)
 
     assert note in capsys.readouterr().out
 
@@ -694,16 +695,9 @@ def test_a_row_with_a_command_shows_what_to_type(monkeypatch, capsys):
     monkeypatch.setenv('COLUMNS', '200')
     rows = [dashboard.Row('review', 'Re-index indy so search stays current', '25d overdue', handle='indy index')]
 
-    dashboard.render_rows(rows, dashboard.MAX_WIDTH)
+    dashboard.render_rows(rows, render.MAX_WIDTH)
 
     assert f'{dashboard.HANDLE_MARK} indy index' in capsys.readouterr().out
-
-
-def test_a_trailing_column_takes_what_it_needs_bounded_by_its_share():
-    assert dashboard.column_width(140, ['', ''], 0.3, 20) == 0, 'a lane whose rows carry no command reserves nothing'
-    assert dashboard.column_width(140, ['↳ indy index'], 0.3, 20) == 12, 'what it needs, when that is under the share'
-    assert dashboard.column_width(140, ['x' * 90], 0.3, 20) == 42, 'the share, when the content runs longer'
-    assert dashboard.column_width(40, ['x' * 90], 0.3, 20) == 20, 'never below the minimum, however narrow the line'
 
 
 def test_a_narrow_terminal_spends_its_width_on_the_row_itself(monkeypatch, capsys):

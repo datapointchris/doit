@@ -75,6 +75,32 @@ def test_a_weightless_pursuit_owes_nothing():
     assert allocate.balance(3.0, math.inf, 1.0, 0.0) == 0.0
 
 
+def test_the_due_date_is_the_balance_on_the_one_axis_both_units_share():
+    """One checkoff owed is due now, and each further checkoff is one more interval.
+
+    Minutes and whole checkoffs cannot be read against each other, so neither is
+    ever the number on screen. Days are what both convert to.
+    """
+    assert allocate.days_until_due(1.0, 3.0, 1.0) == 0.0
+    assert allocate.days_until_due(3.0, 3.0, 1.0) == -6.0
+    assert allocate.days_until_due(0.0, 3.0, 1.0) == 3.0
+    assert allocate.days_until_due(90.0, 4.0, 45.0) == -4.0
+
+
+def test_the_due_date_keeps_the_order_the_balance_had():
+    """A rescaling, so the pursuit further behind in its own unit is further behind in days."""
+    worse = allocate.days_until_due(4.0, 3.0, 1.0)
+    better = allocate.days_until_due(2.0, 3.0, 1.0)
+
+    assert worse < better < 0
+
+
+def test_a_pursuit_with_no_schedule_is_due_at_no_time():
+    assert allocate.days_until_due(1.0, 0.0, 1.0) is None
+    assert allocate.days_until_due(1.0, math.inf, 1.0) is None
+    assert allocate.days_until_due(1.0, 3.0, 0.0) is None
+
+
 def test_period_amount_is_what_a_week_of_the_schedule_asks_for():
     # A 45-minute checkoff every day and a half is 210 minutes a week.
     assert allocate.period_amount(1.5, 45.0, 7.0) == 210.0
