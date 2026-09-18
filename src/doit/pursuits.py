@@ -96,7 +96,6 @@ from doit.paths import xdg_cache_home
 from doit.paths import xdg_config_home
 from doit.paths import xdg_state_home
 from doit.render import can_prompt
-from doit.render import column_width
 from doit.render import console
 from doit.render import error_console
 from doit.render import first_sentence
@@ -129,12 +128,15 @@ STANDING_NAMES = 4
 # stated weight as the thing to argue with.
 DEFAULT_WARN_WEEKS = 2.0
 
-# Share of the line the "where it lives" column may take, and how much the title
-# must be left before that column is granted any width at all. Context places an
-# item; the title is the item, so a narrow terminal spends its last columns on
-# the title and drops the context entirely.
-CONTEXT_WIDTH_SHARE = 0.25
-TITLE_WIDTH_MIN = 20
+# How many of a resolve's rows a pursuit offers — enough to choose between, few
+# enough that five pursuits stay one screen.
+CANDIDATE_ROWS = 3
+
+# Two spaces between columns reads as one run of words on a wide terminal.
+GUTTER = 3
+
+# Below this a choice is an ellipsis and a letter, so the backstop clips instead.
+MIN_CHOICE_WIDTH = 12
 
 # A resolver is one network call to a product CLI. They run concurrently and only
 # for what was actually drawn, so this is the whole wait, not a per-pursuit one.
@@ -218,17 +220,18 @@ TEMPLATE = """\
 #
 # How many rows come back is the register saying whether it means one thing or
 # several. One row is a decision, so the draw shows it and `doit log` records it.
-# Several are candidates: the first is the title, the row says how many others
-# there were, and the log names none of them — an hour of reading is not a claim
-# about which book. Narrow the command to one where you mean one.
+# Several are choices: the draw shows the first three under the pursuit, and
+# `doit log` asks which one you did wherever `on_log` would act on it. Enter, or
+# nobody there to ask, names none — an hour of reading is not a claim about
+# which book. Narrow the command to one where you mean one.
 #
 #   resolve_where  optional field: value pairs keeping only the rows that are
 #                  this pursuit. Narrow the command itself where the backend can;
 #                  reach for this where it has no filter for the distinction.
 #
-# A title names an item without placing it, so `context` puts where it lives in
-# the column beside it. It takes one dotted path or several, and a number in one
-# indexes a list (`projects.0.name`):
+# A title names an item without placing it, so `context` follows it on the same
+# line. It takes one dotted path or several, and a number in one indexes a list
+# (`projects.0.name`):
 #
 #   context      where it lives — one path or several, joined
 #
@@ -859,7 +862,7 @@ def resolve_one(name: str, config: dict) -> dict | None:
     label_field = config.get('label')
     if not label_field:
         first = next((line for line in result.stdout.splitlines() if line.strip()), '')
-        return {'pursuit': name, 'label': first.strip()} if first else None
+        return {'pursuit': name, 'candidates': 1, 'choices': [{'label': first.strip()}]} if first else None
 
     try:
         document = json.loads(result.stdout or 'null')
@@ -880,10 +883,6 @@ def resolve_one(name: str, config: dict) -> dict | None:
     rows = evidence.matching(rows, config.get('resolve_where'))
     if not rows:
         return None
-    row = rows[0]
-    if not isinstance(row, dict):
-        return {'pursuit': name, 'candidates': len(rows), 'label': str(row)}
-    identifier = row.get(config['id']) if config.get('id') else None
     return {
         'pursuit': name,
         # How many rows the backend matched, not how many are shown. A resolve
@@ -891,13 +890,45 @@ def resolve_one(name: str, config: dict) -> dict | None:
         # equally in progress are candidates, and the first is not the answer to
         # anything. Everything downstream reads this before claiming a pick.
         'candidates': len(rows),
+        'backend': shlex.split(config['resolve'])[0],
+        'choices': [one_choice(row, config, label_field) for row in rows[:CANDIDATE_ROWS]],
+    }
+
+
+def one_choice(row, config: dict, label_field: str) -> dict:
+    """One row of a resolve, as the thing you would go and do.
+
+    A backend that returns scalars rather than objects has a title and nothing
+    else, so everything but the label is absent rather than guessed at.
+    """
+    if not isinstance(row, dict):
+        return {'label': str(row)}
+    identifier = row.get(config['id']) if config.get('id') else None
+    return {
         'label': str(row.get(label_field, '')).strip(),
         'id': None if identifier is None else str(identifier),
         'context': row_context(row, config.get('context')),
         'detail': first_sentence(str(dig(row, config['detail']) or '')) if config.get('detail') else '',
         'view': view_command(config.get('view'), identifier),
-        'backend': shlex.split(config['resolve'])[0],
         'raw': row,
+    }
+
+
+def chosen_item(item: dict, index: int) -> dict:
+    """One choice flattened back into the row a log writes through and records.
+
+    The journal entry names a thing that was done, so it carries the choice's own
+    fields beside where they came from. Nothing downstream has to know a resolve
+    offered more than one.
+    """
+    choices = item.get('choices') or []
+    if not 0 <= index < len(choices):
+        return {}
+    return {
+        'pursuit': item.get('pursuit'),
+        'backend': item.get('backend'),
+        'candidates': item.get('candidates'),
+        **choices[index],
     }
 
 
@@ -1143,9 +1174,9 @@ def render_out_of_band(state: dict) -> None:
     acted on. A pursuit far ahead is reported alongside one far behind: both say
     the weight is wrong, and only one of them ever feels like it.
 
-    Said as a gap between what the weight asks for and what is happening, never
-    as a balance against a band. A band is a number from inside the model, so a
-    reader shown one has to learn the model before the line means anything.
+    Said as the goal a weight stands for, never as the weight. A weight is a
+    number from inside the model, and a reader shown one has to learn the model
+    before the line means anything.
 
     The gap is `days_adrift` and not `due_in_days`. A due date is one interval
     further on, which is the right number for "when next", and understates a debt
@@ -1154,17 +1185,17 @@ def render_out_of_band(state: dict) -> None:
     drifted = out_of_band(state)
     if not drifted:
         return
-    console.print(Text('Weights that do not match how you live', style='yellow'))
+    console.print(Text('Off your goals', style='yellow'))
     names = max(len(name) for name, _, _ in drifted)
     for name, _, _ in drifted:
         days = drift_days(state, name)
-        pace = 'behind' if days is None or days > 0 else 'ahead of'
-        gap = '—' if days is None else span_text(days)
-        line = Text('  ')
+        side = 'behind goal' if days is None or days > 0 else 'ahead of goal'
+        gap = '' if days is None else f' by {span_text(days)}'
+        line = Text(' ' * GUTTER)
         line.append(name.ljust(names), style='yellow')
-        line.append(f'  {gap} {pace} what weight {int(state["weights"][name])} asks for')
+        line.append(f'{" " * GUTTER}{side}{gap}')
         console.print(line, no_wrap=True, overflow='ellipsis')
-    console.print('  Edit a weight with [cyan]doit pursuits edit[/], or [cyan]doit pursuits reset <pursuit>[/] to start it again')
+    console.print(f'{" " * GUTTER}Change a goal with [cyan]doit pursuits edit[/]')
 
 
 def standing_line(state: dict, exclude: Iterable[str]) -> str:
@@ -1204,23 +1235,22 @@ def standing_line(state: dict, exclude: Iterable[str]) -> str:
 
 
 class Offer(NamedTuple):
-    """One drawn pursuit as the four things a row shows.
+    """One drawn pursuit: what it is called, when it is due, and what you could do.
 
-    Assembled before anything is printed, because every column is sized against
-    the values that will actually be on screen — a context column nothing fills
-    reserves nothing, and the title keeps the width instead.
+    ``choices`` is a line apiece. A pursuit whose backend matched several rows is
+    several things you could go and do, and naming one of them picks for you —
+    three books equally in progress have no next one.
     """
 
     name: str
     due: str
     due_style: str
-    title: str
-    context: str
+    choices: list[str]
     failed: bool
 
 
 def offer(name: str, state: dict, resolved: dict) -> Offer:
-    """What one drawn pursuit says: its name, when it is due, and what it is.
+    """What one drawn pursuit says: its name, when it is due, and what it could be.
 
     Every read of the state is guarded, because the draw outlives the register by
     up to a quarter of an hour. Pausing a drawn pursuit, or an `until` that passes
@@ -1237,59 +1267,46 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
         # What the backend said, never a verdict about the backend. A register
         # naming a verb the CLI dropped fails identically to one that is logged
         # out, and only the message it printed tells the two apart.
-        title = f'{detail.get("backend") or "resolve"}: {failure}'
-        return Offer(name, due, due_style(days), title, '', True)
+        return Offer(name, due, due_style(days), [f'{detail.get("backend") or "resolve"}: {failure}'], True)
 
-    # The title is the first of several equally valid rows whenever the backend
-    # matched more than one, and without saying so the row reads as the backend
-    # having chosen. Three books in progress have no next one; showing one of them
-    # silently picks for you.
-    others = max(int(detail.get('candidates') or 1) - 1, 0)
-    title = detail.get('label') or config.get('description') or ''
-    context = join_context([detail.get('context'), f'{others} others' if others else ''])
-    return Offer(name, due, due_style(days), title, context, False)
+    # Title and place on one line rather than in two columns. A context column is
+    # sized by the longest title anywhere on screen, so an eight-character title
+    # beside a thirty-five-character one puts its place most of a pane away from
+    # the thing it places.
+    lines = [join_context([choice.get('label'), choice.get('context')]) for choice in detail.get('choices') or []]
+    return Offer(name, due, due_style(days), lines or [config.get('description') or ''], False)
 
 
 def render_offers(offers: list[Offer], width: int) -> None:
-    """One line per pursuit, in four columns, clipped rather than wrapped.
+    """A pursuit per block: name and due date once, then a line per choice.
 
-    Name and due date come first at fixed widths, so a narrow pane eats the
-    context and then the tail of the title — never which pursuit the row is or
-    how late it is. Both of those are what the screen is read for.
+    Name and due date come first at fixed widths, so a narrow pane eats the tail
+    of a choice rather than which pursuit the row is or how late it is. Both of
+    those are what the screen is read for.
     """
     if not offers:
         return
     names = max(len(row.name) for row in offers)
     dues = max(len(row.due) for row in offers)
-    # The context is offered what is left once the name, the due date and the
-    # title's floor are paid for, so a long name on a narrow pane drops it rather
-    # than reserving columns the assembled row runs past and the backstop clips.
-    fixed = 2 + names + 2 + dues + 2 + TITLE_WIDTH_MIN + 2
-    context = column_width(min(width, max(width - fixed, 0)), [row.context for row in offers], CONTEXT_WIDTH_SHARE, 0)
-    reserved = 2 + names + 2 + dues + 2 + (context + 2 if context else 0)
-    # Capped at what the titles need, and never more than the line has left.
-    # Taking the whole remainder pads every title to the terminal and strands the
-    # context against the right edge; taking a floor the line cannot afford
-    # assembles a row wider than the pane, which the backstop then clips anyway.
-    wanted = max(len(row.title) for row in offers)
-    titles = min(wanted, max(width - reserved, 0))
-    for row in offers:
-        # Guarded on the width the column was granted, never on the value alone.
-        # A narrow pane grants none, and appending an ellipsized stub anyway is
-        # what pushes the assembled row past the line it was sized for.
-        places = bool(context and row.context)
-        line = Text('  ')
-        line.append(row.name.ljust(names), style='white')
-        line.append('  ')
-        line.append(row.due.ljust(dues), style=row.due_style)
-        line.append('  ')
-        # Padded only where something follows it, so a row that ends at its title
-        # ends at its title rather than at a run of spaces.
-        line.append(fitted(row.title, titles, pad=places, style='red' if row.failed else 'green'))
-        if places:
-            line.append('  ')
-            line.append(fitted(row.context, context, style='cyan'))
-        console.print(line, no_wrap=True, overflow='ellipsis')
+    head = GUTTER + names + GUTTER + dues + GUTTER
+    body = max(width - head, MIN_CHOICE_WIDTH)
+    # A pursuit offering several choices is a block, and blocks printed flush run
+    # the last choice of one into the name of the next. The gap goes in whenever
+    # any block is taller than a line, so one screen never mixes the two spacings.
+    spaced = any(len(row.choices) > 1 for row in offers)
+    for position, row in enumerate(offers):
+        if spaced and position:
+            console.print()
+        for index, choice in enumerate(row.choices):
+            line = Text(' ' * GUTTER)
+            # The name and the date are the pursuit's, not each choice's, so they
+            # are said once. Repeating them down a block reads as three pursuits.
+            line.append(row.name.ljust(names) if index == 0 else ' ' * names, style='white')
+            line.append(' ' * GUTTER)
+            line.append(row.due.ljust(dues) if index == 0 else ' ' * dues, style=row.due_style)
+            line.append(' ' * GUTTER)
+            line.append(fitted(choice, body, style='red' if row.failed else 'green'))
+            console.print(line, no_wrap=True, overflow='ellipsis')
 
 
 def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
@@ -1337,9 +1354,9 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
 
     width = terminal_width()
     console.rule(f'[cyan]What now[/] · {now:%a %d %b}', align='left')
-    context = todays_context()
-    if context:
-        console.print(Text('  ' + ' · '.join(context), style='magenta'), no_wrap=True, overflow='ellipsis')
+    # One per line. Joined on one line, two dates read as one event.
+    for event in todays_context():
+        console.print(Text(f'{" " * GUTTER}{event}', style='magenta'), no_wrap=True, overflow='ellipsis')
 
     resolved = selection.get('resolved') or {}
     # Rendered in the order the draw offered them, never re-sorted here. Pin
@@ -1353,7 +1370,7 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
     if standing or drifted:
         console.print()
     if standing:
-        console.print(Text(f'  {standing}', style='yellow'), no_wrap=True, overflow='ellipsis')
+        console.print(Text(f'{" " * GUTTER}{standing}', style='yellow'), no_wrap=True, overflow='ellipsis')
     if standing and drifted:
         console.print()
     render_out_of_band(state)
@@ -1473,6 +1490,43 @@ def prompt_for_pursuit(pursuits: dict, offered: list[str]) -> str:
             return matched
         if answer not in pursuits and not [name for name in pursuits if name.startswith(answer)]:
             error_console.print(f'  No pursuit starts with {answer}.')
+
+
+def which_choice(choices: list[dict], writes_through: bool) -> int:
+    """The index of the choice a log is about, or -1 where it is about none of them.
+
+    One choice is the answer by itself. Several are a question only you can
+    answer, and it is asked only where the answer does something — a
+    write-through completes one specific item. Where nobody is there to ask, the
+    answer is none: guessing it is a wrong completion in another app's data.
+    """
+    if len(choices) <= 1:
+        return 0
+    if not writes_through or not can_prompt():
+        return -1
+    try:
+        return prompt_for_choice(choices)
+    except Abandoned:
+        return -1
+
+
+def prompt_for_choice(choices: list[dict]) -> int:
+    """Which of the offered choices was done, as an index. -1 where none of them was.
+
+    Enter means none rather than the first. Defaulting to the top row would
+    complete whatever happened to sort first, in another app, on a keystroke that
+    reads as "skip this question".
+    """
+    console.print()
+    for number, choice in enumerate(choices, start=1):
+        row = Text(' ' * GUTTER)
+        row.append(f'{number}  ', style='cyan')
+        row.append(join_context([choice.get('label'), choice.get('context')]))
+        console.print(row, no_wrap=True, overflow='ellipsis')
+    answer = ask('\n  which one, or Enter for none: ')
+    if answer.isdigit() and 1 <= int(answer) <= len(choices):
+        return int(answer) - 1
+    return -1
 
 
 def prompt_for_minutes() -> int:
@@ -1657,16 +1711,18 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     if not item and pursuits[matched].get('resolve'):
         item = resolve_one(matched, pursuits[matched]) or {}
 
+    chosen = chosen_item(item, which_choice(item.get('choices') or [], bool(pursuits[matched].get('on_log'))))
+
     downstream = None
     if not no_write:
-        downstream = run_on_log(pursuits[matched], item, ' '.join(words), minutes, assume_yes)
+        downstream = run_on_log(pursuits[matched], chosen, ' '.join(words), minutes, assume_yes)
 
     # Logging a pursuit says the pursuit happened. It does not say which of its
-    # candidates did, and the log has no way to find out — the note is prose. So
-    # the item is only named where naming it is a fact: the backend matched one
-    # row, or the write-through completed the one it offered.
+    # candidates did unless you said so, and the note is prose. So the item is
+    # only named where naming it is a fact: the backend matched one row, or the
+    # write-through completed the one you picked.
     acted = bool((downstream or {}).get('ran'))
-    named = item if item and (int(item.get('candidates') or 1) == 1 or acted) else {}
+    named = chosen if chosen and (int(item.get('candidates') or 1) == 1 or acted) else {}
 
     entry = record_event(
         journal.Event.DONE,
