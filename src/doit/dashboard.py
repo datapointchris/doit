@@ -493,8 +493,12 @@ def build_learning_lane(results: dict[str, sources.Result], today: date) -> Lane
     )
 
 
-def build_meso_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_training_lane(results: dict[str, sources.Result], today: date) -> LaneView:
     """meso's cycles, as the training that is currently prescribed.
+
+    Named for the training rather than for meso, which is the tool that supplies
+    it. A lane name is typed at `--lane` and printed as the header, so it is the
+    same word in both places and `meso` stays the source id it already is.
 
     Rows are workouts rather than cycles, because a cycle is a plan and a workout
     is the thing you can go and do — the same reason the learning lane rows
@@ -506,7 +510,7 @@ def build_meso_lane(results: dict[str, sources.Result], today: date) -> LaneView
     """
     result = results.get('meso')
     if result is None or not isinstance(result.payload, list):
-        return unavailable('meso', 'TRAINING', sources.reason('meso', result))
+        return unavailable('training', 'TRAINING', sources.reason('meso', result))
 
     rows = []
     active = 0
@@ -534,7 +538,7 @@ def build_meso_lane(results: dict[str, sources.Result], today: date) -> LaneView
 
     plural = '' if active == 1 else 's'
     return LaneView(
-        name='meso',
+        name='training',
         title='TRAINING',
         meta=f'{active} cycle{plural} active · {len(rows)} prescribed',
         rows=rows,
@@ -544,8 +548,10 @@ def build_meso_lane(results: dict[str, sources.Result], today: date) -> LaneView
 
 
 def meso_adapter(result: sources.Result) -> list[LaneView]:
-    """meso's cycle model, as one lane."""
-    return [build_meso_lane({'meso': result}, date.today())]
+    """meso's cycle model, as one lane. Named for the source it reads, like every
+    other adapter, because `adapter:` in sources.yml answers "whose model is
+    this" — the lane it builds is named for its subject instead."""
+    return [build_training_lane({'meso': result}, date.today())]
 
 
 def resource_row(label: str, resource: dict, note: str = '') -> Row:
@@ -788,11 +794,6 @@ ICB_LANES = (
 
 LOCAL_LANES = ('maintenance', 'kit')
 
-# Every lane doit can name today. A conforming source contributes lanes that are
-# not in this list, which is the point — it is a convenience for `--lane`, not a
-# closed set the renderer relies on.
-LANE_NAMES = [name for name, _ in ICB_LANES] + ['learning', *LOCAL_LANES]
-
 
 def icb_adapter(result: sources.Result) -> list[LaneView]:
     """icb's overview model, as lanes. Unregistered the day icb emits them."""
@@ -972,12 +973,27 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
     return [build_learning_lane({'learning': result}, date.today())]
 
 
-sources.register_adapter('icb', icb_adapter)
-sources.register_adapter('errors', errors_adapter)
-sources.register_adapter('learning', learning_adapter)
-sources.register_adapter('meso', meso_adapter)
-sources.register_adapter('prs', prs_adapter)
-sources.register_adapter('dotfiles', dotfiles_adapter)
+# Every adapter doit ships, with the lanes each one can name. One table rather
+# than two lists, because the registration and the `--lane` enum have to agree.
+# A separate enum is one an adapter can be registered without touching, and a
+# lane `--help` cannot name is a lane nobody can find.
+SHIPPED_ADAPTERS = (
+    ('icb', icb_adapter, tuple(name for name, _ in ICB_LANES)),
+    ('errors', errors_adapter, ('errors',)),
+    ('learning', learning_adapter, ('learning',)),
+    ('meso', meso_adapter, ('training',)),
+    ('prs', prs_adapter, ('prs',)),
+    ('dotfiles', dotfiles_adapter, ('dotfiles',)),
+)
+
+for adapter_id, adapter_fn, _lane_names in SHIPPED_ADAPTERS:
+    sources.register_adapter(adapter_id, adapter_fn)
+
+# Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
+# conforming source contributes lanes doit has never heard of, and a machine
+# whose sources.yml omits one of these is offered fewer. `--lane` is checked
+# against what actually came back rather than against this.
+LANE_NAMES = [lane for _, _, declared in SHIPPED_ADAPTERS for lane in declared] + list(LOCAL_LANES)
 
 
 def read_local(read: Callable[[], object]) -> sources.Result:
@@ -1218,7 +1234,10 @@ def pursuit_standing() -> str:
 def dashboard_command(
     lane: Annotated[
         list[str] | None,
-        typer.Option('--lane', help=f'Show only this lane (repeatable): {", ".join(LANE_NAMES)}'),
+        typer.Option(
+            '--lane',
+            help=f'Show only this lane (repeatable): {", ".join(LANE_NAMES)}. A source can offer lanes beyond these.',
+        ),
     ] = None,
     as_json: Annotated[bool, typer.Option('--json', help='Output the lane model as JSON to stdout.')] = False,
 ) -> None:

@@ -61,8 +61,62 @@ def lanes_by_name(results: dict) -> dict:
 def test_every_lane_builds_from_fixtures():
     lanes = lanes_by_name(all_results())
 
-    assert set(lanes) == set(dashboard.LANE_NAMES)
+    covered = {name for name, _ in dashboard.ICB_LANES} | {'learning', *dashboard.LOCAL_LANES}
+
+    assert set(lanes) == covered
     assert all(lane.available for lane in lanes.values())
+
+
+# The least payload each adapter accepts: a mapping for the two reading an
+# overview document, a list for the four reading a listing. Enough to reach the
+# branch that builds rows, which is a different naming site from the one a
+# failure takes.
+ADAPTER_PAYLOADS: dict[str, dict | list] = {
+    'icb': {},
+    'learning': {},
+    'errors': [],
+    'meso': [],
+    'prs': [],
+    'dotfiles': [],
+}
+
+
+def test_every_shipped_adapter_names_the_lanes_it_declares():
+    """What `--lane` offers, against what the adapters actually build.
+
+    Derived rather than listed. A hand-written enum and a hand-written test
+    population agree with each other while both omit the same lane, and nothing
+    surfaces the omission: measured on `prs`, `training`, `dotfiles` and `errors`,
+    four working lanes `--help` named none of.
+
+    Both branches of every builder, because a lane is named twice — once where it
+    builds rows and once where it reports itself unavailable. One site is reached
+    only when the source answers and the other only when it fails, so a walk over
+    either alone passes while the two disagree.
+
+    The title is asserted in the same walk. It is the word printed above the rows
+    and the name is the word typed at `--lane`, so a reader who copies the header
+    has to get a lane back.
+    """
+    for adapter_id, adapter, declared in dashboard.SHIPPED_ADAPTERS:
+        answered = sources.Result(source=adapter_id, payload=ADAPTER_PAYLOADS[adapter_id], exit_code=0)
+        broke = sources.Result(source=adapter_id, exit_code=1, stderr='no', failure=sources.Failure.FAILED)
+
+        for result in (answered, broke):
+            built = adapter(result)
+
+            assert [lane.name for lane in built] == list(declared), f'{adapter_id} builds {[x.name for x in built]}'
+            for lane in built:
+                assert lane.title == lane.name.upper(), f'{lane.title} is headed differently from `--lane {lane.name}`'
+
+
+def test_the_lane_enum_covers_every_adapter_doit_ships():
+    """A lane nobody can discover is a lane that does not exist for the reader."""
+    registered = set(sources.ADAPTERS)
+    tabled = {adapter_id for adapter_id, _, _ in dashboard.SHIPPED_ADAPTERS}
+
+    assert registered == tabled, 'an adapter registered outside the table is one `--lane` cannot name'
+    assert set(dashboard.LOCAL_LANES) <= set(dashboard.LANE_NAMES)
 
 
 def test_tasks_lane_reads_priority_name_and_category():
@@ -730,38 +784,38 @@ MESO_CYCLES = [
 ]
 
 
-def meso_lane(payload, today=TODAY):
+def training_lane(payload, today=TODAY):
     result = sources.Result(source='meso', payload=payload, exit_code=0)
-    return dashboard.build_meso_lane({'meso': result}, today)
+    return dashboard.build_training_lane({'meso': result}, today)
 
 
 def test_the_training_lane_rows_workouts_not_cycles():
     """A cycle is a plan; a workout is the thing you can go and do."""
-    lane = meso_lane(MESO_CYCLES)
+    lane = training_lane(MESO_CYCLES)
     assert lane.title == 'TRAINING'
     assert [row.text for row in lane.rows] == ['Session A — Loaded Lower', 'Session B — CR Mobility']
     assert lane.rows[0].handle == 'meso workouts show 1'
 
 
 def test_a_paused_cycle_contributes_nothing():
-    lane = meso_lane(MESO_CYCLES)
+    lane = training_lane(MESO_CYCLES)
     assert lane.meta == '1 cycle active · 2 prescribed'
     assert all('Calf' not in row.text for row in lane.rows)
 
 
 def test_a_cycle_past_its_target_pushes_harder_than_one_with_months_left():
-    relaxed = meso_lane(MESO_CYCLES, date(2026, 1, 1))
+    relaxed = training_lane(MESO_CYCLES, date(2026, 1, 1))
     assert relaxed.rows[0].urgency == dashboard.Urgency.NONE
 
-    late = meso_lane(MESO_CYCLES, date(2026, 11, 1))
+    late = training_lane(MESO_CYCLES, date(2026, 11, 1))
     assert late.rows[0].urgency == dashboard.Urgency.OVERDUE
 
 
-def test_a_meso_that_cannot_answer_says_so_rather_than_vanishing():
+def test_a_training_lane_that_cannot_answer_says_so_rather_than_vanishing():
     """A dropped lane reads as "nothing outstanding", which is the worst thing
     this dashboard could say wrongly."""
     failed = sources.Result(source='meso', exit_code=1, stderr='not logged in', failure=sources.Failure.FAILED)
-    lane = dashboard.build_meso_lane({'meso': failed}, TODAY)
+    lane = dashboard.build_training_lane({'meso': failed}, TODAY)
     assert lane.available is False
     assert lane.title == 'TRAINING'
     assert 'not logged in' in lane.reason
