@@ -135,8 +135,8 @@ def test_habits_lane_shows_every_habit_as_a_grid():
 
     assert lane.meta == '1 of 4 done today'
     assert lane.rows == [], 'habits are a complete set, not ranked rows'
-    assert [cell.text for cell in lane.grid] == ['Exercise', 'Stretch', 'Journal', 'Read']
-    assert [cell.done for cell in lane.grid] == [True, False, False, False]
+    assert [cell.text for cell in lane.grid] == ['Stretch', 'Read', 'Journal', 'Exercise']
+    assert [cell.done for cell in lane.grid] == [False, False, False, True]
 
 
 def test_habits_grid_carries_the_id_you_would_type():
@@ -150,18 +150,48 @@ def test_habits_grid_carries_the_id_you_would_type():
 
 
 def test_habits_grid_keeps_a_completed_habit_in_place():
-    """Ordering by category and name, never by completion, so ticking one off
-    never shuffles the rest out from under you."""
+    """Ordering by habit id, never by completion, so ticking one off never
+    shuffles the rest out from under you."""
     before = dashboard.build_habits_lane(all_results(), TODAY)
 
     payload = fixture('icb-overview.json')
     stretch = payload['habits']['due_today'].pop(0)
-    payload['habits']['completed_today'].append(stretch)
+    # What icb records is a completion naming the habit, not the habit row itself.
+    payload['habits']['completed_today'].append(
+        {
+            'id': 91,
+            'habit_id': stretch['id'],
+            'name': stretch['name'],
+            'category_id': stretch['category_id'],
+            'category': stretch['category'],
+            'complete_date': '2026-07-24T13:00:00Z',
+        }
+    )
     results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
     after = dashboard.build_habits_lane(results, TODAY)
 
     assert [cell.text for cell in after.grid] == [cell.text for cell in before.grid]
-    assert [cell.done for cell in after.grid] == [True, True, False, False]
+    assert [cell.done for cell in after.grid] == [True, False, False, True]
+
+
+def test_habits_grid_sends_a_completion_with_no_habit_to_the_end():
+    """A completion whose habit was deleted has no id to place it by, and going
+    first would push every habit you still owe down a row."""
+    payload = fixture('icb-overview.json')
+    payload['habits']['completed_today'].append(
+        {
+            'id': 92,
+            'name': 'Retired habit',
+            'category_id': 2,
+            'category': {'id': 2, 'name': 'Health'},
+            'complete_date': '2026-07-24T14:00:00Z',
+        }
+    )
+    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+
+    lane = dashboard.build_habits_lane(results, TODAY)
+
+    assert [cell.text for cell in lane.grid][-1] == 'Retired habit'
 
 
 def test_books_lane_leads_with_one_of_each_kind():

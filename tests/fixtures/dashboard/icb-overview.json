@@ -70,6 +70,7 @@
     "completed_today": [
       {
         "id": 90,
+        "habit_id": 4,
         "name": "Exercise",
         "category_id": 2,
         "category": {

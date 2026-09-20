@@ -250,14 +250,15 @@ def build_habits_lane(results: dict[str, sources.Result], today: date) -> LaneVi
     current_total = section.get('current_total', len(due) + len(done))
 
     # Every current habit is due every day, so the useful view is the whole set
-    # with the finished ones ticked off — not a ranked excerpt. Ordering by
-    # category and name keeps a habit in the same place all day, so ticking one
-    # off never shuffles the rest.
+    # with the finished ones ticked off — not a ranked excerpt. Both halves arrive
+    # from icb in habit-id order, and merging them on that id keeps a habit in the
+    # same place all day, so ticking one off never shuffles the rest.
     #
-    # Only the outstanding ones carry an id: a completion record identifies the
-    # completion, not the habit, and a finished habit needs no handle anyway.
+    # Only the outstanding ones carry an id in the cell: a completion record
+    # identifies the completion, not the habit, and a finished habit needs no
+    # handle anyway.
     entries = [(habit, False) for habit in due] + [(habit, True) for habit in done]
-    entries.sort(key=lambda entry: (habit_category(entry[0]), entry[0].get('name', '')))
+    entries.sort(key=lambda entry: habit_sort_key(entry[0], entry[1]))
     grid = [GridCell(habit.get('name', ''), completed, '' if completed else str(habit.get('id', ''))) for habit, completed in entries]
 
     return LaneView(
@@ -270,8 +271,17 @@ def build_habits_lane(results: dict[str, sources.Result], today: date) -> LaneVi
     )
 
 
-def habit_category(habit: dict) -> str:
-    return (habit.get('category') or {}).get('name', '')
+def habit_sort_key(habit: dict, completed: bool) -> tuple[int, int]:
+    """Where a board row sits, by the id of the habit it stands for.
+
+    A completion names its habit in `habit_id`, while a due row is the habit and
+    carries `id`. A completion with neither — a legacy row, or one whose habit was
+    deleted — has no habit to place it by, so the first element sends it to the end.
+    """
+    habit_id = habit.get('habit_id') if completed else habit.get('id')
+    if not isinstance(habit_id, int):
+        return (1, 0)
+    return (0, habit_id)
 
 
 def build_books_lane(results: dict[str, sources.Result], today: date) -> LaneView:
