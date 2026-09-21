@@ -335,7 +335,7 @@ def test_a_pursuit_counts_as_touched_from_either_record():
     state = {
         'now': NOW,
         'active': {'build': {}, 'chore': {}, 'read': {}},
-        'evidence_days': {'build': [TODAY.isoformat()], 'read': ['2026-07-01']},
+        'evidence_days': {'build': [TODAY], 'read': [date(2026, 7, 1)]},
         'records': [
             {'event': journal.Event.DONE, 'pursuit': 'chore', 'occurred_at': NOW.isoformat()},
             {'event': journal.Event.DONE, 'pursuit': 'read', 'occurred_at': (NOW - timedelta(days=3)).isoformat()},
@@ -371,7 +371,11 @@ def test_the_pursuits_row_counts_what_today_touched_and_leaves_what_is_owed_belo
 
 
 def pursuit_state(balances, touched=()):
-    """A minimal `build_state` shaped dict, for the readers that walk one."""
+    """A minimal `build_state` shaped dict, for the readers that walk one.
+
+    Evidence days are dates, because `evidence.occurrences` parses them before
+    `build_state` folds them in.
+    """
     return {
         'now': NOW,
         'today': TODAY,
@@ -379,7 +383,7 @@ def pursuit_state(balances, touched=()):
         'balance': dict(balances),
         'checkoff_size': dict.fromkeys(balances, 1.0),
         'intervals': dict.fromkeys(balances, 3.0),
-        'evidence_days': {name: [TODAY.isoformat()] for name in touched},
+        'evidence_days': {name: [TODAY] for name in touched},
         'records': [],
     }
 

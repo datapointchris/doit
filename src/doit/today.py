@@ -325,8 +325,7 @@ def touched_today(state: dict, today: date) -> list[str]:
     Both are true reports of the same act, which is why the union is the answer
     rather than either one.
     """
-    stamp = today.isoformat()
-    seen = {name for name, days in (state.get('evidence_days') or {}).items() if stamp in set(days)}
+    seen = {name for name, days in (state.get('evidence_days') or {}).items() if today in days}
     now = state['now']
     for record in state.get('records') or []:
         if record.get('event') != journal.Event.DONE:
