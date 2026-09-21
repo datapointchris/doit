@@ -12,8 +12,10 @@ composes are each tested directly instead.
 """
 
 import json
+from datetime import date
 from datetime import datetime
 from datetime import timedelta
+from datetime import timezone
 from pathlib import Path
 
 import pytest
@@ -72,6 +74,30 @@ def test_a_plain_date_and_an_instant_land_on_the_same_day():
     """Books answer with a day and tasks with a moment. Both are one day here."""
     assert today.local_date('2026-07-24', NOW) == TODAY
     assert today.local_date('2026-07-24T17:33:56Z', NOW) == TODAY
+
+
+def test_a_utc_stamp_is_converted_before_its_day_is_read():
+    """Every app here stamps in UTC, and the reader sits west of it.
+
+    Nine in the evening on the 20th is already the 21st in UTC, so reading the
+    first ten characters would move every evening's work onto tomorrow. The
+    same truncation pulls yesterday evening's onto today.
+    """
+    evening = datetime(2026, 7, 24, 21, 0, tzinfo=timezone(timedelta(hours=-4)))
+
+    assert today.local_date('2026-07-25T01:00:00Z', evening) == date(2026, 7, 24)
+    assert today.local_date('2026-07-24T01:00:00Z', evening) == date(2026, 7, 23)
+
+
+def test_a_plain_day_has_no_offset_to_apply_and_keeps_itself():
+    """`read_finish_date`, `performed_on` and `measured_on` carry no time.
+
+    Converting a day parsed as naive midnight would move it, so the branch that
+    converts is the one that found a timezone.
+    """
+    far_east = datetime(2026, 7, 24, 9, 0, tzinfo=timezone(timedelta(hours=13)))
+
+    assert today.local_date('2026-07-24', far_east) == date(2026, 7, 24)
 
 
 def test_an_absent_or_unparsable_date_is_no_day_rather_than_an_error():
@@ -271,8 +297,7 @@ def test_a_pursuit_no_longer_in_the_register_is_not_counted_as_touched():
 
 
 def test_the_pursuits_row_states_two_counts_and_never_a_ratio():
-    """Nine active pursuits is not a daily target — the weights imply intervals
-    of days and weeks, so `3 of 9` would put a goal on screen nobody set."""
+    """`pursuits_lane` carries why the active set is not a denominator."""
     state = pursuit_state(balances={'build': 2.0, 'chore': 0.0}, touched=['chore'])
 
     lane = today.pursuits_lane(state, TODAY)
@@ -323,7 +348,7 @@ def test_one_entry_is_singular():
 def test_the_due_list_orders_by_how_far_past_due_and_carries_a_handle():
     state = pursuit_state(balances={'chore': 1.0, 'socialize': 4.0})
 
-    lane = today.due_lane(state, [], TODAY)
+    lane = today.due_lane(state, [], [], TODAY)
 
     assert [row.label for row in lane.rows] == ['socialize', 'chore'], 'furthest behind first'
     assert all(row.handle for row in lane.rows), 'a row you can read but not act on is half a row'
@@ -331,12 +356,10 @@ def test_the_due_list_orders_by_how_far_past_due_and_carries_a_handle():
 
 
 def test_a_pursuit_that_is_current_stays_off_the_due_list():
-    """A whole checkoff rather than any positive balance: a balance climbs
-    continuously from zero, so everything passes through the fraction above
-    it after every checkoff."""
+    """`owing` carries why the threshold is a whole checkoff."""
     state = pursuit_state(balances={'chore': 0.4})
 
-    assert today.due_lane(state, [], TODAY).rows == []
+    assert today.due_lane(state, [], [], TODAY).rows == []
 
 
 def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
@@ -349,21 +372,23 @@ def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
     state = pursuit_state(balances={'chore': 1.0, 'undated': 1.0})
     del state['intervals']['undated']
 
-    lane = today.due_lane(state, [], TODAY)
+    lane = today.due_lane(state, [], [], TODAY)
 
     assert [row.label for row in lane.rows] == ['chore', 'undated']
     assert lane.rows[1].note == 'due today'
 
 
 def test_an_unfinished_grid_becomes_one_row_naming_what_is_left():
-    built = [
-        lane_view(
-            'habits', [GridCell('Floss', False), GridCell('Walk', False), GridCell('Water', True)], hints=['icb habits complete <id>']
-        )
-    ]
+    grids = today.grid_lanes(
+        [
+            lane_view(
+                'habits', [GridCell('Floss', False), GridCell('Walk', False), GridCell('Water', True)], hints=['icb habits complete <id>']
+            )
+        ]
+    )
     state = pursuit_state(balances={})
 
-    lane = today.due_lane(state, built, TODAY)
+    lane = today.due_lane(state, [], grids, TODAY)
 
     [row] = lane.rows
     assert row.label == 'habits'
@@ -373,9 +398,9 @@ def test_an_unfinished_grid_becomes_one_row_naming_what_is_left():
 
 
 def test_a_finished_grid_contributes_no_due_row():
-    built = [lane_view('habits', [GridCell('Water', True)])]
+    grids = today.grid_lanes([lane_view('habits', [GridCell('Water', True)])])
 
-    assert today.due_lane(pursuit_state(balances={}), built, TODAY).rows == []
+    assert today.due_lane(pursuit_state(balances={}), [], grids, TODAY).rows == []
 
 
 def test_only_todays_rows_come_from_a_row_based_lane():
@@ -398,7 +423,7 @@ def test_only_todays_rows_come_from_a_row_based_lane():
         rows=[Row('unit', 'Channels', 'in 11d', Urgency.DUE, 'learning show 4')],
     )
 
-    lane = today.due_lane(pursuit_state(balances={}), [upcoming, learning], TODAY)
+    lane = today.due_lane(pursuit_state(balances={}), [upcoming, learning], [], TODAY)
 
     assert [row.text for row in lane.rows] == ['Dentist']
 
@@ -412,7 +437,7 @@ def test_an_event_today_sorts_above_everything_owed():
     )
     state = pursuit_state(balances={'socialize': 9.0})
 
-    lane = today.due_lane(state, [upcoming], TODAY)
+    lane = today.due_lane(state, [upcoming], [], TODAY)
 
     assert [row.text for row in lane.rows] == ['Dentist', 'do socialize']
 
@@ -456,3 +481,93 @@ def test_an_empty_register_contributes_nothing_and_is_not_an_error(monkeypatch):
     built, state = today.pursuit_lanes(NOW, TODAY)
 
     assert (built, state) == ([], None)
+
+
+# --- the whole document, composed ---------------------------------------------
+
+
+@pytest.fixture
+def no_backends(monkeypatch):
+    """Everything `build` reads off this machine, answered with nothing.
+
+    `build` is asserted here and not only its parts. A unit test can satisfy
+    the sentence its own name makes while the composition above it breaks that
+    same sentence. `pursuit_lanes` promises a failure costs two rows; only
+    `build` decides whether the rest of the screen survives.
+
+    An empty registry shells out to no backend, so what is left is doit's own
+    state, and each read is replaced rather than pointed at a temporary file.
+    """
+    monkeypatch.setattr(today.sources, 'load', sources.Registry)
+    monkeypatch.setattr(today.dashboard, 'local_lanes', list)
+    monkeypatch.setattr(today.review, 'statuses', list)
+    monkeypatch.setattr(today.labs, 'statuses', list)
+    monkeypatch.setattr(today.pursuits, 'load_pursuits', dict)
+
+
+def lane_named(day, name):
+    return next(lane for lane in day.lanes if lane.name == name)
+
+
+def test_a_register_that_will_not_load_leaves_the_due_list_standing(no_backends, monkeypatch):
+    """One subsystem's failure costs its own rows, never the screen.
+
+    The appointments and the unfinished sets have nothing to do with the
+    weights, so withholding them turns a bad `pursuits.yml` into a screen that
+    names five habits outstanding and then says nothing to do about them.
+    """
+
+    def refuses():
+        raise ValueError('pursuits.yml: weight must be a number')
+
+    monkeypatch.setattr(today.pursuits, 'load_pursuits', refuses)
+    monkeypatch.setattr(today.review, 'statuses', lambda: [{'id': 'rg', 'overdue': 2, 'last': None}])
+
+    day = today.build(sources.Registry(), NOW)
+
+    assert [row.label for row in lane_named(day, 'due').rows] == ['review']
+
+
+def test_review_and_labs_reach_the_due_list_and_not_only_the_scoreboard(no_backends, monkeypatch):
+    """Both are read as statuses, so neither is among the dashboard's grids.
+
+    A ratio printed two lines above a due list that never mentions it tells a
+    reader the items are wanted today and then leaves them off the list of what
+    is wanted today.
+    """
+    monkeypatch.setattr(today.review, 'statuses', lambda: [{'id': 'rg', 'overdue': 2, 'last': None}])
+    monkeypatch.setattr(today.labs, 'statuses', lambda: [{'id': 'tmux', 'overdue': 0, 'last': None}])
+
+    day = today.build(sources.Registry(), NOW)
+
+    assert lane_named(day, 'review').meta == '0 of 1'
+    assert {row.label for row in lane_named(day, 'due').rows} == {'review', 'labs'}
+
+
+def test_a_register_that_loads_still_carries_its_owed_rows(no_backends, monkeypatch):
+    """The guard above must not have cost the group it was guarding."""
+    monkeypatch.setattr(today, 'pursuit_lanes', lambda now, today_: ([], pursuit_state(balances={'chore': 1.0})))
+
+    day = today.build(sources.Registry(), NOW)
+
+    assert [row.label for row in lane_named(day, 'due').rows] == ['chore']
+
+
+def test_the_json_names_which_lanes_are_counts(no_backends, monkeypatch, capsys):
+    """The split is the command's whole claim and no lane shape carries it.
+
+    A count lane and a fully cleared ratio lane are both a full grid with a
+    matching total, so a second renderer that had to guess would call a cleared
+    habits register an app completion. Asserted through `cmd_today` rather than
+    through a document built here, which would only restate the two lines that
+    build it.
+    """
+    state = pursuit_state(balances={'chore': 0.0}, touched=['chore'])
+    monkeypatch.setattr(today, 'pursuit_lanes', lambda now, today_: ([today.pursuits_lane(state, TODAY)], state))
+
+    assert today.cmd_today(as_json=True) == 0
+    document = json.loads(capsys.readouterr().out)
+
+    assert document['count_lanes'] == ['pursuits']
+    assert document['schema_version'] == lanes.SCHEMA_VERSION
+    assert [lane['name'] for lane in document['lanes']] == ['pursuits', 'review', 'labs', 'due']

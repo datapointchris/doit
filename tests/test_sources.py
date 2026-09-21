@@ -182,6 +182,28 @@ def test_a_malformed_completions_entry_is_reported_and_skipped(tmp_path):
     assert any('bad' in problem for problem in registry.problems)
 
 
+def test_one_id_in_both_blocks_is_reported_and_the_completion_dropped(tmp_path):
+    """`fetch` keys its results by id, so two commands under one id collide.
+
+    One result is then read by both blocks and the lane the loser would have
+    built disappears with nothing said — a habits lane gone from the screen
+    while `doit sources list` prints both entries as if they ran. Dropping the
+    completion keeps the dashboard whole, which is the half that has no
+    workaround.
+    """
+    path = write_sources(
+        tmp_path,
+        'sources:\n  meso:\n    command: [meso, overview, --json]\n    adapter: meso\n'
+        'completions:\n  meso:\n    command: [meso, review, --json]\n    adapter: meso-review\n',
+    )
+
+    registry = sources.load(path)
+
+    assert list(registry.sources) == ['meso']
+    assert registry.completions == {}
+    assert any('both' in problem and 'meso' in problem for problem in registry.problems)
+
+
 def test_a_block_that_is_not_a_mapping_names_itself(tmp_path):
     """Two blocks means the message has to say which one was wrong."""
     registry = sources.load(write_sources(tmp_path, 'completions: [icb, tasks]\n'))

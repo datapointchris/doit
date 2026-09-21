@@ -3,26 +3,27 @@
 The third density, beside `doit dashboard` and `doit next`. The dashboard reads
 every lane and ranks across none of them; `next` draws one thing from the
 weights. Neither says how much of the day is done, because an outstanding count
-can only climb and a lane of 307 unread articles renders exactly like a lane of
-two overdue chores.
+can only climb and a lane of hundreds of unread articles renders exactly like a
+lane of two overdue chores.
 
 **Only things a day can finish appear here.** Habits, review items and Labs each
 have a floor a day can reach, so they carry a ratio. Everything else carries a
 count or nothing — there is no honest denominator for articles read, and
 inventing one would put a target on the screen that nobody set.
 
-Nothing here recomputes due-ness. The rule the dashboard follows — mirror the
-`overdue` a backend emits rather than deriving it again — holds just as hard at
-this density, so the due rows are taken from statuses and lanes that are already
-built. The pursuits are the exception that proves it: doit owns that model, so
-`build_state` is the authority rather than a second reader of one.
+Nothing here recomputes due-ness. The dashboard mirrors the `overdue` a backend
+emits rather than deriving it again, and that holds just as hard at this
+density. So the due rows are taken from statuses and lanes already built. The
+pursuits go through `build_state` instead, because doit owns that model and
+there is no backend to mirror.
 
 The model is `doit.lanes`, unchanged. A scoreboard row is a Lane whose `meta`
 holds the ratio and whose `grid` holds the ticks, so `--json` emits the same
 document `doit dashboard --json` does and no consumer learns a second schema.
-Only the renderer is new.
+Only the renderer is new, and one sibling key naming which lanes are counts.
 """
 
+import json
 from datetime import date
 from datetime import datetime
 from typing import Annotated
@@ -48,64 +49,66 @@ from doit.render import fitted
 from doit.render import span_text
 from doit.render import terminal_width
 
-# The one row-based lane whose urgency means today. `day_urgency` marks DUE at
-# exactly zero days out; every other lane's threshold is a window — learning at
-# a fortnight, PRs at three days, dotfiles at any drift at all. So `urgency !=
-# NONE` reads as "wants attention" rather than "is today", and filtering on it
-# would pull a resource due next week onto a screen about this afternoon.
+# The one row-based lane whose urgency means today. Every other lane marks DUE
+# on a window rather than on the day, so `urgency != NONE` reads as "wants
+# attention" and filtering on it pulls next week onto a screen about this
+# afternoon.
 #
-# A lane name rather than an app name, which is what keeps this out of the
-# source registry's way: a conforming source that supplies `upcoming` lands here
-# with nothing to change.
+# A lane name rather than an app name, so a conforming source supplying
+# `upcoming` lands here with nothing to change.
 DAY_SHAPED_ROW_LANES = ('upcoming',)
 
-# How many done things a count row names before it stops naming them. The row is
-# a count first; the titles are there so a number you did not expect can be
-# recognized without another command.
+# The titles are there so a number you did not expect can be recognized without
+# another command. The row is a count first.
 NAMED_PER_ROW = 3
 
-# How many rows the due list shows. Past this the day is not the problem.
+# Past this the day is not the problem.
 DUE_ROWS = 12
 
-# What the due list sorts on before it sorts on lateness. An appointment keeps
-# its hour whatever else is owed; a set you are part-way through is the one
-# thing here you can finish in a minute, so it sits at the bottom where it does
-# not push a commitment off the screen.
+# The due list's groups, sorted on before lateness is. An appointment keeps its
+# hour whatever else is owed; a set you are part-way through is the one thing
+# here you can finish in a minute, so it sits at the bottom where it does not
+# push a commitment off the screen.
 APPOINTMENTS, OWED, SETS = 0, 1, 2
 
 SCOREBOARD_LABEL_WIDTH = 12
-# Wide enough for "1 touched · 5 behind", the longest meta any row builds here.
+# Wide enough for the longest meta built here, `N touched · N behind`.
 META_WIDTH = 22
 DUE_LABEL_WIDTH = 11
 TICK_DONE = '✓'
 TICK_OPEN = '○'
 
 # Beyond this a tick strip is a wall rather than a glance, and the ratio beside
-# it already carries the number. Measured against the live registers: habits at
-# 6 reads at once, review at 11 is already a row of circles nobody counts, and
-# labs at 23 is a bar chart of nothing.
+# it already carries the number. A register in the tens is a row of circles
+# nobody counts.
 MAX_TICKS = 10
 
 
 def local_date(value: object, now: datetime) -> date | None:
     """The local calendar day a backend's timestamp landed on.
 
-    Both shapes a backend answers with, because these fields are not consistent
-    across apps and never will be: `read_finish_date` is a plain day and
-    `complete_date` is an instant. Read through one function so a book finished
-    on the 20th and a task completed on the 20th land on the same day.
+    Both shapes, because these fields are not consistent across apps and never
+    will be: `read_finish_date` is a plain day and `complete_date` is an
+    instant. One function, so both land on the same day.
+
+    The instant is converted before its day is read. The apps stamp in UTC, so
+    the first ten characters of `2026-09-21T01:00:00Z` say the 21st while the
+    work happened at nine in the evening of the 20th in `-04:00`. Truncating
+    first moves every evening onto tomorrow.
+
+    Truncation is the fallback, for a plain day with no time to convert and for
+    a stamp whose day is readable while its time is not.
     """
     if not value:
         return None
     text = str(value)
+    stamp = journal.parse_time(text)
+    if stamp is not None:
+        return stamp.astimezone(now.tzinfo).date() if stamp.tzinfo else stamp.date()
     try:
         return date.fromisoformat(text[:10])
     except ValueError:
-        pass
-    stamp = journal.parse_time(text)
-    if stamp is None:
         return None
-    return stamp.astimezone(now.tzinfo).date() if stamp.tzinfo else stamp.date()
 
 
 def rows_done_today(payload: object, date_field: str, now: datetime) -> list[dict]:
@@ -146,11 +149,10 @@ def row_text(row: dict, label_field: str) -> str:
 def flat_adapter(source_id: str, name: str, title: str, label_field: str, date_field: str, hint: str) -> sources.Adapter:
     """An adapter for a backend answering with a flat array of finished things.
 
-    Five of the six completion sources are this shape and differ only in which
-    field is the title and which is the date. That is a parameter, not five
-    copies — and it stays a closure here rather than becoming two more keys in
-    `sources.yml`, because that file describes foreign apps and `lanes.py`
-    rejects field mappings in it by name.
+    Most of the completion sources are this shape and differ only in which
+    field is the title and which is the date. A closure here rather than two
+    more keys in `sources.yml`, because `lanes.py` rejects field mappings in
+    that file by name.
 
     The failure reason is asked for under the source id, never the lane name.
     `reason` looks the configured argv back up by that id to say which command
@@ -168,8 +170,8 @@ def flat_adapter(source_id: str, name: str, title: str, label_field: str, date_f
     return adapter
 
 
-# Which completion source answers which row, and how to read its rows. The
-# fields are measured against live payloads rather than documented shapes.
+# Which completion source answers which row. The field names came from live
+# payloads, so check one before changing a row here.
 FLAT_COMPLETIONS = (
     ('tasks', 'TASKS', 'icb-tasks', 'name', 'complete_date', 'icb tasks list --status completed'),
     ('projects', 'PROJECTS', 'icb-projects', 'title', 'completed_at', 'icb projects items list --status completed'),
@@ -178,9 +180,8 @@ FLAT_COMPLETIONS = (
     ('learning', 'LEARNING', 'learning-completed', 'title', 'completed_at', 'learning completed list --all'),
 )
 
-# meso answers three kinds of thing in one document, so it reads the document
-# rather than an array. Each kind names its rows differently, which is the whole
-# reason it cannot use the flat adapter above.
+# meso answers three kinds in one document and names each kind's rows
+# differently, which is why it cannot use the flat adapter above.
 MESO_KINDS = (
     ('sessions', 'workout_name', 'performed_on'),
     ('log_entries', 'mood', 'entry_date'),
@@ -323,10 +324,9 @@ def owing(state: dict) -> list[tuple[str, float | None]]:
 def pursuits_lane(state: dict, today: date) -> Lane:
     """One row saying how much of the register today has moved.
 
-    No ratio, deliberately. Nine active pursuits is not a daily target — the
-    weights imply intervals of days and weeks — so `3 of 9` would put a goal on
-    the screen that the register never claimed. Two counts say the same thing
-    and claim nothing.
+    No ratio, deliberately. The weights imply intervals of days and weeks, so
+    the active set is not a daily target and a ratio against it would put a
+    goal on the screen the register never claimed. Two counts claim nothing.
     """
     touched = touched_today(state, today)
     behind = owing(state)
@@ -336,9 +336,8 @@ def pursuits_lane(state: dict, today: date) -> Lane:
         title='PURSUITS',
         meta=meta,
         grid=[GridCell(name, True) for name in touched],
-        # What happened, not how many pursuits exist. Nine active is not a
-        # target a day is measured against, and a `total` above the grid would
-        # render this as a ratio row and tick nine boxes nobody asked for.
+        # The grid's own length, not the active set's. A total above the grid
+        # renders this as a ratio row and ticks a box per pursuit.
         total=len(touched),
         hints=['doit next'],
     )
@@ -376,19 +375,25 @@ def logged_lane(state: dict, today: date) -> Lane:
     )
 
 
-def due_lane(state: dict, built: list[dashboard.LaneView], today: date) -> Lane:
+def due_lane(state: dict | None, built: list[dashboard.LaneView], grids: list[Lane], today: date) -> Lane:
     """Everything still wanted today, most overdue first, each with a handle.
 
-    Four contributors in one list rather than four short lists: the question is
-    what to do next, and a reader deciding that does not care which subsystem
-    owns the answer.
+    Several contributors in one list rather than one short list each: the
+    question is what to do next, and a reader deciding that does not care which
+    subsystem owns the answer.
+
+    `grids` is every complete set on the scoreboard, which is not the same as
+    the grids in `built`. Review and Labs are read as statuses rather than
+    through the dashboard, so taking them from `built` alone would print their
+    ratios two lines above a due list that never mentions them.
+
+    A register that would not load costs its own two rows and the owed group.
+    The appointments and the sets have nothing to do with the weights, so
+    withholding them would turn one subsystem's failure into a blank screen.
     """
     rows: list[tuple[int, float, Row]] = []
 
-    # Group before rank, so a thing with a clock on it cannot be pushed under a
-    # thing without one. A pursuit twenty days overdue will survive another day;
-    # an appointment at two o'clock will not, and ordering purely by lateness
-    # put the appointment last on exactly the day it mattered.
+    # Grouped before ranked; `APPOINTMENTS, OWED, SETS` carries why.
     for lane in built:
         if lane.name not in DAY_SHAPED_ROW_LANES:
             continue
@@ -396,12 +401,14 @@ def due_lane(state: dict, built: list[dashboard.LaneView], today: date) -> Lane:
             if row.urgency in (Urgency.DUE, Urgency.OVERDUE):
                 rows.append((APPOINTMENTS, 0.0, row))
 
-    for name, due_in in owing(state):
-        note = 'due today' if due_in is None or -1 < due_in <= 0 else f'{span_text(due_in)} overdue'
-        rank = 0.0 if due_in is None else due_in
-        rows.append((OWED, rank, Row(name, state['active'][name].get('description', ''), note, Urgency.OVERDUE, f'doit log {name}')))
+    if state is not None:
+        for name, due_in in owing(state):
+            note = 'due today' if due_in is None or -1 < due_in <= 0 else f'{span_text(due_in)} overdue'
+            rank = 0.0 if due_in is None else due_in
+            described = state['active'][name].get('description', '')
+            rows.append((OWED, rank, Row(name, described, note, Urgency.OVERDUE, f'doit log {name}')))
 
-    for lane in grid_lanes(built):
+    for lane in grids:
         left = [cell for cell in lane.grid if not cell.done]
         if not left:
             continue
@@ -458,10 +465,9 @@ class Day(NamedTuple):
     """Today's lanes, and which of them carry no denominator.
 
     `counts` is recorded as the document is built rather than inferred from the
-    lanes afterwards. Every heuristic available is wrong on a real day: a
-    ratio row with everything done has a full grid and a matching total, which
-    is exactly what a count row looks like, so a habits register finally
-    cleared would render as an app completion.
+    lanes afterwards. A ratio row with everything done has a full grid and a
+    matching total, which is exactly what a count row looks like. So a habits
+    register finally cleared would render as an app completion.
     """
 
     lanes: list[Lane]
@@ -480,20 +486,26 @@ def build(registry: sources.Registry, now: datetime) -> Day:
     results = sources.fetch(lane_sources + completion_sources)
 
     built = dashboard.lanes_of(registry, results, None)
-    scoreboard: list[Lane] = list(grid_lanes(built))
+    # Every complete set on this screen, collected as it is added. The due list
+    # turns each one's unfinished half into a row, and a set it is not handed is
+    # a ratio printed with nothing under it saying what is left.
+    grids: list[Lane] = list(grid_lanes(built))
+    scoreboard: list[Lane] = list(grids)
 
     register_lanes, state = pursuit_lanes(now, today)
     counts = {lane.name for lane in register_lanes}
     scoreboard.extend(register_lanes)
-    scoreboard.extend(maintenance_lanes(today))
+
+    maintenance = maintenance_lanes(today)
+    grids.extend(maintenance)
+    scoreboard.extend(maintenance)
 
     for source in completion_sources:
         produced = sources.lanes_from(source, results[source.id])
         counts.update(lane.name for lane in produced)
         scoreboard.extend(produced)
 
-    if state is not None:
-        scoreboard.append(due_lane(state, built, today))
+    scoreboard.append(due_lane(state, built, grids, today))
     return Day(scoreboard, frozenset(counts))
 
 
@@ -592,9 +604,14 @@ def cmd_today(as_json: bool) -> int:
     day = build(registry, now)
 
     if as_json:
+        document = lanes.to_document(day.lanes, now)
+        # A sibling key, not a lane field: `lanes.py` is the contract a source
+        # conforms to and no source declares this. A second renderer cannot
+        # recover the split from the lanes, for the reason `Day` gives.
+        document['count_lanes'] = sorted(day.counts)
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
-        print(lanes.dumps(day.lanes, now))
+        print(json.dumps(document, indent=2))
     else:
         render(day, now.date())
     # A read-only glance always succeeds. Degradation is shown per row, and a

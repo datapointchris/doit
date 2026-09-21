@@ -23,9 +23,7 @@ what happened today and feeds `doit today`. An entry in either is the same
 block an entry sits in is the whole of what distinguishes it.
 
 A completions command needs today's date, and `{today}` is the only token
-substituted into one. An argv part equal to it is replaced whole with the local
-ISO date; a part merely containing it is left alone, so nothing here has to
-reason about quoting.
+substituted into one. `resolved_command` carries what is matched and why.
 
 Failure policy is code, not config, because it must not vary by source. A source
 absent from the file is silent — it is not configured, so it does not exist. One
@@ -61,10 +59,8 @@ SOURCES = Path(os.environ.get('DOIT_SOURCES') or xdg_config_home() / 'doit' / 's
 # concurrently, so this is the worst-case total rather than a per-source penalty.
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
-# The one substitution a command may ask for. Matched against a whole argv part
-# rather than searched for inside one: a backend takes the date as its own
-# argument, so there is no case for splicing it into a longer string, and
-# refusing that case is what keeps quoting out of this file.
+# The one substitution a command may ask for. `resolved_command` says what it
+# matches against.
 TODAY_TOKEN = '{today}'
 
 TEMPLATE = """\
@@ -186,9 +182,15 @@ def parse_block(declared: object, block: str, problems: list[str]) -> dict[str, 
 def load(path: Path | None = None) -> Registry:
     """Read `sources.yml`, both blocks.
 
-    A block that is absent is an empty map rather than an error. `completions:`
-    postdates every file already on disk, and a machine that never adds one gets
-    `doit today` without its count rows instead of a warning it cannot act on.
+    A block that is absent is an empty map rather than an error. A machine with
+    no `completions:` block gets `doit today` without its count rows rather than
+    a warning it cannot act on.
+
+    An id used in both blocks is a problem rather than two entries. `fetch` keys
+    its results by id, so the two commands collide on one result and the lane
+    the loser would have built disappears with nothing said. `icb` and `meso`
+    are plausible in either block, which is what makes the collision reachable
+    rather than theoretical.
     """
     path = SOURCES if path is None else path
     registry = Registry()
@@ -197,6 +199,9 @@ def load(path: Path | None = None) -> Registry:
     document = yaml.safe_load(path.read_text()) or {}
     registry.sources = parse_block(document.get('sources'), 'sources', registry.problems)
     registry.completions = parse_block(document.get('completions'), 'completions', registry.problems)
+    for shared in sorted(set(registry.sources) & set(registry.completions)):
+        registry.problems.append(f'{shared} is declared in both sources and completions; an id names one command')
+        del registry.completions[shared]
     return registry
 
 
