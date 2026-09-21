@@ -36,8 +36,9 @@ time and never hit a cryptic error.
 - **`doit dashboard`** ranks across nothing. Each lane is ordered by whichever app owns it, three
   rows deep, and no lane is comparable to the one beside it.
 - **`doit today`** admits only what a day can finish. An outstanding count can only climb, so a
-  lane of hundreds of unread articles reads exactly like a lane of two overdue chores. Here a
-  habit register and a review register carry a ratio, and an inventory carries a count or nothing.
+  lane of hundreds of unread articles reads exactly like a lane of two overdue chores. Here habits
+  carry a ratio, because every habit is due every day. Everything else counts what today cleared,
+  and whatever is behind appears once, in the due list underneath.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
 

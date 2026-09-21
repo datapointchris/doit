@@ -6,15 +6,23 @@ weights. Neither says how much of the day is done, because an outstanding count
 can only climb and a lane of hundreds of unread articles renders exactly like a
 lane of two overdue chores.
 
-**Only things a day can finish appear here.** Habits, review items and Labs each
-have a floor a day can reach, so they carry a ratio. Everything else carries a
-count or nothing — there is no honest denominator for articles read, and
-inventing one would put a target on the screen that nobody set.
+**A ratio only where the whole set is due every day.** Habits are that set, so
+they alone read `1 of 6`. Everything else is a count of what today cleared —
+there is no honest daily denominator for articles read, and none for a review
+register either. Its items fall due on cadences of weeks, so the ones owed on a
+given morning are a backlog, and a ratio against a backlog puts a target on the
+screen that nobody set.
+
+**Being behind is said once, in the due list.** Review, Labs and the pursuits
+each carry what they owe there, as due or overdue, and their scoreboard row
+counts only what today cleared. A scoreboard count of what is behind, above a
+list naming each of them, says it twice.
 
 Nothing here recomputes due-ness. The dashboard mirrors the `overdue` a backend
 emits rather than deriving it again, and that holds just as hard at this
-density. So the due rows are taken from statuses and lanes already built. The
-pursuits go through `build_state` instead, because doit owns that model and
+density. So the due rows are taken from statuses and lanes already built, and a
+register is asked its own `is_due` rather than having one written for it here.
+The pursuits go through `build_state` instead, because doit owns that model and
 there is no backend to mirror.
 
 The model is `doit.lanes`, unchanged. A scoreboard row is a Lane whose `meta`
@@ -31,6 +39,7 @@ leaves the late rows visible at a glance.
 """
 
 import json
+from collections.abc import Callable
 from datetime import date
 from datetime import datetime
 from typing import Annotated
@@ -74,13 +83,15 @@ NAMED_PER_ROW = 3
 DUE_ROWS = 12
 
 # The due list's groups, sorted on before lateness is. An appointment keeps its
-# hour whatever else is owed; a set you are part-way through is the one thing
-# here you can finish in a minute, so it sits at the bottom where it does not
-# push a commitment off the screen.
-APPOINTMENTS, OWED, SETS = 0, 1, 2
+# hour whatever else is owed. A register's backlog follows the pursuits, because
+# one row stands for many items and ranking it by a single lateness would say
+# something false about the rest. A set you are part-way through is the one
+# thing here you can finish in a minute, so it sits at the bottom where it does
+# not push a commitment off the screen.
+APPOINTMENTS, OWED, REGISTERS, SETS = 0, 1, 2, 3
 
 SCOREBOARD_LABEL_WIDTH = 12
-# Wide enough for the longest meta built here, `N touched · N behind`.
+# Wide enough for the longest meta built here, `N entries · N min`.
 META_WIDTH = 22
 DUE_LABEL_WIDTH = 11
 TICK_DONE = '✓'
@@ -240,10 +251,10 @@ def grid_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
     future source that answers the same way.
 
     The meta is rewritten rather than carried through. A source phrases its own
-    summary for its own lane, and on the dashboard that is right; in a column
-    where every row is a ratio, one row reading "1 of 6 done today" beside
-    another reading "0 of 11" makes the reader parse each row instead of
-    scanning the column.
+    summary for its own lane, and on the dashboard that is right. In a column of
+    short counts, "1 of 6 done today" beside "3 done" makes the reader parse each
+    row instead of scanning the column, and a screen titled Today does not need
+    the word repeated.
     """
     found = []
     for lane in built:
@@ -264,32 +275,46 @@ def grid_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
     return found
 
 
-def statuses_lane(name: str, title: str, rows: list[dict], today: date, hint: str) -> Lane:
-    """One maintenance row: of the things due today, how many are done.
+def register_rows(
+    name: str, title: str, rows: list[dict], is_due: Callable[[dict], bool], today: date, hint: str
+) -> tuple[Lane, Row | None]:
+    """A register's scoreboard count, and its one row in the due list if it owes.
 
-    `review` and `labs` both emit `overdue` and `last`, so due-ness and done-ness
-    are read rather than derived. `overdue >= 0` is the backend's own answer to
-    "is this wanted today", and `None` is an item never done, which ranks above
-    any number of days late.
+    The count is what today cleared and nothing else. What is still owed goes
+    to the due list, where being behind is said once, as due or overdue.
+
+    `is_due` is the register's own predicate. Review is due when never done or
+    past its date; a Lab is due only when it is also scheduled, so an on-demand
+    Lab never is. One rule written here would agree with `doit review due` and
+    disagree with `doit labs due`.
     """
     stamp = today.isoformat()
     done = [row for row in rows if row.get('last') == stamp]
     # Done is subtracted from due rather than counted alongside it. An item on a
     # daily cadence done this morning still reports `overdue: 0`, because zero
-    # means "wanted today" and it was — so without this it lands in both halves
-    # and a register of one item reads `1 of 2`.
+    # means "wanted today" and it was — so without this it is cleared and owed
+    # at once.
     finished = {id(row) for row in done}
-    due = [row for row in rows if id(row) not in finished and (row.get('overdue') is None or row.get('overdue', -1) >= 0)]
-    cells = [GridCell(str(row.get('id') or row.get('title') or ''), True) for row in done]
-    cells += [GridCell(str(row.get('id') or row.get('title') or ''), False) for row in due]
-    return Lane(
+    owed = [row for row in rows if id(row) not in finished and is_due(row)]
+    count = Lane(
         name=name,
         title=title,
-        meta=ratio_meta(len(done), len(done) + len(due)),
-        grid=cells,
-        total=len(done) + len(due),
+        meta=f'{len(done)} done',
+        grid=[GridCell(item_name(row), True) for row in done],
+        total=len(done),
         hints=[hint],
     )
+    if not owed:
+        return count, None
+    # Never done ranks above any number of days late, matching the dashboard's
+    # maintenance rows, so either one makes the register late rather than due.
+    late = any(row.get('overdue') is None or row['overdue'] > 0 for row in owed)
+    named = ' · '.join(item_name(row) for row in owed[:NAMED_PER_ROW])
+    return count, Row(name, named, f'{len(owed)} due', Urgency.OVERDUE if late else Urgency.DUE, hint)
+
+
+def item_name(row: dict) -> str:
+    return str(row.get('id') or row.get('title') or '')
 
 
 def touched_today(state: dict, today: date) -> list[str]:
@@ -334,15 +359,14 @@ def pursuits_lane(state: dict, today: date) -> Lane:
 
     No ratio, deliberately. The weights imply intervals of days and weeks, so
     the active set is not a daily target and a ratio against it would put a
-    goal on the screen the register never claimed. Two counts claim nothing.
+    goal on the screen the register never claimed. What is owed is in the due
+    list, one row per pursuit, so this row does not count it a second time.
     """
     touched = touched_today(state, today)
-    behind = owing(state)
-    meta = f'{len(touched)} touched · {len(behind)} behind' if behind else f'{len(touched)} touched'
     return Lane(
         name='pursuits',
         title='PURSUITS',
-        meta=meta,
+        meta=f'{len(touched)} touched',
         grid=[GridCell(name, True) for name in touched],
         # The grid's own length, not the active set's. A total above the grid
         # renders this as a ratio row and ticks a box per pursuit.
@@ -383,25 +407,25 @@ def logged_lane(state: dict, today: date) -> Lane:
     )
 
 
-def due_lane(state: dict | None, built: list[dashboard.LaneView], grids: list[Lane], today: date) -> Lane:
+def due_lane(state: dict | None, built: list[dashboard.LaneView], grids: list[Lane], registers: list[Row], today: date) -> Lane:
     """Everything still wanted today, most overdue first, each with a handle.
 
     Several contributors in one list rather than one short list each: the
     question is what to do next, and a reader deciding that does not care which
     subsystem owns the answer.
 
-    `grids` is every complete set on the scoreboard, which is not the same as
-    the grids in `built`. Review and Labs are read as statuses rather than
-    through the dashboard, so taking them from `built` alone would print their
-    ratios two lines above a due list that never mentions them.
+    `grids` is the same list the scoreboard printed as ratios, passed in rather
+    than rebuilt, so a set with a ratio above always has its row here.
+    `registers` carries Review and Labs, which are read as statuses rather than
+    through the dashboard and so reach this list by no other path.
 
-    A register that would not load costs its own two rows and the owed group.
-    The appointments and the sets have nothing to do with the weights, so
-    withholding them would turn one subsystem's failure into a blank screen.
+    A pursuits register that would not load costs its own two rows and the owed
+    group. Nothing else here depends on the weights, so withholding the rest
+    would turn one subsystem's failure into a blank screen.
     """
     rows: list[tuple[int, float, Row]] = []
 
-    # Grouped before ranked; `APPOINTMENTS, OWED, SETS` carries why.
+    # Grouped before ranked; `APPOINTMENTS, OWED, REGISTERS, SETS` carries why.
     for lane in built:
         if lane.name not in DAY_SHAPED_ROW_LANES:
             continue
@@ -415,6 +439,9 @@ def due_lane(state: dict | None, built: list[dashboard.LaneView], grids: list[La
             rank = 0.0 if due_in is None else due_in
             described = state['active'][name].get('description', '')
             rows.append((OWED, rank, Row(name, described, note, Urgency.OVERDUE, f'doit log {name}')))
+
+    for row in registers:
+        rows.append((REGISTERS, 0.0, row))
 
     for lane in grids:
         left = [cell for cell in lane.grid if not cell.done]
@@ -432,23 +459,28 @@ def due_lane(state: dict | None, built: list[dashboard.LaneView], grids: list[La
     return Lane(name='due', title='STILL DUE', rows=ordered, total=len(ordered), hints=['doit dashboard'])
 
 
-def maintenance_lanes(today: date) -> list[Lane]:
-    """The two registers doit keeps itself.
+def maintenance_lanes(today: date) -> tuple[list[Lane], list[Row]]:
+    """The two registers doit keeps itself: their counts, and what they owe.
 
     Read as statuses rather than through the dashboard's `maintenance` lane,
     which interleaves them into one ranked excerpt and drops the done half —
-    exactly the half this screen is for.
+    exactly the half the scoreboard is for.
     """
-    found = []
-    for name, title, read, hint in (
-        ('review', 'REVIEW', review.statuses, 'doit review due'),
-        ('labs', 'LABS', labs.statuses, 'doit labs due'),
+    counts: list[Lane] = []
+    owed: list[Row] = []
+    for name, title, read, is_due, hint in (
+        ('review', 'REVIEW', review.statuses, lambda row: review.is_due(row.get('overdue')), 'doit review due'),
+        ('labs', 'LABS', labs.statuses, labs.is_due_row, 'doit labs due'),
     ):
         try:
-            found.append(statuses_lane(name, title, read(), today, hint))
+            count, row = register_rows(name, title, read(), is_due, today, hint)
         except (OSError, ValueError) as error:
-            found.append(lanes.unavailable(name, title, str(error)))
-    return found
+            counts.append(lanes.unavailable(name, title, str(error)))
+            continue
+        counts.append(count)
+        if row is not None:
+            owed.append(row)
+    return counts, owed
 
 
 def pursuit_lanes(now: datetime, today: date) -> tuple[list[Lane], dict | None]:
@@ -494,9 +526,9 @@ def build(registry: sources.Registry, now: datetime) -> Day:
     results = sources.fetch(lane_sources + completion_sources)
 
     built = dashboard.lanes_of(registry, results, None)
-    # Every complete set on this screen, collected as it is added. The due list
-    # turns each one's unfinished half into a row, and a set it is not handed is
-    # a ratio printed with nothing under it saying what is left.
+    # The sets printed as ratios. The due list turns each one's unfinished half
+    # into a row, and a set it is not handed is a ratio with nothing under it
+    # saying what is left.
     grids: list[Lane] = list(grid_lanes(built))
     scoreboard: list[Lane] = list(grids)
 
@@ -504,8 +536,8 @@ def build(registry: sources.Registry, now: datetime) -> Day:
     counts = {lane.name for lane in register_lanes}
     scoreboard.extend(register_lanes)
 
-    maintenance = maintenance_lanes(today)
-    grids.extend(maintenance)
+    maintenance, owed_by_registers = maintenance_lanes(today)
+    counts.update(lane.name for lane in maintenance)
     scoreboard.extend(maintenance)
 
     for source in completion_sources:
@@ -513,7 +545,7 @@ def build(registry: sources.Registry, now: datetime) -> Day:
         counts.update(lane.name for lane in produced)
         scoreboard.extend(produced)
 
-    scoreboard.append(due_lane(state, built, grids, today))
+    scoreboard.append(due_lane(state, built, grids, owed_by_registers, today))
     return Day(scoreboard, frozenset(counts))
 
 

@@ -22,7 +22,9 @@ import pytest
 
 from doit import dashboard
 from doit import journal
+from doit import labs
 from doit import lanes
+from doit import review
 from doit import sources
 from doit import today
 from doit.lanes import GridCell
@@ -265,11 +267,16 @@ def test_a_set_too_large_for_a_strip_offers_no_ticks():
     assert today.tick_strip(lane).plain == ''
 
 
-def test_review_counts_what_is_due_and_what_is_done_without_double_counting():
-    """An item on a daily cadence done this morning still reports `overdue: 0`.
+def review_is_due(row):
+    return review.is_due(row.get('overdue'))
 
-    Zero means "wanted today" and it was, so without subtracting the done half
-    a register of one item reads `1 of 2`.
+
+def test_a_register_counts_only_what_today_cleared_and_owes_the_rest_below():
+    """A register's owed items fall due on cadences of weeks, so they are a
+    backlog and not a target the day was set. A ratio against them read as one.
+
+    An item on a daily cadence done this morning still reports `overdue: 0`, so
+    without subtracting the done half it is cleared and owed at once.
     """
     rows = [
         {'id': 'brew', 'overdue': 0, 'last': TODAY.isoformat()},
@@ -278,10 +285,45 @@ def test_review_counts_what_is_due_and_what_is_done_without_double_counting():
         {'id': 'never', 'overdue': None, 'last': None},
     ]
 
-    lane = today.statuses_lane('review', 'REVIEW', rows, TODAY, 'doit review due')
+    count, owed = today.register_rows('review', 'REVIEW', rows, review_is_due, TODAY, 'doit review due')
 
-    assert lane.meta == '1 of 3', 'brew is done, certs and never are due, fresh is not yet wanted'
-    assert lane.total == 3
+    assert count.meta == '1 done'
+    assert count.total == 1, 'a total above the grid would render this as a ratio'
+    assert owed == Row('review', 'certs · never', '2 due', Urgency.OVERDUE, 'doit review due')
+
+
+def test_a_register_owing_nothing_behind_reads_as_due_rather_than_late():
+    rows = [{'id': 'brew', 'overdue': 0, 'last': '2026-07-17'}]
+
+    _, owed = today.register_rows('review', 'REVIEW', rows, review_is_due, TODAY, 'doit review due')
+
+    assert owed is not None
+    assert owed.urgency == Urgency.DUE
+
+
+def test_a_register_owing_nothing_adds_no_due_row():
+    rows = [{'id': 'fresh', 'overdue': -2, 'last': '2026-07-23'}]
+
+    _, owed = today.register_rows('review', 'REVIEW', rows, review_is_due, TODAY, 'doit review due')
+
+    assert owed is None
+
+
+def test_an_on_demand_lab_is_never_owed():
+    """A Lab is due only when it is scheduled, which review items always are.
+
+    A rule written here in place of `labs.is_due_row` would read an on-demand
+    Lab's absent `overdue` as never done, and owe it every day forever.
+    """
+    rows = [
+        {'id': 'tmux', 'overdue': None, 'last': None, 'scheduled': True},
+        {'id': 'jq', 'overdue': None, 'last': None, 'scheduled': False},
+    ]
+
+    _, owed = today.register_rows('labs', 'LABS', rows, labs.is_due_row, TODAY, 'doit labs due')
+
+    assert owed is not None
+    assert (owed.text, owed.note) == ('tmux', '1 due')
 
 
 def test_a_pursuit_counts_as_touched_from_either_record():
@@ -317,13 +359,14 @@ def test_a_pursuit_no_longer_in_the_register_is_not_counted_as_touched():
     assert today.touched_today(state, TODAY) == []
 
 
-def test_the_pursuits_row_states_two_counts_and_never_a_ratio():
-    """`pursuits_lane` carries why the active set is not a denominator."""
+def test_the_pursuits_row_counts_what_today_touched_and_leaves_what_is_owed_below():
+    """`pursuits_lane` carries why the active set is not a denominator, and why
+    `build`, which is owed, is left to its own row in the due list."""
     state = pursuit_state(balances={'build': 2.0, 'chore': 0.0}, touched=['chore'])
 
     lane = today.pursuits_lane(state, TODAY)
 
-    assert lane.meta == '1 touched · 1 behind'
+    assert lane.meta == '1 touched'
     assert lane.total == 1, 'a total above the grid would render this as a ratio and tick boxes nobody asked for'
 
 
@@ -369,7 +412,7 @@ def test_one_entry_is_singular():
 def test_the_due_list_orders_by_how_far_past_due_and_carries_a_handle():
     state = pursuit_state(balances={'chore': 1.0, 'socialize': 4.0})
 
-    lane = today.due_lane(state, [], [], TODAY)
+    lane = today.due_lane(state, [], [], [], TODAY)
 
     assert [row.label for row in lane.rows] == ['socialize', 'chore'], 'furthest behind first'
     assert all(row.handle for row in lane.rows), 'a row you can read but not act on is half a row'
@@ -380,7 +423,7 @@ def test_a_pursuit_that_is_current_stays_off_the_due_list():
     """`owing` carries why the threshold is a whole checkoff."""
     state = pursuit_state(balances={'chore': 0.4})
 
-    assert today.due_lane(state, [], [], TODAY).rows == []
+    assert today.due_lane(state, [], [], [], TODAY).rows == []
 
 
 def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
@@ -393,7 +436,7 @@ def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
     state = pursuit_state(balances={'chore': 1.0, 'undated': 1.0})
     del state['intervals']['undated']
 
-    lane = today.due_lane(state, [], [], TODAY)
+    lane = today.due_lane(state, [], [], [], TODAY)
 
     assert [row.label for row in lane.rows] == ['chore', 'undated']
     assert lane.rows[1].note == 'due today'
@@ -409,7 +452,7 @@ def test_an_unfinished_grid_becomes_one_row_naming_what_is_left():
     )
     state = pursuit_state(balances={})
 
-    lane = today.due_lane(state, [], grids, TODAY)
+    lane = today.due_lane(state, [], grids, [], TODAY)
 
     [row] = lane.rows
     assert row.label == 'habits'
@@ -421,7 +464,17 @@ def test_an_unfinished_grid_becomes_one_row_naming_what_is_left():
 def test_a_finished_grid_contributes_no_due_row():
     grids = today.grid_lanes([lane_view('habits', [GridCell('Water', True)])])
 
-    assert today.due_lane(pursuit_state(balances={}), [], grids, TODAY).rows == []
+    assert today.due_lane(pursuit_state(balances={}), [], grids, [], TODAY).rows == []
+
+
+def test_a_register_backlog_sits_between_the_owed_pursuits_and_the_sets():
+    """`APPOINTMENTS, OWED, REGISTERS, SETS` carries why."""
+    grids = today.grid_lanes([lane_view('habits', [GridCell('Floss', False)])])
+    backlog = Row('review', 'certs', '1 due', Urgency.OVERDUE, 'doit review due')
+
+    lane = today.due_lane(pursuit_state(balances={'chore': 1.0}), [], grids, [backlog], TODAY)
+
+    assert [row.label for row in lane.rows] == ['chore', 'review', 'habits']
 
 
 def test_only_todays_rows_come_from_a_row_based_lane():
@@ -444,7 +497,7 @@ def test_only_todays_rows_come_from_a_row_based_lane():
         rows=[Row('unit', 'Channels', 'in 11d', Urgency.DUE, 'learning show 4')],
     )
 
-    lane = today.due_lane(pursuit_state(balances={}), [upcoming, learning], [], TODAY)
+    lane = today.due_lane(pursuit_state(balances={}), [upcoming, learning], [], [], TODAY)
 
     assert [row.text for row in lane.rows] == ['Dentist']
 
@@ -458,7 +511,7 @@ def test_an_event_today_sorts_above_everything_owed():
     )
     state = pursuit_state(balances={'socialize': 9.0})
 
-    lane = today.due_lane(state, [upcoming], [], TODAY)
+    lane = today.due_lane(state, [upcoming], [], [], TODAY)
 
     assert [row.text for row in lane.rows] == ['Dentist', 'do socialize']
 
@@ -549,19 +602,20 @@ def test_a_register_that_will_not_load_leaves_the_due_list_standing(no_backends,
     assert [row.label for row in lane_named(day, 'due').rows] == ['review']
 
 
-def test_review_and_labs_reach_the_due_list_and_not_only_the_scoreboard(no_backends, monkeypatch):
-    """Both are read as statuses, so neither is among the dashboard's grids.
+def test_review_and_labs_owe_in_the_due_list_and_count_on_the_scoreboard(no_backends, monkeypatch):
+    """Both are read as statuses, so neither is among the dashboard's grids and
+    the due list reaches them only through what `maintenance_lanes` hands on.
 
-    A ratio printed two lines above a due list that never mentions it tells a
-    reader the items are wanted today and then leaves them off the list of what
-    is wanted today.
+    The scoreboard carries what today cleared, which here is nothing, so both
+    are counts and neither is a ratio against its backlog.
     """
     monkeypatch.setattr(today.review, 'statuses', lambda: [{'id': 'rg', 'overdue': 2, 'last': None}])
-    monkeypatch.setattr(today.labs, 'statuses', lambda: [{'id': 'tmux', 'overdue': 0, 'last': None}])
+    monkeypatch.setattr(today.labs, 'statuses', lambda: [{'id': 'tmux', 'overdue': 0, 'last': None, 'scheduled': True}])
 
     day = today.build(sources.Registry(), NOW)
 
-    assert lane_named(day, 'review').meta == '0 of 1'
+    assert lane_named(day, 'review').meta == '0 done'
+    assert {'review', 'labs'} <= day.counts
     assert {row.label for row in lane_named(day, 'due').rows} == {'review', 'labs'}
 
 
@@ -589,6 +643,6 @@ def test_the_json_names_which_lanes_are_counts(no_backends, monkeypatch, capsys)
     assert today.cmd_today(as_json=True) == 0
     document = json.loads(capsys.readouterr().out)
 
-    assert document['count_lanes'] == ['pursuits']
+    assert document['count_lanes'] == ['labs', 'pursuits', 'review']
     assert document['schema_version'] == lanes.SCHEMA_VERSION
     assert [lane['name'] for lane in document['lanes']] == ['pursuits', 'review', 'labs', 'due']
