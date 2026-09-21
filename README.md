@@ -36,18 +36,22 @@ time and never hit a cryptic error.
 - **`doit dashboard`** ranks across nothing. Each lane is ordered by whichever app owns it, three
   rows deep, and no lane is comparable to the one beside it.
 - **`doit today`** admits only what a day can finish. An outstanding count can only climb, so a
-  lane of hundreds of unread articles reads exactly like a lane of two overdue chores. Here habits
-  carry a ratio, because every habit is due every day. Everything else counts what today cleared,
-  and whatever is behind appears once, in the due list underneath.
+  lane of hundreds of unread articles reads exactly like a lane of two overdue chores. Here the top
+  list names everything the day has had, grouped by where it was recorded and in the order it
+  happened. The list underneath is what is still owed, three to a group, then a row saying how many
+  more and what to type to see them.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
 
 ### Done is whatever record saw it
 
 Habits come from `icb overview`, which already reports what was ticked. Pursuits come from the
-journal and the evidence cache together, so one satisfied inside its own CLI counts without also
+journal and the evidence cache together, so one satisfied inside its own CLI is listed without also
 being typed. Review items and Labs come from their own state files. Those are the records doit
 either owns or already reads.
+
+Each entry shows the hour its record kept. Review, Labs and meso record only the day, so their
+entries follow the timed ones with the hour left blank rather than shown as midnight.
 
 Everything else is a `completions:` entry in `sources.yml` — the same settings a lane source takes,
 answering "what happened today" instead of "what is outstanding". An argv part written as `{today}`

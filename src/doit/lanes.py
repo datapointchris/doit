@@ -76,6 +76,10 @@ class GridCell:
     # What you would type to act on this cell. Blank when there is nothing left
     # to do, so a finished cell does not offer a handle it does not need.
     handle: str = ''
+    # When it was done, as an ISO 8601 instant. Blank where the source records
+    # only the day, because a midnight standing in for an unknown hour sorts
+    # first and prints as a time nobody did anything at.
+    done_at: str = ''
 
 
 @dataclass
@@ -144,6 +148,7 @@ def cell_from(payload: dict) -> GridCell:
         text=str(payload.get('text', '')),
         done=bool(payload.get('done')),
         handle=str(payload.get('handle', '')),
+        done_at=str(payload.get('done_at') or ''),
     )
 
 
@@ -182,30 +187,38 @@ def to_document(lanes: list[Lane], generated_at: datetime) -> dict:
     This is also the worked example: a source wanting a lane here can run
     `doit dashboard --json` and copy the shape.
     """
-    # `generated_at` is coerced here rather than at each caller: a stamp with no
-    # offset cannot be compared across machines, and a naive one from a caller
-    # means the local time `datetime.now()` returns.
     return {
         'schema_version': SCHEMA_VERSION,
-        'generated_at': generated_at.astimezone().isoformat(timespec='seconds'),
-        'lanes': [
-            {
-                'name': lane.name,
-                'title': lane.title,
-                'meta': lane.meta,
-                'status': 'ok' if lane.available else 'unavailable',
-                'alert': lane.alert,
-                'reason': lane.reason or None,
-                'rows': [
-                    {'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency), 'handle': row.handle}
-                    for row in lane.rows
-                ],
-                'grid': [{'text': cell.text, 'done': cell.done, 'handle': cell.handle} for cell in lane.grid],
-                'total': lane.total,
-                'hints': lane.hints,
-            }
-            for lane in lanes
+        'generated_at': timestamp(generated_at),
+        'lanes': [lane_to_dict(lane) for lane in lanes],
+    }
+
+
+def timestamp(generated_at: datetime) -> str:
+    """A document's timestamp, always with an offset.
+
+    Coerced here rather than at each caller: a stamp with no offset cannot be
+    compared across machines, and a naive one from a caller means the local
+    time `datetime.now()` returns.
+    """
+    return generated_at.astimezone().isoformat(timespec='seconds')
+
+
+def lane_to_dict(lane: Lane) -> dict:
+    """One lane in the contract's shape, for a document that is not a flat list of lanes."""
+    return {
+        'name': lane.name,
+        'title': lane.title,
+        'meta': lane.meta,
+        'status': 'ok' if lane.available else 'unavailable',
+        'alert': lane.alert,
+        'reason': lane.reason or None,
+        'rows': [
+            {'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency), 'handle': row.handle} for row in lane.rows
         ],
+        'grid': [{'text': cell.text, 'done': cell.done, 'handle': cell.handle, 'done_at': cell.done_at} for cell in lane.grid],
+        'total': lane.total,
+        'hints': lane.hints,
     }
 
 

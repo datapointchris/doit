@@ -1,17 +1,17 @@
-"""Tests for doit.today — the day scoreboard, its adapters, and the due list.
+"""Tests for doit.today — the done list, the due list, and the adapters behind them.
 
 Backends are never invoked. The completion adapters are fed committed payloads
 wrapped in a `sources.Result`, exactly the way `test_dashboard.py` feeds the
 lane adapters, and every date is pinned to `NOW` so a test cannot pass or fail
 on the day it is run.
 
-`build` itself is not exercised end to end here. It shells out to every
-configured source, and a test that did would be measuring whichever backends
-the machine running the suite happens to have authenticated. The pieces it
-composes are each tested directly instead.
+`build` only ever runs here with every backend replaced. It shells out to every
+configured source, and a test that let it would be measuring whichever backends
+the machine running the suite happens to have authenticated.
 """
 
 import json
+from datetime import UTC
 from datetime import date
 from datetime import datetime
 from datetime import timedelta
@@ -21,10 +21,9 @@ from pathlib import Path
 import pytest
 
 from doit import dashboard
+from doit import evidence
 from doit import journal
-from doit import labs
 from doit import lanes
-from doit import review
 from doit import sources
 from doit import today
 from doit.lanes import GridCell
@@ -109,6 +108,27 @@ def test_an_absent_or_unparsable_date_is_no_day_rather_than_an_error():
     assert today.local_date('whenever', NOW) is None
 
 
+def test_a_plain_day_has_no_hour_rather_than_midnight():
+    """Printed, a day parsed as naive midnight is `00:00`, an hour nobody did
+    anything at, and it sorts ahead of the whole morning."""
+    assert today.local_instant('2026-07-24', NOW) is None
+    assert today.instant_text('2026-07-24', NOW) == ''
+
+
+def test_an_instant_is_carried_in_local_time_with_its_offset():
+    """The screen prints the hour it reads, so the stamp arrives already local."""
+    evening = datetime(2026, 7, 24, 21, 0, tzinfo=timezone(timedelta(hours=-4)))
+
+    assert today.instant_text('2026-07-25T01:00:00Z', evening) == '2026-07-24T21:00:00-04:00'
+
+
+def test_an_app_observation_is_already_a_datetime_and_is_read_as_one():
+    """`build_state` hands evidence over parsed, not as the text it came from."""
+    seen = datetime(2026, 7, 24, 13, 0, tzinfo=UTC)
+
+    assert today.local_instant(seen, NOW) == seen
+
+
 def test_rows_are_filtered_to_today_even_when_the_command_already_asked_for_one_day():
     """`{today}` in the argv saves transfer; it is not what makes this right.
 
@@ -132,49 +152,47 @@ def adapter_for(source_id: str):
     return sources.ADAPTERS[source_id]
 
 
-def test_project_items_are_counted_by_when_they_were_completed_not_touched():
+def test_project_items_are_listed_by_when_they_were_completed_not_touched():
     """`updated_at` moves on any edit, so it overstates what a day contained.
 
     The third fixture row was completed yesterday and edited today. A reader
-    on `updated_at` counts three; the honest answer is two.
+    on `updated_at` lists three; the honest answer is two. The two arrive
+    newest first and are listed in the order they happened.
     """
     [lane] = adapter_for('icb-projects')(ok('icb-projects', fixture('icb-projects-completed')))
 
-    assert lane.meta == '2 done'
     assert [cell.text for cell in lane.grid] == [
-        'digest does every operation in one run',
         'the homelab CLI wraps pyinfra',
+        'digest does every operation in one run',
     ]
 
 
-def test_every_completion_cell_is_marked_done():
-    """`sum(cell.done)` has to be the count on every lane in this document.
-
-    The habits lane arrives from the dashboard with both halves in its grid, so
-    a completion lane storing finished things as undone cells would make the
-    two disagree about what a grid means.
-    """
+def test_a_completion_carries_the_hour_it_happened_in_local_time():
     [lane] = adapter_for('icb-projects')(ok('icb-projects', fixture('icb-projects-completed')))
 
-    assert all(cell.done for cell in lane.grid)
-    assert lane.total == sum(1 for cell in lane.grid if cell.done)
+    first = datetime.fromisoformat(lane.grid[0].done_at)
+
+    assert first == datetime(2026, 7, 24, 9, 15, tzinfo=UTC)
+    assert first.utcoffset() == NOW.utcoffset()
 
 
 def test_learning_is_filtered_here_because_it_takes_no_date_flag():
     """One of its three rows is today, one is older, one never completed."""
     [lane] = adapter_for('learning-completed')(ok('learning-completed', fixture('learning-completed')))
 
-    assert lane.meta == '1 done'
     assert [cell.text for cell in lane.grid] == ['Structured concurrency in practice']
 
 
-def test_meso_folds_three_kinds_of_record_into_one_row():
-    """Sessions, measurements and log entries all count as training happening."""
+def test_meso_folds_three_kinds_of_record_into_one_group_with_no_hours():
+    """Sessions, measurements and log entries all count as training happening.
+
+    meso records the day of each and never the hour, so none of them is timed.
+    """
     [lane] = adapter_for('meso-review')(ok('meso-review', fixture('meso-review')))
 
     assert lane.name == 'training'
-    assert lane.meta == '3 done'
     assert sorted(cell.text for cell in lane.grid) == ['Lower A', 'bodyweight', 'steady']
+    assert {cell.done_at for cell in lane.grid} == {''}
 
 
 def test_a_row_missing_its_label_renders_as_a_dash_rather_than_an_empty_cell():
@@ -218,163 +236,205 @@ def test_every_completion_adapter_is_registered_under_its_tabled_id(adapter_id, 
     assert adapter_id in sources.ADAPTERS
 
 
-# --- the scoreboard rows -----------------------------------------------------
+# --- a done group ------------------------------------------------------------
+
+
+def done(text: str, done_at: str = '') -> GridCell:
+    return GridCell(text, True, done_at=done_at)
+
+
+def test_a_done_group_runs_in_the_order_it_happened_and_the_untimed_follow():
+    """An entry whose record kept only the day has no place in the order, so it
+    follows the timed ones rather than being guessed into it."""
+    cells = [done('undated'), done('late', '2026-07-24T15:00:00+00:00'), done('early', '2026-07-24T09:00:00+00:00')]
+
+    lane = today.done_lane('x', 'X', cells, '')
+
+    assert [cell.text for cell in lane.grid] == ['early', 'late', 'undated']
+
+
+def test_the_order_is_by_instant_even_where_the_offsets_differ():
+    """A day crossing a clock change carries two offsets. Sorted as text,
+    `10:00-04:00` lands ahead of `13:00+00:00` although it happened an hour
+    later."""
+    cells = [done('second', '2026-07-24T10:00:00-04:00'), done('first', '2026-07-24T13:00:00+00:00')]
+
+    lane = today.done_lane('x', 'X', cells, '')
+
+    assert [cell.text for cell in lane.grid] == ['first', 'second']
+
+
+# --- a day set ---------------------------------------------------------------
 
 
 def lane_view(name, cells, meta='', hints=()):
     return dashboard.LaneView(name=name, title=name.upper(), meta=meta, grid=list(cells), hints=list(hints))
 
 
-def test_a_grid_lane_is_restated_as_a_ratio_so_the_column_scans():
-    """A source phrases its own summary, and on the dashboard that is right.
+def habits_view():
+    return lane_view(
+        'habits',
+        [GridCell('Floss', False, '2'), GridCell('Water', True, done_at='2026-07-24T13:00:00Z'), GridCell('Walk', False, '5')],
+        hints=['icb habits complete <id>'],
+    )
 
-    In a column where every row is a ratio, "1 of 6 done today" beside "0 of
-    11" makes the reader parse each row instead of scanning the column.
+
+def test_a_day_set_splits_into_what_is_done_and_what_is_left():
+    [finished], [left] = today.set_lanes([habits_view()], NOW)
+
+    assert [cell.text for cell in finished.grid] == ['Water']
+    assert datetime.fromisoformat(finished.grid[0].done_at) == datetime(2026, 7, 24, 13, 0, tzinfo=UTC)
+    assert [row.label for row in left.rows] == ['Floss', 'Walk']
+
+
+def test_a_habit_left_carries_the_command_that_completes_it():
+    """The dashboard prints the bare id beside a hint holding `<id>`. A due row
+    has one handle column, so the two arrive joined."""
+    _, [left] = today.set_lanes([habits_view()], NOW)
+
+    assert [row.handle for row in left.rows] == ['icb habits complete 2', 'icb habits complete 5']
+
+
+def test_a_grid_is_a_day_set_only_when_it_is_named_as_one():
+    """A grid says "the whole set", not "due today". A weekly set emitted as one
+    would otherwise land here as a week of work owed this afternoon."""
+    weekly = lane_view('chores', [GridCell('Vacuum', False)])
+
+    assert today.set_lanes([weekly], NOW) == ([], [])
+
+
+def test_a_day_set_that_could_not_be_read_is_reported_where_it_is_owed():
+    """Found by having a grid, a failed lane has none and would leave both lists
+    without a word."""
+    failed = lanes.unavailable('habits', 'HABITS', 'icb: not logged in')
+
+    finished, left = today.set_lanes([failed], NOW)
+
+    assert finished == []
+    assert [(lane.name, lane.available) for lane in left] == [('habits', False)]
+
+
+# --- appointments ------------------------------------------------------------
+
+
+def upcoming_view(*rows):
+    return dashboard.LaneView(name='upcoming', title='UPCOMING', rows=list(rows), hints=['icb countdowns list', 'icb events list'])
+
+
+DENTIST = Row('today', 'Dentist', '24 Jul 2026', Urgency.DUE, 'icb events show 8')
+
+
+def test_only_todays_rows_come_from_a_row_based_lane():
+    """`urgency != NONE` means "wants attention", not "is today".
+
+    Learning marks DUE a fortnight out and PRs at three days, so a generic
+    filter would put next week on a screen about this afternoon.
     """
-    built = [lane_view('habits', [GridCell('a', True), GridCell('b', False)], meta='1 of 2 done today')]
+    upcoming = upcoming_view(DENTIST, Row('in 9d', 'Passport expires', '02 Aug 2026', Urgency.NONE, 'icb countdowns show 2'))
+    learning = dashboard.LaneView(
+        name='learning', title='LEARNING', rows=[Row('unit', 'Channels', 'in 11d', Urgency.DUE, 'learning show 4')]
+    )
 
-    [lane] = today.grid_lanes(built)
+    [lane] = today.appointment_lanes([upcoming, learning])
 
-    assert lane.meta == '1 of 2'
-    assert lane.total == 2
-
-
-def test_a_lane_with_rows_and_no_grid_is_not_a_day():
-    """Books and articles are inventories. Nothing about them completes a day."""
-    rows_only = dashboard.LaneView(name='books', title='BOOKS', rows=[Row('reading', 'Dune')])
-
-    assert today.grid_lanes([rows_only]) == []
+    assert lane.name == 'upcoming'
+    assert [row.text for row in lane.rows] == ['Dentist']
 
 
-def test_only_a_done_tick_is_green():
-    """Green is what the screen says done with, so an open circle must not carry it.
+def test_an_appointment_says_how_late_in_its_note():
+    """On the dashboard the gutter answers "how far away". Here every row is
+    today or past, so that word is the note."""
+    [lane] = today.appointment_lanes(
+        [upcoming_view(Row('3d ago', 'Renew permit', '21 Jul 2026', Urgency.OVERDUE, 'icb countdowns show 4'))]
+    )
 
-    Asserted on the spans rather than on rendered escapes, because the question
-    is which cells were styled and that is a property of the Text.
-    """
-    lane = Lane(name='habits', title='HABITS', grid=[GridCell('a', True), GridCell('b', False)])
-
-    strip = today.tick_strip(lane)
-
-    assert strip.plain == f'{today.TICK_DONE}{today.TICK_OPEN}'
-    assert [(span.start, span.end, str(span.style)) for span in strip.spans if str(span.style)] == [(0, 1, 'green')]
+    assert lane.rows == [Row('', 'Renew permit', '3d ago', Urgency.OVERDUE, 'icb countdowns show 4')]
 
 
-def test_a_set_too_large_for_a_strip_offers_no_ticks():
-    """Past MAX_TICKS the strip stops being scannable and the ratio carries it alone."""
-    lane = Lane(name='habits', title='HABITS', grid=[GridCell(str(n), True) for n in range(today.MAX_TICKS + 1)])
-
-    assert today.tick_strip(lane).plain == ''
+# --- the registers -----------------------------------------------------------
 
 
-def review_is_due(row):
-    return review.is_due(row.get('overdue'))
+@pytest.fixture
+def registers(monkeypatch):
+    """`maintenance_lanes` over the given statuses, so each test reaches the
+    real table of how an item is described and acted on."""
+
+    def read(review_rows=(), lab_rows=()):
+        monkeypatch.setattr(today.review, 'statuses', lambda: list(review_rows))
+        monkeypatch.setattr(today.labs, 'statuses', lambda: list(lab_rows))
+        return today.maintenance_lanes(TODAY)
+
+    return read
 
 
-def test_a_register_counts_only_what_today_cleared_and_owes_the_rest_below():
-    """A register's owed items fall due on cadences of weeks, so they are a
-    backlog and not a target the day was set. A ratio against them read as one.
-
-    An item on a daily cadence done this morning still reports `overdue: 0`, so
-    without subtracting the done half it is cleared and owed at once.
-    """
+def test_a_register_lists_what_today_cleared_and_owes_the_rest(registers):
+    """An item on a daily cadence done this morning still reports `overdue: 0`,
+    so without subtracting the done half it is cleared and owed at once."""
     rows = [
-        {'id': 'brew', 'overdue': 0, 'last': TODAY.isoformat()},
-        {'id': 'certs', 'overdue': 3, 'last': '2026-07-01'},
+        {'id': 'brew', 'desc': 'Upgrade brew', 'overdue': 0, 'last': TODAY.isoformat()},
+        {'id': 'certs', 'desc': 'Renew certs', 'overdue': 3, 'last': '2026-07-01'},
         {'id': 'fresh', 'overdue': -2, 'last': '2026-07-23'},
         {'id': 'never', 'overdue': None, 'last': None},
     ]
 
-    count, owed = today.register_rows('review', 'REVIEW', rows, review_is_due, TODAY, 'doit review due')
+    [cleared, _], [owed, _] = registers(review_rows=rows)
 
-    assert count.meta == '1 done'
-    assert count.total == 1, 'a total above the grid would render this as a ratio'
-    assert owed == Row('review', 'certs · never', '2 due', Urgency.OVERDUE, 'doit review due')
-
-
-def test_a_register_owing_nothing_behind_reads_as_due_rather_than_late():
-    rows = [{'id': 'brew', 'overdue': 0, 'last': '2026-07-17'}]
-
-    _, owed = today.register_rows('review', 'REVIEW', rows, review_is_due, TODAY, 'doit review due')
-
-    assert owed is not None
-    assert owed.urgency == Urgency.DUE
+    assert [cell.text for cell in cleared.grid] == ['Upgrade brew']
+    assert [row.label for row in owed.rows] == ['never', 'certs'], 'never run ranks above any number of days late'
+    assert [row.note for row in owed.rows] == ['never run', '3d overdue']
 
 
-def test_a_register_owing_nothing_adds_no_due_row():
-    rows = [{'id': 'fresh', 'overdue': -2, 'last': '2026-07-23'}]
+def test_a_review_item_is_named_by_what_it_is_for_and_carries_its_own_command(registers):
+    rows = [{'id': 'certs', 'desc': 'Renew certs', 'command': 'certbot renew', 'overdue': 3, 'last': None}]
 
-    _, owed = today.register_rows('review', 'REVIEW', rows, review_is_due, TODAY, 'doit review due')
+    _, [owed, _] = registers(review_rows=rows)
 
-    assert owed is None
+    assert owed.rows == [Row('certs', 'Renew certs', '3d overdue', Urgency.OVERDUE, 'certbot renew')]
 
 
-def test_an_on_demand_lab_is_never_owed():
+def test_an_item_due_today_reads_as_due_rather_than_late(registers):
+    _, [owed, _] = registers(review_rows=[{'id': 'brew', 'overdue': 0, 'last': '2026-07-17'}])
+
+    assert owed.rows[0].urgency == Urgency.DUE
+
+
+def test_an_on_demand_lab_is_never_owed(registers):
     """A Lab is due only when it is scheduled, which review items always are.
 
     A rule written here in place of `labs.is_due_row` would read an on-demand
     Lab's absent `overdue` as never done, and owe it every day forever.
     """
     rows = [
-        {'id': 'tmux', 'overdue': None, 'last': None, 'scheduled': True},
+        {'id': 'tmux', 'title': 'Panes and sessions', 'overdue': None, 'last': None, 'scheduled': True},
         {'id': 'jq', 'overdue': None, 'last': None, 'scheduled': False},
     ]
 
-    _, owed = today.register_rows('labs', 'LABS', rows, labs.is_due_row, TODAY, 'doit labs due')
+    _, [_, owed] = registers(lab_rows=rows)
 
-    assert owed is not None
-    assert (owed.text, owed.note) == ('tmux', '1 due')
-
-
-def test_a_pursuit_counts_as_touched_from_either_record():
-    """The journal answers what got typed and evidence answers what apps saw.
-
-    A pursuit satisfied inside its own CLI appears only in the second, so the
-    union is the answer rather than either one.
-    """
-    state = {
-        'now': NOW,
-        'active': {'build': {}, 'chore': {}, 'read': {}},
-        'evidence_days': {'build': [TODAY], 'read': [date(2026, 7, 1)]},
-        'records': [
-            {'event': journal.Event.DONE, 'pursuit': 'chore', 'occurred_at': NOW.isoformat()},
-            {'event': journal.Event.DONE, 'pursuit': 'read', 'occurred_at': (NOW - timedelta(days=3)).isoformat()},
-            {'event': journal.Event.SKIP, 'pursuit': 'build', 'occurred_at': NOW.isoformat()},
-        ],
-    }
-
-    assert today.touched_today(state, TODAY) == ['build', 'chore']
+    assert [(row.label, row.text, row.handle) for row in owed.rows] == [('tmux', 'Panes and sessions', 'doit labs show tmux')]
 
 
-def test_a_pursuit_no_longer_in_the_register_is_not_counted_as_touched():
-    """A journal is history and the register is now. Commenting one out must
-    not keep it scoring against today."""
-    state = {
-        'now': NOW,
-        'active': {'build': {}},
-        'evidence_days': {},
-        'records': [{'event': journal.Event.DONE, 'pursuit': 'retired', 'occurred_at': NOW.isoformat()}],
-    }
+def test_a_register_that_cannot_be_read_is_reported_where_it_is_owed(monkeypatch):
+    def refuses():
+        raise OSError('state.json: permission denied')
 
-    assert today.touched_today(state, TODAY) == []
+    monkeypatch.setattr(today.review, 'statuses', refuses)
+    monkeypatch.setattr(today.labs, 'statuses', list)
+
+    cleared, owed = today.maintenance_lanes(TODAY)
+
+    assert [lane.name for lane in cleared] == ['labs']
+    assert [(lane.name, lane.available) for lane in owed] == [('review', False), ('labs', True)]
 
 
-def test_the_pursuits_row_counts_what_today_touched_and_leaves_what_is_owed_below():
-    """`pursuits_lane` carries why the active set is not a denominator, and why
-    `build`, which is owed, is left to its own row in the due list."""
-    state = pursuit_state(balances={'build': 2.0, 'chore': 0.0}, touched=['chore'])
-
-    lane = today.pursuits_lane(state, TODAY)
-
-    assert lane.meta == '1 touched'
-    assert lane.total == 1, 'a total above the grid would render this as a ratio and tick boxes nobody asked for'
+# --- the pursuits ------------------------------------------------------------
 
 
 def pursuit_state(balances, touched=()):
     """A minimal `build_state` shaped dict, for the readers that walk one.
 
-    Evidence days are dates, because `evidence.occurrences` parses them before
-    `build_state` folds them in.
+    The evidence days come from `evidence.occurrences`, the function
+    `build_state` folds them with, so they are the type the real state carries.
     """
     return {
         'now': NOW,
@@ -383,51 +443,75 @@ def pursuit_state(balances, touched=()):
         'balance': dict(balances),
         'checkoff_size': dict.fromkeys(balances, 1.0),
         'intervals': dict.fromkeys(balances, 3.0),
-        'evidence_days': {name: [TODAY] for name in touched},
+        'evidence_days': evidence.occurrences({'pursuits': {name: {'dates': [TODAY.isoformat()]} for name in touched}}),
+        'observed': {},
         'records': [],
     }
 
 
-def test_logged_sums_only_the_entries_that_carry_a_duration():
-    """A timed pursuit logged without `--minutes` records no duration on
-    purpose, so counting it as zero would be as wrong as counting a checkoff."""
-    state = pursuit_state(balances={'read': 0.0})
+def done_record(pursuit: str, when: datetime, **extra) -> dict:
+    return {'event': journal.Event.DONE, 'pursuit': pursuit, 'occurred_at': when.isoformat(), **extra}
+
+
+def test_a_pursuit_is_done_from_either_record():
+    """The journal answers what got typed and evidence answers what apps saw.
+
+    A pursuit satisfied inside its own CLI appears only in the second, and it
+    takes its place in the order at the time its app saw it.
+    """
+    state = pursuit_state(balances={'build': 0.0, 'chore': 0.0, 'read': 0.0}, touched=['build'])
+    state['observed'] = {'build': NOW - timedelta(hours=2)}
     state['records'] = [
-        {'event': journal.Event.DONE, 'pursuit': 'read', 'occurred_at': NOW.isoformat(), 'duration_minutes': 45},
-        {'event': journal.Event.DONE, 'pursuit': 'chore', 'occurred_at': NOW.isoformat()},
-        {'event': journal.Event.DONE, 'pursuit': 'read', 'occurred_at': (NOW - timedelta(days=1)).isoformat(), 'duration_minutes': 90},
+        done_record('chore', NOW),
+        done_record('read', NOW - timedelta(days=3)),
+        {'event': journal.Event.SKIP, 'pursuit': 'read', 'occurred_at': NOW.isoformat()},
     ]
 
-    lane = today.logged_lane(state, TODAY)
+    lane = today.pursuits_done(state, TODAY)
 
-    assert lane.meta == '2 entries · 45 min'
-
-
-def test_one_entry_is_singular():
-    state = pursuit_state(balances={'read': 0.0})
-    state['records'] = [{'event': journal.Event.DONE, 'pursuit': 'read', 'occurred_at': NOW.isoformat()}]
-
-    assert today.logged_lane(state, TODAY).meta == '1 entry'
+    assert [cell.text for cell in lane.grid] == ['build', 'chore']
 
 
-# --- the due list ------------------------------------------------------------
+def test_evidence_adds_nothing_for_a_pursuit_also_typed_today():
+    state = pursuit_state(balances={'read': 0.0}, touched=['read'])
+    state['records'] = [done_record('read', NOW)]
+
+    assert [cell.text for cell in today.pursuits_done(state, TODAY).grid] == ['read']
 
 
-def test_the_due_list_orders_by_how_far_past_due_and_carries_a_handle():
-    state = pursuit_state(balances={'chore': 1.0, 'socialize': 4.0})
+def test_each_entry_typed_today_is_its_own_row_with_its_minutes():
+    """A timed pursuit logged without `--minutes` records no duration on
+    purpose, so it gets no number rather than a zero."""
+    state = pursuit_state(balances={'read': 0.0, 'chore': 0.0})
+    state['records'] = [
+        done_record('read', NOW - timedelta(hours=3), duration_minutes=45),
+        done_record('chore', NOW - timedelta(hours=1)),
+        done_record('read', NOW, duration_minutes=30),
+        done_record('read', NOW - timedelta(days=1), duration_minutes=90),
+    ]
 
-    lane = today.due_lane(state, [], [], [], TODAY)
+    assert [cell.text for cell in today.pursuits_done(state, TODAY).grid] == ['read · 45 min', 'chore', 'read · 30 min']
 
-    assert [row.label for row in lane.rows] == ['socialize', 'chore'], 'furthest behind first'
-    assert all(row.handle for row in lane.rows), 'a row you can read but not act on is half a row'
+
+def test_a_pursuit_no_longer_in_the_register_is_not_listed():
+    """A journal is history and the register is now. Commenting one out takes
+    it off today."""
+    state = pursuit_state(balances={'build': 0.0})
+    state['records'] = [done_record('retired', NOW)]
+
+    assert today.pursuits_done(state, TODAY).grid == []
+
+
+def test_the_pursuits_owed_run_furthest_behind_first_and_carry_a_handle():
+    lane = today.pursuits_due(pursuit_state(balances={'chore': 1.0, 'socialize': 4.0}))
+
+    assert [row.label for row in lane.rows] == ['socialize', 'chore']
     assert lane.rows[0].handle == 'doit log socialize'
 
 
-def test_a_pursuit_that_is_current_stays_off_the_due_list():
+def test_a_pursuit_that_is_current_is_not_owed():
     """`owing` carries why the threshold is a whole checkoff."""
-    state = pursuit_state(balances={'chore': 0.4})
-
-    assert today.due_lane(state, [], [], [], TODAY).rows == []
+    assert today.pursuits_due(pursuit_state(balances={'chore': 0.4})).rows == []
 
 
 def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
@@ -440,125 +524,86 @@ def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
     state = pursuit_state(balances={'chore': 1.0, 'undated': 1.0})
     del state['intervals']['undated']
 
-    lane = today.due_lane(state, [], [], [], TODAY)
+    lane = today.pursuits_due(state)
 
     assert [row.label for row in lane.rows] == ['chore', 'undated']
     assert lane.rows[1].note == 'due today'
 
 
-def test_an_unfinished_grid_becomes_one_row_naming_what_is_left():
-    grids = today.grid_lanes(
-        [
-            lane_view(
-                'habits', [GridCell('Floss', False), GridCell('Walk', False), GridCell('Water', True)], hints=['icb habits complete <id>']
-            )
-        ]
-    )
-    state = pursuit_state(balances={})
-
-    lane = today.due_lane(state, [], grids, [], TODAY)
-
-    [row] = lane.rows
-    assert row.label == 'habits'
-    assert row.text == 'Floss · Walk'
-    assert row.note == '2 left'
-    assert row.handle == 'icb habits complete <id>'
-
-
-def test_a_finished_grid_contributes_no_due_row():
-    grids = today.grid_lanes([lane_view('habits', [GridCell('Water', True)])])
-
-    assert today.due_lane(pursuit_state(balances={}), [], grids, [], TODAY).rows == []
-
-
-def test_a_register_backlog_sits_between_the_owed_pursuits_and_the_sets():
-    """`APPOINTMENTS, OWED, REGISTERS, SETS` carries why."""
-    grids = today.grid_lanes([lane_view('habits', [GridCell('Floss', False)])])
-    backlog = Row('review', 'certs', '1 due', Urgency.OVERDUE, 'doit review due')
-
-    lane = today.due_lane(pursuit_state(balances={'chore': 1.0}), [], grids, [backlog], TODAY)
-
-    assert [row.label for row in lane.rows] == ['chore', 'review', 'habits']
-
-
-def test_only_todays_rows_come_from_a_row_based_lane():
-    """`urgency != NONE` means "wants attention", not "is today".
-
-    Learning marks DUE a fortnight out and PRs at three days, so a generic
-    filter would put next week on a screen about this afternoon.
-    """
-    upcoming = dashboard.LaneView(
-        name='upcoming',
-        title='UPCOMING',
-        rows=[
-            Row('today', 'Dentist', '24 Jul 2026', Urgency.DUE, 'icb events show 8'),
-            Row('in 9d', 'Passport expires', '02 Aug 2026', Urgency.NONE, 'icb countdowns show 2'),
-        ],
-    )
-    learning = dashboard.LaneView(
-        name='learning',
-        title='LEARNING',
-        rows=[Row('unit', 'Channels', 'in 11d', Urgency.DUE, 'learning show 4')],
-    )
-
-    lane = today.due_lane(pursuit_state(balances={}), [upcoming, learning], [], [], TODAY)
-
-    assert [row.text for row in lane.rows] == ['Dentist']
-
-
-def test_an_event_today_sorts_above_everything_owed():
-    """An appointment has a clock on it and a chore does not."""
-    upcoming = dashboard.LaneView(
-        name='upcoming',
-        title='UPCOMING',
-        rows=[Row('today', 'Dentist', '24 Jul 2026', Urgency.DUE, 'icb events show 8')],
-    )
-    state = pursuit_state(balances={'socialize': 9.0})
-
-    lane = today.due_lane(state, [upcoming], [], [], TODAY)
-
-    assert [row.text for row in lane.rows] == ['Dentist', 'do socialize']
-
-
-# --- the document ------------------------------------------------------------
-
-
-def test_the_document_is_the_lane_contract_so_no_consumer_learns_a_second_schema():
-    day = today.Day(
-        [Lane(name='habits', title='HABITS', meta='1 of 2', grid=[GridCell('a', True), GridCell('b', False)], total=2)],
-        frozenset(),
-    )
-
-    parsed = json.loads(lanes.dumps(day.lanes, NOW))
-
-    assert parsed['schema_version'] == lanes.SCHEMA_VERSION
-    assert parsed['lanes'][0]['grid'] == [
-        {'text': 'a', 'done': True, 'handle': ''},
-        {'text': 'b', 'done': False, 'handle': ''},
-    ]
-
-
-def test_a_register_that_will_not_load_costs_two_rows_rather_than_the_screen(monkeypatch):
-    """The lanes either side of it have nothing to do with the weights."""
+def test_a_register_that_will_not_load_costs_its_two_groups_rather_than_the_screen(monkeypatch):
+    """The failure goes to the due list, where a missing group reads as nothing owed."""
 
     def refuses():
         raise ValueError('pursuits.yml: weight must be a number')
 
     monkeypatch.setattr(today.pursuits, 'load_pursuits', refuses)
 
-    built, state = today.pursuit_lanes(NOW, TODAY)
+    moved, owed = today.pursuit_lanes(NOW, TODAY)
 
-    assert state is None
-    assert [lane.name for lane in built] == ['pursuits']
-    assert built[0].available is False
+    assert moved == []
+    assert [(lane.name, lane.available) for lane in owed] == [('pursuits', False)]
 
 
 def test_an_empty_register_contributes_nothing_and_is_not_an_error(monkeypatch):
     monkeypatch.setattr(today.pursuits, 'load_pursuits', dict)
 
-    built, state = today.pursuit_lanes(NOW, TODAY)
+    assert today.pursuit_lanes(NOW, TODAY) == ([], [])
 
-    assert (built, state) == ([], None)
+
+# --- the screen --------------------------------------------------------------
+
+
+def test_a_group_past_three_shows_three_then_how_many_more_and_where():
+    lane = Lane(name='labs', title='LABS', rows=[Row(str(n), '') for n in range(5)], total=5, hints=['doit labs due'])
+
+    rows = today.visible_rows(lane)
+
+    assert [row.label for row in rows] == ['0', '1', '2', '2 more']
+    assert rows[-1].handle == 'doit labs due'
+
+
+def test_a_group_of_three_needs_no_more_row():
+    lane = Lane(name='labs', title='LABS', rows=[Row(str(n), '') for n in range(3)], total=3, hints=['doit labs due'])
+
+    assert len(today.visible_rows(lane)) == 3
+
+
+def test_a_group_that_answered_with_nothing_prints_nothing_while_one_that_failed_does(capsys):
+    day = today.Day(
+        done=[Lane(name='articles', title='ARTICLES'), today.done_lane('tasks', 'TASKS', [done('Pumice Stone')], '')],
+        due=[Lane(name='labs', title='LABS'), lanes.unavailable('habits', 'HABITS', 'icb: not logged in')],
+    )
+
+    today.render(day, TODAY)
+    out = capsys.readouterr().out
+
+    assert 'articles' not in out
+    assert 'labs' not in out
+    assert 'Pumice Stone' in out
+    assert 'unavailable — icb: not logged in' in out
+
+
+def test_an_entry_with_no_hour_leaves_the_column_blank_and_lines_up(capsys):
+    lane = today.done_lane('review', 'REVIEW', [done('Renew certs'), done('Upgrade brew', NOW.isoformat())], '')
+
+    today.render(today.Day([lane], []), TODAY)
+    lines = capsys.readouterr().out.splitlines()
+
+    assert lines[-2:] == [f'    {NOW:%H:%M}  Upgrade brew', '           Renew certs']
+
+
+def test_one_group_follows_another_with_no_blank_line_between(capsys):
+    day = today.Day(
+        done=[
+            today.done_lane('habits', 'HABITS', [done('Floss', NOW.isoformat())], ''),
+            today.done_lane('tasks', 'TASKS', [done('Pumice Stone', NOW.isoformat())], ''),
+        ],
+        due=[],
+    )
+
+    today.render(day, TODAY)
+
+    assert '' not in capsys.readouterr().out.splitlines()
 
 
 # --- the whole document, composed ---------------------------------------------
@@ -570,7 +615,7 @@ def no_backends(monkeypatch):
 
     `build` is asserted here and not only its parts. A unit test can satisfy
     the sentence its own name makes while the composition above it breaks that
-    same sentence. `pursuit_lanes` promises a failure costs two rows; only
+    same sentence. `pursuit_lanes` promises a failure costs two groups; only
     `build` decides whether the rest of the screen survives.
 
     An empty registry shells out to no backend, so what is left is doit's own
@@ -583,17 +628,25 @@ def no_backends(monkeypatch):
     monkeypatch.setattr(today.pursuits, 'load_pursuits', dict)
 
 
-def lane_named(day, name):
-    return next(lane for lane in day.lanes if lane.name == name)
+def pursuits_answer(state):
+    return lambda now, today_: ([today.pursuits_done(state, TODAY)], [today.pursuits_due(state)])
 
 
-def test_a_register_that_will_not_load_leaves_the_due_list_standing(no_backends, monkeypatch):
-    """One subsystem's failure costs its own rows, never the screen.
+def test_each_list_keeps_its_groups_in_one_order(no_backends, monkeypatch):
+    """`build` carries why the due list runs appointments, pursuits, registers,
+    then sets. A done group keeps its place all day for the reason a habit does
+    on the dashboard: finishing something never shuffles the rest."""
+    monkeypatch.setattr(today.dashboard, 'lanes_of', lambda registry, results, wanted: [habits_view(), upcoming_view(DENTIST)])
+    monkeypatch.setattr(today, 'pursuit_lanes', pursuits_answer(pursuit_state(balances={'chore': 1.0})))
 
-    The appointments and the unfinished sets have nothing to do with the
-    weights, so withholding them turns a bad `pursuits.yml` into a screen that
-    names five habits outstanding and then says nothing to do about them.
-    """
+    day = today.build(sources.Registry(), NOW)
+
+    assert [lane.name for lane in day.done] == ['habits', 'pursuits', 'review', 'labs']
+    assert [lane.name for lane in day.due] == ['upcoming', 'pursuits', 'review', 'labs', 'habits']
+
+
+def test_a_register_that_will_not_load_leaves_the_rest_standing(no_backends, monkeypatch):
+    """One subsystem's failure costs its own groups, never the screen."""
 
     def refuses():
         raise ValueError('pursuits.yml: weight must be a number')
@@ -603,50 +656,23 @@ def test_a_register_that_will_not_load_leaves_the_due_list_standing(no_backends,
 
     day = today.build(sources.Registry(), NOW)
 
-    assert [row.label for row in lane_named(day, 'due').rows] == ['review']
+    assert [(lane.name, lane.available) for lane in day.due] == [('pursuits', False), ('review', True), ('labs', True)]
+    assert [row.label for row in day.due[1].rows] == ['rg']
 
 
-def test_review_and_labs_owe_in_the_due_list_and_count_on_the_scoreboard(no_backends, monkeypatch):
-    """Both are read as statuses, so neither is among the dashboard's grids and
-    the due list reaches them only through what `maintenance_lanes` hands on.
-
-    The scoreboard carries what today cleared, which here is nothing, so both
-    are counts and neither is a ratio against its backlog.
-    """
-    monkeypatch.setattr(today.review, 'statuses', lambda: [{'id': 'rg', 'overdue': 2, 'last': None}])
-    monkeypatch.setattr(today.labs, 'statuses', lambda: [{'id': 'tmux', 'overdue': 0, 'last': None, 'scheduled': True}])
-
-    day = today.build(sources.Registry(), NOW)
-
-    assert lane_named(day, 'review').meta == '0 done'
-    assert {'review', 'labs'} <= day.counts
-    assert {row.label for row in lane_named(day, 'due').rows} == {'review', 'labs'}
-
-
-def test_a_register_that_loads_still_carries_its_owed_rows(no_backends, monkeypatch):
-    """The guard above must not have cost the group it was guarding."""
-    monkeypatch.setattr(today, 'pursuit_lanes', lambda now, today_: ([], pursuit_state(balances={'chore': 1.0})))
-
-    day = today.build(sources.Registry(), NOW)
-
-    assert [row.label for row in lane_named(day, 'due').rows] == ['chore']
-
-
-def test_the_json_names_which_lanes_are_counts(no_backends, monkeypatch, capsys):
-    """The split is the command's whole claim and no lane shape carries it.
-
-    A count lane and a fully cleared ratio lane are both a full grid with a
-    matching total, so a second renderer that had to guess would call a cleared
-    habits register an app completion. Asserted through `cmd_today` rather than
-    through a document built here, which would only restate the two lines that
-    build it.
-    """
-    state = pursuit_state(balances={'chore': 0.0}, touched=['chore'])
-    monkeypatch.setattr(today, 'pursuit_lanes', lambda now, today_: ([today.pursuits_lane(state, TODAY)], state))
+def test_the_json_carries_both_lists_with_each_lane_in_the_contract_shape(no_backends, monkeypatch, capsys):
+    """Two lists, because a record appears in both under one name. Each lane
+    reads back through the contract's own parser, so no consumer learns a second
+    lane shape."""
+    state = pursuit_state(balances={'chore': 1.0})
+    state['records'] = [done_record('chore', NOW)]
+    monkeypatch.setattr(today, 'pursuit_lanes', pursuits_answer(state))
 
     assert today.cmd_today(as_json=True) == 0
     document = json.loads(capsys.readouterr().out)
 
-    assert document['count_lanes'] == ['labs', 'pursuits', 'review']
     assert document['schema_version'] == lanes.SCHEMA_VERSION
-    assert [lane['name'] for lane in document['lanes']] == ['pursuits', 'review', 'labs', 'due']
+    [moved, *_] = lanes.from_document({'lanes': document['done']})
+    assert [cell.text for cell in moved.grid] == ['chore']
+    assert datetime.fromisoformat(moved.grid[0].done_at) == NOW
+    assert [lane['name'] for lane in document['due']] == ['pursuits', 'review', 'labs']

@@ -183,8 +183,8 @@ def load(path: Path | None = None) -> Registry:
     """Read `sources.yml`, both blocks.
 
     A block that is absent is an empty map rather than an error. A machine with
-    no `completions:` block gets `doit today` without its count rows rather than
-    a warning it cannot act on.
+    no `completions:` block gets `doit today` without the groups those sources
+    would list, rather than a warning it cannot act on.
 
     An id used in both blocks is a problem rather than two entries. `fetch` keys
     its results by id, so the two commands collide on one result and the lane

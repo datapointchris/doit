@@ -256,10 +256,15 @@ def build_habits_lane(results: dict[str, sources.Result], today: date) -> LaneVi
     #
     # Only the outstanding ones carry an id in the cell: a completion record
     # identifies the completion, not the habit, and a finished habit needs no
-    # handle anyway.
+    # handle anyway. What the record does carry is when it happened.
     entries = [(habit, False) for habit in due] + [(habit, True) for habit in done]
     entries.sort(key=lambda entry: habit_sort_key(entry[0], entry[1]))
-    grid = [GridCell(habit.get('name', ''), completed, '' if completed else str(habit.get('id', ''))) for habit, completed in entries]
+    grid = [
+        GridCell(habit.get('name', ''), True, done_at=str(habit.get('complete_date') or ''))
+        if completed
+        else GridCell(habit.get('name', ''), False, str(habit.get('id', '')))
+        for habit, completed in entries
+    ]
 
     return LaneView(
         name='habits',

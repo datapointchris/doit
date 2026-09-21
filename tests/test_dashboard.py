@@ -20,6 +20,7 @@ from doit import render
 from doit import sources
 from doit import today
 from doit.cli import app as cli_app
+from doit.lanes import GridCell
 from doit.lanes import Row
 from doit.lanes import Urgency
 
@@ -169,6 +170,19 @@ def test_habits_grid_carries_the_id_you_would_type():
     assert outstanding == {'Stretch': '1', 'Journal': '3', 'Read': '2'}
     completed = [cell for cell in lane.grid if cell.done]
     assert completed[0].handle == '', 'a completion identifies the completion, not the habit'
+
+
+def test_a_finished_habit_carries_when_it_was_done():
+    """`doit today` lists what the day had in the order it happened, and the
+    completion record is the only thing that knows the hour."""
+    lane = lanes_by_name(all_results())['habits']
+
+    assert {cell.text: cell.done_at for cell in lane.grid} == {
+        'Stretch': '',
+        'Read': '',
+        'Journal': '',
+        'Exercise': '2026-07-24T12:00:00Z',
+    }
 
 
 def test_habits_grid_keeps_a_completed_habit_in_place():
@@ -1060,3 +1074,12 @@ def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
     read_back = dashboard.lanemodel.from_document(document)
 
     assert [lane.alert for lane in read_back] == [True, False]
+
+
+def test_when_a_cell_was_done_survives_a_round_trip_through_the_contract() -> None:
+    lane = dashboard.LaneView(name='t', title='T', grid=[GridCell('a', True, done_at='2026-07-24T12:00:00Z'), GridCell('b', False, '4')])
+    document = json.loads(dashboard.lanemodel.dumps([lane], datetime.now()))
+
+    [read_back] = dashboard.lanemodel.from_document(document)
+
+    assert read_back.grid == lane.grid

@@ -43,8 +43,8 @@ They are separate systems: **next** draws from the pursuit weights you declared 
 across everything, **dashboard** reads every lane and ranks across none of them. They meet
 only on the dashboard.
 
-**doit today** is the narrow one. It admits only what a day can finish, so it carries
-a ratio where one is honest and a count where it is not.
+**doit today** is the narrow one. It admits only what a day can finish: what the day
+has had, in the order it happened, above what it still owes.
 
 Reach for **doit review due** or **doit labs due** when MAINTENANCE is the line that caught
 your eye — the dashboard shows three of those rows and there are usually more.
