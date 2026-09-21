@@ -182,9 +182,13 @@ def to_document(lanes: list[Lane], generated_at: datetime) -> dict:
     This is also the worked example: a source wanting a lane here can run
     `doit dashboard --json` and copy the shape.
     """
+    # Coerced here rather than at each caller, because a stamp with no offset
+    # cannot be compared across machines and this file is the worked example
+    # anyone building a source copies. A naive datetime means local time, which
+    # is what `datetime.now()` returns, so reading it that way is not a guess.
     return {
         'schema_version': SCHEMA_VERSION,
-        'generated_at': generated_at.isoformat(timespec='seconds'),
+        'generated_at': generated_at.astimezone().isoformat(timespec='seconds'),
         'lanes': [
             {
                 'name': lane.name,
