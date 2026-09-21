@@ -21,6 +21,13 @@ The model is `doit.lanes`, unchanged. A scoreboard row is a Lane whose `meta`
 holds the ratio and whose `grid` holds the ticks, so `--json` emits the same
 document `doit dashboard --json` does and no consumer learns a second schema.
 Only the renderer is new, and one sibling key naming which lanes are counts.
+
+**Color marks what differs between rows, never what every row has.** A label,
+a handle and a title are on every line, so coloring them spends the whole
+palette before anything has been said. Four things earn it here: how late a
+row is, a tick that is done, a lane that could not be answered, and the two
+headings that find the blocks. Everything else is plain, which is also what
+leaves the late rows visible at a glance.
 """
 
 import json
@@ -30,6 +37,7 @@ from typing import Annotated
 from typing import NamedTuple
 
 import typer
+from rich.text import Text
 
 from doit import dashboard
 from doit import journal
@@ -509,10 +517,18 @@ def build(registry: sources.Registry, now: datetime) -> Day:
     return Day(scoreboard, frozenset(counts))
 
 
-def tick_strip(lane: Lane) -> str:
+def tick_strip(lane: Lane) -> Text:
+    """The set as ticks, green only on the cells that are done.
+
+    Styled per cell rather than per strip: green is what the screen says `done`
+    with, so an open circle carrying it reads as the opposite of what it means.
+    """
+    strip = Text()
     if len(lane.grid) > MAX_TICKS:
-        return ''
-    return ''.join(TICK_DONE if cell.done else TICK_OPEN for cell in lane.grid)
+        return strip
+    for cell in lane.grid:
+        strip.append(TICK_DONE if cell.done else TICK_OPEN, style='green' if cell.done else '')
+    return strip
 
 
 def render(day: Day, today: date) -> None:
@@ -536,9 +552,9 @@ def render(day: Day, today: date) -> None:
     for lane in spoken:
         render_scoreboard_row(lane, width, ticks=False)
     if silent:
-        line = fitted('nothing yet', SCOREBOARD_LABEL_WIDTH, pad=True, style='yellow')
+        line = fitted('nothing yet', SCOREBOARD_LABEL_WIDTH, pad=True)
         line.append('  ')
-        line.append(fitted(' · '.join(lane.name for lane in silent), max(10, width - 16), style='dim'))
+        line.append(fitted(' · '.join(lane.name for lane in silent), max(10, width - 16)))
         console.print(line, no_wrap=True, overflow='ellipsis')
 
     due = next((lane for lane in day.lanes if lane.name == 'due'), None)
@@ -549,7 +565,7 @@ def render(day: Day, today: date) -> None:
 
 
 def render_scoreboard_row(lane: Lane, width: int, ticks: bool) -> None:
-    line = fitted(lane.name, SCOREBOARD_LABEL_WIDTH, pad=True, style='yellow')
+    line = fitted(lane.name, SCOREBOARD_LABEL_WIDTH, pad=True)
     if not lane.available:
         line.append('  ')
         line.append(f'unavailable — {lane.reason}', style='red')
@@ -557,16 +573,14 @@ def render_scoreboard_row(lane: Lane, width: int, ticks: bool) -> None:
         return
     line.append('  ')
     line.append(fitted(lane.meta, META_WIDTH, pad=True))
-    strip = tick_strip(lane) if ticks else ''
+    strip = tick_strip(lane) if ticks else Text()
     named = [cell.text for cell in lane.grid if cell.done][:NAMED_PER_ROW]
     if strip:
         line.append('  ')
-        line.append(strip, style='green')
+        line.append(strip)
     elif named:
         line.append('  ')
-        # Styled through `fitted` rather than passed to `append`: rich refuses a
-        # style argument when what is being appended is already a Text.
-        line.append(fitted(' · '.join(named), max(10, width - 40), style='dim'))
+        line.append(fitted(' · '.join(named), max(10, width - 40)))
     line.rstrip()
     console.print(line, no_wrap=True, overflow='ellipsis')
 
@@ -581,7 +595,7 @@ def render_due(rows: list[Row], width: int) -> None:
     handle_width = column_width(width, [f'↳ {row.handle}' for row in rows], 0.35, 14)
     text_width = max(12, width - 4 - DUE_LABEL_WIDTH - note_width - handle_width)
     for row in rows:
-        line = fitted(row.label, DUE_LABEL_WIDTH, pad=True, style='yellow')
+        line = fitted(row.label, DUE_LABEL_WIDTH, pad=True)
         line.append(' ')
         line.append(fitted(row.text, text_width, pad=True))
         if note_width:
@@ -591,7 +605,7 @@ def render_due(rows: list[Row], width: int) -> None:
             line.append(note)
         if handle_width and row.handle:
             line.append(' ')
-            line.append(fitted(f'↳ {row.handle}', handle_width, style='cyan'))
+            line.append(fitted(f'↳ {row.handle}', handle_width))
         line.rstrip()
         console.print(line, no_wrap=True, overflow='ellipsis')
 

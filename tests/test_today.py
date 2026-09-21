@@ -244,6 +244,27 @@ def test_a_lane_with_rows_and_no_grid_is_not_a_day():
     assert today.grid_lanes([rows_only]) == []
 
 
+def test_only_a_done_tick_is_green():
+    """Green is what the screen says done with, so an open circle must not carry it.
+
+    Asserted on the spans rather than on rendered escapes, because the question
+    is which cells were styled and that is a property of the Text.
+    """
+    lane = Lane(name='habits', title='HABITS', grid=[GridCell('a', True), GridCell('b', False)])
+
+    strip = today.tick_strip(lane)
+
+    assert strip.plain == f'{today.TICK_DONE}{today.TICK_OPEN}'
+    assert [(span.start, span.end, str(span.style)) for span in strip.spans if str(span.style)] == [(0, 1, 'green')]
+
+
+def test_a_set_too_large_for_a_strip_offers_no_ticks():
+    """Past MAX_TICKS the strip stops being scannable and the ratio carries it alone."""
+    lane = Lane(name='habits', title='HABITS', grid=[GridCell(str(n), True) for n in range(today.MAX_TICKS + 1)])
+
+    assert today.tick_strip(lane).plain == ''
+
+
 def test_review_counts_what_is_due_and_what_is_done_without_double_counting():
     """An item on a daily cadence done this morning still reports `overdue: 0`.
 

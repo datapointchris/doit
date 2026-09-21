@@ -112,6 +112,11 @@ def fitted(text: str, width: int, *, pad: bool = False, style: str = '') -> Text
     The style is carried here rather than passed to `Text.append`, which refuses
     one alongside a Text instance.
 
+    `style` becomes the Text's base style, which every later `append` inherits.
+    So a styled call is safe as a column appended into a line, and colors the
+    whole row when it is the line other columns are appended to. Build a line
+    from an unstyled Text, or from a column whose style the rest should carry.
+
     A column granted no width renders nothing. `Text.truncate(0)` treats zero as
     no limit and hands back the whole value, so a layout that computed its way
     down to an empty column would emit its widest row there.
