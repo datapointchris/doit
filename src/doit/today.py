@@ -32,12 +32,12 @@ is a grid of finished cells carrying `done_at`, and a due group is ranked rows.
 Two lists rather than one, because a record appears in both under one name:
 habits done and habits still to do.
 
-**Color marks what differs between rows, never what every row has.** A label,
-a handle and an hour are on every line, so coloring them spends the whole
-palette before anything has been said. Three things earn it here: how late a
-row is, a group that could not be read, and the two headings that find the
-lists. Everything else is plain, which is also what leaves the late rows
-visible at a glance.
+**Color finds the structure and marks a state, and never fills a whole row.**
+The two list headings are cyan and each group's name is blue, so the eye
+reaches a group before it reads a row. A done entry's hour is green, the color
+this screen says done with. A due row's note is yellow or red by how late it
+is, and a group that could not be read is red. The text, the labels and the
+handles stay plain.
 """
 
 import json
@@ -90,6 +90,10 @@ DUE_PER_GROUP = 3
 # A review slug or a Lab id is the longest label here and fits. A longer one is
 # clipped rather than pushing every description in its group off the line.
 DUE_LABEL_MAX = 20
+
+LIST_STYLE = 'cyan'
+GROUP_STYLE = 'bold blue'
+HOUR_STYLE = 'green'
 
 GROUP_INDENT = '  '
 ITEM_INDENT = '    '
@@ -532,17 +536,17 @@ def render(day: Day, today: date) -> None:
     done = [lane for lane in day.done if has_something(lane)]
     due = [lane for lane in day.due if has_something(lane)]
     if done:
-        console.print('DONE', style='cyan')
+        console.print('DONE', style=LIST_STYLE)
         render_done(done, width)
     if due:
         if done:
             console.print()
-        console.print('STILL DUE', style='cyan')
+        console.print('STILL DUE', style=LIST_STYLE)
         render_due(due, width)
 
 
-def render_heading(lane: Lane) -> None:
-    console.print(Text(f'{GROUP_INDENT}{lane.name}', style='bold'))
+def group_heading(lane: Lane) -> Text:
+    return Text(f'{GROUP_INDENT}{lane.name}', style=GROUP_STYLE)
 
 
 def render_unavailable(lane: Lane) -> None:
@@ -555,24 +559,29 @@ def clock(done_at: str) -> str:
     return datetime.fromisoformat(done_at).strftime('%H:%M') if done_at else ''
 
 
-def render_done(groups: list[Lane], width: int) -> None:
-    """One line per thing done: the hour it happened, then what it was.
+def done_line(cell: GridCell, text_width: int) -> Text:
+    """One thing done: the hour it happened, then what it was.
 
     An entry whose record kept only the day leaves the hour blank rather than
     printing a guess, so its text still lines up with the timed ones.
     """
+    hour = clock(cell.done_at)
+    line = Text(ITEM_INDENT)
+    line.append(hour, style=HOUR_STYLE)
+    line.append(' ' * (CLOCK_WIDTH - len(hour) + 2))
+    line.append(fitted(cell.text, text_width))
+    return line
+
+
+def render_done(groups: list[Lane], width: int) -> None:
     text_width = max(10, width - len(ITEM_INDENT) - CLOCK_WIDTH - 2)
     for lane in groups:
-        render_heading(lane)
+        console.print(group_heading(lane))
         if not lane.available:
             render_unavailable(lane)
             continue
         for cell in lane.grid:
-            line = Text(ITEM_INDENT)
-            line.append(clock(cell.done_at).ljust(CLOCK_WIDTH))
-            line.append('  ')
-            line.append(fitted(cell.text, text_width))
-            console.print(line, no_wrap=True, overflow='ellipsis')
+            console.print(done_line(cell, text_width), no_wrap=True, overflow='ellipsis')
 
 
 def visible_rows(lane: Lane) -> list[Row]:
@@ -601,7 +610,7 @@ def render_due(groups: list[Lane], width: int) -> None:
     gaps = (1 if note_width else 0) + (1 if handle_width else 0)
     what_width = max(16, width - len(ITEM_INDENT) - note_width - handle_width - gaps)
     for lane, rows in shown:
-        render_heading(lane)
+        console.print(group_heading(lane))
         if not lane.available:
             render_unavailable(lane)
             continue

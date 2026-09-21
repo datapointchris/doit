@@ -592,6 +592,19 @@ def test_an_entry_with_no_hour_leaves_the_column_blank_and_lines_up(capsys):
     assert lines[-2:] == [f'    {NOW:%H:%M}  Upgrade brew', '           Renew certs']
 
 
+def test_a_group_name_is_blue_and_a_done_hour_green_while_the_text_stays_plain():
+    """A style set on a line's first Text is inherited by everything appended
+    to it, which is how a whole row ends up one color."""
+    heading = today.group_heading(Lane(name='habits', title='HABITS'))
+    line = today.done_line(done('Floss', NOW.isoformat()), 40)
+
+    assert str(heading.style) == today.GROUP_STYLE
+    assert str(line.style) == ''
+    assert [(line.plain[span.start : span.end], str(span.style)) for span in line.spans if str(span.style)] == [
+        (f'{NOW:%H:%M}', today.HOUR_STYLE)
+    ]
+
+
 def test_one_group_follows_another_with_no_blank_line_between(capsys):
     day = today.Day(
         done=[
