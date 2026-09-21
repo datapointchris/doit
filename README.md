@@ -11,6 +11,7 @@ next, what is due to revisit, what to practice, and the reference for actually d
 ```bash
 doit next             # what to do now, drawn from weights you declared
 doit dashboard        # every lane, unranked — what is outstanding across everything
+doit today            # what today has had, and what it still wants
 doit review due       # what is due to revisit, on a cadence
 doit labs due         # hands-on practice that is due
 doit workflows list   # the reference cards
@@ -26,7 +27,7 @@ doit forecast trend   # what earlier forecasts predicted, against what got logge
 Bare `doit` prints help, and so does every namespace under it — you can walk down one token at a
 time and never hit a cryptic error.
 
-### Which of the three to type
+### Which one to type
 
 `doit next` and `doit dashboard` are separate systems, and they meet only on the dashboard.
 
@@ -34,8 +35,24 @@ time and never hit a cryptic error.
   pursuit. It hands you five things and expects one back through `doit log`.
 - **`doit dashboard`** ranks across nothing. Each lane is ordered by whichever app owns it, three
   rows deep, and no lane is comparable to the one beside it.
+- **`doit today`** admits only what a day can finish. An outstanding count can only climb, so a
+  lane of hundreds of unread articles reads exactly like a lane of two overdue chores. Here a
+  habit register and a review register carry a ratio, and an inventory carries a count or nothing.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
+
+### Done is whatever record saw it
+
+Habits come from `icb overview`, which already reports what was ticked. Pursuits come from the
+journal and the evidence cache together, so one satisfied inside its own CLI counts without also
+being typed. Review items and Labs come from their own state files. Those are the records doit
+either owns or already reads.
+
+Everything else is a `completions:` entry in `sources.yml` — the same settings a lane source takes,
+answering "what happened today" instead of "what is outstanding". An argv part written as `{today}`
+becomes the local ISO date, so a backend filters its own rows rather than shipping a backlog to be
+filtered here. Nothing is required. With the block absent, `doit today` prints the records above
+and says nothing about the rest.
 
 ## A pursuit is measured in minutes or in occurrences
 

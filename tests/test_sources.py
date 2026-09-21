@@ -6,7 +6,10 @@ policy around it.
 """
 
 import json
+from datetime import date
 from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 
 import pytest
 
@@ -133,6 +136,107 @@ def test_a_string_command_is_accepted(tmp_path):
     assert registry.sources['day'].command == ['day', '--json']
 
 
+def test_both_blocks_parse_into_the_same_source(tmp_path):
+    """An entry means the same thing in either block.
+
+    Which question it answers is the block it sits in and nothing else, so one
+    parser, one runner and one failure policy serve both.
+    """
+    path = write_sources(
+        tmp_path,
+        'sources:\n  icb:\n    command: [icb, overview, --json]\n    adapter: icb\n'
+        'completions:\n  icb-tasks:\n    command: [icb, tasks, list, --json]\n    adapter: icb-tasks\n    timeout: 9\n',
+    )
+
+    registry = sources.load(path)
+
+    assert list(registry.sources) == ['icb']
+    assert list(registry.completions) == ['icb-tasks']
+    assert registry.completions['icb-tasks'] == sources.Source(
+        id='icb-tasks', command=['icb', 'tasks', 'list', '--json'], timeout=9.0, adapter='icb-tasks'
+    )
+
+
+def test_a_file_with_no_completions_block_is_not_a_problem(tmp_path):
+    """Every file already on disk predates the block.
+
+    A machine that never adds one gets `doit today` without its count rows
+    rather than a warning it cannot act on.
+    """
+    registry = sources.load(write_sources(tmp_path, 'sources:\n  icb:\n    command: [icb, overview, --json]\n'))
+
+    assert registry.completions == {}
+    assert registry.problems == []
+
+
+def test_a_malformed_completions_entry_is_reported_and_skipped(tmp_path):
+    """The same policy as a malformed source, because it is the same parser."""
+    path = write_sources(
+        tmp_path,
+        'completions:\n  good:\n    command: [echo, hi]\n  bad:\n    adapter: nope\n',
+    )
+
+    registry = sources.load(path)
+
+    assert list(registry.completions) == ['good']
+    assert any('bad' in problem for problem in registry.problems)
+
+
+def test_one_id_in_both_blocks_is_reported_and_the_completion_dropped(tmp_path):
+    """`fetch` keys its results by id, so two commands under one id collide.
+
+    One result is then read by both blocks and the lane the loser would have
+    built disappears with nothing said — a habits lane gone from the screen
+    while `doit sources list` prints both entries as if they ran. Dropping the
+    completion keeps the dashboard whole, which is the half that has no
+    workaround.
+    """
+    path = write_sources(
+        tmp_path,
+        'sources:\n  meso:\n    command: [meso, overview, --json]\n    adapter: meso\n'
+        'completions:\n  meso:\n    command: [meso, review, --json]\n    adapter: meso-review\n',
+    )
+
+    registry = sources.load(path)
+
+    assert list(registry.sources) == ['meso']
+    assert registry.completions == {}
+    assert any('both' in problem and 'meso' in problem for problem in registry.problems)
+
+
+def test_a_block_that_is_not_a_mapping_names_itself(tmp_path):
+    """Two blocks means the message has to say which one was wrong."""
+    registry = sources.load(write_sources(tmp_path, 'completions: [icb, tasks]\n'))
+
+    assert any('completions' in problem for problem in registry.problems)
+
+
+def test_today_replaces_a_whole_argv_part(tmp_path):
+    stamp = date(2026, 8, 6)
+
+    resolved = sources.resolved_command(['icb', 'tasks', '--start', '{today}', '--json'], stamp)
+
+    assert resolved == ['icb', 'tasks', '--start', '2026-08-06', '--json']
+
+
+def test_today_leaves_a_part_that_merely_contains_it_alone():
+    """Equality rather than a substring replace.
+
+    A backend takes the date as its own argument, so splicing it into a longer
+    string has no caller — and refusing that case means a path or a title
+    containing the token is passed through rather than silently rewritten.
+    """
+    resolved = sources.resolved_command(['grep', 'due {today}', '{today}'], date(2026, 8, 6))
+
+    assert resolved == ['grep', 'due {today}', '2026-08-06']
+
+
+def test_a_command_with_no_token_is_unchanged():
+    command = ['icb', 'overview', '--json']
+
+    assert sources.resolved_command(command, date(2026, 8, 6)) == command
+
+
 def test_source_order_is_the_files_order(tmp_path):
     """Lane order follows sources.yml, which is what makes it yours to change."""
     body = 'sources:\n  b:\n    command: [b]\n  a:\n    command: [a]\n'
@@ -211,3 +315,16 @@ def test_what_doit_emits_is_what_doit_reads():
     round_tripped = lanes.from_document(json.loads(lanes.dumps(original, NOW)))
 
     assert round_tripped == original
+
+
+@pytest.mark.parametrize('stamp', [NOW, NOW.replace(tzinfo=timezone(timedelta(hours=9)))])
+def test_the_document_stamp_always_carries_an_offset(stamp):
+    """A time with no offset cannot be compared across two machines.
+
+    Coerced in `to_document` rather than at each caller, because the commands
+    emitting this document do not all hold an aware datetime and this file is
+    what anyone building a source copies.
+    """
+    document = json.loads(lanes.dumps([], stamp))
+
+    assert datetime.fromisoformat(document['generated_at']).utcoffset() is not None

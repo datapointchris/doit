@@ -1,0 +1,26 @@
+[
+  {
+    "id": 9001,
+    "title": "Structured concurrency in practice",
+    "source": "section",
+    "completed_at": "2026-07-24T08:30:00-04:00",
+    "resource_type": "article",
+    "track_name": "Concurrency"
+  },
+  {
+    "id": 9002,
+    "title": "The Go memory model",
+    "source": "track",
+    "completed_at": "2026-07-19T21:05:00-04:00",
+    "resource_type": "spec",
+    "track_name": "Concurrency"
+  },
+  {
+    "id": 9003,
+    "title": "Never finished",
+    "source": "manual",
+    "completed_at": null,
+    "resource_type": "book",
+    "track_name": "Concurrency"
+  }
+]
