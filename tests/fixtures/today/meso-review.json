@@ -1,0 +1,44 @@
+{
+  "since": "1d",
+  "active_cycles": [
+    {
+      "id": 3,
+      "name": "Base build",
+      "status": "active",
+      "start_date": "2026-07-01",
+      "target_date": "2026-09-01"
+    }
+  ],
+  "sessions": [
+    {
+      "id": 77,
+      "workout_name": "Lower A",
+      "performed_on": "2026-07-24",
+      "finished_at": "2026-07-24T07:41:00Z",
+      "duration_minutes": 52
+    },
+    {
+      "id": 76,
+      "workout_name": "Upper B",
+      "performed_on": "2026-07-23",
+      "finished_at": "2026-07-23T07:38:00Z",
+      "duration_minutes": 48
+    }
+  ],
+  "measurements": [
+    {
+      "id": 501,
+      "metric": "bodyweight",
+      "measured_on": "2026-07-24",
+      "value": 78.4
+    }
+  ],
+  "log_entries": [
+    {
+      "id": 22,
+      "mood": "steady",
+      "entry_date": "2026-07-24",
+      "body": "Legs heavy, sleep was short."
+    }
+  ]
+}

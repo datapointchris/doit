@@ -16,6 +16,17 @@ because its other consumers render the same data completely differently.
 doit renders it with no adapter. Available, and the right choice only for a tool
 whose entire reason to exist is feeding this dashboard.
 
+Two blocks, and the difference is which question the entry answers. `sources:`
+answers what is outstanding and feeds `doit dashboard`. `completions:` answers
+what happened today and feeds `doit today`. An entry in either is the same
+`Source`, so one parser, one runner and one failure policy serve both — the
+block an entry sits in is the whole of what distinguishes it.
+
+A completions command needs today's date, and `{today}` is the only token
+substituted into one. An argv part equal to it is replaced whole with the local
+ISO date; a part merely containing it is left alone, so nothing here has to
+reason about quoting.
+
 Failure policy is code, not config, because it must not vary by source. A source
 absent from the file is silent — it is not configured, so it does not exist. One
 that is configured but missing gets a single line naming it. One that runs and
@@ -30,6 +41,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import date
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -49,8 +61,14 @@ SOURCES = Path(os.environ.get('DOIT_SOURCES') or xdg_config_home() / 'doit' / 's
 # concurrently, so this is the worst-case total rather than a per-source penalty.
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
+# The one substitution a command may ask for. Matched against a whole argv part
+# rather than searched for inside one: a backend takes the date as its own
+# argument, so there is no case for splicing it into a longer string, and
+# refusing that case is what keeps quoting out of this file.
+TODAY_TOKEN = '{today}'
+
 TEMPLATE = """\
-# Which apps doit asks for lanes, read by `doit dashboard`.
+# Which apps doit asks, and what it asks them.
 #
 # doit does not know which apps exist — this file is the only place that says.
 # Adding one is an edit here, never a release.
@@ -64,6 +82,7 @@ TEMPLATE = """\
 # `doit sources contract` for the shape, or `doit dashboard --json` for a
 # worked example.
 
+# What is outstanding. Read by `doit dashboard`.
 sources:
   icb:
     command: [icb, overview, --json]
@@ -72,6 +91,14 @@ sources:
   learning:
     command: [learning, overview, --json]
     adapter: learning
+
+# What happened today. Read by `doit today`. Same four settings, and `{today}`
+# in place of an argv part becomes the local ISO date — a whole part only, so a
+# backend gets the date as its own argument.
+completions:
+  icb-tasks:
+    command: [icb, tasks, list, --status, completed, --start, '{today}', --json]
+    adapter: icb-tasks
 """
 
 
@@ -108,52 +135,87 @@ class Result:
 
 @dataclass
 class Registry:
-    """The configured sources, plus whatever the file itself got wrong."""
+    """The configured sources, plus whatever the file itself got wrong.
+
+    `sources` answers what is outstanding, `completions` answers what happened
+    today. Two maps rather than one with a flag, because every caller wants one
+    question or the other and none wants them interleaved — the dashboard would
+    otherwise have to filter out the completion entries on every render.
+    """
 
     sources: dict[str, Source] = field(default_factory=dict)
+    completions: dict[str, Source] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
 
 
-def load(path: Path | None = None) -> Registry:
-    """Read `sources.yml`.
+def parse_block(declared: object, block: str, problems: list[str]) -> dict[str, Source]:
+    """One block of the file as sources, collecting what it got wrong.
 
-    A malformed entry is reported and skipped rather than raised: one bad source
-    must not cost you the dashboard, and the message names the entry so it can be
-    fixed.
+    Shared by both blocks so an entry means the same thing in either. A
+    malformed entry is reported and skipped rather than raised: one bad source
+    must not cost you the dashboard, and the message names the entry so it can
+    be fixed.
     """
-    path = SOURCES if path is None else path
-    registry = Registry()
-    if not path.exists():
-        return registry
-    document = yaml.safe_load(path.read_text()) or {}
-    declared = document.get('sources') or {}
+    if declared is None:
+        return {}
     if not isinstance(declared, dict):
-        registry.problems.append(f'{path}: `sources` must be a mapping of id to settings')
-        return registry
+        problems.append(f'`{block}` must be a mapping of id to settings')
+        return {}
 
+    found = {}
     for name, config in declared.items():
         if not isinstance(config, dict):
-            registry.problems.append(f'{name}: must be a mapping of settings')
+            problems.append(f'{name}: must be a mapping of settings')
             continue
         command = config.get('command')
         if isinstance(command, str):
             command = shlex.split(command)
         if not isinstance(command, list) or not command:
-            registry.problems.append(f'{name}: needs a `command` to run')
+            problems.append(f'{name}: needs a `command` to run')
             continue
-        registry.sources[name] = Source(
+        found[name] = Source(
             id=name,
             command=[str(part) for part in command],
             timeout=float(config.get('timeout') or DEFAULT_TIMEOUT_SECONDS),
             adapter=str(config.get('adapter') or ''),
             lanes=tuple(config.get('lanes') or ()),
         )
+    return found
+
+
+def load(path: Path | None = None) -> Registry:
+    """Read `sources.yml`, both blocks.
+
+    A block that is absent is an empty map rather than an error. `completions:`
+    postdates every file already on disk, and a machine that never adds one gets
+    `doit today` without its count rows instead of a warning it cannot act on.
+    """
+    path = SOURCES if path is None else path
+    registry = Registry()
+    if not path.exists():
+        return registry
+    document = yaml.safe_load(path.read_text()) or {}
+    registry.sources = parse_block(document.get('sources'), 'sources', registry.problems)
+    registry.completions = parse_block(document.get('completions'), 'completions', registry.problems)
     return registry
 
 
+def resolved_command(command: list[str], today: date | None = None) -> list[str]:
+    """The argv to run, with `{today}` replaced by the local ISO date.
+
+    Equality rather than a substring replace. A backend takes the date as its
+    own argument, so splicing it into a longer string has no caller — and
+    refusing that case means a path or a title that happens to contain the
+    token is passed through untouched rather than silently rewritten.
+    """
+    stamp = (today or date.today()).isoformat()
+    return [stamp if part == TODAY_TOKEN else part for part in command]
+
+
 def run(source: Source) -> Result:
+    command = resolved_command(source.command)
     try:
-        completed = subprocess.run(source.command, capture_output=True, text=True, timeout=source.timeout, check=False)
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=source.timeout, check=False)
     except FileNotFoundError:
         return Result(source=source.id, failure=Failure.NOT_INSTALLED)
     except subprocess.TimeoutExpired:
@@ -202,8 +264,13 @@ def reason(name: str, result: Result | None) -> str:
 
 
 def result_command(name: str) -> list[str]:
-    """The configured command for a source id, for use in an error message."""
-    source = load().sources.get(name)
+    """The configured command for a source id, for use in an error message.
+
+    Both blocks, because an id is unique across the file and a caller holding a
+    failed `Result` has no idea which block the entry came from.
+    """
+    registry = load()
+    source = registry.sources.get(name) or registry.completions.get(name)
     return source.command[1:] if source else []
 
 
@@ -239,7 +306,7 @@ def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
     return built
 
 
-app = typer.Typer(name='sources', no_args_is_help=True, help='Which apps doit asks for lanes.')
+app = typer.Typer(name='sources', no_args_is_help=True, help='Which apps doit asks, and what it asks them.')
 
 
 @app.command('list')
@@ -248,14 +315,31 @@ def list_command() -> None:
     registry = load()
     for problem in registry.problems:
         error_console.print(Text(f'sources.yml: {problem}', style='yellow'))
-    if not registry.sources:
+    if not registry.sources and not registry.completions:
         console.print(Text(f'No sources configured in {SOURCES}.'))
         console.print('Write one with [cyan]doit sources example[/].')
         raise typer.Exit(0)
 
-    results = fetch(list(registry.sources.values()))
-    width = max(len(name) for name in registry.sources)
-    for name, source in registry.sources.items():
+    # One call for the whole file, so the two blocks cost what the slower of
+    # them costs rather than the sum.
+    everything = list(registry.sources.values()) + list(registry.completions.values())
+    results = fetch(everything)
+    width = max(len(source.id) for source in everything)
+    report_block('outstanding', registry.sources, results, width)
+    report_block('today', registry.completions, results, width)
+    raise typer.Exit(0)
+
+
+def report_block(title: str, block: dict[str, Source], results: dict[str, Result], width: int) -> None:
+    """One block's sources, each with whether it answered. Silent when empty.
+
+    An empty block is a question nobody configured, which is not a problem to
+    report — a heading over nothing would read as something missing.
+    """
+    if not block:
+        return
+    console.print(Text(title, style='cyan'))
+    for name, source in block.items():
         result = results[name]
         built = lanes_from(source, result)
         line = Text('  ')
@@ -268,7 +352,6 @@ def list_command() -> None:
         else:
             line.append('  answered, but offered no lanes', style='yellow')
         console.print(line, no_wrap=True, overflow='ellipsis')
-    raise typer.Exit(0)
 
 
 @app.command('example')

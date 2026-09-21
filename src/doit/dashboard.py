@@ -1026,7 +1026,7 @@ def local_lanes() -> list[LaneView]:
     return [build_maintenance_lane(results, date.today()), build_kit_lane(results)]
 
 
-def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneView]:
+def lanes_of(registry: sources.Registry, results: dict[str, sources.Result], wanted: list[str] | None) -> list[LaneView]:
     """Every lane, in the order sources.yml declares its sources.
 
     Order is config's, not a constant here — that is what makes it yours to
@@ -1035,16 +1035,23 @@ def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneVi
     Alert lanes are the one exception and they come first, because a problem you
     scroll to is a problem you read after deciding what to do rather than before.
     The sort is stable, so config still decides the order among them.
+
+    Takes the results rather than fetching them, so a caller wanting these lanes
+    alongside something else out of `sources.yml` pays for one concurrent round
+    instead of two. `doit today` is that caller.
     """
-    configured = list(registry.sources.values())
-    results = sources.fetch(configured)
     collected: list[LaneView] = []
-    for source in configured:
+    for source in registry.sources.values():
         collected.extend(sources.lanes_from(source, results[source.id]))
     collected.extend(local_lanes())
     if wanted:
         collected = [lane for lane in collected if lane.name in wanted]
     return sorted(collected, key=lambda lane: not lane.alert)
+
+
+def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneView]:
+    """Every lane, fetching the sources first."""
+    return lanes_of(registry, sources.fetch(list(registry.sources.values())), wanted)
 
 
 def clip(text: str, width: int) -> str:

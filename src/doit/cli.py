@@ -25,6 +25,7 @@ from doit import pursuits
 from doit import review
 from doit import shell
 from doit import sources
+from doit import today
 from doit import tools
 from doit import workflows
 from doit.render import set_no_input
@@ -41,6 +42,9 @@ Start with **doit dashboard** for the spread, or **doit next** to be handed one 
 They are separate systems: **next** draws from the pursuit weights you declared and ranks
 across everything, **dashboard** reads every lane and ranks across none of them. They meet
 only on the dashboard.
+
+**doit today** is the third, and it is the narrow one. It admits only what a day can
+finish, so it carries a ratio where one is honest and a count where it is not.
 
 Reach for **doit review due** or **doit labs due** when MAINTENANCE is the line that caught
 your eye — the dashboard shows three of those rows and there are usually more.
@@ -65,6 +69,7 @@ app.command('next')(pursuits.next_command)
 app.command('log')(pursuits.log_command)
 app.command('skip')(pursuits.skip_command)
 app.command('dashboard')(dashboard.dashboard_command)
+app.command('today')(today.today_command)
 app.command('find')(find.find_command)
 app.command('choose')(find.choose_command)
 app.command('launch')(find.launch_command)

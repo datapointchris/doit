@@ -1,0 +1,18 @@
+[
+  {
+    "id": 41,
+    "title": "The Mythical Man-Month",
+    "author": "Fred Brooks",
+    "progress": "read",
+    "read_start_date": "2026-06-02",
+    "read_finish_date": "2026-07-24"
+  },
+  {
+    "id": 42,
+    "title": "A Philosophy of Software Design",
+    "author": "John Ousterhout",
+    "progress": "read",
+    "read_start_date": "2026-05-01",
+    "read_finish_date": "2026-07-23"
+  }
+]

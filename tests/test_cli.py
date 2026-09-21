@@ -63,12 +63,21 @@ def test_the_pursuits_help_lists_every_verb_registered_under_it():
     assert not [name for name in registered if name not in result.output]
 
 
-@pytest.mark.parametrize('command', ['next', 'log', 'skip', 'dashboard', 'pursuits', 'review', 'labs'])
-def test_root_help_lists_every_command(command):
+def test_root_help_lists_every_command():
+    """Derived from the tree, not listed here.
+
+    A hand-written list passes for every command it was written with and says
+    nothing about the next one added, which is the one at risk. Hidden nodes
+    are excluded the same way the pursuits check above excludes them —
+    `__preview` is what the fzf pane calls, not what anyone types.
+    """
+    visible = {command.name or command.callback.__name__ for command in app.registered_commands if not command.hidden}
+    visible |= {group.name for group in app.registered_groups if group.name}
     result = runner.invoke(app, ['--help'])
 
     assert result.exit_code == 0
-    assert command in result.output
+    assert visible
+    assert not [name for name in visible if name not in result.output]
 
 
 @pytest.mark.parametrize('argv', [['nonsense'], ['review', 'nonsense'], ['labs', 'nonsense']])
