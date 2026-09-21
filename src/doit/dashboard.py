@@ -1038,7 +1038,7 @@ def lanes_of(registry: sources.Registry, results: dict[str, sources.Result], wan
 
     Takes the results rather than fetching them, so a caller wanting these lanes
     alongside something else out of `sources.yml` pays for one concurrent round
-    instead of two. `doit today` is that caller.
+    instead of two.
     """
     collected: list[LaneView] = []
     for source in registry.sources.values():

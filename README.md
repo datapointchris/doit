@@ -27,7 +27,7 @@ doit forecast trend   # what earlier forecasts predicted, against what got logge
 Bare `doit` prints help, and so does every namespace under it — you can walk down one token at a
 time and never hit a cryptic error.
 
-### Which of the four to type
+### Which one to type
 
 `doit next` and `doit dashboard` are separate systems, and they meet only on the dashboard.
 
@@ -36,23 +36,23 @@ time and never hit a cryptic error.
 - **`doit dashboard`** ranks across nothing. Each lane is ordered by whichever app owns it, three
   rows deep, and no lane is comparable to the one beside it.
 - **`doit today`** admits only what a day can finish. An outstanding count can only climb, so a
-  lane of 307 unread articles reads exactly like a lane of two overdue chores; here a habit
-  register and a review register carry a ratio, and an inventory carries a count or nothing.
+  lane of hundreds of unread articles reads exactly like a lane of two overdue chores. Here a
+  habit register and a review register carry a ratio, and an inventory carries a count or nothing.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
 
-### What `doit today` counts as done
+### Done is whatever record saw it
 
-Four records, whichever of them saw it. Habits come from `icb overview`, which already reports
-what was ticked. The pursuits come from the journal and from the evidence cache together, so one
-satisfied inside its own CLI counts without also being typed. Review items and Labs come from
-their own state files.
+Habits come from `icb overview`, which already reports what was ticked. Pursuits come from the
+journal and the evidence cache together, so one satisfied inside its own CLI counts without also
+being typed. Review items and Labs come from their own state files. Those are the records doit
+either owns or already reads.
 
-Everything else is a `completions:` entry in `sources.yml` — the same four settings a lane source
-takes, answering "what happened today" instead of "what is outstanding". An argv part written as
-`{today}` becomes the local ISO date, so a backend filters its own rows rather than shipping a
-backlog to be filtered here. Nothing is required: with the block absent, `doit today` prints the
-four records above and says nothing about the rest.
+Everything else is a `completions:` entry in `sources.yml` — the same settings a lane source takes,
+answering "what happened today" instead of "what is outstanding". An argv part written as `{today}`
+becomes the local ISO date, so a backend filters its own rows rather than shipping a backlog to be
+filtered here. Nothing is required. With the block absent, `doit today` prints the records above
+and says nothing about the rest.
 
 ## A pursuit is measured in minutes or in occurrences
 
