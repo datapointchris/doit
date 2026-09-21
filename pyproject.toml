@@ -134,7 +134,6 @@ dev = [
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
-branch = "main"
 commit_message = "build(release): {version}"
 # The package name is hardcoded because python-semantic-release sets no
 # $PACKAGE_NAME; the variable form silently no-ops and ships a stale uv.lock.
