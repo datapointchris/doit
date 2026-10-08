@@ -48,8 +48,14 @@ would file every package-installed row as foreign and empty the report.
 - **Config** — `pursuits.yml`, the review register, `sources.yml`. `$XDG_CONFIG_HOME/doit/`,
   hand-edited, and only ever *read* here so comments and layout survive. Never in either repo: it is
   personal, and both repos are public.
-- **State** — `$XDG_STATE_HOME/doit/`. Per-machine wherever a sync layer would otherwise have to
-  merge concurrent writes, which it cannot.
+- **State** — `$XDG_STATE_HOME/doit/`, or `$DOIT_JOURNAL_DIR` where a box reads the share somewhere
+  else. Per-machine wherever a sync layer would otherwise have to merge concurrent writes, which it
+  cannot.
+
+A path `$DOIT_JOURNAL_DIR` or `$DOIT_PURSUITS` names must exist, and doit refuses one that does not,
+naming the variable. A missing default is a fresh machine and reads as empty. A missing named path
+is a share that has not arrived. Read as empty, it lets a scheduled job run on no data and exit 0,
+writing into a directory that never syncs.
 
 ## One renderer per collection, and `doit.tools` owns most of them
 

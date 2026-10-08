@@ -69,8 +69,6 @@ from doit.render import error_console
 
 SCHEMA_VERSION = 1
 
-STATE_DIR = pursuits.JOURNAL_DIR
-
 # Horizons a reading reports. A week is the shortest span over which a weekly
 # cadence can express itself at all, and a month is long enough for the measured
 # rate to have moved every implied interval at least once.
@@ -242,7 +240,8 @@ def percentile(values: list[float], fraction: float) -> float:
 
 def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = REPLICATES) -> Reading:
     """Run every replicate and fold them into one reading."""
-    records = journal.read_all(pursuits.JOURNAL_DIR) if pursuits.JOURNAL_DIR.exists() else []
+    directory = pursuits.journal_dir()
+    records = journal.read_all(directory) if directory.exists() else []
     bands = pursuits.load_balance_settings()
     live = pursuits.build_state(register, now, balance_settings=bands)
     active = live['active']
@@ -528,7 +527,8 @@ def cmd_trend(days: int, as_json: bool, directory: Path) -> int:
     if not stored:
         error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
         return 1
-    records = journal.read_all(pursuits.JOURNAL_DIR) if pursuits.JOURNAL_DIR.exists() else []
+    journal_dir = pursuits.journal_dir()
+    records = journal.read_all(journal_dir) if journal_dir.exists() else []
     now = dt.datetime.now().astimezone()
     verdicts = grade(stored, records, now, days)
     if as_json:
@@ -549,7 +549,7 @@ def run_command(
     as_json: JsonOption = False,
 ) -> None:
     """Take a forecast from the register as it stands, and store it."""
-    pursuits.run(lambda: cmd_run(as_json, budget, STATE_DIR))
+    pursuits.run(lambda: cmd_run(as_json, budget, pursuits.journal_dir()))
 
 
 @app.command('show')
@@ -558,13 +558,13 @@ def show_command(
     as_json: JsonOption = False,
 ) -> None:
     """Read a stored forecast back."""
-    pursuits.run(lambda: cmd_show(handle, as_json, STATE_DIR))
+    pursuits.run(lambda: cmd_show(handle, as_json, pursuits.journal_dir()))
 
 
 @app.command('list')
 def list_command(as_json: JsonOption = False) -> None:
     """Every forecast taken, oldest first."""
-    pursuits.run(lambda: cmd_list(as_json, STATE_DIR))
+    pursuits.run(lambda: cmd_list(as_json, pursuits.journal_dir()))
 
 
 @app.command('trend')
@@ -573,4 +573,4 @@ def trend_command(
     as_json: JsonOption = False,
 ) -> None:
     """Grade the forecasts whose window has closed against the journal."""
-    pursuits.run(lambda: cmd_trend(days, as_json, STATE_DIR))
+    pursuits.run(lambda: cmd_trend(days, as_json, pursuits.journal_dir()))

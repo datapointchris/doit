@@ -62,6 +62,42 @@ def load_config() -> dict[str, Any]:
         return {}
 
 
+class NamedPathMissing(FileNotFoundError):
+    """A path an environment variable names, with nothing there.
+
+    A default path that is missing is a fresh machine, and it reads as empty. A
+    named one is a share or a mount that has not arrived. Read as empty, it runs
+    a scheduled job against no data, exits 0, and writes into a directory that
+    never syncs.
+
+    A ``FileNotFoundError`` so the readers that already degrade one lane on an
+    ``OSError`` degrade it on this too, with the variable in the message.
+    """
+
+    def __init__(self, env_var: str, path: Path) -> None:
+        self.env_var = env_var
+        self.path = path
+        super().__init__(f'${env_var} names {path}, and nothing is there.')
+
+
+def env_path(env_var: str, default: Path) -> Path:
+    """`$env_var` as a path when it is set and not empty, else ``default``."""
+    value = os.environ.get(env_var)
+    return Path(value).expanduser() if value else default
+
+
+def require_named(env_var: str, path: Path) -> Path:
+    """``path``, refused with :class:`NamedPathMissing` when `$env_var` named it and nothing is there.
+
+    Compared against the variable at call time rather than flagged at import, so
+    a path a caller substituted is never held to a variable that did not name it.
+    """
+    value = os.environ.get(env_var)
+    if value and Path(value).expanduser() == path and not path.exists():
+        raise NamedPathMissing(env_var, path)
+    return path
+
+
 def resolve_path(env_var: str, key: str, default: Path, config: dict[str, Any] | None = None) -> Path:
     """Resolve a shared path: $env_var, then the config key, then the default.
 

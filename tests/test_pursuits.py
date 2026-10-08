@@ -23,6 +23,7 @@ from doit import journal
 from doit import pursuits
 from doit import render
 from doit.cli import app as cli_app
+from doit.paths import NamedPathMissing
 
 runner = CliRunner()
 
@@ -2011,3 +2012,27 @@ def test_a_paused_timed_pursuit_keeps_its_unit_in_drift(tmp_path, sandbox, monke
 
     assert (row['unit'], row['amount']) == ('minutes', 135.0)
     assert row['checkoff_minutes'] == 45.0
+
+
+def test_a_named_journal_directory_that_is_missing_stops_a_log_before_it_writes(tmp_path, monkeypatch):
+    """Creating it would file the record in a directory the share never reaches."""
+    missing = tmp_path / 'share' / 'doit-state'
+    monkeypatch.setenv(pursuits.JOURNAL_DIR_ENV, str(missing))
+    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', missing)
+    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
+
+    ran = runner.invoke(cli_app, ['log', 'chores', '--yes', '--no-write'])
+
+    assert ran.exit_code == 1
+    assert '$DOIT_JOURNAL_DIR' in ran.output
+    assert not missing.exists()
+
+
+def test_a_named_register_that_is_missing_is_refused_rather_than_read_as_empty(tmp_path, monkeypatch):
+    """An empty register draws nothing and exits 0, which a scheduled run reports as clean."""
+    missing = tmp_path / 'share' / 'pursuits.yml'
+    monkeypatch.setenv(pursuits.REGISTER_ENV, str(missing))
+    monkeypatch.setattr(pursuits, 'REGISTER', missing)
+
+    with pytest.raises(NamedPathMissing):
+        pursuits.load_pursuits()
