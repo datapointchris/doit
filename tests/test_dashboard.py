@@ -956,6 +956,7 @@ def problem(
     archived: bool = False,
     status: str = 'new',
     ask: dict | None = None,
+    last: str = '',
 ) -> dict:
     row = {
         'key': key,
@@ -963,7 +964,7 @@ def problem(
         'machines': list(machines),
         'count': count,
         'is_archived': archived,
-        'last_seen_ts': dt.date.today().isoformat(),
+        'last_seen_ts': last or dt.date.today().isoformat(),
         'status': status,
     }
     if ask:
@@ -1012,18 +1013,20 @@ def test_an_escalated_problem_leads_with_its_question_and_the_command_that_answe
 
     lane = dashboard.problems_adapter(result)[0]
 
-    assert [row.label for row in lane.rows] == ['ask', 'new']
+    assert [row.label for row in lane.rows] == ['ask', 'today']
     assert lane.rows[0].text == 'Restart the runner?'
     assert lane.rows[0].note == 'recommends 1. Restart it'
     assert lane.rows[0].handle == 'fleet problems answer runner-down <n>'
 
 
-def test_a_privileged_ask_hands_over_the_command_only_you_can_run() -> None:
-    asked = question('Rewrite /etc/hosts?', 'Ran it', 'Not now', command='sudo fleet machine hosts apply')
+def test_a_privileged_ask_opens_the_problem_rather_than_running_one_option() -> None:
+    """Running the command settles nothing: only an answer moves the escalation
+    on, and `show` prints the command and the answer together."""
+    asked = question('Rewrite /etc/hosts?', 'Rewrite it', 'Leave it', command='sudo fleet machine hosts apply')
 
     row = dashboard.problems_adapter(inbox(problem('hosts-drift', 'hosts drifted', status='escalated', ask=asked)))[0].rows[0]
 
-    assert row.handle == 'sudo fleet machine hosts apply'
+    assert row.handle == 'fleet problems show hosts-drift'
     assert row.note == '2 options', 'an ask recommending nothing still says there is a choice to read'
 
 
@@ -1034,7 +1037,22 @@ def test_an_escalation_without_a_question_is_a_pr_waiting_on_review() -> None:
     assert lane.rows[0].handle == 'fleet problems show audit/incomplete-sweep'
 
 
-def test_the_heading_counts_what_agents_hold_without_listing_it() -> None:
+def test_an_untriaged_problem_says_how_long_ago_it_last_fired() -> None:
+    three_days_ago = (dt.date.today() - dt.timedelta(days=3)).isoformat()
+
+    lane = dashboard.problems_adapter(inbox(problem('hosts-drift', 'drifted', last=three_days_ago)))[0]
+
+    assert lane.rows[0].label == '3d'
+
+
+def test_a_status_this_build_does_not_know_is_listed_under_its_own_name() -> None:
+    lane = dashboard.problems_adapter(inbox(problem('hosts-drift', 'drifted', status='blocked')))[0]
+
+    assert lane.rows[0].label == 'blocked'
+    assert lane.meta == '1 blocked'
+
+
+def test_the_heading_counts_fixing_and_verifying_without_listing_them() -> None:
     result = inbox(
         problem('a', 'being fixed', status='fixing'),
         problem('b', 'being fixed too', status='fixing'),
@@ -1069,13 +1087,14 @@ def test_a_duplicate_is_neither_a_row_nor_a_count() -> None:
     assert lane.meta == '1 new'
 
 
-def test_a_problem_from_before_fleet_had_statuses_is_still_a_row() -> None:
-    old = problem('hosts-drift', 'hosts drifted')
-    del old['status']
+def test_a_problem_with_no_status_is_a_new_row() -> None:
+    unstated = problem('hosts-drift', 'hosts drifted')
+    del unstated['status']
 
-    lane = dashboard.problems_adapter(inbox(old))[0]
+    lane = dashboard.problems_adapter(inbox(unstated))[0]
 
-    assert [row.label for row in lane.rows] == ['new']
+    assert [row.text for row in lane.rows] == ['hosts drifted']
+    assert lane.meta == '1 new'
 
 
 def test_an_empty_inbox_still_builds_its_lane() -> None:

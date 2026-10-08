@@ -923,19 +923,28 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
-# A problem's status says who acts on it next. An agent holds the first two, so
-# they are counted in the heading rather than listed. A duplicate is neither: the
-# row it names carries its work.
-HELD_STATUSES = ('fixing', 'verifying')
+# Nobody needs to act on `fixing` or `verifying`. The fix agent holds one, and
+# the other waits for the producer to run clean. Both are counted in the heading
+# rather than listed. A duplicate is neither: the row it names carries its work.
+IN_FLIGHT_STATUSES = ('fixing', 'verifying')
 DUPLICATE_STATUS = 'duplicate'
 ESCALATED_STATUS = 'escalated'
+NEW_STATUS = 'new'
 HEADING_STATUSES = ('escalated', 'new', 'fixing', 'verifying')
 
 
 def problem_status(problem: dict) -> str:
-    """A row from before fleet had a lifecycle carries no status, and reads as
-    `new`, which is fleet's word for a problem with no step on it."""
-    return str(problem.get('status') or 'new')
+    """A row with no `status` reads as `new`, fleet's status for a problem
+    waiting on triage."""
+    return str(problem.get('status') or NEW_STATUS)
+
+
+def elapsed_label(timestamp: object, today: dt.date) -> str:
+    """How long ago a problem last fired, short enough for the label column."""
+    elapsed = days_away_from(str(timestamp), today) if timestamp else None
+    if elapsed is None:
+        return '—'
+    return 'today' if elapsed < 1 else f'{int(elapsed)}d' if elapsed < 14 else f'{int(elapsed / 7)}w'
 
 
 def problem_where(problem: dict) -> str:
@@ -955,23 +964,34 @@ def ask_note(ask: dict) -> str:
     return plural(len(options), 'option')
 
 
-def problem_row(problem: dict) -> Row:
-    """One problem no agent holds, with the gutter naming what it waits on.
+def problem_row(problem: dict, today: dt.date) -> Row:
+    """One problem nobody else is acting on.
 
-    An escalation with a question is an `ask`. Its handle is the command a
-    privileged verdict names, since only you can run that, and otherwise the
-    answer itself. An escalation with no question is a fix PR waiting on review.
+    An escalation with a question is an `ask`, and its handle answers it. A
+    privileged ask has a command to run as well as an answer to give, and a
+    handle holds one command, so its handle is `fleet problems show`, which
+    prints both. An escalation with no question is a fix PR waiting on review.
     That PR is only in the row's steps, and picking the current one is fleet's
-    episode rule, so the handle is `fleet problems show`, which prints it.
+    episode rule, so its handle is `fleet problems show` too.
+
+    An untriaged problem's gutter says how long ago it last fired. A status this
+    build does not know carries its own name there instead, so it never passes
+    for an untriaged row.
     """
     key = problem.get('key', '')
     status = problem_status(problem)
+    shown = f'fleet problems show {key}'
     ask = problem.get('ask')
     if status == ESCALATED_STATUS and isinstance(ask, dict):
-        handle = ask.get('command') or f'fleet problems answer {key} <n>'
+        handle = shown if ask.get('command') else f'fleet problems answer {key} <n>'
         return Row('ask', clean(ask.get('question', '')), ask_note(ask), Urgency.OVERDUE, handle)
-    label = 'review' if status == ESCALATED_STATUS else status
-    return Row(label, clean(problem.get('title', '')), problem_where(problem), Urgency.OVERDUE, f'fleet problems show {key}')
+    if status == ESCALATED_STATUS:
+        label = 'review'
+    elif status == NEW_STATUS:
+        label = elapsed_label(problem.get('last_seen_ts'), today)
+    else:
+        label = status
+    return Row(label, clean(problem.get('title', '')), problem_where(problem), Urgency.OVERDUE, shown)
 
 
 def problems_heading(statuses: list[str]) -> str:
@@ -993,15 +1013,14 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
     declared in `sources.yml` like any other, so a machine without the producer
     simply does not have the line.
 
-    The rows are the problems no agent holds: escalations first, because each
-    waits on you, then everything triage has not reached. The lane never hides a
-    problem nobody is acting on, and those two are what nobody is.
+    The rows are the problems nobody else is acting on: escalations first,
+    because each waits on you, then everything triage has not reached.
 
     Always one lane while the call succeeded, even with nothing open. Returning
     none would make `lanes_from` fall back to reporting the lane unavailable,
     and an empty inbox is the healthy answer rather than a broken one — the
-    renderer is what drops it from sight. `total` counts held problems too, so
-    a lane whose every problem is in an agent's hands is still drawn.
+    renderer is what drops it from sight. `total` counts fixing and verifying
+    problems too, so a lane with nothing listed and work in flight is still drawn.
     """
     payload = result.payload
     if not isinstance(payload, list):
@@ -1014,15 +1033,16 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
         for problem in payload
         if isinstance(problem, dict) and not problem.get('is_archived') and problem_status(problem) != DUPLICATE_STATUS
     ]
-    unheld = [problem for problem in open_problems if problem_status(problem) not in HELD_STATUSES]
+    listed = [problem for problem in open_problems if problem_status(problem) not in IN_FLIGHT_STATUSES]
     # Stable, so fleet's most-recently-active order holds within each group.
-    unheld.sort(key=lambda problem: problem_status(problem) != ESCALATED_STATUS)
+    listed.sort(key=lambda problem: problem_status(problem) != ESCALATED_STATUS)
+    today = dt.date.today()
     return [
         LaneView(
             name='problems',
             title='PROBLEMS',
             meta=problems_heading([problem_status(problem) for problem in open_problems]),
-            rows=[problem_row(problem) for problem in unheld],
+            rows=[problem_row(problem, today) for problem in listed],
             total=len(open_problems),
             hints=['fleet problems list'] if open_problems else [],
             alert=True,
