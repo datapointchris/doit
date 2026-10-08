@@ -34,12 +34,13 @@ schedule that invokes ``run``. ``show`` and ``list`` read what a run wrote and
 never reach the network, which is why they are separate verbs rather than one
 verb and a flag.
 
-**``run`` reads exported tables, never shell history.** It runs on a scheduler
-whose own history would otherwise answer for the fleet. ``export`` measures
-this machine's history into a :mod:`doit.usage_table` file, and ``run`` merges
-every file present, taking each host once. A file that will not read fails the
-run before any request. What it covered is named in the summary and kept on the
-reading, so a host that stopped arriving shows as absent rather than idle.
+**``run`` reads exported tables, never shell history.** It may run where no
+shell history is yours, so its own history would answer for the fleet.
+``export`` measures this machine's history into a :mod:`doit.usage_table`
+file, and ``run`` merges every file present, taking each host once. A file that
+will not read fails the run before any request. What it covered is named in the
+summary and kept on the reading: each host, the export it came from, and the
+last day that export's history holds for it.
 
 Readings are kept in the journal directory, beside the tables they read, and not
 in the cache directory: a recompute cannot rebuild one, because a second call
@@ -871,9 +872,10 @@ def digest_export_command() -> None:
     """Write this machine's usage table where `run` reads it.
 
     Measures every host this machine's shell history holds, each against the kit
-    here, and replaces this machine's file in $DOIT_JOURNAL_DIR. atuin syncs, so
-    one desk's export can cover the others. The file holds counts and dates per
-    row of your kit, and never a command line.
+    here, and replaces this machine's file in the journal directory
+    ($DOIT_JOURNAL_DIR, else $XDG_STATE_HOME/doit). Another desk's history
+    appears here only as far as atuin last synced it. The file holds counts and
+    dates per row of your kit, and never a command line.
 
         doit kit digest export   measure history here and replace this machine's table
     """

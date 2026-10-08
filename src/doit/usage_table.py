@@ -1,10 +1,10 @@
 """Each machine's usage table, written where a digest on another box can read it.
 
-The digest runs on a box with no history of yours: a scheduler has no atuin login,
-and atuin has no service accounts. Its own zsh history would answer instead, and
-the reading would describe the scheduler. So every machine that runs the export
-measures its own history and writes the result into the shared directory, and the
-digest reads those files instead of any history at all.
+The digest may run on a box that holds none of your history, such as a scheduler
+with no atuin login, where its own zsh history would answer for the fleet. So
+every machine that runs the export measures its own history and writes the
+result into the shared directory, and the digest reads those files instead of
+any history at all.
 
 **An export holds every host its history holds**, each measured on its own. atuin
 syncs, so one desk's history carries the other desks' commands, each tagged with

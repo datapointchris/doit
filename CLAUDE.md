@@ -27,8 +27,8 @@ digest reads. A second parser would answer a subtly different question within a 
 `review` and `kit` would disagree about whether you had used `rg`. Anything else needing history
 folds this, never re-reads it.
 
-**`doit kit digest run` reads no shell history at all.** It runs on the scheduler, where its own
-history would answer for the fleet and the run would still succeed. It reads the
+**`doit kit digest run` reads no shell history at all.** It may run where no shell history is
+yours, so its own history would answer for the fleet and the run would still succeed. It reads the
 `usage-table-<machine>.json` files `export` writes into the journal directory instead. It takes each
 host once, from the table whose history for that host runs latest, and refuses before the request
 when a table will not read.
