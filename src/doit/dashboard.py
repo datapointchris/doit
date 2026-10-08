@@ -1019,8 +1019,8 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
     Always one lane while the call succeeded, even with nothing open. Returning
     none would make `lanes_from` fall back to reporting the lane unavailable,
     and an empty inbox is the healthy answer rather than a broken one — the
-    renderer is what drops it from sight. `total` counts fixing and verifying
-    problems too, so a lane with nothing listed and work in flight is still drawn.
+    renderer is what drops it from sight. Fixing and verifying problems are
+    `in_flight`, so a lane with nothing listed and work in flight is still drawn.
     """
     payload = result.payload
     if not isinstance(payload, list):
@@ -1043,7 +1043,8 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
             title='PROBLEMS',
             meta=problems_heading([problem_status(problem) for problem in open_problems]),
             rows=[problem_row(problem, today) for problem in listed],
-            total=len(open_problems),
+            total=len(listed),
+            in_flight=len(open_problems) - len(listed),
             hints=['fleet problems list'] if open_problems else [],
             alert=True,
         )
@@ -1143,14 +1144,13 @@ def cap_for(lane_name: str, row_cap: int) -> int:
 def quiet_alert(lane: LaneView) -> bool:
     """An alert lane that answered and had nothing open.
 
-    `total` is read as well as the rows, because an alert lane can count work it
-    does not list. Problems an agent is fixing sit in the heading, and a lane
-    that vanished while they were in flight would read as a clean inbox.
+    Work in flight counts as open. A lane that vanished while an agent was
+    fixing its problems would read as a clean inbox.
 
     Only the terminal drops it. `--json` keeps every lane, because a consumer
     asking what doit knows wants the empty answer as much as the full one.
     """
-    return lane.alert and lane.available and not lane.rows and not lane.grid and not lane.total
+    return lane.alert and lane.available and not lane.rows and not lane.grid and not lane.in_flight
 
 
 def render_lanes(lanes: list[LaneView], today: dt.date, row_cap: int) -> None:

@@ -1064,7 +1064,7 @@ def test_the_heading_counts_fixing_and_verifying_without_listing_them() -> None:
 
     assert lane.meta == '1 new · 2 fixing · 1 verifying'
     assert [row.text for row in lane.rows] == ['untriaged']
-    assert lane.total == 4
+    assert (lane.total, lane.in_flight) == (1, 3), 'a reader of total must not take work in flight for rows the cap cut'
 
 
 def test_work_in_flight_keeps_the_lane_drawn_with_nothing_escalated(capsys) -> None:
@@ -1199,6 +1199,17 @@ def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
     read_back = dashboard.lanemodel.from_document(document)
 
     assert [lane.alert for lane in read_back] == [True, False]
+
+
+def test_work_in_flight_survives_a_round_trip_through_the_contract() -> None:
+    """A source with nothing to list but work under way stays drawn without an adapter."""
+    held = dashboard.LaneView(name='problems', title='PROBLEMS', in_flight=2, alert=True)
+    document = json.loads(dashboard.lanemodel.dumps([held], dt.datetime.now()))
+
+    read_back = dashboard.lanemodel.from_document(document)[0]
+
+    assert read_back.in_flight == 2
+    assert dashboard.quiet_alert(read_back) is False
 
 
 def test_when_a_cell_was_done_survives_a_round_trip_through_the_contract() -> None:
