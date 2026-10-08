@@ -923,8 +923,25 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
+# `fixing` and `verifying` need nothing from you: the fix agent holds one, and
+# the other waits for the producer to run clean. Both are counted in the heading
+# and in `in_flight`, never listed. A duplicate is neither counted nor listed,
+# because the row it names carries its work.
+IN_FLIGHT_STATUSES = ('fixing', 'verifying')
+DUPLICATE_STATUS = 'duplicate'
+ESCALATED_STATUS = 'escalated'
+NEW_STATUS = 'new'
+HEADING_STATUSES = ('escalated', 'new', 'fixing', 'verifying')
+
+
+def problem_status(problem: dict) -> str:
+    """A row with no `status` reads as `new`, fleet's status for a problem
+    waiting on triage."""
+    return str(problem.get('status') or NEW_STATUS)
+
+
 def elapsed_label(timestamp: object, today: dt.date) -> str:
-    """How long a problem has been standing, short enough for the label column."""
+    """How long ago a problem last fired, short enough for the label column."""
     elapsed = days_away_from(str(timestamp), today) if timestamp else None
     if elapsed is None:
         return '—'
@@ -938,6 +955,55 @@ def problem_where(problem: dict) -> str:
     return f'{boxes} ×{seen}' if seen > 1 else boxes
 
 
+def ask_note(ask: dict) -> str:
+    """The triage's recommended option, numbered from 1 as `fleet problems answer` takes it."""
+    options = [option for option in ask.get('options') or [] if isinstance(option, dict)]
+    chosen = ask.get('recommendation')
+    if isinstance(chosen, int) and 1 <= chosen <= len(options):
+        return f'recommends {chosen}. {clean(options[chosen - 1].get("label", ""))}'
+    return plural(len(options), 'option')
+
+
+def problem_row(problem: dict, today: dt.date) -> Row:
+    """One problem nobody else is acting on.
+
+    Running a privileged ask's command settles nothing until it is answered, and
+    a handle holds one command. So that handle is `fleet problems show`, which
+    prints the command and the answer line together.
+
+    An escalation with no question is a fix PR waiting on review. The PR is only
+    in the row's steps, and choosing which step is current is fleet's rule, not
+    doit's. `fleet problems show` prints it.
+
+    A status this build does not know is labeled by name rather than by age, so
+    it never passes for an untriaged row.
+    """
+    key = problem.get('key', '')
+    status = problem_status(problem)
+    shown = f'fleet problems show {key}'
+    ask = problem.get('ask')
+    if status == ESCALATED_STATUS and isinstance(ask, dict):
+        handle = shown if ask.get('command') else f'fleet problems answer {key} <n>'
+        return Row('ask', clean(ask.get('question', '')), ask_note(ask), Urgency.OVERDUE, handle)
+    if status == ESCALATED_STATUS:
+        label = 'review'
+    elif status == NEW_STATUS:
+        label = elapsed_label(problem.get('last_seen_ts'), today)
+    else:
+        label = status
+    return Row(label, clean(problem.get('title', '')), problem_where(problem), Urgency.OVERDUE, shown)
+
+
+def problems_heading(statuses: list[str]) -> str:
+    """How many open problems sit in each status, the ones waiting on you first.
+
+    A status this build does not know is still counted, because the lane lists
+    it as a row.
+    """
+    order = [*HEADING_STATUSES, *(status for status in dict.fromkeys(statuses) if status not in HEADING_STATUSES)]
+    return ' · '.join(f'{statuses.count(status)} {status}' for status in order if status in statuses) or 'nothing open'
+
+
 def problems_adapter(result: sources.Result) -> list[LaneView]:
     """A problem inbox's open problems, as an alert lane.
 
@@ -947,10 +1013,15 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
     declared in `sources.yml` like any other, so a machine without the producer
     simply does not have the line.
 
+    The rows are the problems nobody else is acting on: escalations first,
+    because each waits on you, then everything triage has not reached.
+
     Always one lane while the call succeeded, even with nothing open. Returning
     none would make `lanes_from` fall back to reporting the lane unavailable,
     and an empty inbox is the healthy answer rather than a broken one — the
-    renderer is what drops it from sight.
+    renderer is what drops it from sight. `in_flight` carries fixing and
+    verifying problems, so a lane that lists nothing while they are open is
+    still drawn.
     """
     payload = result.payload
     if not isinstance(payload, list):
@@ -958,27 +1029,24 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
         broken.alert = True
         return [broken]
 
-    today = dt.date.today()
-    open_problems = [row for row in payload if isinstance(row, dict) and not row.get('is_archived')]
-    rows = [
-        Row(
-            elapsed_label(problem.get('last_seen_ts'), today),
-            str(problem.get('title', '')),
-            problem_where(problem),
-            Urgency.OVERDUE,
-            f'fleet problems show {problem.get("key", "")}',
-        )
-        for problem in open_problems
+    open_problems = [
+        problem
+        for problem in payload
+        if isinstance(problem, dict) and not problem.get('is_archived') and problem_status(problem) != DUPLICATE_STATUS
     ]
-    plural = '' if len(rows) == 1 else 's'
+    listed = [problem for problem in open_problems if problem_status(problem) not in IN_FLIGHT_STATUSES]
+    # Stable, so fleet's most-recently-active order holds within each group.
+    listed.sort(key=lambda problem: problem_status(problem) != ESCALATED_STATUS)
+    today = dt.date.today()
     return [
         LaneView(
             name='problems',
             title='PROBLEMS',
-            meta=f'{len(rows)} unresolved problem{plural}',
-            rows=rows,
-            total=len(rows),
-            hints=['fleet problems list'] if rows else [],
+            meta=problems_heading([problem_status(problem) for problem in open_problems]),
+            rows=[problem_row(problem, today) for problem in listed],
+            total=len(listed),
+            in_flight=len(open_problems) - len(listed),
+            hints=['fleet problems list'] if open_problems else [],
             alert=True,
         )
     ]
@@ -1075,12 +1143,15 @@ def cap_for(lane_name: str, row_cap: int) -> int:
 
 
 def quiet_alert(lane: LaneView) -> bool:
-    """An alert lane that answered and had nothing to report.
+    """An alert lane that answered and had nothing open.
+
+    A lane that vanished while an agent was fixing its problems would read as a
+    clean inbox.
 
     Only the terminal drops it. `--json` keeps every lane, because a consumer
     asking what doit knows wants the empty answer as much as the full one.
     """
-    return lane.alert and lane.available and not lane.rows and not lane.grid
+    return lane.alert and lane.available and not lane.rows and not lane.grid and not lane.in_flight
 
 
 def render_lanes(lanes: list[LaneView], today: dt.date, row_cap: int) -> None:

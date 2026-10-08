@@ -93,12 +93,18 @@ class Lane:
     sits above. `hints` are what you would run to see the rest — a remainder
     count says a lane was truncated without giving you anything to type.
 
+    `in_flight` counts open things the lane does not list, because something
+    other than you is already acting on them. It is never part of `total`: a
+    reader subtracting the rows it shows from `total` would otherwise report
+    them as rows the cap cut.
+
     `alert` says the lane carries problems rather than work. It draws first and
-    in red, and it is omitted entirely while it is empty, because a standing row
-    reading "nothing wrong" is what teaches you to stop looking at the one place
-    that says something is. An alert lane that could not be built is still drawn:
-    the omission is for a lane that answered and had nothing, never for one that
-    failed to answer.
+    in red, and it is omitted entirely while nothing is open, because a standing
+    row reading "nothing wrong" is what teaches you to stop looking at the one
+    place that says something is. Work in flight is open, so an alert lane with
+    no rows and a nonzero `in_flight` is still drawn. An alert lane that could
+    not be built is still drawn too: the omission is for a lane that answered
+    and had nothing, never for one that failed to answer.
     """
 
     name: str
@@ -107,6 +113,7 @@ class Lane:
     rows: list[Row] = field(default_factory=list)
     grid: list[GridCell] = field(default_factory=list)
     total: int = 0
+    in_flight: int = 0
     hints: list[str] = field(default_factory=list)
     reason: str = ''
     available: bool = True
@@ -163,6 +170,7 @@ def lane_from(payload: dict) -> Lane:
         rows=rows,
         grid=grid,
         total=int(payload.get('total') or len(rows) or len(grid)),
+        in_flight=int(payload.get('in_flight') or 0),
         hints=[str(hint) for hint in payload.get('hints') or []],
         reason=str(payload.get('reason') or ''),
         available=payload.get('status', 'ok') != 'unavailable',
@@ -218,6 +226,7 @@ def lane_to_dict(lane: Lane) -> dict:
         ],
         'grid': [{'text': cell.text, 'done': cell.done, 'handle': cell.handle, 'done_at': cell.done_at} for cell in lane.grid],
         'total': lane.total,
+        'in_flight': lane.in_flight,
         'hints': lane.hints,
     }
 
