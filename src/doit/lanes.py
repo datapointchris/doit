@@ -94,9 +94,11 @@ class Lane:
     count says a lane was truncated without giving you anything to type.
 
     `alert` says the lane carries problems rather than work. It draws first and
-    in red, and it is omitted entirely while it is empty, because a standing row
-    reading "nothing wrong" is what teaches you to stop looking at the one place
-    that says something is. An alert lane that could not be built is still drawn:
+    in red, and it is omitted entirely while nothing is open, because a standing
+    row reading "nothing wrong" is what teaches you to stop looking at the one
+    place that says something is. Nothing open means no rows and a `total` of
+    zero, since an alert lane may count work in flight that it does not list.
+    An alert lane that could not be built is still drawn:
     the omission is for a lane that answered and had nothing, never for one that
     failed to answer.
     """

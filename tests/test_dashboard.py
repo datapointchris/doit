@@ -947,15 +947,35 @@ def inbox(*problems: dict) -> sources.Result:
     return sources.Result(source='problems', payload=list(problems), exit_code=0)
 
 
-def problem(key: str, title: str, *, machines=('archlinux',), count: int = 1, archived: bool = False, last: str = '') -> dict:
-    return {
+def problem(
+    key: str,
+    title: str,
+    *,
+    machines=('archlinux',),
+    count: int = 1,
+    archived: bool = False,
+    status: str = 'new',
+    ask: dict | None = None,
+) -> dict:
+    row = {
         'key': key,
         'title': title,
         'machines': list(machines),
         'count': count,
         'is_archived': archived,
-        'last_seen_ts': last or dt.date.today().isoformat(),
+        'last_seen_ts': dt.date.today().isoformat(),
+        'status': status,
     }
+    if ask:
+        row['ask'] = ask
+    return row
+
+
+def question(text: str, *labels: str, recommendation: int = 0, command: str = '') -> dict:
+    asked = {'question': text, 'options': [{'label': label} for label in labels], 'step': '0199', 'recommendation': recommendation}
+    if command:
+        asked['command'] = command
+    return asked
 
 
 def test_the_problems_lane_is_an_alert_carrying_one_row_per_open_problem() -> None:
@@ -984,6 +1004,78 @@ def test_a_problem_seen_more_than_once_says_so_beside_its_machine() -> None:
     lane = dashboard.problems_adapter(inbox(problem('hosts-drift', 'drifted', count=3)))[0]
 
     assert lane.rows[0].note == 'archlinux ×3'
+
+
+def test_an_escalated_problem_leads_with_its_question_and_the_command_that_answers_it() -> None:
+    asked = question('Restart the runner?', 'Restart it', 'Leave it down', recommendation=1)
+    result = inbox(problem('runner-check', 'runner-check failed'), problem('runner-down', 'runner is down', status='escalated', ask=asked))
+
+    lane = dashboard.problems_adapter(result)[0]
+
+    assert [row.label for row in lane.rows] == ['ask', 'new']
+    assert lane.rows[0].text == 'Restart the runner?'
+    assert lane.rows[0].note == 'recommends 1. Restart it'
+    assert lane.rows[0].handle == 'fleet problems answer runner-down <n>'
+
+
+def test_a_privileged_ask_hands_over_the_command_only_you_can_run() -> None:
+    asked = question('Rewrite /etc/hosts?', 'Ran it', 'Not now', command='sudo fleet machine hosts apply')
+
+    row = dashboard.problems_adapter(inbox(problem('hosts-drift', 'hosts drifted', status='escalated', ask=asked)))[0].rows[0]
+
+    assert row.handle == 'sudo fleet machine hosts apply'
+    assert row.note == '2 options', 'an ask recommending nothing still says there is a choice to read'
+
+
+def test_an_escalation_without_a_question_is_a_pr_waiting_on_review() -> None:
+    lane = dashboard.problems_adapter(inbox(problem('audit/incomplete-sweep', 'sweep incomplete', status='escalated')))[0]
+
+    assert lane.rows[0].label == 'review'
+    assert lane.rows[0].handle == 'fleet problems show audit/incomplete-sweep'
+
+
+def test_the_heading_counts_what_agents_hold_without_listing_it() -> None:
+    result = inbox(
+        problem('a', 'being fixed', status='fixing'),
+        problem('b', 'being fixed too', status='fixing'),
+        problem('c', 'waiting on a clean run', status='verifying'),
+        problem('d', 'untriaged'),
+    )
+
+    lane = dashboard.problems_adapter(result)[0]
+
+    assert lane.meta == '1 new · 2 fixing · 1 verifying'
+    assert [row.text for row in lane.rows] == ['untriaged']
+    assert lane.total == 4
+
+
+def test_work_in_flight_keeps_the_lane_drawn_with_nothing_escalated(capsys) -> None:
+    """A lane that emptied as the fixer picked problems up would read as a clean
+    inbox while the problem is still open."""
+    lane = dashboard.problems_adapter(inbox(problem('a', 'being fixed', status='fixing')))[0]
+
+    dashboard.render_lanes([lane], dt.date.today(), 5)
+
+    assert dashboard.quiet_alert(lane) is False
+    assert 'PROBLEMS  1 fixing' in capsys.readouterr().out
+
+
+def test_a_duplicate_is_neither_a_row_nor_a_count() -> None:
+    result = inbox(problem('runner-down', 'runner is down'), problem('schedule/job-failed/sweep', 'sweep failed', status='duplicate'))
+
+    lane = dashboard.problems_adapter(result)[0]
+
+    assert [row.text for row in lane.rows] == ['runner is down']
+    assert lane.meta == '1 new'
+
+
+def test_a_problem_from_before_fleet_had_statuses_is_still_a_row() -> None:
+    old = problem('hosts-drift', 'hosts drifted')
+    del old['status']
+
+    lane = dashboard.problems_adapter(inbox(old))[0]
+
+    assert [row.label for row in lane.rows] == ['new']
 
 
 def test_an_empty_inbox_still_builds_its_lane() -> None:

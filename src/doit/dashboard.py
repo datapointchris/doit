@@ -923,12 +923,19 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
-def elapsed_label(timestamp: object, today: dt.date) -> str:
-    """How long a problem has been standing, short enough for the label column."""
-    elapsed = days_away_from(str(timestamp), today) if timestamp else None
-    if elapsed is None:
-        return '—'
-    return 'today' if elapsed < 1 else f'{int(elapsed)}d' if elapsed < 14 else f'{int(elapsed / 7)}w'
+# A problem's status says who acts on it next. An agent holds the first two, so
+# they are counted in the heading rather than listed. A duplicate is neither: the
+# row it names carries its work.
+HELD_STATUSES = ('fixing', 'verifying')
+DUPLICATE_STATUS = 'duplicate'
+ESCALATED_STATUS = 'escalated'
+HEADING_STATUSES = ('escalated', 'new', 'fixing', 'verifying')
+
+
+def problem_status(problem: dict) -> str:
+    """A row from before fleet had a lifecycle carries no status, and reads as
+    `new`, which is fleet's word for a problem with no step on it."""
+    return str(problem.get('status') or 'new')
 
 
 def problem_where(problem: dict) -> str:
@@ -936,6 +943,45 @@ def problem_where(problem: dict) -> str:
     boxes = ', '.join(str(box) for box in problem.get('machines') or []) or '—'
     seen = int(problem.get('count') or 0)
     return f'{boxes} ×{seen}' if seen > 1 else boxes
+
+
+def ask_note(ask: dict) -> str:
+    """The option the triage recommends, numbered the way `answer` takes it, or
+    how many options there are when it recommends none."""
+    options = [option for option in ask.get('options') or [] if isinstance(option, dict)]
+    chosen = ask.get('recommendation')
+    if isinstance(chosen, int) and 1 <= chosen <= len(options):
+        return f'recommends {chosen}. {clean(options[chosen - 1].get("label", ""))}'
+    return plural(len(options), 'option')
+
+
+def problem_row(problem: dict) -> Row:
+    """One problem no agent holds, with the gutter naming what it waits on.
+
+    An escalation with a question is an `ask`. Its handle is the command a
+    privileged verdict names, since only you can run that, and otherwise the
+    answer itself. An escalation with no question is a fix PR waiting on review.
+    That PR is only in the row's steps, and picking the current one is fleet's
+    episode rule, so the handle is `fleet problems show`, which prints it.
+    """
+    key = problem.get('key', '')
+    status = problem_status(problem)
+    ask = problem.get('ask')
+    if status == ESCALATED_STATUS and isinstance(ask, dict):
+        handle = ask.get('command') or f'fleet problems answer {key} <n>'
+        return Row('ask', clean(ask.get('question', '')), ask_note(ask), Urgency.OVERDUE, handle)
+    label = 'review' if status == ESCALATED_STATUS else status
+    return Row(label, clean(problem.get('title', '')), problem_where(problem), Urgency.OVERDUE, f'fleet problems show {key}')
+
+
+def problems_heading(statuses: list[str]) -> str:
+    """How many open problems sit in each status, the ones waiting on you first.
+
+    A status this build does not know is counted after the known ones, because
+    it is listed as a row and the heading must not undercount the rows.
+    """
+    order = [*HEADING_STATUSES, *(status for status in dict.fromkeys(statuses) if status not in HEADING_STATUSES)]
+    return ' · '.join(f'{statuses.count(status)} {status}' for status in order if status in statuses) or 'nothing open'
 
 
 def problems_adapter(result: sources.Result) -> list[LaneView]:
@@ -947,10 +993,15 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
     declared in `sources.yml` like any other, so a machine without the producer
     simply does not have the line.
 
+    The rows are the problems no agent holds: escalations first, because each
+    waits on you, then everything triage has not reached. The lane never hides a
+    problem nobody is acting on, and those two are what nobody is.
+
     Always one lane while the call succeeded, even with nothing open. Returning
     none would make `lanes_from` fall back to reporting the lane unavailable,
     and an empty inbox is the healthy answer rather than a broken one — the
-    renderer is what drops it from sight.
+    renderer is what drops it from sight. `total` counts held problems too, so
+    a lane whose every problem is in an agent's hands is still drawn.
     """
     payload = result.payload
     if not isinstance(payload, list):
@@ -958,27 +1009,22 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
         broken.alert = True
         return [broken]
 
-    today = dt.date.today()
-    open_problems = [row for row in payload if isinstance(row, dict) and not row.get('is_archived')]
-    rows = [
-        Row(
-            elapsed_label(problem.get('last_seen_ts'), today),
-            str(problem.get('title', '')),
-            problem_where(problem),
-            Urgency.OVERDUE,
-            f'fleet problems show {problem.get("key", "")}',
-        )
-        for problem in open_problems
+    open_problems = [
+        problem
+        for problem in payload
+        if isinstance(problem, dict) and not problem.get('is_archived') and problem_status(problem) != DUPLICATE_STATUS
     ]
-    plural = '' if len(rows) == 1 else 's'
+    unheld = [problem for problem in open_problems if problem_status(problem) not in HELD_STATUSES]
+    # Stable, so fleet's most-recently-active order holds within each group.
+    unheld.sort(key=lambda problem: problem_status(problem) != ESCALATED_STATUS)
     return [
         LaneView(
             name='problems',
             title='PROBLEMS',
-            meta=f'{len(rows)} unresolved problem{plural}',
-            rows=rows,
-            total=len(rows),
-            hints=['fleet problems list'] if rows else [],
+            meta=problems_heading([problem_status(problem) for problem in open_problems]),
+            rows=[problem_row(problem) for problem in unheld],
+            total=len(open_problems),
+            hints=['fleet problems list'] if open_problems else [],
             alert=True,
         )
     ]
@@ -1075,12 +1121,16 @@ def cap_for(lane_name: str, row_cap: int) -> int:
 
 
 def quiet_alert(lane: LaneView) -> bool:
-    """An alert lane that answered and had nothing to report.
+    """An alert lane that answered and had nothing open.
+
+    `total` is read as well as the rows, because an alert lane can count work it
+    does not list. Problems an agent is fixing sit in the heading, and a lane
+    that vanished while they were in flight would read as a clean inbox.
 
     Only the terminal drops it. `--json` keeps every lane, because a consumer
     asking what doit knows wants the empty answer as much as the full one.
     """
-    return lane.alert and lane.available and not lane.rows and not lane.grid
+    return lane.alert and lane.available and not lane.rows and not lane.grid and not lane.total
 
 
 def render_lanes(lanes: list[LaneView], today: dt.date, row_cap: int) -> None:
