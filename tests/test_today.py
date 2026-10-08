@@ -10,13 +10,10 @@ configured source, and a test that let it would be measuring whichever backends
 the machine running the suite happens to have authenticated.
 """
 
+import datetime as dt
 import json
-from datetime import UTC
-from datetime import date
-from datetime import datetime
-from datetime import timedelta
-from datetime import timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -35,7 +32,7 @@ FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'today'
 
 # Noon, so a test can move a stamp several hours either way without crossing
 # midnight and silently changing which day it lands on.
-NOW = datetime(2026, 7, 24, 12, 0, 0).astimezone()
+NOW = dt.datetime(2026, 7, 24, 12, 0, 0).astimezone()
 TODAY = NOW.date()
 
 
@@ -60,12 +57,12 @@ def frozen_clock(monkeypatch):
     dashboard's adapters are also written against.
     """
 
-    class Frozen(datetime):
+    class Frozen(dt.datetime):
         @classmethod
         def now(cls, tz=None):
             return NOW if tz is None else NOW.astimezone(tz)
 
-    monkeypatch.setattr(today, 'datetime', Frozen)
+    monkeypatch.setattr(today, 'dt', SimpleNamespace(**vars(dt) | {'datetime': Frozen}))
 
 
 # --- reading a backend's date ------------------------------------------------
@@ -84,10 +81,10 @@ def test_a_utc_stamp_is_converted_before_its_day_is_read():
     first ten characters would move every evening's work onto tomorrow. The
     same truncation pulls yesterday evening's onto today.
     """
-    evening = datetime(2026, 7, 24, 21, 0, tzinfo=timezone(timedelta(hours=-4)))
+    evening = dt.datetime(2026, 7, 24, 21, 0, tzinfo=dt.timezone(dt.timedelta(hours=-4)))
 
-    assert today.local_date('2026-07-25T01:00:00Z', evening) == date(2026, 7, 24)
-    assert today.local_date('2026-07-24T01:00:00Z', evening) == date(2026, 7, 23)
+    assert today.local_date('2026-07-25T01:00:00Z', evening) == dt.date(2026, 7, 24)
+    assert today.local_date('2026-07-24T01:00:00Z', evening) == dt.date(2026, 7, 23)
 
 
 def test_a_plain_day_has_no_offset_to_apply_and_keeps_itself():
@@ -96,9 +93,9 @@ def test_a_plain_day_has_no_offset_to_apply_and_keeps_itself():
     Converting a day parsed as naive midnight would move it, so the branch that
     converts is the one that found a timezone.
     """
-    far_east = datetime(2026, 7, 24, 9, 0, tzinfo=timezone(timedelta(hours=13)))
+    far_east = dt.datetime(2026, 7, 24, 9, 0, tzinfo=dt.timezone(dt.timedelta(hours=13)))
 
-    assert today.local_date('2026-07-24', far_east) == date(2026, 7, 24)
+    assert today.local_date('2026-07-24', far_east) == dt.date(2026, 7, 24)
 
 
 def test_an_absent_or_unparsable_date_is_no_day_rather_than_an_error():
@@ -117,14 +114,14 @@ def test_a_plain_day_has_no_hour_rather_than_midnight():
 
 def test_an_instant_is_carried_in_local_time_with_its_offset():
     """The screen prints the hour it reads, so the stamp arrives already local."""
-    evening = datetime(2026, 7, 24, 21, 0, tzinfo=timezone(timedelta(hours=-4)))
+    evening = dt.datetime(2026, 7, 24, 21, 0, tzinfo=dt.timezone(dt.timedelta(hours=-4)))
 
     assert today.instant_text('2026-07-25T01:00:00Z', evening) == '2026-07-24T21:00:00-04:00'
 
 
 def test_an_app_observation_is_already_a_datetime_and_is_read_as_one():
     """`build_state` hands evidence over parsed, not as the text it came from."""
-    seen = datetime(2026, 7, 24, 13, 0, tzinfo=UTC)
+    seen = dt.datetime(2026, 7, 24, 13, 0, tzinfo=dt.UTC)
 
     assert today.local_instant(seen, NOW) == seen
 
@@ -170,9 +167,9 @@ def test_project_items_are_listed_by_when_they_were_completed_not_touched():
 def test_a_completion_carries_the_hour_it_happened_in_local_time():
     [lane] = adapter_for('icb-projects')(ok('icb-projects', fixture('icb-projects-completed')))
 
-    first = datetime.fromisoformat(lane.grid[0].done_at)
+    first = dt.datetime.fromisoformat(lane.grid[0].done_at)
 
-    assert first == datetime(2026, 7, 24, 9, 15, tzinfo=UTC)
+    assert first == dt.datetime(2026, 7, 24, 9, 15, tzinfo=dt.UTC)
     assert first.utcoffset() == NOW.utcoffset()
 
 
@@ -283,7 +280,7 @@ def test_a_day_set_splits_into_what_is_done_and_what_is_left():
     [finished], [left] = today.set_lanes([habits_view()], NOW)
 
     assert [cell.text for cell in finished.grid] == ['Water']
-    assert datetime.fromisoformat(finished.grid[0].done_at) == datetime(2026, 7, 24, 13, 0, tzinfo=UTC)
+    assert dt.datetime.fromisoformat(finished.grid[0].done_at) == dt.datetime(2026, 7, 24, 13, 0, tzinfo=dt.UTC)
     assert [row.label for row in left.rows] == ['Floss', 'Walk']
 
 
@@ -449,7 +446,7 @@ def pursuit_state(balances, touched=()):
     }
 
 
-def done_record(pursuit: str, when: datetime, **extra) -> dict:
+def done_record(pursuit: str, when: dt.datetime, **extra) -> dict:
     return {'event': journal.Event.DONE, 'pursuit': pursuit, 'occurred_at': when.isoformat(), **extra}
 
 
@@ -460,10 +457,10 @@ def test_a_pursuit_is_done_from_either_record():
     takes its place in the order at the time its app saw it.
     """
     state = pursuit_state(balances={'build': 0.0, 'chore': 0.0, 'read': 0.0}, touched=['build'])
-    state['observed'] = {'build': NOW - timedelta(hours=2)}
+    state['observed'] = {'build': NOW - dt.timedelta(hours=2)}
     state['records'] = [
         done_record('chore', NOW),
-        done_record('read', NOW - timedelta(days=3)),
+        done_record('read', NOW - dt.timedelta(days=3)),
         {'event': journal.Event.SKIP, 'pursuit': 'read', 'occurred_at': NOW.isoformat()},
     ]
 
@@ -484,10 +481,10 @@ def test_each_entry_typed_today_is_its_own_row_with_its_minutes():
     purpose, so it gets no number rather than a zero."""
     state = pursuit_state(balances={'read': 0.0, 'chore': 0.0})
     state['records'] = [
-        done_record('read', NOW - timedelta(hours=3), duration_minutes=45),
-        done_record('chore', NOW - timedelta(hours=1)),
+        done_record('read', NOW - dt.timedelta(hours=3), duration_minutes=45),
+        done_record('chore', NOW - dt.timedelta(hours=1)),
         done_record('read', NOW, duration_minutes=30),
-        done_record('read', NOW - timedelta(days=1), duration_minutes=90),
+        done_record('read', NOW - dt.timedelta(days=1), duration_minutes=90),
     ]
 
     assert [cell.text for cell in today.pursuits_done(state, TODAY).grid] == ['read · 45 min', 'chore', 'read · 30 min']
@@ -687,5 +684,5 @@ def test_the_json_carries_both_lists_with_each_lane_in_the_contract_shape(no_bac
     assert document['schema_version'] == lanes.SCHEMA_VERSION
     [moved, *_] = lanes.from_document({'lanes': document['done']})
     assert [cell.text for cell in moved.grid] == ['chore']
-    assert datetime.fromisoformat(moved.grid[0].done_at) == NOW
+    assert dt.datetime.fromisoformat(moved.grid[0].done_at) == NOW
     assert [lane['name'] for lane in document['due']] == ['pursuits', 'review', 'labs']

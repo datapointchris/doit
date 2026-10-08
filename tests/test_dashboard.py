@@ -8,9 +8,8 @@ The module binds no paths at import time — every backend is a subprocess — s
 unlike its siblings it needs no fixture repointing at all.
 """
 
+import datetime as dt
 import json
-from datetime import date
-from datetime import datetime
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -26,7 +25,7 @@ from doit.lanes import Urgency
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'dashboard'
 
-TODAY = date(2026, 7, 24)
+TODAY = dt.date(2026, 7, 24)
 
 
 def fixture(name: str):
@@ -885,10 +884,10 @@ def test_a_paused_cycle_contributes_nothing():
 
 
 def test_a_cycle_past_its_target_pushes_harder_than_one_with_months_left():
-    relaxed = training_lane(MESO_CYCLES, date(2026, 1, 1))
+    relaxed = training_lane(MESO_CYCLES, dt.date(2026, 1, 1))
     assert relaxed.rows[0].urgency == dashboard.Urgency.NONE
 
-    late = training_lane(MESO_CYCLES, date(2026, 11, 1))
+    late = training_lane(MESO_CYCLES, dt.date(2026, 11, 1))
     assert late.rows[0].urgency == dashboard.Urgency.OVERDUE
 
 
@@ -955,7 +954,7 @@ def problem(key: str, title: str, *, machines=('archlinux',), count: int = 1, ar
         'machines': list(machines),
         'count': count,
         'is_archived': archived,
-        'last_seen_ts': last or date.today().isoformat(),
+        'last_seen_ts': last or dt.date.today().isoformat(),
     }
 
 
@@ -1048,7 +1047,7 @@ def test_the_terminal_drops_an_alert_lane_with_nothing_open(capsys) -> None:
     the one place that says something is wrong."""
     quiet = alert_lane(rows=0)
 
-    dashboard.render_lanes([quiet, dashboard.LaneView(name='tasks', title='TASKS')], date.today(), 5)
+    dashboard.render_lanes([quiet, dashboard.LaneView(name='tasks', title='TASKS')], dt.date.today(), 5)
 
     printed = capsys.readouterr().out
     assert 'PROBLEMS' not in printed
@@ -1056,7 +1055,7 @@ def test_the_terminal_drops_an_alert_lane_with_nothing_open(capsys) -> None:
 
 
 def test_an_alert_lane_with_something_open_is_drawn(capsys) -> None:
-    dashboard.render_lanes([alert_lane()], date.today(), 5)
+    dashboard.render_lanes([alert_lane()], dt.date.today(), 5)
 
     assert 'PROBLEMS' in capsys.readouterr().out
 
@@ -1068,7 +1067,7 @@ def test_an_alert_lane_that_failed_is_drawn_rather_than_dropped(capsys) -> None:
     broken = dashboard.lanemodel.unavailable('problems', 'PROBLEMS', 'fleet is not installed')
     broken.alert = True
 
-    dashboard.render_lanes([broken], date.today(), 5)
+    dashboard.render_lanes([broken], dt.date.today(), 5)
 
     assert dashboard.quiet_alert(broken) is False
     assert 'problems' in capsys.readouterr().out
@@ -1076,7 +1075,7 @@ def test_an_alert_lane_that_failed_is_drawn_rather_than_dropped(capsys) -> None:
 
 def test_json_keeps_an_alert_lane_the_terminal_would_drop() -> None:
     """A consumer asking what doit knows wants the empty answer too."""
-    document = json.loads(dashboard.lanemodel.dumps([alert_lane(rows=0)], datetime.now()))
+    document = json.loads(dashboard.lanemodel.dumps([alert_lane(rows=0)], dt.datetime.now()))
 
     assert [lane['name'] for lane in document['lanes']] == ['problems']
     assert document['lanes'][0]['alert'] is True
@@ -1084,7 +1083,7 @@ def test_json_keeps_an_alert_lane_the_terminal_would_drop() -> None:
 
 def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
     """A source emitting doit's own lane document can declare it without an adapter."""
-    document = json.loads(dashboard.lanemodel.dumps([alert_lane(), dashboard.LaneView(name='t', title='T')], datetime.now()))
+    document = json.loads(dashboard.lanemodel.dumps([alert_lane(), dashboard.LaneView(name='t', title='T')], dt.datetime.now()))
 
     read_back = dashboard.lanemodel.from_document(document)
 
@@ -1093,7 +1092,7 @@ def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
 
 def test_when_a_cell_was_done_survives_a_round_trip_through_the_contract() -> None:
     lane = dashboard.LaneView(name='t', title='T', grid=[GridCell('a', True, done_at='2026-07-24T12:00:00Z'), GridCell('b', False, '4')])
-    document = json.loads(dashboard.lanemodel.dumps([lane], datetime.now()))
+    document = json.loads(dashboard.lanemodel.dumps([lane], dt.datetime.now()))
 
     [read_back] = dashboard.lanemodel.from_document(document)
 

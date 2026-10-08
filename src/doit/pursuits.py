@@ -44,6 +44,7 @@ that domain — `icb books` knows which book, `icb tasks` knows which chore — 
 as the dashboard delegates its lanes.
 """
 
+import datetime as dt
 import json
 import math
 import os
@@ -53,9 +54,6 @@ import subprocess
 from collections.abc import Callable
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
-from datetime import datetime
-from datetime import timedelta
 from pathlib import Path
 from typing import Annotated
 from typing import NamedTuple
@@ -332,7 +330,7 @@ def load_pursuits(path: Path | None = None) -> dict:
             raise RegisterError(f'{name}: weight must be a non-negative number')
         if config.get('cadence') and parse_cadence(config['cadence']) <= 0:
             raise RegisterError(f'{name}: cadence must look like 10d / 2w / 1mo / 1y')
-        if config.get('until') and not isinstance(config['until'], date):
+        if config.get('until') and not isinstance(config['until'], dt.date):
             raise RegisterError(f'{name}: until must be a date (YYYY-MM-DD)')
         size = config.get('checkoff_minutes')
         if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size <= 0):
@@ -396,7 +394,7 @@ def load_balance_settings(path: Path | None = None) -> dict:
     return settings
 
 
-def term_ended(config: dict, today: date) -> bool:
+def term_ended(config: dict, today: dt.date) -> bool:
     """Whether a time-boxed pursuit is past its `until` date."""
     until = config.get('until')
     if not until:
@@ -404,7 +402,7 @@ def term_ended(config: dict, today: date) -> bool:
     return bool(until < today)
 
 
-def is_active(config: dict, today: date) -> bool:
+def is_active(config: dict, today: dt.date) -> bool:
     """Paused, term-ended, and zero-weight pursuits stay in the file but out of the draw."""
     return not config.get('paused') and not term_ended(config, today) and config.get('weight', 0) > 0
 
@@ -433,7 +431,7 @@ def records_by_pursuit(records: list[dict]) -> dict[str, list[dict]]:
     return found
 
 
-def zero_point(reset: datetime | None, now: datetime, interval: float, window: float | None) -> datetime:
+def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, window: float | None) -> dt.datetime:
     """When a pursuit's balance starts counting.
 
     An explicit ``doit pursuits reset`` sets it. Without one the origin is a
@@ -452,13 +450,13 @@ def zero_point(reset: datetime | None, now: datetime, interval: float, window: f
     the credit side cannot answer for is a debt that grows by construction, on
     the pursuit most reliably done.
     """
-    opened = reset if reset is not None else now - timedelta(days=0.0 if math.isinf(interval) else interval)
+    opened = reset if reset is not None else now - dt.timedelta(days=0.0 if math.isinf(interval) else interval)
     if window is None:
         return opened
-    return max(opened, now - timedelta(days=window))
+    return max(opened, now - dt.timedelta(days=window))
 
 
-def completed_since(records: list[dict], app_days: list[date], now: datetime, origin: datetime, minutes: float | None) -> float:
+def completed_since(records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None) -> float:
     """Everything done since ``origin``, in the pursuit's own unit.
 
     A typed entry contributes the duration it carries where a checkoff size is
@@ -489,14 +487,14 @@ def completed_since(records: list[dict], app_days: list[date], now: datetime, or
     return total
 
 
-def merged_span_days(spans: list[tuple[datetime, datetime]]) -> float:
+def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
     """Total days covered by a set of possibly overlapping spans.
 
     Renewing a skip before the last one expires is the ordinary case, and adding
     the two lengths would take the same fortnight off the clock twice.
     """
     total = 0.0
-    reached: datetime | None = None
+    reached: dt.datetime | None = None
     for start, finish in sorted(spans):
         begin = start if reached is None or start > reached else reached
         if finish <= begin:
@@ -506,7 +504,7 @@ def merged_span_days(spans: list[tuple[datetime, datetime]]) -> float:
     return total
 
 
-def skipped_days(records: list[dict], now: datetime, origin: datetime) -> float:
+def skipped_days(records: list[dict], now: dt.datetime, origin: dt.datetime) -> float:
     """Days inside the balance window that a skip took out of the schedule.
 
     A pass is a decision not to do the thing, never a decision to owe it later, so
@@ -525,7 +523,7 @@ def skipped_days(records: list[dict], now: datetime, origin: datetime) -> float:
     return merged_span_days(spans)
 
 
-def skip_expiry(records: list[dict]) -> datetime | None:
+def skip_expiry(records: list[dict]) -> dt.datetime | None:
     """When the newest skip on record runs out, or None where none does.
 
     The newest rather than the one reaching furthest, so a later skip can shorten
@@ -533,8 +531,8 @@ def skip_expiry(records: list[dict]) -> datetime | None:
     maximum expiry instead makes a mistyped `--for 1y` unreachable by any command
     the tool ships, on an append-only file that is never rewritten.
     """
-    newest: datetime | None = None
-    expires: datetime | None = None
+    newest: dt.datetime | None = None
+    expires: dt.datetime | None = None
     for record in records:
         if record.get('event') != journal.Event.SKIP:
             continue
@@ -549,9 +547,9 @@ def skip_expiry(records: list[dict]) -> datetime | None:
 
 def build_state(
     pursuits: dict,
-    now: datetime,
+    now: dt.datetime,
     records: list[dict] | None = None,
-    observed: dict[str, datetime] | None = None,
+    observed: dict[str, dt.datetime] | None = None,
     balance_settings: dict | None = None,
 ) -> dict:
     """Everything the draw and every view need: rates, intervals, urgency, weights.
@@ -617,7 +615,7 @@ def build_state(
     # backend has to count what that backend saw as well as what got retyped.
     mine = records_by_pursuit(records)
     reset_at = latest_occurrence(records, journal.Event.RESET)
-    origins: dict[str, datetime] = {}
+    origins: dict[str, dt.datetime] = {}
     balances: dict[str, float] = {}
     suppressed: set[str] = set()
     for name, config in active.items():
@@ -742,7 +740,7 @@ def compute_draw(state: dict, seed: int | None = None) -> dict:
     }
 
 
-def load_cached_draw(now: datetime) -> dict | None:
+def load_cached_draw(now: dt.datetime) -> dict | None:
     """The draw from the last few minutes, or None once it has aged out.
 
     A payload carrying no `offered` list is treated as expired. The cache holds a
@@ -756,7 +754,7 @@ def load_cached_draw(now: datetime) -> dict | None:
     except json.JSONDecodeError:
         return None
     created = journal.parse_time(cached.get('created_at'))
-    if created is None or now - created > timedelta(minutes=CACHE_MINUTES):
+    if created is None or now - created > dt.timedelta(minutes=CACHE_MINUTES):
         return None
     return cached if isinstance(cached.get('offered'), list) else None
 
@@ -766,7 +764,7 @@ def save_cached_draw(payload: dict) -> None:
     DRAW_CACHE.write_text(json.dumps(payload, indent=2) + '\n')
 
 
-def mark_logged(name: str, now: datetime) -> None:
+def mark_logged(name: str, now: dt.datetime) -> None:
     """Note that a pursuit has been done against the standing draw.
 
     Marked rather than dropped, and the draw kept rather than discarded. A log
@@ -1004,7 +1002,7 @@ def todays_context() -> list[str]:
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
         return []
 
-    today = date.today()
+    today = dt.date.today()
     lines = []
     for event in (payload.get('events') or {}).get('items') or []:
         when = journal.parse_time(event.get('date'))
@@ -1014,7 +1012,7 @@ def todays_context() -> list[str]:
         due = countdown.get('due_date')
         if not due:
             continue
-        days = (date.fromisoformat(due) - today).days
+        days = (dt.date.fromisoformat(due) - today).days
         if 0 <= days <= 14:
             lines.append(f'{countdown.get("name", "")} in {days}d')
     return lines
@@ -1316,7 +1314,7 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
         return 1
     write_names_cache(pursuits)
 
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     state = build_state(pursuits, now)
     if not state['active']:
         console.print('Every pursuit is paused or past its term.')
@@ -1547,14 +1545,14 @@ def prompt_for_minutes() -> int:
         error_console.print('  A whole number of minutes.')
 
 
-def parse_ago(token: str) -> timedelta | None:
+def parse_ago(token: str) -> dt.timedelta | None:
     """'3h' → 3 hours, '2d' → 2 days, '90m' → 90 minutes. None if unparsable."""
     units = {'m': 'minutes', 'h': 'hours', 'd': 'days', 'w': 'weeks'}
     number = ''.join(character for character in token if character.isdigit())
     unit = ''.join(character for character in token if character.isalpha()) or 'h'
     if not number or unit not in units:
         return None
-    return timedelta(**{units[unit]: int(number)})
+    return dt.timedelta(**{units[unit]: int(number)})
 
 
 def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_yes: bool) -> dict | None:
@@ -1594,7 +1592,7 @@ def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_
     return {'command': command, 'ran': True, 'exit_code': result.returncode}
 
 
-def record_event(event: str, name: str, state: dict | None, extra: dict, now: datetime | None = None) -> dict:
+def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt.datetime | None = None) -> dict:
     """Append one journal entry, carrying the state that produced it where there is one.
 
     The state vector is written into a record on purpose. Weights change, and
@@ -1606,7 +1604,7 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: da
     vector describes the whole register, so a run writing several records would
     otherwise put the same payload in each of them.
     """
-    now = now or (state['now'] if state else datetime.now().astimezone())
+    now = now or (state['now'] if state else dt.datetime.now().astimezone())
     record = {
         'id': new_id(now),
         'pursuit': name,
@@ -1657,7 +1655,7 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
         error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
         return 1
 
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     # Read before the prompt rather than after: this is a file read, where
     # build_state is a round trip to every backend, and the question should
     # appear at typing speed.
@@ -1771,7 +1769,7 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
     if not pursuits:
         error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
         return 1
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     cached = load_cached_draw(now) or {}
     try:
         if name is None:
@@ -1790,7 +1788,7 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
 
     state = build_state(pursuits, now)
     span = skip_span(duration, state['intervals'].get(matched))
-    expires = now + timedelta(days=span)
+    expires = now + dt.timedelta(days=span)
     record_event(journal.Event.SKIP, matched, state, {'expires_at': expires.isoformat(), 'draw_id': cached.get('draw_id')})
     # The pass only means something against a new draw, and the span it covers is
     # already in the journal, so the stale cache goes.
@@ -1818,7 +1816,7 @@ def cmd_resume(name: str | None) -> int:
     if not pursuits:
         error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
         return 1
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     if name is None:
         state = build_state(pursuits, now)
         chosen = list(state['suppressed'])
@@ -1888,7 +1886,7 @@ def cmd_reset(name: str | None, assume_yes: bool) -> int:
             return 1
         chosen = [matched]
 
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     state = build_state(pursuits, now)
     for index, pursuit in enumerate(chosen):
         # The state vector goes on the first record of the run only. It describes
@@ -1922,7 +1920,7 @@ def cmd_list(as_json: bool) -> int:
         console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
         return 1
     write_names_cache(pursuits)
-    state = build_state(pursuits, datetime.now().astimezone())
+    state = build_state(pursuits, dt.datetime.now().astimezone())
 
     if as_json:
         # See cmd_next: a Console would soft-wrap this into invalid JSON.
@@ -2004,7 +2002,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     claim it never made.
     """
     now = state['now']
-    cutoff = now - timedelta(days=days)
+    cutoff = now - dt.timedelta(days=days)
     sizes = declared_minutes(pursuits)
     mine = records_by_pursuit(state['records'])
     counts = load_counts(JOURNAL_DIR)
@@ -2047,7 +2045,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     return rows
 
 
-def in_window(record: dict, cutoff: datetime) -> bool:
+def in_window(record: dict, cutoff: dt.datetime) -> bool:
     """Whether a record happened inside the reporting window.
 
     A record whose timestamp will not parse is outside it, matching
@@ -2105,7 +2103,7 @@ def cmd_drift(days: int, as_json: bool) -> int:
     pursuits = load_pursuits()
     if not pursuits:
         return 1
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     state = build_state(pursuits, now)
     rows = drift_rows(pursuits, state, days)
 
@@ -2132,7 +2130,7 @@ def cmd_drift(days: int, as_json: bool) -> int:
 def cmd_dormant() -> int:
     """Pursuits gone quiet for far longer than their own weight implies."""
     pursuits = load_pursuits()
-    state = build_state(pursuits, datetime.now().astimezone())
+    state = build_state(pursuits, dt.datetime.now().astimezone())
     stale = []
     for name in state['active']:
         elapsed = state['days_since'][name]
@@ -2165,7 +2163,7 @@ def cmd_evidence(as_json: bool = False) -> int:
     pursuits = load_pursuits()
     if not pursuits:
         return 1
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     active = {name: config for name, config in pursuits.items() if is_active(config, now.date())}
     observations = evidence.refresh(active, CACHE_DIR, now, force=True)
     seen = evidence.observed(observations)

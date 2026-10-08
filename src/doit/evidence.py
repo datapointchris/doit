@@ -27,12 +27,11 @@ Each answer keeps the dates it was built from as well as the latest of them, so 
 reader asking how often a pursuit happens has something to ask.
 """
 
+import datetime as dt
 import json
 import shlex
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
-from datetime import datetime
 from pathlib import Path
 
 from doit.journal import parse_time
@@ -133,7 +132,7 @@ def rows_of(document, items_key: str | None) -> list:
     return document if isinstance(document, list) else []
 
 
-def aware(when: datetime | None, now: datetime) -> datetime | None:
+def aware(when: dt.datetime | None, now: dt.datetime) -> dt.datetime | None:
     """A backend's timestamp in a comparable form.
 
     Some answer with an offset and some without, and a naive one compared against
@@ -145,7 +144,7 @@ def aware(when: datetime | None, now: datetime) -> datetime | None:
     return when if when.tzinfo is not None else when.replace(tzinfo=now.tzinfo)
 
 
-def stamps_in(document, config: dict, now: datetime) -> list[datetime]:
+def stamps_in(document, config: dict, now: dt.datetime) -> list[dt.datetime]:
     """Every timestamp among the rows that count, comparable.
 
     One read of the rows feeds both fields an answer records. A second parser
@@ -158,13 +157,13 @@ def stamps_in(document, config: dict, now: datetime) -> list[datetime]:
     return [stamp for stamp in stamps if stamp is not None]
 
 
-def latest_in(document, config: dict, now: datetime) -> datetime | None:
+def latest_in(document, config: dict, now: dt.datetime) -> dt.datetime | None:
     """The most recent timestamp among the rows that count, or None."""
     found = stamps_in(document, config, now)
     return max(found) if found else None
 
 
-def dates_of(stamps: list[datetime], now: datetime, window: int = OCCURRENCE_WINDOW_DAYS) -> list[str]:
+def dates_of(stamps: list[dt.datetime], now: dt.datetime, window: int = OCCURRENCE_WINDOW_DAYS) -> list[str]:
     """The distinct local dates inside the window, oldest first.
 
     Dates rather than a count of rows, because row counts are not commensurable
@@ -181,7 +180,7 @@ def dates_of(stamps: list[datetime], now: datetime, window: int = OCCURRENCE_WIN
     return sorted(day.isoformat() for day in days if 0 <= (today - day).days < window)
 
 
-def read_files(name: str, directory: str, now: datetime) -> tuple[str, dict]:
+def read_files(name: str, directory: str, now: dt.datetime) -> tuple[str, dict]:
     """When a pursuit whose output is files last produced one.
 
     For practices that write rather than tick something off in an app — a journal
@@ -197,7 +196,7 @@ def read_files(name: str, directory: str, now: datetime) -> tuple[str, dict]:
     root = Path(directory).expanduser()
     try:
         stamps = [
-            datetime.fromtimestamp(child.stat().st_mtime).astimezone()
+            dt.datetime.fromtimestamp(child.stat().st_mtime).astimezone()
             for child in root.iterdir()
             if child.is_file() and not child.name.startswith('.')
         ]
@@ -210,7 +209,7 @@ def read_files(name: str, directory: str, now: datetime) -> tuple[str, dict]:
     return name, entry
 
 
-def read_one(name: str, config: dict, now: datetime) -> tuple[str, dict]:
+def read_one(name: str, config: dict, now: dt.datetime) -> tuple[str, dict]:
     """Ask one app when this pursuit last happened.
 
     Never `shell=True`: the command comes from a config file, and a tool that
@@ -248,7 +247,7 @@ def read_one(name: str, config: dict, now: datetime) -> tuple[str, dict]:
     return name, entry
 
 
-def stale(entry: dict | None, now: datetime, ttl: float) -> bool:
+def stale(entry: dict | None, now: dt.datetime, ttl: float) -> bool:
     if not entry:
         return True
     checked = parse_time(entry.get('checked_at'))
@@ -260,7 +259,7 @@ def stale(entry: dict | None, now: datetime, ttl: float) -> bool:
 def refresh(
     pursuits: dict,
     directory: Path,
-    now: datetime,
+    now: dt.datetime,
     force: bool = False,
     ttl: float = REFRESH_TTL_SECONDS,
 ) -> dict:
@@ -301,7 +300,7 @@ def refresh(
     return payload
 
 
-def observed(payload: dict) -> dict[str, datetime]:
+def observed(payload: dict) -> dict[str, dt.datetime]:
     """Pursuit to when its app last saw it happen."""
     found = {}
     for name, entry in (payload.get('pursuits') or {}).items():
@@ -311,7 +310,7 @@ def observed(payload: dict) -> dict[str, datetime]:
     return found
 
 
-def occurrences(payload: dict) -> dict[str, list[date]]:
+def occurrences(payload: dict) -> dict[str, list[dt.date]]:
     """Pursuit to the distinct local dates its app reported something on.
 
     An answer carrying no dates reads as an empty window rather than as damage,
@@ -326,7 +325,7 @@ def occurrences(payload: dict) -> dict[str, list[date]]:
         parsed = []
         for value in days:
             try:
-                parsed.append(date.fromisoformat(str(value)))
+                parsed.append(dt.date.fromisoformat(str(value)))
             except ValueError:
                 continue
         if parsed:
@@ -334,7 +333,7 @@ def occurrences(payload: dict) -> dict[str, list[date]]:
     return found
 
 
-def merged(typed: dict[str, datetime], seen: dict[str, datetime]) -> dict[str, datetime]:
+def merged(typed: dict[str, dt.datetime], seen: dict[str, dt.datetime]) -> dict[str, dt.datetime]:
     """The later of what you logged and what the app observed, per pursuit.
 
     Later rather than either alone: logging by hand stays meaningful for the

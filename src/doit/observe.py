@@ -29,11 +29,11 @@ rather than done once for everyone — updating this box's packages, checking it
 PATH — must set ``scope: machine``, or the other desk doing it clears it here.
 """
 
+import datetime as dt
 import json
 import os
 import re
 import subprocess
-from datetime import date
 from functools import cache
 from pathlib import Path
 from typing import NamedTuple
@@ -159,7 +159,7 @@ def zsh_invocations() -> tuple[Invocation, ...]:
     for line in text.splitlines():
         match = HISTORY_LINE.match(line)
         if match:
-            when = date.fromtimestamp(int(match.group(1))).isoformat()
+            when = dt.date.fromtimestamp(int(match.group(1))).isoformat()
             entries.append(Invocation(when, here, match.group(2).strip()))
     return tuple(entries)
 

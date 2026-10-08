@@ -25,11 +25,11 @@ or a subprocess follows from where the owner lives, and is not a distinction thi
 module makes.
 """
 
+import datetime as dt
 import json
 import shutil
 import subprocess
 from collections.abc import Callable
-from datetime import date
 from typing import Annotated
 
 import typer
@@ -439,7 +439,7 @@ def measured(source: list[str] | None) -> list[usage.Row]:
     return rows
 
 
-def emit_rows(rows: list[usage.Row], today: date) -> None:
+def emit_rows(rows: list[usage.Row], today: dt.date) -> None:
     """The rows as JSON on stdout, which is the only thing that goes there."""
     print(
         json.dumps(
@@ -459,7 +459,7 @@ def emit_rows(rows: list[usage.Row], today: date) -> None:
     )
 
 
-def render_rows(rows: list[usage.Row], today: date) -> None:
+def render_rows(rows: list[usage.Row], today: dt.date) -> None:
     """One line per thing you can type, with the handle first.
 
     The handle column is capped rather than sized to the longest row: one
@@ -479,7 +479,7 @@ def render_rows(rows: list[usage.Row], today: date) -> None:
 
 def cmd_usage(as_json: bool, source: list[str] | None) -> int:
     """Rank everything you own by how often you reach for it."""
-    today = date.today()
+    today = dt.date.today()
     rows = usage.by_frequency(measured(source))
     if as_json:
         emit_rows(rows, today)
@@ -498,7 +498,7 @@ def cmd_usage(as_json: bool, source: list[str] | None) -> int:
 
 def cmd_unused(as_json: bool, source: list[str] | None, days: int, minimum: int) -> int:
     """List what you own, can run, and never do."""
-    today = date.today()
+    today = dt.date.today()
     rows = usage.by_staleness(usage.unused(measured(source), days=days, minimum=minimum, today=today))
     if as_json:
         emit_rows(rows, today)

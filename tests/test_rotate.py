@@ -8,7 +8,7 @@ below is one of those.
 No test reads the real state dir; each points ROTATION_DIR at a tmp_path.
 """
 
-from datetime import date
+import datetime as dt
 
 import pytest
 
@@ -35,7 +35,7 @@ def ran(command: str, when: str) -> Invocation:
     return Invocation(when, 'archlinux', command)
 
 
-TODAY = date(2026, 8, 17)
+TODAY = dt.date(2026, 8, 17)
 RECENT = '2026-08-16'
 LONG_AGO = '2020-01-01'
 
@@ -68,8 +68,8 @@ def test_never_shown_leads_and_the_name_breaks_the_tie():
 
 def test_the_row_shown_longest_ago_comes_round_before_a_recent_one():
     entries = [binding('alpha'), binding('zulu')]
-    rotate.record('tmux', entries[0], date(2026, 8, 16))
-    rotate.record('tmux', entries[1], date(2020, 1, 1))
+    rotate.record('tmux', entries[0], dt.date(2026, 8, 16))
+    rotate.record('tmux', entries[1], dt.date(2020, 1, 1))
 
     assert rotate.next_up('tmux', entries, []).name == 'zulu'
 

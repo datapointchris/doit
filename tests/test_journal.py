@@ -6,15 +6,14 @@ Syncthing failure the design exists to avoid, and a regression would look like
 working code right up until the day a second machine logged something.
 """
 
+import datetime as dt
 import json
 import random
-from datetime import datetime
-from datetime import timedelta
 from pathlib import Path
 
 from doit import journal
 
-NOW = datetime.fromisoformat('2026-08-04T12:00:00-04:00')
+NOW = dt.datetime.fromisoformat('2026-08-04T12:00:00-04:00')
 
 
 def write_entries(directory: Path, machine: str, entries: list[dict]) -> Path:
@@ -28,7 +27,7 @@ def entry(pursuit: str, event: str = 'done', days_ago: float = 0.0, **extra) -> 
     return {
         'pursuit': pursuit,
         'event': event,
-        'occurred_at': (NOW - timedelta(days=days_ago)).isoformat(),
+        'occurred_at': (NOW - dt.timedelta(days=days_ago)).isoformat(),
         **extra,
     }
 
@@ -77,14 +76,14 @@ def test_read_all_on_an_empty_directory(tmp_path):
 def test_latest_occurrence_takes_the_most_recent_per_pursuit(tmp_path):
     write_entries(tmp_path, 'mbp', [entry('chores', days_ago=9), entry('chores', days_ago=2)])
     latest = journal.latest_occurrence(journal.read_all(tmp_path), 'done')
-    assert latest['chores'] == NOW - timedelta(days=2)
+    assert latest['chores'] == NOW - dt.timedelta(days=2)
 
 
 def test_latest_occurrence_separates_event_kinds(tmp_path):
     write_entries(tmp_path, 'mbp', [entry('cs', 'done', 9), entry('cs', 'skip', 1)])
     records = journal.read_all(tmp_path)
-    assert journal.latest_occurrence(records, 'done')['cs'] == NOW - timedelta(days=9)
-    assert journal.latest_occurrence(records, 'skip')['cs'] == NOW - timedelta(days=1)
+    assert journal.latest_occurrence(records, 'done')['cs'] == NOW - dt.timedelta(days=9)
+    assert journal.latest_occurrence(records, 'skip')['cs'] == NOW - dt.timedelta(days=1)
 
 
 def test_days_since_reports_none_for_a_pursuit_never_logged(tmp_path):
@@ -165,7 +164,7 @@ def test_counts_of_an_empty_directory(tmp_path):
 def test_new_id_is_time_ordered():
     rng = random.Random(3)
     earlier = journal.new_id(NOW, rng)
-    later = journal.new_id(NOW + timedelta(seconds=1), rng)
+    later = journal.new_id(NOW + dt.timedelta(seconds=1), rng)
     assert earlier < later
 
 
@@ -187,7 +186,7 @@ def test_appended_records_are_valid_json_lines(tmp_path):
     assert parsed['note'] == 'has "quotes" and, commas'
 
 
-def done_at(pursuit: str, when: datetime) -> dict:
+def done_at(pursuit: str, when: dt.datetime) -> dict:
     return {'pursuit': pursuit, 'event': 'done', 'occurred_at': when.isoformat()}
 
 

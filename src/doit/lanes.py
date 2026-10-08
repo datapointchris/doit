@@ -21,10 +21,10 @@ by a boolean without growing conditionals, and it puts the burden on the consume
 forever rather than on the producer once.
 """
 
+import datetime as dt
 import json
 from dataclasses import dataclass
 from dataclasses import field
-from datetime import datetime
 from enum import StrEnum
 from typing import TypeGuard
 
@@ -181,7 +181,7 @@ def from_document(payload: object) -> list[Lane]:
     return [lane_from(lane) for lane in payload['lanes'] if isinstance(lane, dict) and lane.get('name')]
 
 
-def to_document(lanes: list[Lane], generated_at: datetime) -> dict:
+def to_document(lanes: list[Lane], generated_at: dt.datetime) -> dict:
     """The contract, as doit emits it.
 
     This is also the worked example: a source wanting a lane here can run
@@ -194,7 +194,7 @@ def to_document(lanes: list[Lane], generated_at: datetime) -> dict:
     }
 
 
-def timestamp(generated_at: datetime) -> str:
+def timestamp(generated_at: dt.datetime) -> str:
     """A document's timestamp, always with an offset.
 
     Coerced here rather than at each caller: a stamp with no offset cannot be
@@ -222,5 +222,5 @@ def lane_to_dict(lane: Lane) -> dict:
     }
 
 
-def dumps(lanes: list[Lane], generated_at: datetime) -> str:
+def dumps(lanes: list[Lane], generated_at: dt.datetime) -> str:
     return json.dumps(to_document(lanes, generated_at), indent=2)

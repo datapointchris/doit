@@ -20,11 +20,11 @@ the reader reads — which is why nothing here resolves a second path or links o
 into the other.
 """
 
+import datetime as dt
 import json
 import os
 import random
 import subprocess
-from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -108,7 +108,7 @@ def statuses() -> list[dict]:
     """
     labs = load_labs()
     state = load_state(STATE)
-    today = date.today()
+    today = dt.date.today()
     rows = []
     for lab_id, meta in labs.items():
         cadence = meta['cadence']
@@ -237,7 +237,7 @@ def cmd_done(lab_id: str) -> int:
     labs = load_labs()
     if lab_id not in labs:
         return unknown_lab(lab_id)
-    today = date.today().isoformat()
+    today = dt.date.today().isoformat()
     state = load_state(STATE)
     state[lab_id] = today
     save_state(STATE, state)

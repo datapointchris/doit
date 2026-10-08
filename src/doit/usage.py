@@ -28,10 +28,9 @@ only what you ran at a prompt — work driven through an agent or an editor leav
 no trace here, by design.
 """
 
+import datetime as dt
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date
-from datetime import timedelta
 
 from doit.index import Entry
 from doit.index import build_index
@@ -104,9 +103,9 @@ class Row:
     count: int
     last: str
 
-    def days_since(self, today: date) -> int | None:
+    def days_since(self, today: dt.date) -> int | None:
         """Days since it last ran, or None if it never has."""
-        return None if not self.last else (today - date.fromisoformat(self.last)).days
+        return None if not self.last else (today - dt.date.fromisoformat(self.last)).days
 
 
 def literal_prefix(invocation: str) -> str:
@@ -210,9 +209,9 @@ def measure(entries: list[Entry] | None = None, invocations: tuple[Invocation, .
     return rows
 
 
-def unused(rows: list[Row], days: int = DEFAULT_DAYS, minimum: int = 1, today: date | None = None) -> list[Row]:
+def unused(rows: list[Row], days: int = DEFAULT_DAYS, minimum: int = 1, today: dt.date | None = None) -> list[Row]:
     """The tail: never run, run fewer than ``minimum`` times, or gone cold."""
-    cutoff = ((today or date.today()) - timedelta(days=days)).isoformat()
+    cutoff = ((today or dt.date.today()) - dt.timedelta(days=days)).isoformat()
     return [row for row in rows if row.count < minimum or row.last < cutoff]
 
 

@@ -34,10 +34,9 @@ Not to be confused with `fleet info`, which is the dev brief across *repos* for
 a coding session. Same plumbing, different audience.
 """
 
+import datetime as dt
 import math
 from collections.abc import Callable
-from datetime import date
-from datetime import datetime
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -209,7 +208,7 @@ def describe(title: str, detail: str) -> str:
     return f'{title} — {detail}' if detail else title
 
 
-def build_tasks_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_tasks_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     payload, reason = icb_context(results, ('tasks',))
     if payload is None:
         return unavailable('tasks', 'TASKS', reason)
@@ -241,7 +240,7 @@ def build_tasks_lane(results: dict[str, sources.Result], today: date) -> LaneVie
     )
 
 
-def build_habits_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_habits_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     payload, reason = icb_context(results, ('habits',))
     if payload is None:
         return unavailable('habits', 'HABITS', reason)
@@ -291,7 +290,7 @@ def habit_sort_key(habit: dict, completed: bool) -> tuple[int, int]:
     return (0, habit_id)
 
 
-def build_books_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_books_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     payload, reason = icb_context(results, ('books',))
     if payload is None:
         return unavailable('books', 'BOOKS', reason)
@@ -323,7 +322,7 @@ def book_row(label: str, book: dict) -> Row:
     return Row(label, clean(book.get('title', '')), clean(book.get('author', '')), handle=view_handle('icb books show', book))
 
 
-def build_articles_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_articles_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     payload, reason = icb_context(results, ('articles',))
     if payload is None:
         return unavailable('articles', 'ARTICLES', reason)
@@ -346,7 +345,7 @@ def build_articles_lane(results: dict[str, sources.Result], today: date) -> Lane
     )
 
 
-def article_reading(section: dict, today: date) -> str:
+def article_reading(section: dict, today: dt.date) -> str:
     """Whether the pile is moving, appended to the unread count.
 
     Three states rather than one number, because the useful fact changes with the
@@ -368,10 +367,10 @@ def article_reading(section: dict, today: date) -> str:
     return f' · last read {pursuits.format_elapsed(elapsed)}'
 
 
-def days_away_from(timestamp: str, today: date) -> float | None:
+def days_away_from(timestamp: str, today: dt.date) -> float | None:
     """Days between a stamp and today, for the elapsed formatter."""
     try:
-        return float((today - date.fromisoformat(str(timestamp)[:10])).days)
+        return float((today - dt.date.fromisoformat(str(timestamp)[:10])).days)
     except ValueError:
         return None
 
@@ -385,7 +384,7 @@ def article_row(label: str, article: dict) -> Row:
     )
 
 
-def build_projects_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_projects_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     payload, reason = icb_context(results, ('project_items',))
     if payload is None:
         return unavailable('projects', 'PROJECTS', reason)
@@ -428,7 +427,7 @@ def project_item_row(label: str, item: dict) -> Row:
     )
 
 
-def build_upcoming_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_upcoming_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     payload, reason = icb_context(results, ('countdowns', 'events'))
     if payload is None:
         return unavailable('upcoming', 'UPCOMING', reason)
@@ -464,7 +463,7 @@ def build_upcoming_lane(results: dict[str, sources.Result], today: date) -> Lane
     )
 
 
-def build_learning_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_learning_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     result = results.get('learning')
     if result is None or not isinstance(result.payload, dict):
         return unavailable('learning', 'LEARNING', sources.reason('learning', result))
@@ -510,7 +509,7 @@ def build_learning_lane(results: dict[str, sources.Result], today: date) -> Lane
     )
 
 
-def build_training_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_training_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     """meso's cycles, as the training that is currently prescribed.
 
     Named for the training rather than for meso, which is the tool that supplies
@@ -538,7 +537,7 @@ def build_training_lane(results: dict[str, sources.Result], today: date) -> Lane
         target = cycle.get('target_date')
         urgency = Urgency.NONE
         if isinstance(target, str):
-            remaining = (date.fromisoformat(target) - today).days
+            remaining = (dt.date.fromisoformat(target) - today).days
             urgency = Urgency.OVERDUE if remaining < 0 else Urgency.DUE if remaining <= 14 else Urgency.NONE
         for workout in cycle.get('workouts') or []:
             if not isinstance(workout, dict):
@@ -568,7 +567,7 @@ def meso_adapter(result: sources.Result) -> list[LaneView]:
     """meso's cycle model, as one lane. Named for the source it reads, like every
     other adapter, because `adapter:` in sources.yml answers "whose model is
     this" — the lane it builds is named for its subject instead."""
-    return [build_training_lane({'meso': result}, date.today())]
+    return [build_training_lane({'meso': result}, dt.date.today())]
 
 
 def resource_row(label: str, resource: dict, note: str = '') -> Row:
@@ -597,7 +596,7 @@ def track_rows(focuses: list[dict], seen: set) -> list[Row]:
     return rows
 
 
-def build_maintenance_lane(results: dict[str, sources.Result], today: date) -> LaneView:
+def build_maintenance_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     review = results.get('review')
     labs = results.get('labs')
 
@@ -750,19 +749,19 @@ def event_date(timestamp: str) -> str:
     """The calendar date of an RFC3339 event timestamp, for sorting alongside
     countdowns, which carry a bare date."""
     try:
-        return datetime.fromisoformat(timestamp).astimezone().date().isoformat()
+        return dt.datetime.fromisoformat(timestamp).astimezone().date().isoformat()
     except ValueError:
         return timestamp[:10]
 
 
-def days_away(due: str, today: date) -> int | None:
+def days_away(due: str, today: dt.date) -> int | None:
     try:
-        return (date.fromisoformat(due) - today).days
+        return (dt.date.fromisoformat(due) - today).days
     except ValueError:
         return None
 
 
-def relative_day(due: str, today: date) -> str:
+def relative_day(due: str, today: dt.date) -> str:
     """A gutter-width distance. Past a season out the label changes unit, never
     format, so every row in the lane still answers the same question."""
     delta = days_away(due, today)
@@ -774,19 +773,19 @@ def relative_day(due: str, today: date) -> str:
         return f'{-delta}d ago'
     if delta <= RELATIVE_DAYS_LIMIT:
         return f'in {delta}d'
-    target = date.fromisoformat(due)
+    target = dt.date.fromisoformat(due)
     months = (target.year - today.year) * 12 + (target.month - today.month)
     return f'in {months}mo'
 
 
 def calendar_day(due: str) -> str:
     try:
-        return date.fromisoformat(due).strftime('%d %b %Y')
+        return dt.date.fromisoformat(due).strftime('%d %b %Y')
     except ValueError:
         return due
 
 
-def day_urgency(due: str, today: date) -> Urgency:
+def day_urgency(due: str, today: dt.date) -> Urgency:
     delta = days_away(due, today)
     if delta is None:
         return Urgency.NONE
@@ -814,7 +813,7 @@ LOCAL_LANES = ('maintenance', 'kit')
 
 def icb_adapter(result: sources.Result) -> list[LaneView]:
     """icb's overview model, as lanes. Unregistered the day icb emits them."""
-    today = date.today()
+    today = dt.date.today()
     return [build({'icb': result}, today) for _, build in ICB_LANES]
 
 
@@ -924,7 +923,7 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
-def elapsed_label(timestamp: object, today: date) -> str:
+def elapsed_label(timestamp: object, today: dt.date) -> str:
     """How long a problem has been standing, short enough for the label column."""
     elapsed = days_away_from(str(timestamp), today) if timestamp else None
     if elapsed is None:
@@ -959,7 +958,7 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
         broken.alert = True
         return [broken]
 
-    today = date.today()
+    today = dt.date.today()
     open_problems = [row for row in payload if isinstance(row, dict) and not row.get('is_archived')]
     rows = [
         Row(
@@ -987,7 +986,7 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
 
 def learning_adapter(result: sources.Result) -> list[LaneView]:
     """learning's overview model, as one lane."""
-    return [build_learning_lane({'learning': result}, date.today())]
+    return [build_learning_lane({'learning': result}, dt.date.today())]
 
 
 # Every adapter doit ships, with the lanes each one can name. One table rather
@@ -1030,7 +1029,7 @@ def local_lanes() -> list[LaneView]:
     dashboard that needs configuring before it can show your own register would
     be configuration for its own sake."""
     results = {name: read_local(read) for name, read in LOCAL_BACKENDS.items()}
-    return [build_maintenance_lane(results, date.today()), build_kit_lane(results)]
+    return [build_maintenance_lane(results, dt.date.today()), build_kit_lane(results)]
 
 
 def lanes_of(registry: sources.Registry, results: dict[str, sources.Result], wanted: list[str] | None) -> list[LaneView]:
@@ -1084,7 +1083,7 @@ def quiet_alert(lane: LaneView) -> bool:
     return lane.alert and lane.available and not lane.rows and not lane.grid
 
 
-def render_lanes(lanes: list[LaneView], today: date, row_cap: int) -> None:
+def render_lanes(lanes: list[LaneView], today: dt.date, row_cap: int) -> None:
     width = terminal_width()
     console.rule(f'[cyan]Dashboard[/] · {today.strftime("%a %d %b")}', align='left')
 
@@ -1228,9 +1227,9 @@ def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
-        print(lanemodel.dumps(collected, datetime.now()))
+        print(lanemodel.dumps(collected, dt.datetime.now()))
     else:
-        render_lanes(collected, date.today(), row_cap)
+        render_lanes(collected, dt.date.today(), row_cap)
         standing = pursuit_standing()
         if standing:
             console.print(Text(f'  {standing}\n', style='yellow'))
@@ -1250,7 +1249,7 @@ def pursuit_standing() -> str:
         register = pursuits.load_pursuits()
         if not register:
             return ''
-        return pursuits.standing_line(pursuits.build_state(register, datetime.now().astimezone()), exclude=())
+        return pursuits.standing_line(pursuits.build_state(register, dt.datetime.now().astimezone()), exclude=())
     except (pursuits.RegisterError, OSError, ValueError):
         return ''
 

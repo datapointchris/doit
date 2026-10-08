@@ -10,11 +10,10 @@ parameter default, so an autouse fixture can repoint it — the dotfiles version
 froze the path at import and needed env vars set before the module loaded.
 """
 
+import datetime as dt
 import json
 import math
 import re
-from datetime import datetime
-from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -28,7 +27,7 @@ from doit.cli import app as cli_app
 runner = CliRunner()
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'pursuits'
-NOW = datetime.fromisoformat('2026-08-04T12:00:00-04:00')
+NOW = dt.datetime.fromisoformat('2026-08-04T12:00:00-04:00')
 
 
 @pytest.fixture(autouse=True)
@@ -58,7 +57,7 @@ def write_register(tmp_path, body: str) -> Path:
 def log_done(directory: Path, pursuit: str, days_ago: float) -> None:
     journal.append(
         journal.journal_path(directory, 'testbox'),
-        {'pursuit': pursuit, 'event': 'done', 'occurred_at': (NOW - timedelta(days=days_ago)).isoformat()},
+        {'pursuit': pursuit, 'event': 'done', 'occurred_at': (NOW - dt.timedelta(days=days_ago)).isoformat()},
     )
 
 
@@ -242,19 +241,19 @@ def test_a_just_logged_pursuit_is_never_the_heaviest_candidate(sandbox):
 
 def test_a_cached_draw_is_reused_inside_the_window(sandbox):
     pursuits.save_cached_draw({'draw_id': 'abc', 'created_at': NOW.isoformat(), 'pinned': [], 'offered': ['chores']})
-    assert pursuits.load_cached_draw(NOW + timedelta(minutes=5))['draw_id'] == 'abc'
+    assert pursuits.load_cached_draw(NOW + dt.timedelta(minutes=5))['draw_id'] == 'abc'
 
 
 def test_a_cached_draw_expires(sandbox):
     pursuits.save_cached_draw({'draw_id': 'abc', 'created_at': NOW.isoformat(), 'pinned': [], 'offered': []})
-    assert pursuits.load_cached_draw(NOW + timedelta(minutes=pursuits.CACHE_MINUTES + 1)) is None
+    assert pursuits.load_cached_draw(NOW + dt.timedelta(minutes=pursuits.CACHE_MINUTES + 1)) is None
 
 
 def stand_a_draw(offered: list[str], resolved: dict | None = None, logged: list[str] | None = None) -> None:
     """Cache a draw created now, so it is live for the rest of the window."""
     payload = {
         'draw_id': 'abc',
-        'created_at': datetime.now().astimezone().isoformat(),
+        'created_at': dt.datetime.now().astimezone().isoformat(),
         'pinned': [],
         'offered': offered,
         'resolved': resolved or {},
@@ -276,7 +275,7 @@ def test_logging_takes_the_pursuit_off_the_standing_draw(sandbox, monkeypatch):
 
     assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
 
-    cached = pursuits.load_cached_draw(datetime.now().astimezone())
+    cached = pursuits.load_cached_draw(dt.datetime.now().astimezone())
     assert pursuits.without_logged(cached)['offered'] == ['read-library']
 
 
@@ -309,7 +308,7 @@ def test_a_fully_logged_draw_is_replaced_rather_than_shown_empty(sandbox, monkey
 
     assert pursuits.cmd_next(False, False, False) == 0
 
-    assert pursuits.load_cached_draw(datetime.now().astimezone())['draw_id'] != 'abc'
+    assert pursuits.load_cached_draw(dt.datetime.now().astimezone())['draw_id'] != 'abc'
 
 
 def test_a_cached_failure_is_asked_again_without_disturbing_the_draw(sandbox, tmp_path):
@@ -398,14 +397,14 @@ def test_match_pursuit_returns_none_for_a_miss():
 
 @pytest.mark.parametrize(
     ('token', 'expected'),
-    [('90m', timedelta(minutes=90)), ('3h', timedelta(hours=3)), ('2d', timedelta(days=2)), ('1w', timedelta(weeks=1))],
+    [('90m', dt.timedelta(minutes=90)), ('3h', dt.timedelta(hours=3)), ('2d', dt.timedelta(days=2)), ('1w', dt.timedelta(weeks=1))],
 )
 def test_parse_ago_units(token, expected):
     assert pursuits.parse_ago(token) == expected
 
 
 def test_parse_ago_defaults_a_bare_number_to_hours():
-    assert pursuits.parse_ago('3') == timedelta(hours=3)
+    assert pursuits.parse_ago('3') == dt.timedelta(hours=3)
 
 
 def test_parse_ago_rejects_nonsense():
@@ -667,7 +666,7 @@ def test_logging_re_resolves_past_a_cached_failure(sandbox, tmp_path, monkeypatc
     pursuits.save_cached_draw(
         {
             'draw_id': 'abc',
-            'created_at': datetime.now().astimezone().isoformat(),
+            'created_at': dt.datetime.now().astimezone().isoformat(),
             'pinned': [],
             'offered': ['chores'],
             'resolved': {'chores': {'pursuit': 'chores', 'error': 'exited 1', 'backend': 'icb'}},
@@ -803,7 +802,7 @@ def test_record_event_writes_the_state_that_produced_it(sandbox, monkeypatch):
 def test_record_event_defaults_occurred_at_to_now_but_accepts_a_past_time(sandbox, monkeypatch):
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    earlier = (NOW - timedelta(hours=3)).isoformat()
+    earlier = (NOW - dt.timedelta(hours=3)).isoformat()
     pursuits.record_event('done', 'chores', state, {'occurred_at': earlier})
 
     record = journal.read_all(sandbox / 'state')[0]
@@ -812,8 +811,8 @@ def test_record_event_defaults_occurred_at_to_now_but_accepts_a_past_time(sandbo
 
 
 def test_term_ended_only_after_the_date():
-    assert pursuits.term_ended({'until': NOW.date() - timedelta(days=1)}, NOW.date())
-    assert not pursuits.term_ended({'until': NOW.date() + timedelta(days=1)}, NOW.date())
+    assert pursuits.term_ended({'until': NOW.date() - dt.timedelta(days=1)}, NOW.date())
+    assert not pursuits.term_ended({'until': NOW.date() + dt.timedelta(days=1)}, NOW.date())
     assert not pursuits.term_ended({}, NOW.date())
 
 
@@ -841,7 +840,7 @@ def test_the_draw_puts_every_offered_pursuit_on_the_screen(sandbox, monkeypatch,
     assert pursuits.cmd_next(False, False, True) == 0
 
     printed = capsys.readouterr().out
-    offered = pursuits.load_cached_draw(datetime.now().astimezone())['offered']
+    offered = pursuits.load_cached_draw(dt.datetime.now().astimezone())['offered']
     assert offered
     assert all(name in printed for name in offered)
 
@@ -963,23 +962,23 @@ def write_records(directory, records: list[dict]) -> None:
 
 
 def done(name: str, days_ago: float, minutes: int | None = None) -> dict:
-    record: dict = {'pursuit': name, 'event': 'done', 'occurred_at': (NOW - timedelta(days=days_ago)).isoformat()}
+    record: dict = {'pursuit': name, 'event': 'done', 'occurred_at': (NOW - dt.timedelta(days=days_ago)).isoformat()}
     if minutes is not None:
         record['duration_minutes'] = minutes
     return record
 
 
 def zeroed(name: str, days_ago: float) -> dict:
-    return {'pursuit': name, 'event': 'reset', 'occurred_at': (NOW - timedelta(days=days_ago)).isoformat()}
+    return {'pursuit': name, 'event': 'reset', 'occurred_at': (NOW - dt.timedelta(days=days_ago)).isoformat()}
 
 
 def skipped(name: str, days_ago: float, span_days: float) -> dict:
-    start = NOW - timedelta(days=days_ago)
+    start = NOW - dt.timedelta(days=days_ago)
     return {
         'pursuit': name,
         'event': 'skip',
         'occurred_at': start.isoformat(),
-        'expires_at': (start + timedelta(days=span_days)).isoformat(),
+        'expires_at': (start + dt.timedelta(days=span_days)).isoformat(),
     }
 
 
@@ -1075,8 +1074,8 @@ def test_an_evidence_backed_pursuit_is_billed_only_over_what_its_app_remembers(t
     debt by construction, on the pursuit most reliably done."""
     monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER))
     window = pursuits.evidence.OCCURRENCE_WINDOW_DAYS
-    now = datetime.now().astimezone()
-    write_records(sandbox / 'state', [{'pursuit': 'backed', 'event': 'reset', 'occurred_at': (now - timedelta(days=400)).isoformat()}])
+    now = dt.datetime.now().astimezone()
+    write_records(sandbox / 'state', [{'pursuit': 'backed', 'event': 'reset', 'occurred_at': (now - dt.timedelta(days=400)).isoformat()}])
     stub_evidence_days(monkeypatch, {'backed': [days_ago_iso(n) for n in range(window)]})
 
     state = pursuits.build_state(pursuits.load_pursuits(), now)
@@ -1495,7 +1494,7 @@ def test_resetting_a_pursuit_that_does_not_exist_writes_nothing(sandbox, monkeyp
 
 
 def log_days_ago(directory: Path, pursuit: str, count: int, minutes: int | None = None) -> None:
-    when = datetime.now().astimezone() - timedelta(days=count)
+    when = dt.datetime.now().astimezone() - dt.timedelta(days=count)
     record: dict = {'pursuit': pursuit, 'event': 'done', 'occurred_at': when.isoformat()}
     if minutes is not None:
         record['duration_minutes'] = minutes
@@ -1503,7 +1502,7 @@ def log_days_ago(directory: Path, pursuit: str, count: int, minutes: int | None 
 
 
 def days_ago_iso(count: int) -> str:
-    return (datetime.now().astimezone() - timedelta(days=count)).date().isoformat()
+    return (dt.datetime.now().astimezone() - dt.timedelta(days=count)).date().isoformat()
 
 
 def stub_evidence_days(monkeypatch, dates_by_pursuit: dict[str, list[str]]) -> None:
@@ -1607,48 +1606,48 @@ pursuits:
 def test_completed_since_counts_each_typed_entry_as_its_own_checkoff():
     """Three in one evening is three checkoffs. Collapsing them to a date is the
     burst the balance exists to credit."""
-    now = datetime.now().astimezone()
-    records = [{'pursuit': 'chores', 'event': 'done', 'occurred_at': (now - timedelta(hours=h)).isoformat()} for h in (1, 3, 5)]
+    now = dt.datetime.now().astimezone()
+    records = [{'pursuit': 'chores', 'event': 'done', 'occurred_at': (now - dt.timedelta(hours=h)).isoformat()} for h in (1, 3, 5)]
 
-    assert pursuits.completed_since(records, [], now, now - timedelta(days=1), None) == 3.0
+    assert pursuits.completed_since(records, [], now, now - dt.timedelta(days=1), None) == 3.0
 
 
 def test_completed_since_reads_a_timed_entry_as_the_minutes_it_carries():
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     records = [{'pursuit': 'read', 'event': 'done', 'occurred_at': now.isoformat(), 'duration_minutes': 20}]
 
-    assert pursuits.completed_since(records, [], now, now - timedelta(days=1), 45.0) == 20.0
+    assert pursuits.completed_since(records, [], now, now - dt.timedelta(days=1), 45.0) == 20.0
 
 
 def test_completed_since_drops_an_app_day_the_journal_already_carries():
     """One act reported by both records counts once, or logging what the app
     already saw would pay it off twice."""
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     records = [{'pursuit': 'chores', 'event': 'done', 'occurred_at': now.isoformat()}]
 
-    assert pursuits.completed_since(records, [now.date()], now, now - timedelta(days=1), None) == 1.0
+    assert pursuits.completed_since(records, [now.date()], now, now - dt.timedelta(days=1), None) == 1.0
 
 
 def test_completed_since_adds_an_app_day_the_journal_never_saw():
-    now = datetime.now().astimezone()
-    seen = [now.date() - timedelta(days=n) for n in (1, 2)]
+    now = dt.datetime.now().astimezone()
+    seen = [now.date() - dt.timedelta(days=n) for n in (1, 2)]
 
-    assert pursuits.completed_since([], seen, now, now - timedelta(days=5), None) == 2.0
+    assert pursuits.completed_since([], seen, now, now - dt.timedelta(days=5), None) == 2.0
 
 
 def test_completed_since_ignores_everything_before_the_zero_point():
-    now = datetime.now().astimezone()
-    records = [{'pursuit': 'chores', 'event': 'done', 'occurred_at': (now - timedelta(days=d)).isoformat()} for d in (1, 9)]
+    now = dt.datetime.now().astimezone()
+    records = [{'pursuit': 'chores', 'event': 'done', 'occurred_at': (now - dt.timedelta(days=d)).isoformat()} for d in (1, 9)]
 
-    assert pursuits.completed_since(records, [], now, now - timedelta(days=5), None) == 1.0
+    assert pursuits.completed_since(records, [], now, now - dt.timedelta(days=5), None) == 1.0
 
 
 def test_an_app_day_on_a_timed_pursuit_counts_one_whole_checkoff():
     """An app answers in days rather than durations, so a day it reports is one
     checkoff whatever happened inside it."""
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
 
-    assert pursuits.completed_since([], [now.date()], now, now - timedelta(days=1), 45.0) == 45.0
+    assert pursuits.completed_since([], [now.date()], now, now - dt.timedelta(days=1), 45.0) == 45.0
 
 
 def test_a_backed_pursuit_reads_the_days_its_app_reported(tmp_path, sandbox, monkeypatch):
@@ -1657,7 +1656,7 @@ def test_a_backed_pursuit_reads_the_days_its_app_reported(tmp_path, sandbox, mon
     monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER))
     stub_evidence_days(monkeypatch, {'backed': [days_ago_iso(n) for n in (0, 1, 2, 3)]})
 
-    state = pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())
+    state = pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())
 
     assert state['balance']['backed'] < 0, 'four days running against a 3-day cadence is ahead, not overdue'
     assert state['effective']['backed'] == 0.0
@@ -1669,7 +1668,7 @@ def test_a_backed_pursuit_with_no_record_anywhere_opens_one_checkoff_behind(tmp_
     monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER))
     stub_evidence_days(monkeypatch, {})
 
-    state = pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())
+    state = pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())
 
     assert state['balance']['backed'] == 1.0
     assert pursuits.pinned(state) == ['backed']
@@ -1825,7 +1824,7 @@ def test_an_unpriced_row_says_which_of_the_four_reasons_it_is():
         'today': NOW.date(),
         'pursuits': {
             'stopped': {'paused': True},
-            'expired': {'until': NOW.date() - timedelta(days=1)},
+            'expired': {'until': NOW.date() - dt.timedelta(days=1)},
             'weightless': {'weight': 0},
         },
     }
@@ -1880,11 +1879,11 @@ def test_a_backdated_log_reports_the_standing_the_next_command_will(sandbox, mon
 def test_resume_ends_a_standing_skip(sandbox, monkeypatch):
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
     assert pursuits.cmd_skip('chores', '1y') == 0
-    assert 'chores' in pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())['suppressed']
+    assert 'chores' in pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())['suppressed']
 
     assert pursuits.cmd_resume('chores') == 0
 
-    assert pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())['suppressed'] == []
+    assert pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())['suppressed'] == []
 
 
 def test_a_later_skip_shortens_an_earlier_one(sandbox, monkeypatch):
@@ -1894,7 +1893,7 @@ def test_a_later_skip_shortens_an_earlier_one(sandbox, monkeypatch):
     assert pursuits.cmd_skip('chores', '1y') == 0
     assert pursuits.cmd_skip('chores', '1d') == 0
 
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     own = pursuits.records_by_pursuit(journal.read_all(sandbox / 'state'))['chores']
     assert (pursuits.skip_expiry(own) - now).days == 0
 
@@ -1906,7 +1905,7 @@ def test_resume_with_no_name_brings_back_everything_skipped(sandbox, monkeypatch
 
     assert pursuits.cmd_resume(None) == 0
 
-    assert pursuits.build_state(pursuits.load_pursuits(), datetime.now().astimezone())['suppressed'] == []
+    assert pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())['suppressed'] == []
 
 
 def test_zeroing_the_whole_register_is_refused_where_nobody_can_answer(sandbox, monkeypatch):

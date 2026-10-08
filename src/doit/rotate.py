@@ -27,7 +27,7 @@ should drop its cursor entry in silence. One operation, opposite correct
 behaviors.
 """
 
-from datetime import date
+import datetime as dt
 from pathlib import Path
 
 from doit import usage
@@ -109,7 +109,7 @@ def next_up(lens: str, entries: list[Entry] | None = None, rows: list[usage.Row]
     return min(pool, key=lambda entry: (shown.get(usage.typed_form(entry) or entry.name, ''), entry.name))
 
 
-def record(lens: str, entry: Entry, today: date | None = None) -> None:
+def record(lens: str, entry: Entry, today: dt.date | None = None) -> None:
     """Stamp this row as shown, advancing the lens's rotation by one.
 
     Keyed on the typed form so the cursor survives a row being recatalogd —
@@ -117,5 +117,5 @@ def record(lens: str, entry: Entry, today: date | None = None) -> None:
     """
     path = cursor_path(lens)
     shown = load_state(path)
-    shown[usage.typed_form(entry) or entry.name] = (today or date.today()).isoformat()
+    shown[usage.typed_form(entry) or entry.name] = (today or dt.date.today()).isoformat()
     save_state(path, shown)

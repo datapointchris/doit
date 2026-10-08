@@ -6,8 +6,7 @@ number means days). The due date is always derived, never stored:
 second date to keep in sync and nothing to drift.
 """
 
-from datetime import date
-from datetime import timedelta
+import datetime as dt
 
 CADENCE_UNITS = {'d': 1, 'w': 7, 'mo': 30, 'y': 365}
 
@@ -22,7 +21,7 @@ def parse_cadence(token: str) -> int:
     return int(num) * CADENCE_UNITS.get(unit, 1)
 
 
-def overdue_days(last: str | None, cadence: str, today: date) -> int | None:
+def overdue_days(last: str | None, cadence: str, today: dt.date) -> int | None:
     """Days past due for an item, or None if it has never been done.
 
     Negative means not yet due. ``None`` (never done) is treated by callers as the
@@ -30,7 +29,7 @@ def overdue_days(last: str | None, cadence: str, today: date) -> int | None:
     """
     if not last:
         return None
-    next_due = date.fromisoformat(last) + timedelta(days=parse_cadence(cadence))
+    next_due = dt.date.fromisoformat(last) + dt.timedelta(days=parse_cadence(cadence))
     return (today - next_due).days
 
 

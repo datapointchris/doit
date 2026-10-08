@@ -6,7 +6,7 @@ row that must not inherit its parent's count, a git alias spelled differently in
 the catalog and in history, and a name made entirely of punctuation.
 """
 
-from datetime import date
+import datetime as dt
 
 from doit import usage
 from doit.index import Entry
@@ -110,7 +110,7 @@ def test_a_row_never_run_is_kept_with_a_zero_count():
 
     assert rows[0].count == 0
     assert rows[0].last == ''
-    assert rows[0].days_since(date(2026, 8, 10)) is None
+    assert rows[0].days_since(dt.date(2026, 8, 10)) is None
 
 
 def test_the_last_date_is_the_newest_not_the_last_row():
@@ -120,7 +120,7 @@ def test_the_last_date_is_the_newest_not_the_last_row():
     rows = usage.measure([tool('fd', 'fd [pattern]')], history)
 
     assert rows[0].last == '2026-08-10'
-    assert rows[0].days_since(date(2026, 8, 20)) == 10
+    assert rows[0].days_since(dt.date(2026, 8, 20)) == 10
 
 
 def test_unused_catches_never_run_and_gone_cold_but_not_the_live_ones():
@@ -130,7 +130,7 @@ def test_unused_catches_never_run_and_gone_cold_but_not_the_live_ones():
         usage.Row(typed='never', sources=('tool',), names=('never',), count=0, last=''),
     ]
 
-    got = {row.typed for row in usage.unused(rows, days=90, today=date(2026, 8, 10))}
+    got = {row.typed for row in usage.unused(rows, days=90, today=dt.date(2026, 8, 10))}
 
     assert got == {'cold', 'never'}
 
@@ -141,7 +141,7 @@ def test_minimum_catches_the_barely_used():
         usage.Row(typed='often', sources=('tool',), names=('often',), count=40, last='2026-08-10'),
     ]
 
-    got = {row.typed for row in usage.unused(rows, minimum=3, today=date(2026, 8, 10))}
+    got = {row.typed for row in usage.unused(rows, minimum=3, today=dt.date(2026, 8, 10))}
 
     assert got == {'twice'}
 

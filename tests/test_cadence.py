@@ -1,7 +1,7 @@
 """Tests for doit.cadence — the cadence tokens and derived due-date math shared
 by review and labs."""
 
-from datetime import date
+import datetime as dt
 
 from doit import cadence
 
@@ -28,23 +28,23 @@ def test_parse_cadence_unknown_unit_defaults_to_days():
 
 
 def test_overdue_days_never_done_is_none():
-    assert cadence.overdue_days(None, '1w', date(2026, 7, 17)) is None
-    assert cadence.overdue_days('', '1w', date(2026, 7, 17)) is None
+    assert cadence.overdue_days(None, '1w', dt.date(2026, 7, 17)) is None
+    assert cadence.overdue_days('', '1w', dt.date(2026, 7, 17)) is None
 
 
 def test_overdue_days_due_today_is_zero():
     # last + 1w == today → exactly due.
-    assert cadence.overdue_days('2026-07-10', '1w', date(2026, 7, 17)) == 0
+    assert cadence.overdue_days('2026-07-10', '1w', dt.date(2026, 7, 17)) == 0
 
 
 def test_overdue_days_positive_when_past_due():
     # next_due = 2026-07-08; today is 9 days later.
-    assert cadence.overdue_days('2026-07-01', '1w', date(2026, 7, 17)) == 9
+    assert cadence.overdue_days('2026-07-01', '1w', dt.date(2026, 7, 17)) == 9
 
 
 def test_overdue_days_negative_when_not_yet_due():
     # next_due = 2026-07-31; today is 14 days before.
-    assert cadence.overdue_days('2026-07-17', '2w', date(2026, 7, 17)) == -14
+    assert cadence.overdue_days('2026-07-17', '2w', dt.date(2026, 7, 17)) == -14
 
 
 def test_is_due():

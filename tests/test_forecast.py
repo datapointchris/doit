@@ -10,9 +10,8 @@ that a forecast reaches a pinned pursuit is also a test that the two have not co
 apart.
 """
 
+import datetime as dt
 import json
-from datetime import datetime
-from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -22,7 +21,7 @@ from doit import journal
 from doit import pursuits
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'pursuits'
-NOW = datetime.fromisoformat('2026-08-04T12:00:00-04:00')
+NOW = dt.datetime.fromisoformat('2026-08-04T12:00:00-04:00')
 
 
 @pytest.fixture(autouse=True)
@@ -39,12 +38,12 @@ def done(pursuit: str, minutes: int | None = None, days_ago: float = 0.0) -> dic
     return {
         'pursuit': pursuit,
         'event': 'done',
-        'occurred_at': (NOW - timedelta(days=days_ago)).isoformat(),
+        'occurred_at': (NOW - dt.timedelta(days=days_ago)).isoformat(),
         'duration_minutes': minutes,
     }
 
 
-def reading(generated: datetime, horizons: dict, machine: str = 'testbox') -> forecast.Reading:
+def reading(generated: dt.datetime, horizons: dict, machine: str = 'testbox') -> forecast.Reading:
     return forecast.Reading(
         generated=generated.isoformat(),
         machine=machine,
@@ -190,40 +189,40 @@ def test_a_half_synced_line_does_not_make_the_rest_unreadable(tmp_path):
 
 def test_readings_from_every_machine_are_merged_oldest_first(tmp_path):
     forecast.append(forecast.reading_path(tmp_path, 'b'), reading(NOW, {}, machine='b'))
-    forecast.append(forecast.reading_path(tmp_path, 'a'), reading(NOW - timedelta(days=1), {}, machine='a'))
+    forecast.append(forecast.reading_path(tmp_path, 'a'), reading(NOW - dt.timedelta(days=1), {}, machine='a'))
     assert [row.machine for row in forecast.read_all(tmp_path)] == ['a', 'b']
 
 
 def test_select_takes_the_newest_when_no_handle_is_given(tmp_path):
     path = forecast.reading_path(tmp_path, 'testbox')
-    forecast.append(path, reading(NOW - timedelta(days=2), {}))
+    forecast.append(path, reading(NOW - dt.timedelta(days=2), {}))
     forecast.append(path, reading(NOW, {}))
     assert forecast.select(forecast.read_all(tmp_path)).generated == NOW.isoformat()
 
 
 def test_a_handle_selects_by_timestamp_prefix(tmp_path):
     path = forecast.reading_path(tmp_path, 'testbox')
-    forecast.append(path, reading(NOW - timedelta(days=2), {}))
+    forecast.append(path, reading(NOW - dt.timedelta(days=2), {}))
     forecast.append(path, reading(NOW, {}))
     assert forecast.select(forecast.read_all(tmp_path), '2026-08-02').generated.startswith('2026-08-02')
 
 
 def test_occasions_are_counted_inside_the_window_only():
     records = [done('a', days_ago=1), done('a', days_ago=9), done('b', days_ago=2)]
-    counted = forecast.actual_occasions(records, NOW - timedelta(days=7), 7)
+    counted = forecast.actual_occasions(records, NOW - dt.timedelta(days=7), 7)
     assert counted == {'a': 1, 'b': 1}
 
 
 def test_a_reading_whose_window_has_not_closed_is_not_graded():
     # Grading early reports every pursuit as under-done, and the error would be
     # the calendar rather than the model.
-    fresh = [reading(NOW - timedelta(days=3), {'7': {'chores': {'occasions': 2.0}}})]
+    fresh = [reading(NOW - dt.timedelta(days=3), {'7': {'chores': {'occasions': 2.0}}})]
     assert forecast.matured(fresh, NOW, 7) == []
     assert forecast.grade(fresh, [], NOW, 7) == []
 
 
 def test_a_matured_reading_is_graded_against_what_the_journal_recorded():
-    stored = [reading(NOW - timedelta(days=8), {'7': {'chores': {'occasions': 2.0}}})]
+    stored = [reading(NOW - dt.timedelta(days=8), {'7': {'chores': {'occasions': 2.0}}})]
     records = [done('chores', days_ago=7), done('chores', days_ago=6), done('chores', days_ago=5)]
     verdict = forecast.grade(stored, records, NOW, 7)[0]
     assert verdict.pursuit == 'chores'
@@ -236,8 +235,8 @@ def test_grading_averages_across_readings_rather_than_listing_them():
     # Several forecasts taken hours apart predict overlapping windows, so listing
     # them separately would present one measurement as many.
     stored = [
-        reading(NOW - timedelta(days=8), {'7': {'chores': {'occasions': 2.0}}}),
-        reading(NOW - timedelta(days=9), {'7': {'chores': {'occasions': 4.0}}}),
+        reading(NOW - dt.timedelta(days=8), {'7': {'chores': {'occasions': 2.0}}}),
+        reading(NOW - dt.timedelta(days=9), {'7': {'chores': {'occasions': 4.0}}}),
     ]
     verdicts = forecast.grade(stored, [], NOW, 7)
     assert len(verdicts) == 1
@@ -246,7 +245,7 @@ def test_grading_averages_across_readings_rather_than_listing_them():
 
 
 def test_the_worst_prediction_is_reported_first():
-    stored = [reading(NOW - timedelta(days=8), {'7': {'a': {'occasions': 1.0}, 'b': {'occasions': 9.0}}})]
+    stored = [reading(NOW - dt.timedelta(days=8), {'7': {'a': {'occasions': 1.0}, 'b': {'occasions': 9.0}}})]
     assert [v.pursuit for v in forecast.grade(stored, [], NOW, 7)] == ['b', 'a']
 
 
@@ -270,7 +269,7 @@ def test_show_without_a_stored_reading_says_how_to_take_one(tmp_path, capsys):
 
 
 def test_trend_before_anything_has_matured_says_so(register, tmp_path, capsys):
-    forecast.append(forecast.reading_path(tmp_path, 'testbox'), reading(datetime.now().astimezone(), {}))
+    forecast.append(forecast.reading_path(tmp_path, 'testbox'), reading(dt.datetime.now().astimezone(), {}))
     assert forecast.cmd_trend(7, as_json=False, directory=tmp_path) == 0
     assert 'days old yet' in capsys.readouterr().out
 

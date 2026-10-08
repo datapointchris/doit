@@ -5,18 +5,15 @@ of contributes a lane with no doit code at all. Everything else is the failure
 policy around it.
 """
 
+import datetime as dt
 import json
-from datetime import date
-from datetime import datetime
-from datetime import timedelta
-from datetime import timezone
 
 import pytest
 
 from doit import lanes
 from doit import sources
 
-NOW = datetime(2026, 8, 6, 12, 0, 0)
+NOW = dt.datetime(2026, 8, 6, 12, 0, 0)
 
 CONFORMING = {
     'schema_version': 1,
@@ -227,7 +224,7 @@ def test_a_block_that_is_not_a_mapping_names_itself(tmp_path):
 
 
 def test_today_replaces_a_whole_argv_part(tmp_path):
-    stamp = date(2026, 8, 6)
+    stamp = dt.date(2026, 8, 6)
 
     resolved = sources.resolved_command(['icb', 'tasks', '--start', '{today}', '--json'], stamp)
 
@@ -241,7 +238,7 @@ def test_today_leaves_a_part_that_merely_contains_it_alone():
     string has no caller — and refusing that case means a path or a title
     containing the token is passed through rather than silently rewritten.
     """
-    resolved = sources.resolved_command(['grep', 'due {today}', '{today}'], date(2026, 8, 6))
+    resolved = sources.resolved_command(['grep', 'due {today}', '{today}'], dt.date(2026, 8, 6))
 
     assert resolved == ['grep', 'due {today}', '2026-08-06']
 
@@ -249,7 +246,7 @@ def test_today_leaves_a_part_that_merely_contains_it_alone():
 def test_a_command_with_no_token_is_unchanged():
     command = ['icb', 'overview', '--json']
 
-    assert sources.resolved_command(command, date(2026, 8, 6)) == command
+    assert sources.resolved_command(command, dt.date(2026, 8, 6)) == command
 
 
 def test_source_order_is_the_files_order(tmp_path):
@@ -340,7 +337,7 @@ def test_what_doit_emits_is_what_doit_reads():
     assert round_tripped == original
 
 
-@pytest.mark.parametrize('stamp', [NOW, NOW.replace(tzinfo=timezone(timedelta(hours=9)))])
+@pytest.mark.parametrize('stamp', [NOW, NOW.replace(tzinfo=dt.timezone(dt.timedelta(hours=9)))])
 def test_the_document_stamp_always_carries_an_offset(stamp):
     """A time with no offset cannot be compared across two machines.
 
@@ -350,4 +347,4 @@ def test_the_document_stamp_always_carries_an_offset(stamp):
     """
     document = json.loads(lanes.dumps([], stamp))
 
-    assert datetime.fromisoformat(document['generated_at']).utcoffset() is not None
+    assert dt.datetime.fromisoformat(document['generated_at']).utcoffset() is not None

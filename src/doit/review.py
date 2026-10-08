@@ -16,13 +16,13 @@ there is no date to keep in sync and nothing to drift.
 """
 
 import contextlib
+import datetime as dt
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
-from datetime import date
 from pathlib import Path
 from typing import Annotated
 
@@ -132,7 +132,7 @@ def statuses() -> list[dict]:
     """
     items = load_items() or {}
     state = load_state(STATE)
-    today = date.today()
+    today = dt.date.today()
     rows = []
     for item_id, meta in items.items():
         meta = meta or {}
@@ -264,7 +264,7 @@ def cmd_done(item_id: str) -> int:
         console.print(Text(f'No such item: {item_id}'))
         console.print('See what is registered with [cyan]doit review list[/].')
         return 1
-    today = date.today().isoformat()
+    today = dt.date.today().isoformat()
     state = load_state(STATE)
     state[item_id] = today
     save_state(STATE, state)

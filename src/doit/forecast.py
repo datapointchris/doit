@@ -50,12 +50,11 @@ that have since moved. One append-only file per machine, one writer each.
 """
 
 import dataclasses
+import datetime as dt
 import json
 import statistics
 from dataclasses import dataclass
 from dataclasses import field
-from datetime import datetime
-from datetime import timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -194,9 +193,9 @@ def spend_a_day(offered: list[str], cost: dict[str, Duration], budget: float) ->
 def simulate(
     register: dict,
     seed_records: list[dict],
-    observed: dict[str, datetime],
+    observed: dict[str, dt.datetime],
     cost: dict[str, Duration],
-    start: datetime,
+    start: dt.datetime,
     days: int,
     budget: float,
     replicate: int,
@@ -216,7 +215,7 @@ def simulate(
     records = list(seed_records)
     done: list[tuple[int, str, float]] = []
     for day in range(days):
-        when = start + timedelta(days=day)
+        when = start + dt.timedelta(days=day)
         state = pursuits.build_state(register, when, records=records, observed=observed, balance_settings=balance_settings)
         selection = pursuits.compute_draw(state, seed=replicate * 100_003 + day)
         for name, minutes in spend_a_day(selection['offered'], cost, budget):
@@ -241,7 +240,7 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
-def forecast(register: dict, now: datetime, budget: float, replicates: int = REPLICATES) -> Reading:
+def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = REPLICATES) -> Reading:
     """Run every replicate and fold them into one reading."""
     records = journal.read_all(pursuits.JOURNAL_DIR) if pursuits.JOURNAL_DIR.exists() else []
     bands = pursuits.load_balance_settings()
@@ -350,9 +349,9 @@ class Verdict:
         return self.actual - self.predicted
 
 
-def actual_occasions(records: list[dict], start: datetime, days: int) -> dict[str, int]:
+def actual_occasions(records: list[dict], start: dt.datetime, days: int) -> dict[str, int]:
     """Done events per pursuit inside a window, counted from the journal."""
-    finish = start + timedelta(days=days)
+    finish = start + dt.timedelta(days=days)
     counted: dict[str, int] = {}
     for record in records:
         if record.get('event') != journal.Event.DONE:
@@ -364,7 +363,7 @@ def actual_occasions(records: list[dict], start: datetime, days: int) -> dict[st
     return counted
 
 
-def matured(stored: list[Reading], now: datetime, days: int) -> list[Reading]:
+def matured(stored: list[Reading], now: dt.datetime, days: int) -> list[Reading]:
     """Readings old enough that their `days`-horizon prediction can be graded.
 
     A prediction cannot be wrong yet if the window it named has not closed, so
@@ -374,12 +373,12 @@ def matured(stored: list[Reading], now: datetime, days: int) -> list[Reading]:
     ready = []
     for reading in stored:
         when = journal.parse_time(reading.generated)
-        if when is not None and (now - when) >= timedelta(days=days):
+        if when is not None and (now - when) >= dt.timedelta(days=days):
             ready.append(reading)
     return ready
 
 
-def grade(stored: list[Reading], records: list[dict], now: datetime, days: int) -> list[Verdict]:
+def grade(stored: list[Reading], records: list[dict], now: dt.datetime, days: int) -> list[Verdict]:
     """Every matured reading's prediction at one horizon, against the journal.
 
     Averaged across readings rather than reported per reading: several forecasts
@@ -474,7 +473,7 @@ def cmd_run(as_json: bool, budget: int | None, directory: Path) -> int:
         return 1
     settings = pursuits.load_settings()
     minutes = budget or settings.get('budget_minutes') or DEFAULT_BUDGET_MINUTES
-    reading = forecast(register, datetime.now().astimezone(), float(minutes))
+    reading = forecast(register, dt.datetime.now().astimezone(), float(minutes))
     stored = True
     try:
         append(reading_path(directory, machine_name()), reading)
@@ -530,7 +529,7 @@ def cmd_trend(days: int, as_json: bool, directory: Path) -> int:
         error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
         return 1
     records = journal.read_all(pursuits.JOURNAL_DIR) if pursuits.JOURNAL_DIR.exists() else []
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     verdicts = grade(stored, records, now, days)
     if as_json:
         print(json.dumps({'days': days, 'verdicts': [dataclasses.asdict(v) for v in verdicts]}, indent=2))

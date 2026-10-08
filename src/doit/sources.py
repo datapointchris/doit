@@ -31,6 +31,7 @@ that is configured but missing gets a single line naming it. One that runs and
 fails shows its error. A configured lane is never silently dropped.
 """
 
+import datetime as dt
 import json
 import os
 import shlex
@@ -39,8 +40,6 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from dataclasses import field
-from datetime import date
-from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -205,7 +204,7 @@ def load(path: Path | None = None) -> Registry:
     return registry
 
 
-def resolved_command(command: list[str], today: date | None = None) -> list[str]:
+def resolved_command(command: list[str], today: dt.date | None = None) -> list[str]:
     """The argv to run, with `{today}` replaced by the local ISO date.
 
     Equality rather than a substring replace. A backend takes the date as its
@@ -213,7 +212,7 @@ def resolved_command(command: list[str], today: date | None = None) -> list[str]
     refusing that case means a path or a title that happens to contain the
     token is passed through untouched rather than silently rewritten.
     """
-    stamp = (today or date.today()).isoformat()
+    stamp = (today or dt.date.today()).isoformat()
     return [stamp if part == TODAY_PLACEHOLDER else part for part in command]
 
 
@@ -402,7 +401,7 @@ def contract_command() -> None:
                 hints=['nomad trips list'],
             )
         ],
-        datetime(2026, 8, 6, 12, 0, 0),
+        dt.datetime(2026, 8, 6, 12, 0, 0),
     )
     print(json.dumps(example, indent=2))
     raise typer.Exit(0)

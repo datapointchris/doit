@@ -9,19 +9,17 @@ those where a near-miss must not be mistaken for evidence.
 so every test here supplies its own history or deliberately has none.
 """
 
+import datetime as dt
 import json
-from datetime import date
-from datetime import datetime
-from datetime import timedelta
 
 import pytest
 
 from doit import observe
 
 
-def write_history(tmp_path, monkeypatch, entries: list[tuple[date, str]]) -> None:
+def write_history(tmp_path, monkeypatch, entries: list[tuple[dt.date, str]]) -> None:
     """A zsh EXTENDED_HISTORY file recording each command on each date."""
-    lines = [f': {int(datetime.combine(when, datetime.min.time()).timestamp())}:0;{command}' for when, command in entries]
+    lines = [f': {int(dt.datetime.combine(when, dt.datetime.min.time()).timestamp())}:0;{command}' for when, command in entries]
     history = tmp_path / 'history'
     history.write_text('\n'.join(lines) + '\n')
     monkeypatch.setattr(observe, 'HISTORY', history)
@@ -35,7 +33,7 @@ def write_dates(tmp_path, name: str, payload: object) -> str:
 
 
 def test_last_run_finds_the_date_a_command_was_last_typed(tmp_path, monkeypatch):
-    old, recent = date(2026, 1, 2), date(2026, 3, 4)
+    old, recent = dt.date(2026, 1, 2), dt.date(2026, 3, 4)
     write_history(tmp_path, monkeypatch, [(old, 'brew-maintenance'), (recent, 'brew-maintenance')])
 
     assert observe.last_run('brew-maintenance').date == recent.isoformat()
@@ -45,14 +43,14 @@ def test_last_run_takes_the_newest_timestamp_not_the_last_line(tmp_path, monkeyp
     """Several shells append to one file, so its order is write order — only
     approximately chronological. Reading the last match would report the older
     run whenever two sessions interleaved."""
-    newest, older = date(2026, 5, 1), date(2026, 2, 1)
+    newest, older = dt.date(2026, 5, 1), dt.date(2026, 2, 1)
     write_history(tmp_path, monkeypatch, [(newest, 'indy index'), (older, 'indy index')])
 
     assert observe.last_run('indy index').date == newest.isoformat()
 
 
 def test_last_run_counts_the_command_with_arguments(tmp_path, monkeypatch):
-    when = date(2026, 6, 7)
+    when = dt.date(2026, 6, 7)
     write_history(tmp_path, monkeypatch, [(when, 'doit kit unresolved --verbose')])
 
     assert observe.last_run('doit kit unresolved').date == when.isoformat()
@@ -67,7 +65,7 @@ def test_last_run_will_not_claim_a_longer_command_that_merely_starts_the_same():
 
 
 def test_last_run_is_silent_when_the_command_never_ran(tmp_path, monkeypatch):
-    write_history(tmp_path, monkeypatch, [(date(2026, 1, 1), 'something else')])
+    write_history(tmp_path, monkeypatch, [(dt.date(2026, 1, 1), 'something else')])
 
     assert observe.last_run('never-typed').date is None
 
@@ -108,7 +106,7 @@ def test_newest_date_in_reports_a_file_it_cannot_parse(tmp_path):
 def test_observed_defaults_to_watching_the_items_own_command(tmp_path, monkeypatch):
     """No `observe:` needed for most items: the command is already the item's own
     statement of what doing it looks like."""
-    when = date(2026, 4, 5)
+    when = dt.date(2026, 4, 5)
     write_history(tmp_path, monkeypatch, [(when, 'review-diff')])
 
     assert observe.observed(None, 'review-diff').date == when.isoformat()
@@ -116,13 +114,13 @@ def test_observed_defaults_to_watching_the_items_own_command(tmp_path, monkeypat
 
 def test_observed_false_turns_observation_off(tmp_path, monkeypatch):
     """For an item whose command is not the work — a picker, a browse view."""
-    write_history(tmp_path, monkeypatch, [(date(2026, 4, 5), 'doit labs choose')])
+    write_history(tmp_path, monkeypatch, [(dt.date(2026, 4, 5), 'doit labs choose')])
 
     assert observe.observed(False, 'doit labs choose').date is None
 
 
 def test_observed_takes_an_explicit_observer_over_the_command(tmp_path, monkeypatch):
-    write_history(tmp_path, monkeypatch, [(date(2026, 1, 1), 'doit kit remind')])
+    write_history(tmp_path, monkeypatch, [(dt.date(2026, 1, 1), 'doit kit remind')])
     path = write_dates(tmp_path, 'reminders.json', {'jira': '2026-08-07'})
 
     assert observe.observed({'newest-date-in': path}, 'doit kit remind').date == '2026-08-07'
@@ -182,8 +180,8 @@ def test_history_survives_undecodable_bytes(tmp_path, monkeypatch):
 
 def test_a_recent_run_clears_an_item_a_stale_stamp_left_overdue(tmp_path, monkeypatch):
     """The whole point, end to end: doing the thing is what marks it done."""
-    stamped = (date.today() - timedelta(days=33)).isoformat()
-    ran_today = date.today()
+    stamped = (dt.date.today() - dt.timedelta(days=33)).isoformat()
+    ran_today = dt.date.today()
     write_history(tmp_path, monkeypatch, [(ran_today, 'doit kit remind')])
 
     assert observe.newest(stamped, observe.observed(None, 'doit kit remind').date) == ran_today.isoformat()
@@ -273,7 +271,7 @@ def test_atuin_host_is_canonicalized_to_the_recorded_form():
 
 def test_history_falls_back_to_zsh_when_atuin_cannot_be_asked(tmp_path, monkeypatch):
     """A box where atuin is missing, not yet syncing, or broken still observes."""
-    when = date(2026, 5, 5)
+    when = dt.date(2026, 5, 5)
     write_history(tmp_path, monkeypatch, [(when, 'brew-maintenance')])
 
     assert observe.last_run('brew-maintenance').date == when.isoformat()
@@ -283,6 +281,6 @@ def test_zsh_fallback_attributes_every_row_to_this_machine(tmp_path, monkeypatch
     """It is this machine's file, so a machine-scoped question is answered right
     and a fleet-scoped one narrows to this box rather than going blank."""
     monkeypatch.setattr(observe, 'machine_name', lambda: 'macmini')
-    write_history(tmp_path, monkeypatch, [(date(2026, 5, 5), 'brew-maintenance')])
+    write_history(tmp_path, monkeypatch, [(dt.date(2026, 5, 5), 'brew-maintenance')])
 
     assert {entry.host for entry in observe.zsh_invocations()} == {'macmini'}

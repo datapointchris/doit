@@ -26,11 +26,10 @@ written by machines running different versions of the tool end up merged in one
 read.
 """
 
+import datetime as dt
 import json
 import random
 import uuid
-from datetime import date
-from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -70,7 +69,7 @@ def counts_path(directory: Path, machine: str) -> Path:
     return directory / f'next-offers-{machine}.json'
 
 
-def new_id(now: datetime, rng: random.Random | None = None) -> str:
+def new_id(now: dt.datetime, rng: random.Random | None = None) -> str:
     """A UUIDv7: 48-bit millisecond timestamp, then randomness.
 
     Time-ordered, so ids sort into the order the events happened even after files
@@ -118,19 +117,19 @@ def read_all(directory: Path) -> list[dict]:
     return records
 
 
-def parse_time(value: str | None) -> datetime | None:
+def parse_time(value: str | None) -> dt.datetime | None:
     """An ISO 8601 timestamp from a record, or None if absent or unparsable."""
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value)
+        return dt.datetime.fromisoformat(value)
     except ValueError:
         return None
 
 
-def latest_occurrence(records: list[dict], event: str) -> dict[str, datetime]:
+def latest_occurrence(records: list[dict], event: str) -> dict[str, dt.datetime]:
     """Most recent time per pursuit for one event kind (``done``, ``skip``, …)."""
-    latest: dict[str, datetime] = {}
+    latest: dict[str, dt.datetime] = {}
     for record in records:
         if record.get('event') != event:
             continue
@@ -143,7 +142,7 @@ def latest_occurrence(records: list[dict], event: str) -> dict[str, datetime]:
     return latest
 
 
-def local_day(record: dict, now: datetime) -> date | None:
+def local_day(record: dict, now: dt.datetime) -> dt.date | None:
     """The local date a record landed on, by ``now``'s offset.
 
     The unit an app's answer can also be expressed in, so anything lining a typed
@@ -155,7 +154,7 @@ def local_day(record: dict, now: datetime) -> date | None:
     return None if when is None else when.astimezone(now.tzinfo).date()
 
 
-def days_since(latest: dict[str, datetime], names: list[str], now: datetime) -> dict[str, float | None]:
+def days_since(latest: dict[str, dt.datetime], names: list[str], now: dt.datetime) -> dict[str, float | None]:
     """Days elapsed per pursuit, ``None`` for one with no matching event yet."""
     elapsed: dict[str, float | None] = {}
     for name in names:
@@ -179,7 +178,7 @@ def checkoff_equivalent(record: dict, size: float | None) -> float:
     return float(minutes) / size
 
 
-def rate_per_day(records: list[dict], now: datetime, sizes: dict[str, float]) -> float | None:
+def rate_per_day(records: list[dict], now: dt.datetime, sizes: dict[str, float]) -> float | None:
     """Measured checkoff-equivalents per day, or ``None`` when there is nothing to measure.
 
     Equivalents rather than entries, because this one number divides every

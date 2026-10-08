@@ -8,11 +8,9 @@ Tests that need recorded done-dates write a state file under tmp_path, because
 overdue days are derived from today and a committed state file would rot.
 """
 
+import datetime as dt
 import json
 import re
-from datetime import date
-from datetime import datetime
-from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -59,12 +57,12 @@ def test_statuses_never_done_reads_as_most_urgent():
 
 
 def test_statuses_orders_most_overdue_first(tmp_path, monkeypatch):
-    today = date.today()
+    today = dt.date.today()
     write_state(
         tmp_path,
         monkeypatch,
         {
-            'overdue-item': (today - timedelta(days=30)).isoformat(),
+            'overdue-item': (today - dt.timedelta(days=30)).isoformat(),
             'fresh-item': today.isoformat(),
         },
     )
@@ -80,7 +78,7 @@ def test_statuses_orders_most_overdue_first(tmp_path, monkeypatch):
 
 def observe_history(tmp_path, monkeypatch, entries: dict) -> None:
     """A shell history recording each command as last run on the given date."""
-    lines = [f': {int(datetime.combine(when, datetime.min.time()).timestamp())}:0;{command}' for command, when in entries.items()]
+    lines = [f': {int(dt.datetime.combine(when, dt.datetime.min.time()).timestamp())}:0;{command}' for command, when in entries.items()]
     history = tmp_path / 'history'
     history.write_text('\n'.join(lines) + '\n')
     monkeypatch.setattr(observe, 'HISTORY', history)
@@ -90,8 +88,8 @@ def observe_history(tmp_path, monkeypatch, entries: dict) -> None:
 def test_running_the_command_clears_an_item_a_stale_stamp_left_overdue(tmp_path, monkeypatch):
     """Doing the thing is what marks it done. An item whose only record is one
     you have to type reads as weeks overdue hours after it ran."""
-    today = date.today()
-    write_state(tmp_path, monkeypatch, {'overdue-item': (today - timedelta(days=30)).isoformat()})
+    today = dt.date.today()
+    write_state(tmp_path, monkeypatch, {'overdue-item': (today - dt.timedelta(days=30)).isoformat()})
     observe_history(tmp_path, monkeypatch, {'echo overdue': today})
 
     row = {row['id']: row for row in review.statuses()}['overdue-item']
@@ -104,9 +102,9 @@ def test_running_the_command_clears_an_item_a_stale_stamp_left_overdue(tmp_path,
 def test_a_stamp_still_wins_when_it_is_the_later_evidence(tmp_path, monkeypatch):
     """Observation may only ever improve a date. A command run long ago cannot
     undo `done`, or adding an observer would lose history."""
-    today = date.today()
+    today = dt.date.today()
     write_state(tmp_path, monkeypatch, {'overdue-item': today.isoformat()})
-    observe_history(tmp_path, monkeypatch, {'echo overdue': today - timedelta(days=200)})
+    observe_history(tmp_path, monkeypatch, {'echo overdue': today - dt.timedelta(days=200)})
 
     row = {row['id']: row for row in review.statuses()}['overdue-item']
 
@@ -217,7 +215,7 @@ def test_nudge_clips_long_commands_rather_than_wrapping(tmp_path, monkeypatch, c
 
 def test_nudge_is_silent_when_nothing_is_due(tmp_path, monkeypatch, capsys):
     """A nudge you don't notice on a clear day is one you'll read on a busy one."""
-    today = date.today().isoformat()
+    today = dt.date.today().isoformat()
     write_state(tmp_path, monkeypatch, {'never-done': today, 'overdue-item': today, 'fresh-item': today})
 
     assert review.cmd_nudge() == 0

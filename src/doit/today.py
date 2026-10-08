@@ -40,10 +40,9 @@ is, and a group that could not be read is red. The text, the labels and the
 handles stay plain.
 """
 
+import datetime as dt
 import json
 from collections.abc import Callable
-from datetime import date
-from datetime import datetime
 from typing import Annotated
 from typing import NamedTuple
 
@@ -100,7 +99,7 @@ ITEM_INDENT = '    '
 CLOCK_WIDTH = len('00:00')
 
 
-def local_date(value: object, now: datetime) -> date | None:
+def local_date(value: object, now: dt.datetime) -> dt.date | None:
     """The local calendar day a backend's timestamp landed on.
 
     Both shapes, because these fields are not consistent across apps and never
@@ -122,20 +121,20 @@ def local_date(value: object, now: datetime) -> date | None:
     if stamp is not None:
         return stamp.astimezone(now.tzinfo).date() if stamp.tzinfo else stamp.date()
     try:
-        return date.fromisoformat(text[:10])
+        return dt.date.fromisoformat(text[:10])
     except ValueError:
         return None
 
 
-def local_instant(value: object, now: datetime) -> datetime | None:
+def local_instant(value: object, now: dt.datetime) -> dt.datetime | None:
     """When a record says something happened, in local time, if it says an hour.
 
     A plain day parses as naive midnight. Shown, that is `00:00`, an hour nobody
     did anything at, and it sorts ahead of the whole morning. So only a stamp
     carrying an offset is a time here.
     """
-    if isinstance(value, datetime):
-        stamp: datetime | None = value
+    if isinstance(value, dt.datetime):
+        stamp: dt.datetime | None = value
     else:
         stamp = journal.parse_time(str(value)) if value else None
     if stamp is None or stamp.tzinfo is None:
@@ -143,13 +142,13 @@ def local_instant(value: object, now: datetime) -> datetime | None:
     return stamp.astimezone(now.tzinfo)
 
 
-def instant_text(value: object, now: datetime) -> str:
+def instant_text(value: object, now: dt.datetime) -> str:
     """`GridCell.done_at` for a record's stamp: local, with its offset, or blank."""
     stamp = local_instant(value, now)
     return '' if stamp is None else stamp.isoformat(timespec='seconds')
 
 
-def rows_done_today(payload: object, date_field: str, now: datetime) -> list[dict]:
+def rows_done_today(payload: object, date_field: str, now: dt.datetime) -> list[dict]:
     """The rows in a completions payload whose date is today.
 
     Filtered here even where the command already asked the backend for one day.
@@ -170,7 +169,7 @@ def done_lane(name: str, title: str, cells: list[GridCell], hint: str) -> Lane:
     order the screen shows. An entry whose record kept only the day has no place
     in that order, so it follows the timed ones in the order it arrived.
     """
-    timed = sorted((cell for cell in cells if cell.done_at), key=lambda cell: datetime.fromisoformat(cell.done_at))
+    timed = sorted((cell for cell in cells if cell.done_at), key=lambda cell: dt.datetime.fromisoformat(cell.done_at))
     ordered = timed + [cell for cell in cells if not cell.done_at]
     return Lane(name=name, title=title, meta=f'{len(ordered)} done', grid=ordered, total=len(ordered), hints=[hint] if hint else [])
 
@@ -179,7 +178,7 @@ def row_text(row: dict, label_field: str) -> str:
     return str(row.get(label_field) or '').strip() or '—'
 
 
-def completion_cell(row: dict, label_field: str, date_field: str, now: datetime) -> GridCell:
+def completion_cell(row: dict, label_field: str, date_field: str, now: dt.datetime) -> GridCell:
     return GridCell(row_text(row, label_field), True, done_at=instant_text(row.get(date_field), now))
 
 
@@ -200,7 +199,7 @@ def flat_adapter(source_id: str, name: str, title: str, label_field: str, date_f
     def adapter(result: sources.Result) -> list[Lane]:
         if result.payload is None or not isinstance(result.payload, list):
             return [lanes.unavailable(name, title, sources.reason(source_id, result))]
-        now = datetime.now().astimezone()
+        now = dt.datetime.now().astimezone()
         rows = rows_done_today(result.payload, date_field, now)
         return [done_lane(name, title, [completion_cell(row, label_field, date_field, now) for row in rows], hint)]
 
@@ -237,7 +236,7 @@ def meso_adapter(result: sources.Result) -> list[Lane]:
     payload = result.payload
     if not isinstance(payload, dict):
         return [lanes.unavailable('training', 'TRAINING', sources.reason('meso-review', result))]
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     cells = []
     for key, label_field, date_field in MESO_KINDS:
         for row in rows_done_today(payload.get(key), date_field, now):
@@ -270,7 +269,7 @@ def filled(template: str, handle: str) -> str:
     return handle
 
 
-def set_lanes(built: list[dashboard.LaneView], now: datetime) -> tuple[list[Lane], list[Lane]]:
+def set_lanes(built: list[dashboard.LaneView], now: dt.datetime) -> tuple[list[Lane], list[Lane]]:
     """Each day set split in two: the done group, and the group still to do.
 
     A set that could not be read goes to the due list alone. That is where its
@@ -320,7 +319,7 @@ def register_lanes(
     title: str,
     rows: list[dict],
     is_due: Callable[[dict], bool],
-    today: date,
+    today: dt.date,
     describe: Callable[[dict], str],
     act: Callable[[dict], str],
     hint: str,
@@ -357,7 +356,7 @@ def register_lanes(
     )
 
 
-def maintenance_lanes(today: date) -> tuple[list[Lane], list[Lane]]:
+def maintenance_lanes(today: dt.date) -> tuple[list[Lane], list[Lane]]:
     """The two registers doit keeps itself, each split into done and owed.
 
     Read as statuses rather than through the dashboard's `maintenance` lane,
@@ -431,7 +430,7 @@ def journal_entry(record: dict) -> str:
     return name
 
 
-def pursuits_done(state: dict, today: date) -> Lane:
+def pursuits_done(state: dict, today: dt.date) -> Lane:
     """Every pursuit today moved, from either record.
 
     The journal answers what got typed, one entry per act at its own time. The
@@ -472,7 +471,7 @@ def pursuits_due(state: dict) -> Lane:
     return Lane(name='pursuits', title='PURSUITS', rows=rows, total=len(rows), hints=['doit next --explain'])
 
 
-def pursuit_lanes(now: datetime, today: date) -> tuple[list[Lane], list[Lane]]:
+def pursuit_lanes(now: dt.datetime, today: dt.date) -> tuple[list[Lane], list[Lane]]:
     """The pursuits' group in each list.
 
     Guarded the way the dashboard guards its own standing line. A register that
@@ -498,7 +497,7 @@ class Day(NamedTuple):
     due: list[Lane]
 
 
-def build(registry: sources.Registry, now: datetime) -> Day:
+def build(registry: sources.Registry, now: dt.datetime) -> Day:
     """Both lists, from one round of every configured source.
 
     One `sources.fetch` over both blocks, so the command costs the slowest
@@ -530,7 +529,7 @@ def has_something(lane: Lane) -> bool:
     return not lane.available or bool(lane.grid or lane.rows)
 
 
-def render(day: Day, today: date) -> None:
+def render(day: Day, today: dt.date) -> None:
     width = terminal_width()
     console.rule(f'[cyan]Today[/] · {today.strftime("%a %d %b")}', align='left')
     done = [lane for lane in day.done if has_something(lane)]
@@ -556,7 +555,7 @@ def render_unavailable(lane: Lane) -> None:
 
 
 def clock(done_at: str) -> str:
-    return datetime.fromisoformat(done_at).strftime('%H:%M') if done_at else ''
+    return dt.datetime.fromisoformat(done_at).strftime('%H:%M') if done_at else ''
 
 
 def done_line(cell: GridCell, text_width: int) -> Text:
@@ -636,7 +635,7 @@ def cmd_today(as_json: bool) -> int:
     registry = sources.load()
     for problem in registry.problems:
         error_console.print(f'sources.yml: {problem}')
-    now = datetime.now().astimezone()
+    now = dt.datetime.now().astimezone()
     day = build(registry, now)
 
     if as_json:
