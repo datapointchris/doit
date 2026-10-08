@@ -19,7 +19,7 @@ folder would put every command line you typed, secrets included, on every box th
 folder reaches.
 
 A host is measured against the exporting machine's kit. A shell function defined
-only on a Mac is invisible in archlinux's export of that Mac's history.
+only on one desk is invisible in another desk's export of that desk's history.
 
 One file per exporting machine, rewritten whole by temp file and rename. One
 writer per file is the whole sync story, for the reason :mod:`doit.journal` gives.

@@ -107,8 +107,9 @@ class ShellHistory(NamedTuple):
     """Every recorded invocation, and which source answered for them.
 
     ``source`` travels with the rows because the two sources hold different
-    spans of the same history. On archlinux atuin reaches back to July and zsh
-    to April. A count that moved because the source flipped is otherwise
+    spans of the same history. atuin starts where it was installed or last
+    imported, and zsh at whatever its file has kept, so they can differ by
+    months. A count that moved because the source flipped is otherwise
     indistinguishable from one that moved because you did.
     """
 
@@ -164,10 +165,10 @@ def atuin_environment() -> dict[str, str]:
     """This process's environment, with an atuin session id wherever no shell hook set one.
 
     atuin 18 refuses `search` without `$ATUIN_SESSION`, and only its shell hook
-    sets that. A scheduled run or an `ssh box doit …` carries none, so atuin
-    exited 1 and the read fell back to zsh, answering for this box alone. The id
-    serves atuin's session filter, which this query does not use, so any fresh
-    one does.
+    sets that. A scheduled run or an `ssh box doit …` carries none. Without one
+    atuin exits 1, and the read falls back to zsh and answers for this box
+    alone. The id serves atuin's session filter, which this query does not use,
+    so any fresh one does.
     """
     environment = dict(os.environ)
     if not environment.get('ATUIN_SESSION'):
