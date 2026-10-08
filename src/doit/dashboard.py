@@ -93,7 +93,8 @@ LANE_ROW_CAPS = {'tasks': 5, 'learning': 5}
 
 # The `icb overview` schema this build understands. A newer one is reported
 # rather than half-read: dotfiles and ichrisbirch install independently.
-ICB_SCHEMA_VERSION = 2
+# v3 task rows carry no priority; a row's position in the list is its rank.
+ICB_SCHEMA_VERSION = 3
 
 # The status ids `learning` assigns; the names come from `learning statuses`.
 LEARNING_NOT_STARTED = 1
@@ -216,17 +217,18 @@ def build_tasks_lane(results: dict[str, sources.Result], today: date) -> LaneVie
     section = payload.get('tasks') or {}
     items = section.get('items') or []
     total = section.get('total', len(items))
-    # `p3` rather than a bare `3`: in a gutter that elsewhere holds words, a lone
-    # numeral reads as a row number. The priority is not the id, so without the
-    # handle there is nothing on the row you could act on.
+    # icb sends tasks in queue order, pinned first, so a row's position is its
+    # rank. `#3` rather than a bare `3`: in a gutter that elsewhere holds words,
+    # a lone numeral reads as a row number. The position is not the id, so the
+    # handle is what you act on. A row without `pinned` is not pinned.
     rows = [
         Row(
-            f'p{task.get("priority", "")}',
+            'pin' if task.get('pinned') else f'#{position}',
             describe(task.get('name', ''), task.get('notes', '')),
             task.get('category', ''),
             handle=view_handle('icb tasks show', task),
         )
-        for task in items
+        for position, task in enumerate(items, start=1)
     ]
     return LaneView(
         name='tasks',

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "generated_at": "2026-07-24T15:00:00-04:00",
   "tasks": {
     "items": [
@@ -8,28 +8,28 @@
         "name": "Renew passport",
         "notes": null,
         "category": "chore",
-        "priority": 1
+        "pinned": true
       },
       {
         "id": 2,
         "name": "Call dentist",
         "notes": null,
         "category": "chore",
-        "priority": 2
+        "pinned": false
       },
       {
         "id": 3,
         "name": "Fix the garage door",
         "notes": "sticks halfway",
         "category": "home",
-        "priority": 3
+        "pinned": false
       },
       {
         "id": 4,
         "name": "Rotate the tyres",
         "notes": null,
         "category": "car",
-        "priority": 4
+        "pinned": false
       }
     ],
     "total": 12

@@ -142,13 +142,28 @@ def test_the_two_adapter_tables_do_not_overlap():
     assert not dashboard_ids & completion_ids, 'an id in both tables is one registration overwriting the other'
 
 
-def test_tasks_lane_reads_priority_name_and_category():
+def test_tasks_lane_labels_a_pin_or_the_queue_position():
     lane = lanes_by_name(all_results())['tasks']
 
     assert lane.meta == '12 open'
-    assert lane.rows[0].label == 'p1', 'a bare numeral in a gutter of words reads as a row number'
+    assert lane.rows[0].label == 'pin'
     assert lane.rows[0].text == 'Renew passport'
     assert lane.rows[0].note == 'chore'
+    assert lane.rows[2].label == '#3', 'a bare numeral in a gutter of words reads as a row number'
+
+
+def test_tasks_lane_labels_a_v2_row_by_position():
+    """A v2 payload carries `priority` and no `pinned`; it still renders."""
+    payload = fixture('icb-overview.json')
+    payload['schema_version'] = 2
+    for task in payload['tasks']['items']:
+        del task['pinned']
+        task['priority'] = task['id']
+    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+
+    lane = dashboard.build_tasks_lane(results, TODAY)
+
+    assert [row.label for row in lane.rows] == ['#1', '#2', '#3', '#4']
 
 
 def test_habits_lane_shows_every_habit_as_a_grid():
