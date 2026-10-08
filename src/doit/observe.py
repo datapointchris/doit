@@ -78,6 +78,9 @@ ATUIN_QUERY = (
 )
 ATUIN_TIMEOUT = 20
 
+ATUIN = 'atuin'
+ZSH = 'zsh'
+
 
 class Observation(NamedTuple):
     """A date an observer found, and any reason it could not look properly.
@@ -100,8 +103,21 @@ class Invocation(NamedTuple):
     command: str
 
 
+class ShellHistory(NamedTuple):
+    """Every recorded invocation, and which source answered for them.
+
+    ``source`` travels with the rows because the two sources hold different
+    spans of the same history. On archlinux atuin reaches back to July and zsh
+    to April. A count that moved because the source flipped is otherwise
+    indistinguishable from one that moved because you did.
+    """
+
+    source: str
+    entries: tuple[Invocation, ...]
+
+
 @cache
-def history_entries() -> tuple[Invocation, ...]:
+def shell_history() -> ShellHistory:
     """Every recorded shell invocation, from atuin if it answers and zsh if not.
 
     Read once per process and shared: both the dashboard and the review views ask
@@ -115,7 +131,15 @@ def history_entries() -> tuple[Invocation, ...]:
     is written unconditionally by `.zshrc`, so it answers on a box where atuin is
     not installed, not yet syncing, or simply broken.
     """
-    return atuin_invocations() or zsh_invocations()
+    atuin = atuin_invocations()
+    if atuin:
+        return ShellHistory(ATUIN, atuin)
+    return ShellHistory(ZSH, zsh_invocations())
+
+
+def history_entries() -> tuple[Invocation, ...]:
+    """The rows of :func:`shell_history`, for a caller with no use for the source."""
+    return shell_history().entries
 
 
 def atuin_invocations() -> tuple[Invocation, ...]:
