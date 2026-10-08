@@ -18,6 +18,7 @@ import pytest
 
 from doit import forecast
 from doit import journal
+from doit import paths
 from doit import pursuits
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'pursuits'
@@ -27,7 +28,7 @@ NOW = dt.datetime.fromisoformat('2026-08-04T12:00:00-04:00')
 @pytest.fixture(autouse=True)
 def register(monkeypatch, tmp_path):
     monkeypatch.setattr(pursuits, 'REGISTER', FIXTURE_DIR / 'pursuits.yml')
-    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', tmp_path / 'state')
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', tmp_path / 'state')
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
     monkeypatch.setattr(forecast, 'machine_name', lambda: 'testbox')

@@ -98,6 +98,21 @@ def require_named(env_var: str, path: Path) -> Path:
     return path
 
 
+JOURNAL_DIR_ENV = 'DOIT_JOURNAL_DIR'
+JOURNAL_DIR = env_path(JOURNAL_DIR_ENV, xdg_state_home() / 'doit')
+
+
+def journal_dir() -> Path:
+    """The directory every per-machine file doit shares lives in.
+
+    The pursuits journal, the usage tables and the digest's readings all live
+    here, so this is the directory a box points at the share. It takes two
+    rungs, the variable and the default. A box that keeps the share elsewhere
+    sets the variable, and one it names that is not there is refused.
+    """
+    return require_named(JOURNAL_DIR_ENV, JOURNAL_DIR)
+
+
 def resolve_path(env_var: str, key: str, default: Path, config: dict[str, Any] | None = None) -> Path:
     """Resolve a shared path: $env_var, then the config key, then the default.
 

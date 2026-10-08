@@ -91,11 +91,11 @@ from doit.journal import new_id
 from doit.journal import rate_per_day
 from doit.paths import NamedPathMissing
 from doit.paths import env_path
+from doit.paths import journal_dir
 from doit.paths import machine_name
 from doit.paths import require_named
 from doit.paths import xdg_cache_home
 from doit.paths import xdg_config_home
-from doit.paths import xdg_state_home
 from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
@@ -106,9 +106,7 @@ from doit.render import span_text
 from doit.render import terminal_width
 
 REGISTER_ENV = 'DOIT_PURSUITS'
-JOURNAL_DIR_ENV = 'DOIT_JOURNAL_DIR'
 REGISTER = env_path(REGISTER_ENV, xdg_config_home() / 'doit' / 'pursuits.yml')
-JOURNAL_DIR = env_path(JOURNAL_DIR_ENV, xdg_state_home() / 'doit')
 CACHE_DIR = Path(os.environ.get('DOIT_CACHE_DIR') or xdg_cache_home() / 'doit')
 DRAW_CACHE = CACHE_DIR / 'next-draw.json'
 NAMES_CACHE = CACHE_DIR / 'next-names.txt'
@@ -303,15 +301,6 @@ class RegisterError(Exception):
 def register_path() -> Path:
     """The register, refused when `$DOIT_PURSUITS` names a file that is not there."""
     return require_named(REGISTER_ENV, REGISTER)
-
-
-def journal_dir() -> Path:
-    """The journal directory, refused when `$DOIT_JOURNAL_DIR` names one that is not there.
-
-    Every per-machine file doit shares lives here, readings and usage tables as
-    well as the journal, so this is the directory a scheduler points at the share.
-    """
-    return require_named(JOURNAL_DIR_ENV, JOURNAL_DIR)
 
 
 def load_pursuits(path: Path | None = None) -> dict:

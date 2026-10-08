@@ -22,11 +22,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
 
 from doit import digest
-from doit import pursuits
+from doit import paths
 from doit import usage
 from doit import usage_table
+from doit.cli import app as cli_app
 from doit.index import Entry
 from doit.observe import Invocation
 
@@ -556,13 +558,26 @@ def test_an_unreadable_export_fails_the_run_before_any_request(monkeypatch, tmp_
 def test_a_share_that_has_not_arrived_reaches_the_scheduler_as_the_reason(monkeypatch, tmp_path, scheduled):
     """Created on demand, the directory would collect readings that never leave the box."""
     missing = tmp_path / 'share' / 'doit-state'
-    monkeypatch.setenv(pursuits.JOURNAL_DIR_ENV, str(missing))
-    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', missing)
+    monkeypatch.setenv(paths.JOURNAL_DIR_ENV, str(missing))
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', missing)
 
     assert digest.cmd_run(days=90) == 1
 
     assert '$DOIT_JOURNAL_DIR' in json.loads(scheduled.read_text())['summary']
     assert not missing.exists()
+
+
+def test_list_refuses_a_named_journal_directory_that_is_missing(monkeypatch, tmp_path):
+    """Read as empty, it would report no readings where the share has simply not arrived."""
+    missing = tmp_path / 'share' / 'doit-state'
+    monkeypatch.setenv(paths.JOURNAL_DIR_ENV, str(missing))
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', missing)
+
+    ran = CliRunner().invoke(cli_app, ['kit', 'digest', 'list'])
+
+    assert ran.exit_code == 1
+    assert '$DOIT_JOURNAL_DIR' in ran.output
+    assert 'pursuits.yml' not in ran.output
 
 
 @pytest.fixture

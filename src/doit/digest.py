@@ -65,11 +65,11 @@ from typing import Annotated
 import typer
 
 from doit import observe
-from doit import pursuits
 from doit import usage
 from doit import usage_table
 from doit.index import build_index
 from doit.paths import NamedPathMissing
+from doit.paths import journal_dir
 from doit.paths import machine_name
 from doit.render import console
 from doit.render import error_console
@@ -709,7 +709,7 @@ def reported(action: Callable[[Path], RunOutcome], directory: Path | None) -> in
     """
     result_file = claim_result_file()
     try:
-        outcome = action(directory or pursuits.journal_dir())
+        outcome = action(directory or journal_dir())
     except NamedPathMissing as missing:
         outcome = refuse(str(missing))
     if not result_file:
@@ -799,6 +799,16 @@ def cmd_list(as_json: bool, directory: Path) -> int:
     return 0
 
 
+def exit_after(action: Callable[[], int]) -> None:
+    """Exit with what ``action`` returned, or with one line where `$DOIT_JOURNAL_DIR` names a missing directory."""
+    try:
+        code = action()
+    except NamedPathMissing as missing:
+        error_console.print(str(missing))
+        raise typer.Exit(1) from None
+    raise typer.Exit(code)
+
+
 app = typer.Typer(name='digest', no_args_is_help=True, help='What your usage table says, read back as prose.')
 
 
@@ -856,7 +866,7 @@ def digest_show_command(
         doit kit digest show              the newest reading
         doit kit digest show 2026-08-12   the reading taken that day
     """
-    pursuits.run(lambda: cmd_show(when or '', as_json, pursuits.journal_dir()))
+    exit_after(lambda: cmd_show(when or '', as_json, journal_dir()))
 
 
 @app.command('list')
@@ -869,4 +879,4 @@ def digest_list_command(as_json: JsonOption = False) -> None:
         doit kit digest list          what has been read, and when
         doit kit digest list --json   every reading whole, text included
     """
-    pursuits.run(lambda: cmd_list(as_json, pursuits.journal_dir()))
+    exit_after(lambda: cmd_list(as_json, journal_dir()))

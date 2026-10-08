@@ -63,6 +63,7 @@ from rich.text import Text
 
 from doit import journal
 from doit import pursuits
+from doit.paths import journal_dir
 from doit.paths import machine_name
 from doit.render import console
 from doit.render import error_console
@@ -240,7 +241,7 @@ def percentile(values: list[float], fraction: float) -> float:
 
 def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = REPLICATES) -> Reading:
     """Run every replicate and fold them into one reading."""
-    directory = pursuits.journal_dir()
+    directory = journal_dir()
     records = journal.read_all(directory) if directory.exists() else []
     bands = pursuits.load_balance_settings()
     live = pursuits.build_state(register, now, balance_settings=bands)
@@ -527,8 +528,8 @@ def cmd_trend(days: int, as_json: bool, directory: Path) -> int:
     if not stored:
         error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
         return 1
-    journal_dir = pursuits.journal_dir()
-    records = journal.read_all(journal_dir) if journal_dir.exists() else []
+    journal_directory = journal_dir()
+    records = journal.read_all(journal_directory) if journal_directory.exists() else []
     now = dt.datetime.now().astimezone()
     verdicts = grade(stored, records, now, days)
     if as_json:
@@ -549,7 +550,7 @@ def run_command(
     as_json: JsonOption = False,
 ) -> None:
     """Take a forecast from the register as it stands, and store it."""
-    pursuits.run(lambda: cmd_run(as_json, budget, pursuits.journal_dir()))
+    pursuits.run(lambda: cmd_run(as_json, budget, journal_dir()))
 
 
 @app.command('show')
@@ -558,13 +559,13 @@ def show_command(
     as_json: JsonOption = False,
 ) -> None:
     """Read a stored forecast back."""
-    pursuits.run(lambda: cmd_show(handle, as_json, pursuits.journal_dir()))
+    pursuits.run(lambda: cmd_show(handle, as_json, journal_dir()))
 
 
 @app.command('list')
 def list_command(as_json: JsonOption = False) -> None:
     """Every forecast taken, oldest first."""
-    pursuits.run(lambda: cmd_list(as_json, pursuits.journal_dir()))
+    pursuits.run(lambda: cmd_list(as_json, journal_dir()))
 
 
 @app.command('trend')
@@ -573,4 +574,4 @@ def trend_command(
     as_json: JsonOption = False,
 ) -> None:
     """Grade the forecasts whose window has closed against the journal."""
-    pursuits.run(lambda: cmd_trend(days, as_json, pursuits.journal_dir()))
+    pursuits.run(lambda: cmd_trend(days, as_json, journal_dir()))
