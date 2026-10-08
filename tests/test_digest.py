@@ -24,7 +24,9 @@ from pathlib import Path
 import pytest
 
 from doit import digest
+from doit import pursuits
 from doit import usage
+from doit import usage_table
 from doit.index import Entry
 from doit.observe import Invocation
 
@@ -86,6 +88,22 @@ def tool(name: str, invocation: str) -> Entry:
 
 def row(typed: str, count: int = 3, last: str = '2026-08-10') -> usage.Row:
     return usage.Row(typed=typed, sources=('tool',), names=(typed,), count=count, last=last)
+
+
+def host(name: str, through: str = '2026-08-10', rows: tuple[usage.Row, ...] = (), commands: int = 10) -> usage_table.HostUsage:
+    return usage_table.HostUsage(host=name, through=through, commands=commands, rows=rows or (row('fd'), row('rg')))
+
+
+def exported(
+    directory: Path,
+    machine: str = 'archlinux',
+    hosts: tuple[usage_table.HostUsage, ...] = (),
+    generated: str = '2026-08-12T09:00:00+00:00',
+    history: str = 'atuin',
+) -> Path:
+    """One machine's usage table in ``directory``, holding its own host unless told otherwise."""
+    table = usage_table.UsageTable(machine=machine, generated=generated, history=history, hosts=hosts or (host(machine),))
+    return usage_table.write(directory, table)
 
 
 def stored(directory, generated: str, text: str = 'a reading', machine: str = 'archlinux') -> digest.Digest:
@@ -194,7 +212,7 @@ def test_every_tool_is_denied_so_the_session_cannot_open_the_history_file():
 def test_a_missing_claude_is_reported_as_a_failure(monkeypatch, tmp_path):
     """Not a silent skip: a scheduled run that quietly does nothing is undiagnosable."""
     monkeypatch.setattr(digest.shutil, 'which', lambda _: None)
-    monkeypatch.setattr(digest.usage, 'measure', lambda: [row('fd')])
+    exported(tmp_path)
 
     code = digest.cmd_run(days=90, directory=tmp_path)
 
@@ -356,7 +374,7 @@ def test_the_call_runs_outside_the_directory_it_was_invoked_from(invocation):
 
 
 def test_a_run_stores_what_it_read_and_show_reads_it_back(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(digest.usage, 'measure', lambda: [row('fd'), row('rg')])
+    exported(tmp_path)
     monkeypatch.setattr(digest, 'ask', lambda prompt: answered('You reach for fd constantly.'))
 
     assert digest.cmd_run(days=90, directory=tmp_path) == 0
@@ -378,9 +396,8 @@ def test_a_reading_that_cannot_be_stored_still_reaches_stdout(monkeypatch, tmp_p
     re-taken and nothing that cannot.
     """
     locked = tmp_path / 'locked'
-    locked.mkdir()
+    exported(locked)
     locked.chmod(0o555)
-    monkeypatch.setattr(digest.usage, 'measure', lambda: [row('fd')])
     monkeypatch.setattr(digest, 'ask', lambda prompt: answered('A reading that cost a request.'))
 
     try:
@@ -402,7 +419,7 @@ def scheduled(monkeypatch, tmp_path) -> Path:
     result_file = tmp_path / 'run' / 'result.json'
     result_file.parent.mkdir()
     monkeypatch.setenv(digest.RESULT_FILE_ENV, str(result_file))
-    monkeypatch.setattr(digest.usage, 'measure', lambda: [row('fd'), row('rg')])
+    exported(tmp_path / 'state')
     monkeypatch.setattr(digest, 'machine_name', lambda: 'archlinux')
     return result_file
 
@@ -468,7 +485,7 @@ def test_a_result_already_written_by_something_else_fails_the_run(monkeypatch, t
 def test_a_run_by_hand_writes_no_result(monkeypatch, tmp_path):
     """No scheduler asked, so the reading and the stand-in's own files are all the run leaves."""
     monkeypatch.delenv(digest.RESULT_FILE_ENV, raising=False)
-    monkeypatch.setattr(digest.usage, 'measure', lambda: [row('fd')])
+    exported(tmp_path / 'state')
     monkeypatch.setattr(digest, 'machine_name', lambda: 'archlinux')
     stand_in_claude(tmp_path, monkeypatch, recorded_reply('answered'))
     monkeypatch.chdir(tmp_path)
@@ -476,7 +493,121 @@ def test_a_run_by_hand_writes_no_result(monkeypatch, tmp_path):
     assert digest.cmd_run(days=90, directory=tmp_path / 'state') == 0
 
     left = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob('*') if path.is_file())
-    assert left == ['bin/claude', 'bin/reply.err', 'bin/reply.json', 'claude-saw-result-file', 'state/usage-digest-archlinux.jsonl']
+    assert left == [
+        'bin/claude',
+        'bin/reply.err',
+        'bin/reply.json',
+        'claude-saw-result-file',
+        'state/usage-digest-archlinux.jsonl',
+        'state/usage-table-archlinux.json',
+    ]
+
+
+def test_a_run_names_each_host_and_the_export_it_came_from(monkeypatch, tmp_path, scheduled):
+    """A host that stopped arriving has to show as absent in the one line a scheduler keeps."""
+    state = tmp_path / 'state'
+    exported(state, 'archlinux', (host('archlinux'), host('mbp', through='2026-09-01')), generated='2026-10-08T09:00:00+00:00')
+    exported(state, 'scheduler-lxc', (host('scheduler-lxc', through='2026-10-07'),), generated='2026-10-07T09:00:00+00:00', history='zsh')
+    monkeypatch.setattr(digest, 'ask', lambda prompt: answered('A reading.'))
+
+    assert digest.cmd_run(days=90, directory=state) == 0
+
+    summary = json.loads(scheduled.read_text())['summary']
+    assert "archlinux, mbp from archlinux's atuin export of 2026-10-08" in summary
+    assert "scheduler-lxc from scheduler-lxc's zsh export of 2026-10-07" in summary
+    reading = digest.read_all(state)[0]
+    assert reading.exports['archlinux'].hosts == {'archlinux': '2026-08-10', 'mbp': '2026-09-01'}
+    assert reading.hosts() == ['archlinux', 'mbp', 'scheduler-lxc']
+
+
+def test_every_hosts_counts_reach_the_prompt_summed(monkeypatch, tmp_path):
+    seen: dict = {}
+    exported(tmp_path, 'archlinux', (host('archlinux', rows=(row('rg', count=5),)), host('mbp', rows=(row('rg', count=3),))))
+
+    def capture(prompt):
+        seen['prompt'] = prompt
+        return answered('A reading.')
+
+    monkeypatch.setattr(digest, 'ask', capture)
+
+    assert digest.cmd_run(days=90, directory=tmp_path) == 0
+    assert '"typed":"rg","sources":["tool"],"count":8' in seen['prompt']
+
+
+def test_a_run_with_no_export_spends_no_request(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(digest, 'ask', lambda prompt: pytest.fail('a run with nothing to read asked the model'))
+
+    assert digest.cmd_run(days=90, directory=tmp_path) == 1
+    assert 'doit kit digest export' in capsys.readouterr().err
+
+
+def test_an_unreadable_export_fails_the_run_before_any_request(monkeypatch, tmp_path, scheduled):
+    """Reading the rest would report every host the bad file held as idle."""
+    state = tmp_path / 'state'
+    usage_table.table_path(state, 'mbp').write_text('{"half": ')
+    monkeypatch.setattr(digest, 'ask', lambda prompt: pytest.fail('a run over an unreadable export asked the model'))
+
+    assert digest.cmd_run(days=90, directory=state) == 1
+
+    assert 'usage-table-mbp.json is not JSON' in json.loads(scheduled.read_text())['summary']
+    assert digest.read_all(state) == []
+
+
+def test_a_share_that_has_not_arrived_reaches_the_scheduler_as_the_reason(monkeypatch, tmp_path, scheduled):
+    """Created on demand, the directory would collect readings that never leave the box."""
+    missing = tmp_path / 'share' / 'doit-state'
+    monkeypatch.setenv(pursuits.JOURNAL_DIR_ENV, str(missing))
+    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', missing)
+
+    assert digest.cmd_run(days=90) == 1
+
+    assert '$DOIT_JOURNAL_DIR' in json.loads(scheduled.read_text())['summary']
+    assert not missing.exists()
+
+
+@pytest.fixture
+def kit(monkeypatch):
+    """Two catalogued tools, standing in for this machine's index."""
+    monkeypatch.setattr(digest, 'build_index', lambda: [tool('fd', 'fd [pattern]'), tool('rg', 'rg [pattern]')])
+    monkeypatch.setattr(digest, 'machine_name', lambda: 'archlinux')
+
+
+def test_an_export_holds_every_host_atuin_holds(monkeypatch, tmp_path, kit):
+    """Sync puts the other desks in this history, which is what lets one desk export for all of them."""
+    history = (ran('rg a', '2026-10-08', 'archlinux'), ran('rg b', '2026-09-01', 'mbp'), ran('fd c', '2026-10-07', 'macmini'))
+    monkeypatch.setattr(digest.observe, 'atuin_invocations', lambda: history)
+
+    assert digest.cmd_export(tmp_path) == 0
+
+    (written,) = usage_table.read_all(tmp_path).tables
+    assert (written.machine, written.history) == ('archlinux', 'atuin')
+    assert {entry.host: entry.through for entry in written.hosts} == {
+        'archlinux': '2026-10-08',
+        'macmini': '2026-10-07',
+        'mbp': '2026-09-01',
+    }
+
+
+def test_a_zsh_export_holds_this_machine_alone(monkeypatch, tmp_path, kit):
+    """zsh records no host, so every row is this box's and is tagged as such."""
+    history_file = tmp_path / 'history'
+    history_file.write_text(': 1786153106:0;rg needle\n')
+    monkeypatch.setattr(digest.observe, 'HISTORY', history_file)
+    monkeypatch.setattr(digest.observe, 'machine_name', lambda: 'archlinux')
+
+    assert digest.cmd_export(tmp_path / 'state') == 0
+
+    (written,) = usage_table.read_all(tmp_path / 'state').tables
+    assert written.history == 'zsh'
+    assert [entry.host for entry in written.hosts] == ['archlinux']
+
+
+def test_an_empty_history_writes_no_table(tmp_path, kit, capsys):
+    """A table of zeros would read as every row gone unused."""
+    assert digest.cmd_export(tmp_path) == 1
+
+    assert usage_table.read_all(tmp_path) == usage_table.Found([], [])
+    assert 'No shell history to export' in capsys.readouterr().err
 
 
 def test_show_never_reaches_the_network(monkeypatch, tmp_path, capsys):
@@ -576,6 +707,7 @@ def test_list_emits_every_record_whole_as_json(tmp_path, capsys):
             'text': 'a reading',
             'model': '',
             'claude_version': '',
+            'exports': {},
         }
     ]
 
@@ -610,6 +742,7 @@ def test_json_emits_the_stored_record_whole(tmp_path, capsys):
         # Written before the attribution fields existed, and still readable.
         'model': '',
         'claude_version': '',
+        'exports': {},
     }
 
 
@@ -628,11 +761,12 @@ def test_a_malformed_line_does_not_make_the_rest_unreadable(tmp_path):
     assert [entry.text for entry in digest.read_all(tmp_path)] == ['a reading']
 
 
-def test_a_kit_with_nothing_measurable_fails_rather_than_reading_an_empty_table(monkeypatch, tmp_path):
-    monkeypatch.setattr(digest.usage, 'measure', lambda: [])
+def test_a_kit_with_nothing_measurable_fails_rather_than_reading_an_empty_table(monkeypatch, tmp_path, capsys):
+    exported(tmp_path, hosts=(usage_table.HostUsage(host='archlinux', through='2026-08-10', commands=4, rows=()),))
     monkeypatch.setattr(digest, 'ask', lambda prompt: pytest.fail('asked the model about an empty table'))
 
     assert digest.cmd_run(days=90, directory=tmp_path) == 1
+    assert 'Nothing measurable' in capsys.readouterr().err
 
 
 def fake_claude(tmp_path, monkeypatch, version_line: str, exit_code: int = 0) -> None:
@@ -682,7 +816,7 @@ def test_a_stored_reading_records_the_cli_that_took_it(tmp_path, monkeypatch):
     indistinguishable from one that moved because the kit did."""
     fake_claude(tmp_path, monkeypatch, '2.1.238 (Claude Code)')
     monkeypatch.setattr(digest, 'ask', lambda _: answered('a reading'))
-    monkeypatch.setattr(digest.usage, 'measure', lambda: [row('fd')])
+    exported(tmp_path)
     monkeypatch.setattr(digest, 'machine_name', lambda: 'archlinux')
 
     assert digest.cmd_run(days=90, directory=tmp_path) == 0

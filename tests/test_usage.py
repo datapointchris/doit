@@ -21,6 +21,20 @@ def tool(name: str, invocation: str) -> Entry:
     return Entry(source='tool', name=name, invocation=invocation)
 
 
+def test_tables_combine_by_what_you_type():
+    """Two hosts' counts for one row sum, its newest run wins, and a row one table lacks keeps the other's."""
+    archlinux = [
+        usage.Row(typed='rg', sources=('tool',), names=('ripgrep',), count=5, last='2026-08-01'),
+        usage.Row(typed='pacman', sources=('tool',), names=('pacman',), count=2, last='2026-07-01'),
+    ]
+    mbp = [usage.Row(typed='rg', sources=('alias', 'tool'), names=('rg',), count=3, last='2026-08-09')]
+
+    combined = {row.typed: row for row in usage.combine([archlinux, mbp])}
+
+    assert combined['rg'] == usage.Row(typed='rg', sources=('alias', 'tool'), names=('rg', 'ripgrep'), count=8, last='2026-08-09')
+    assert combined['pacman'].count == 2
+
+
 def test_a_row_is_measured_by_what_you_type_not_by_its_name():
     """`ripgrep` installs `rg`, so measuring by name reports it as never used."""
     rows = usage.measure([tool('ripgrep', 'rg [pattern] [path]')], (ran('rg needle'), ran('rg other')))

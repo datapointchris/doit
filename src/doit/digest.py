@@ -34,11 +34,18 @@ schedule that invokes ``run``. ``show`` and ``list`` read what a run wrote and
 never reach the network, which is why they are separate verbs rather than one
 verb and a flag.
 
-Readings are kept under the state directory rather than the cache directory
-because a recompute cannot rebuild one — a second call costs another request
-and reads a table that has moved since. One append-only file per machine, for
-the reason :mod:`doit.journal` gives at length: Syncthing resolves conflicts per
-file, so two machines appending to one file lose a tail.
+**``run`` reads exported tables, never shell history.** It runs on a scheduler
+whose own history would otherwise answer for the fleet. ``export`` measures
+this machine's history into a :mod:`doit.usage_table` file, and ``run`` merges
+every file present, taking each host once. A file that will not read fails the
+run before any request. What it covered is named in the summary and kept on the
+reading, so a host that stopped arriving shows as absent rather than idle.
+
+Readings are kept in the journal directory, beside the tables they read, and not
+in the cache directory: a recompute cannot rebuild one, because a second call
+costs another request and reads a table that has moved since. One append-only
+file per machine, for the reason :mod:`doit.journal` gives at length: Syncthing
+resolves conflicts per file, so two machines appending to one file lose a tail.
 """
 
 import dataclasses
@@ -48,16 +55,22 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
+from doit import observe
+from doit import pursuits
 from doit import usage
+from doit import usage_table
+from doit.index import build_index
+from doit.paths import NamedPathMissing
 from doit.paths import machine_name
-from doit.paths import xdg_state_home
 from doit.render import console
 from doit.render import error_console
 
@@ -105,8 +118,6 @@ MODEL = ''
 # read at a glance, and readings accumulate for as long as the schedule runs, so
 # printing the whole record buries the sentence that says what went wrong.
 HANDLES_ON_MISS = 5
-
-STATE_DIR = xdg_state_home() / 'doit'
 
 # Where fleet's scheduler asks a job to say what came of its run. Set only on a
 # scheduled run, to a file that does not exist yet.
@@ -186,6 +197,21 @@ class DigestFailed(Exception):
 
 
 @dataclass(frozen=True)
+class ExportUsed:
+    """One usage table a reading read: when it was written, from which history, and what it gave.
+
+    ``hosts`` maps each host taken from this table to the newest day its history
+    there reaches. A host whose history stops weeks back is a sync that stalled,
+    and this is where that shows. A table whose every host was fresher in
+    another is still listed, with no hosts, because it was read.
+    """
+
+    generated: str
+    history: str
+    hosts: dict[str, str]
+
+
+@dataclass(frozen=True)
 class Digest:
     """One stored reading, beside what it was taken from.
 
@@ -203,6 +229,11 @@ class Digest:
     wherever the call named none, which leaves the choice to the CLI and doit
     with nothing it can honestly record. ``claude_version`` is empty where that
     CLI would not answer. A digest stored before the fields carries neither.
+
+    ``exports`` is keyed by the machine that wrote each table, and says which
+    hosts the reading covers. ``machine`` is only the box that sent the request.
+    A reading stored before exports existed read one machine's history and
+    carries none.
     """
 
     generated: str
@@ -212,6 +243,11 @@ class Digest:
     text: str
     model: str = ''
     claude_version: str = ''
+    exports: dict[str, ExportUsed] = field(default_factory=dict)
+
+    def hosts(self) -> list[str]:
+        """Every host the reading covers, in name order."""
+        return sorted(host for used in self.exports.values() for host in used.hosts)
 
 
 def row_payload(row: usage.Row, today: dt.date) -> dict[str, object]:
@@ -447,6 +483,26 @@ def store(path: Path, digest: Digest) -> str:
     return ''
 
 
+def exports_of(value: object) -> dict[str, ExportUsed]:
+    """A stored ``exports`` map, or none where it is absent or not that shape.
+
+    Forgiving where :func:`usage_table.parse` is strict. That one guards what a
+    reading is built from, and this only labels a reading already taken.
+    """
+    if not isinstance(value, dict):
+        return {}
+    exports: dict[str, ExportUsed] = {}
+    for machine, used in value.items():
+        if not isinstance(used, dict) or not isinstance(used.get('hosts'), dict):
+            continue
+        exports[str(machine)] = ExportUsed(
+            generated=str(used.get('generated') or ''),
+            history=str(used.get('history') or ''),
+            hosts={str(host): str(through) for host, through in used['hosts'].items()},
+        )
+    return exports
+
+
 def read_all(directory: Path) -> list[Digest]:
     """Every machine's readings, merged and ordered oldest first.
 
@@ -475,6 +531,7 @@ def read_all(directory: Path) -> list[Digest]:
                         # these fields existed carries neither and must still load.
                         model=str(record.get('model') or ''),
                         claude_version=str(record.get('claude_version') or ''),
+                        exports=exports_of(record.get('exports')),
                     )
                 )
     return sorted(stored, key=lambda digest: digest.generated)
@@ -504,16 +561,52 @@ class RunOutcome:
     reply: Reply | None = None
 
 
-def take_reading(days: int, directory: Path) -> RunOutcome:
-    """Take a reading and store it, saying what came of it at every exit."""
-    today = dt.date.today()
-    rows = usage.measure()
-    if not rows:
-        nothing = 'Nothing measurable in your kit, so there is nothing to read.'
-        error_console.print(nothing)
-        return RunOutcome(1, nothing)
+def exports_used(tables: list[usage_table.UsageTable], chosen: usage_table.Chosen) -> dict[str, ExportUsed]:
+    """Every table read, with the hosts the reading took from it."""
+    taken: dict[str, dict[str, str]] = {table.machine: {} for table in tables}
+    for host, (table, usage_of_host) in chosen.items():
+        taken[table.machine][host] = usage_of_host.through
+    return {
+        table.machine: ExportUsed(generated=table.generated, history=table.history, hosts=taken[table.machine])
+        for table in sorted(tables, key=lambda table: table.machine)
+    }
 
-    error_console.print(f'Reading {len(rows)} rows with claude — this takes a minute.')
+
+def coverage(exports: dict[str, ExportUsed]) -> str:
+    """Which hosts came from which machine's table, and when that table was written."""
+    return '; '.join(
+        f"{', '.join(sorted(used.hosts))} from {machine}'s {used.history} export of {used.generated[:10]}"
+        for machine, used in exports.items()
+        if used.hosts
+    )
+
+
+def refuse(message: str) -> RunOutcome:
+    """A run that stopped before spending a request, said once to the person and once to the scheduler."""
+    error_console.print(message)
+    return RunOutcome(1, message)
+
+
+def take_reading(days: int, directory: Path) -> RunOutcome:
+    """Take a reading from every exported table and store it, saying what came of it at every exit.
+
+    Everything that can refuse does so before the request, so a run that was
+    never going to be kept costs nothing.
+    """
+    today = dt.date.today()
+    found = usage_table.read_all(directory)
+    if found.unreadable:
+        return refuse('No reading taken. ' + '; '.join(str(fault) for fault in found.unreadable) + '.')
+    if not found.tables:
+        return refuse(f"No usage table in {directory}, so there is nothing to read. `doit kit digest export` writes this machine's.")
+
+    chosen = usage_table.freshest(found.tables)
+    rows = usage.combine(host.rows for _, host in chosen.values())
+    if not rows:
+        return refuse('Nothing measurable in any exported table, so there is nothing to read.')
+    exports = exports_used(found.tables, chosen)
+
+    error_console.print(f'Reading {len(rows)} rows over {", ".join(chosen)} with claude — this takes a minute.')
     try:
         reply = ask(build_prompt(rows, today, days))
     except DigestFailed as failure:
@@ -528,13 +621,37 @@ def take_reading(days: int, directory: Path) -> RunOutcome:
         text=reply.text,
         model=MODEL,
         claude_version=claude_version(),
+        exports=exports,
     )
     print(digest.text)
     unstored = store(digest_path(directory, digest.machine), digest)
     if unstored:
         error_console.print(unstored)
         return RunOutcome(1, unstored, reply)
-    return RunOutcome(0, f'digest of {digest.rows} rows stored as {digest.generated}', reply)
+    return RunOutcome(0, f'digest of {digest.rows} rows stored as {digest.generated} · {coverage(exports)}', reply)
+
+
+def take_export(directory: Path) -> RunOutcome:
+    """Measure this machine's history, every host it holds, and replace this machine's table.
+
+    A history that holds nothing refuses rather than writing a table of zeros,
+    which a reading would take as every row gone unused.
+    """
+    history = observe.shell_history()
+    if not history.entries:
+        return refuse(f'No shell history to export: atuin answered nothing and {observe.HISTORY} holds no commands.')
+    machine = machine_name()
+    table = usage_table.build(history, build_index(), machine, dt.datetime.now(dt.UTC).isoformat(timespec='seconds'))
+    if not any(host.rows for host in table.hosts):
+        return refuse('Nothing measurable in your kit, so there is nothing to export.')
+    try:
+        path = usage_table.write(directory, table)
+    except OSError as failure:
+        return refuse(f'Usage table not written to {usage_table.table_path(directory, machine)} — {failure}')
+    hosts = ', '.join(f'{host.host} through {host.through}' for host in table.hosts)
+    summary = f'exported {hosts} from {table.history} to {path}'
+    error_console.print(summary)
+    return RunOutcome(0, summary)
 
 
 def claim_result_file() -> str:
@@ -578,16 +695,23 @@ def write_result(path: Path, outcome: RunOutcome) -> str:
     return ''
 
 
-def cmd_run(days: int, directory: Path) -> int:
-    """Take a reading, store it, and say what came of it to a scheduler that asked.
+def reported(action: Callable[[Path], RunOutcome], directory: Path | None) -> int:
+    """Run one scheduled verb against the shared directory, and say what came of it to a scheduler that asked.
 
     The result is claimed before anything starts, so no child sees the path. A
     result that cannot be written fails the run: the scheduler would otherwise
     record a clean run with nothing to show for it, which is the run the ledger
     hides.
+
+    ``directory`` is resolved inside, after the claim. A `$DOIT_JOURNAL_DIR` naming
+    a share that has not arrived then reaches the scheduler as this run's reason,
+    rather than as a traceback with no result at all.
     """
     result_file = claim_result_file()
-    outcome = take_reading(days, directory)
+    try:
+        outcome = action(directory or pursuits.journal_dir())
+    except NamedPathMissing as missing:
+        outcome = refuse(str(missing))
     if not result_file:
         return outcome.code
     unwritten = write_result(Path(result_file), outcome)
@@ -595,6 +719,16 @@ def cmd_run(days: int, directory: Path) -> int:
         error_console.print(unwritten)
         return 1
     return outcome.code
+
+
+def cmd_run(days: int, directory: Path | None = None) -> int:
+    """Take a reading from the exported tables in ``directory``, or the journal directory."""
+    return reported(lambda shared: take_reading(days, shared), directory)
+
+
+def cmd_export(directory: Path | None = None) -> int:
+    """Write this machine's table into ``directory``, or the journal directory."""
+    return reported(take_export, directory)
 
 
 def emit(digest: Digest) -> None:
@@ -631,9 +765,15 @@ def cmd_show(handle: str, as_json: bool, directory: Path) -> int:
     if as_json:
         emit(chosen)
         return 0
-    console.rule(f'[cyan]{chosen.generated} · {chosen.machine}', align='left')
+    console.rule(f'[cyan]{chosen.generated} · {chosen.machine}{over(chosen)}', align='left')
     console.print(chosen.text)
     return 0
+
+
+def over(digest: Digest) -> str:
+    """The hosts a reading covers, as a clause, or nothing for one taken before exports."""
+    hosts = digest.hosts()
+    return f' · over {", ".join(hosts)}' if hosts else ''
 
 
 def cmd_list(as_json: bool, directory: Path) -> int:
@@ -654,7 +794,7 @@ def cmd_list(as_json: bool, directory: Path) -> int:
         return 0
     console.rule('[cyan]Readings', align='left')
     for digest in kept:
-        console.print(f'  [cyan]{digest.generated}[/] · {digest.machine} · {digest.rows} rows, cold after {digest.days}d')
+        console.print(f'  [cyan]{digest.generated}[/] · {digest.machine} · {digest.rows} rows, cold after {digest.days}d{over(digest)}')
     console.print('\nRead one:  [cyan]doit kit digest show <handle>[/]')
     return 0
 
@@ -669,19 +809,38 @@ JsonOption = Annotated[bool, typer.Option('--json', help='Output as JSON to stdo
 
 @app.command('run')
 def digest_run_command(days: DaysOption = usage.DEFAULT_DAYS) -> None:
-    """Read your usage table with claude and store what it says.
+    """Read every exported usage table with claude and store what it says.
 
     The only command here that reaches the network, and one run is one request.
     It sends the aggregated table — what you type, how often, how long ago — and
     never a command line.
 
-    Run by fleet's scheduler, it also writes the outcome, the session id and the
-    tokens spent to $FLEET_RESULT_FILE. Run by hand, it writes nothing there.
+    It reads the tables `export` wrote, taking each host from the table whose
+    history for it runs latest. It reads no shell history of its own. A table
+    that will not read stops the run before the request.
 
-        doit kit digest run             read the table as it stands today
+    Run by fleet's scheduler, it also writes the outcome, the hosts covered, the
+    session id and the tokens spent to $FLEET_RESULT_FILE. Run by hand, it
+    writes nothing there.
+
+        doit kit digest run             read the tables as they stand today
         doit kit digest run --days 30   count a row cold after a month, not a season
     """
-    raise typer.Exit(cmd_run(days, STATE_DIR))
+    raise typer.Exit(cmd_run(days))
+
+
+@app.command('export')
+def digest_export_command() -> None:
+    """Write this machine's usage table where `run` reads it.
+
+    Measures every host this machine's shell history holds, each against the kit
+    here, and replaces this machine's file in $DOIT_JOURNAL_DIR. atuin syncs, so
+    one desk's export can cover the others. The file holds counts and dates per
+    row of your kit, and never a command line.
+
+        doit kit digest export   measure history here and replace this machine's table
+    """
+    raise typer.Exit(cmd_export())
 
 
 @app.command('show')
@@ -697,7 +856,7 @@ def digest_show_command(
         doit kit digest show              the newest reading
         doit kit digest show 2026-08-12   the reading taken that day
     """
-    raise typer.Exit(cmd_show(when or '', as_json, STATE_DIR))
+    pursuits.run(lambda: cmd_show(when or '', as_json, pursuits.journal_dir()))
 
 
 @app.command('list')
@@ -710,4 +869,4 @@ def digest_list_command(as_json: JsonOption = False) -> None:
         doit kit digest list          what has been read, and when
         doit kit digest list --json   every reading whole, text included
     """
-    raise typer.Exit(cmd_list(as_json, STATE_DIR))
+    pursuits.run(lambda: cmd_list(as_json, pursuits.journal_dir()))

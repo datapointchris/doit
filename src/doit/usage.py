@@ -30,6 +30,7 @@ no trace here, by design.
 
 import datetime as dt
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from doit.index import Entry
@@ -207,6 +208,27 @@ def measure(entries: list[Entry] | None = None, invocations: tuple[Invocation, .
             )
         )
     return rows
+
+
+def combine(tables: Iterable[Iterable[Row]]) -> list[Row]:
+    """Several tables as one: counts summed, the newest last run, catalogs unioned.
+
+    The unit is still a thing you can type, for the reason :func:`measure` merges
+    by it. Each table is one host's history measured against one machine's kit, so
+    a row only one of them catalogs is kept with that table's count alone.
+    """
+    merged: dict[str, tuple[set[str], set[str], list[int], list[str]]] = {}
+    for table in tables:
+        for row in table:
+            sources, names, counts, lasts = merged.setdefault(row.typed, (set(), set(), [], []))
+            sources.update(row.sources)
+            names.update(row.names)
+            counts.append(row.count)
+            lasts.append(row.last)
+    return [
+        Row(typed=typed, sources=tuple(sorted(sources)), names=tuple(sorted(names)), count=sum(counts), last=max(lasts))
+        for typed, (sources, names, counts, lasts) in merged.items()
+    ]
 
 
 def unused(rows: list[Row], days: int = DEFAULT_DAYS, minimum: int = 1, today: dt.date | None = None) -> list[Row]:
