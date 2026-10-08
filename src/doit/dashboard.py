@@ -30,7 +30,7 @@ it. Inside one package that reads as removable duplication. It is not: backends
 own due-ness, and the day this file imports the cadence module is the day the
 dashboard starts re-deriving a schedule a backend already computed.
 
-Not to be confused with `forge brief`, which is the dev brief across *repos* for
+Not to be confused with `fleet info`, which is the dev brief across *repos* for
 a coding session. Same plumbing, different audience.
 """
 
