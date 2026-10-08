@@ -160,11 +160,12 @@ version_toml = ["pyproject.toml:project.version"]
 commit_message = "build(release): {version}"
 # The package name is hardcoded because python-semantic-release sets no
 # $PACKAGE_NAME; the variable form silently no-ops and ships a stale uv.lock.
-build_command = """
-    pip install uv
+# Reads the uv-lock hook's rev, the one uv release every uv.lock writer runs.
+build_command = '''
+    pip install "uv==$(python -c 'import re; print(re.search(r"uv-pre-commit\s+rev: \"?([\w.]+)", open(".pre-commit-config.yaml").read())[1])')"
     uv lock --upgrade-package doit
     git add uv.lock
-"""
+'''
 
 [build-system]
 requires = ["uv_build>=0.12.2,<0.13.0"]
