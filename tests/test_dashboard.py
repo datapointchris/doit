@@ -1020,8 +1020,6 @@ def test_an_escalated_problem_leads_with_its_question_and_the_command_that_answe
 
 
 def test_a_privileged_ask_opens_the_problem_rather_than_running_one_option() -> None:
-    """Running the command settles nothing: only an answer moves the escalation
-    on, and `show` prints the command and the answer together."""
     asked = question('Rewrite /etc/hosts?', 'Rewrite it', 'Leave it', command='sudo fleet machine hosts apply')
 
     row = dashboard.problems_adapter(inbox(problem('hosts-drift', 'hosts drifted', status='escalated', ask=asked)))[0].rows[0]
@@ -1064,12 +1062,10 @@ def test_the_heading_counts_fixing_and_verifying_without_listing_them() -> None:
 
     assert lane.meta == '1 new · 2 fixing · 1 verifying'
     assert [row.text for row in lane.rows] == ['untriaged']
-    assert (lane.total, lane.in_flight) == (1, 3), 'a reader of total must not take work in flight for rows the cap cut'
+    assert (lane.total, lane.in_flight) == (1, 3)
 
 
 def test_work_in_flight_keeps_the_lane_drawn_with_nothing_escalated(capsys) -> None:
-    """A lane that emptied as the fixer picked problems up would read as a clean
-    inbox while the problem is still open."""
     lane = dashboard.problems_adapter(inbox(problem('a', 'being fixed', status='fixing')))[0]
 
     dashboard.render_lanes([lane], dt.date.today(), 5)

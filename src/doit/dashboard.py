@@ -923,9 +923,10 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
-# Nobody needs to act on `fixing` or `verifying`. The fix agent holds one, and
+# `fixing` and `verifying` need nothing from you: the fix agent holds one, and
 # the other waits for the producer to run clean. Both are counted in the heading
-# rather than listed. A duplicate is neither: the row it names carries its work.
+# and in `in_flight`, never listed. A duplicate is neither counted nor listed,
+# because the row it names carries its work.
 IN_FLIGHT_STATUSES = ('fixing', 'verifying')
 DUPLICATE_STATUS = 'duplicate'
 ESCALATED_STATUS = 'escalated'
@@ -955,8 +956,7 @@ def problem_where(problem: dict) -> str:
 
 
 def ask_note(ask: dict) -> str:
-    """The option the triage recommends, numbered the way `answer` takes it, or
-    how many options there are when it recommends none."""
+    """The triage's recommended option, numbered from 1 as `fleet problems answer` takes it."""
     options = [option for option in ask.get('options') or [] if isinstance(option, dict)]
     chosen = ask.get('recommendation')
     if isinstance(chosen, int) and 1 <= chosen <= len(options):
@@ -967,16 +967,16 @@ def ask_note(ask: dict) -> str:
 def problem_row(problem: dict, today: dt.date) -> Row:
     """One problem nobody else is acting on.
 
-    An escalation with a question is an `ask`, and its handle answers it. A
-    privileged ask has a command to run as well as an answer to give, and a
-    handle holds one command, so its handle is `fleet problems show`, which
-    prints both. An escalation with no question is a fix PR waiting on review.
-    That PR is only in the row's steps, and picking the current one is fleet's
-    episode rule, so its handle is `fleet problems show` too.
+    Running a privileged ask's command settles nothing until it is answered, and
+    a handle holds one command. So that handle is `fleet problems show`, which
+    prints the command and the answer line together.
 
-    An untriaged problem's gutter says how long ago it last fired. A status this
-    build does not know carries its own name there instead, so it never passes
-    for an untriaged row.
+    An escalation with no question is a fix PR waiting on review. The PR is only
+    in the row's steps, and choosing which step is current is fleet's rule, not
+    doit's. `fleet problems show` prints it.
+
+    A status this build does not know is labeled by name rather than by age, so
+    it never passes for an untriaged row.
     """
     key = problem.get('key', '')
     status = problem_status(problem)
@@ -997,8 +997,8 @@ def problem_row(problem: dict, today: dt.date) -> Row:
 def problems_heading(statuses: list[str]) -> str:
     """How many open problems sit in each status, the ones waiting on you first.
 
-    A status this build does not know is counted after the known ones, because
-    it is listed as a row and the heading must not undercount the rows.
+    A status this build does not know is still counted, because the lane lists
+    it as a row.
     """
     order = [*HEADING_STATUSES, *(status for status in dict.fromkeys(statuses) if status not in HEADING_STATUSES)]
     return ' · '.join(f'{statuses.count(status)} {status}' for status in order if status in statuses) or 'nothing open'
@@ -1019,8 +1019,9 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
     Always one lane while the call succeeded, even with nothing open. Returning
     none would make `lanes_from` fall back to reporting the lane unavailable,
     and an empty inbox is the healthy answer rather than a broken one — the
-    renderer is what drops it from sight. Fixing and verifying problems are
-    `in_flight`, so a lane with nothing listed and work in flight is still drawn.
+    renderer is what drops it from sight. `in_flight` carries fixing and
+    verifying problems, so a lane that lists nothing while they are open is
+    still drawn.
     """
     payload = result.payload
     if not isinstance(payload, list):
@@ -1144,8 +1145,8 @@ def cap_for(lane_name: str, row_cap: int) -> int:
 def quiet_alert(lane: LaneView) -> bool:
     """An alert lane that answered and had nothing open.
 
-    Work in flight counts as open. A lane that vanished while an agent was
-    fixing its problems would read as a clean inbox.
+    A lane that vanished while an agent was fixing its problems would read as a
+    clean inbox.
 
     Only the terminal drops it. `--json` keeps every lane, because a consumer
     asking what doit knows wants the empty answer as much as the full one.
