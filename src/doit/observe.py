@@ -34,6 +34,7 @@ import json
 import os
 import re
 import subprocess
+import uuid
 from functools import cache
 from pathlib import Path
 from typing import NamedTuple
@@ -58,12 +59,16 @@ SCOPES = (FLEET, MACHINE)
 
 # `--include-duplicates` is required, not incidental: the default dedupes to the
 # newest run of each distinct command across all hosts, which is exactly the row
-# a machine-scoped question needs to still see for its own host.
+# a machine-scoped question needs to still see for its own host. `--filter-mode
+# global` is pinned for the same reason: a `filter_mode = "host"` chosen for the
+# interactive search would otherwise narrow this query to one box.
 ATUIN_QUERY = (
     'atuin',
     'search',
     '--search-mode',
     'prefix',
+    '--filter-mode',
+    'global',
     '--include-duplicates',
     '--limit',
     '200000',
@@ -121,13 +126,29 @@ def atuin_invocations() -> tuple[Invocation, ...]:
     to, and a register that stopped rendering because a history tool was missing
     would be worse than one answering from the other source.
     """
+    environment = atuin_environment()
     try:
-        result = subprocess.run(ATUIN_QUERY, capture_output=True, text=True, timeout=ATUIN_TIMEOUT, check=False)  # noqa: S603
+        result = subprocess.run(ATUIN_QUERY, capture_output=True, text=True, timeout=ATUIN_TIMEOUT, check=False, env=environment)  # noqa: S603
     except (OSError, subprocess.SubprocessError):
         return ()
     if result.returncode != 0:
         return ()
     return parse_atuin_rows(result.stdout)
+
+
+def atuin_environment() -> dict[str, str]:
+    """This process's environment, with an atuin session id wherever no shell hook set one.
+
+    atuin 18 refuses `search` without `$ATUIN_SESSION`, and only its shell hook
+    sets that. A scheduled run or an `ssh box doit …` carries none, so atuin
+    exited 1 and the read fell back to zsh, answering for this box alone. The id
+    serves atuin's session filter, which this query does not use, so any fresh
+    one does.
+    """
+    environment = dict(os.environ)
+    if not environment.get('ATUIN_SESSION'):
+        environment['ATUIN_SESSION'] = uuid.uuid4().hex
+    return environment
 
 
 def parse_atuin_rows(stdout: str) -> tuple[Invocation, ...]:

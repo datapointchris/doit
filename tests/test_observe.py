@@ -11,10 +11,15 @@ so every test here supplies its own history or deliberately has none.
 
 import datetime as dt
 import json
+import os
 
 import pytest
 
 from doit import observe
+
+# Bound before conftest stubs the module attribute, so the one test that needs
+# the real atuin call can still make it against a stand-in binary.
+real_atuin_invocations = observe.atuin_invocations
 
 
 def write_history(tmp_path, monkeypatch, entries: list[tuple[dt.date, str]]) -> None:
@@ -267,6 +272,22 @@ def test_atuin_host_is_canonicalized_to_the_recorded_form():
     stdout = '2026-08-07 21:38:53|macmini.trusted|doit kit remind\n'
 
     assert observe.parse_atuin_rows(stdout)[0].host == 'macmini'
+
+
+def test_atuin_answers_where_no_shell_hook_set_a_session(tmp_path, monkeypatch):
+    """atuin 18 exits 1 without `$ATUIN_SESSION`, which a scheduled run never carries."""
+    binary = tmp_path / 'bin' / 'atuin'
+    binary.parent.mkdir()
+    binary.write_text(
+        '#!/bin/sh\n'
+        '[ -n "$ATUIN_SESSION" ] || { echo "Failed to find \\$ATUIN_SESSION in the environment" >&2; exit 1; }\n'
+        "printf '2026-10-08 09:00:00|mbp.trusted|rg needle\\n'\n"
+    )
+    binary.chmod(0o755)
+    monkeypatch.setenv('PATH', str(binary.parent), prepend=os.pathsep)
+    monkeypatch.delenv('ATUIN_SESSION', raising=False)
+
+    assert real_atuin_invocations() == (observe.Invocation('2026-10-08', 'mbp', 'rg needle'),)
 
 
 def test_history_falls_back_to_zsh_when_atuin_cannot_be_asked(tmp_path, monkeypatch):
