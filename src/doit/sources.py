@@ -61,7 +61,7 @@ DEFAULT_TIMEOUT_SECONDS = 5.0
 
 # The one substitution a command may ask for. `resolved_command` says what it
 # matches against.
-TODAY_TOKEN = '{today}'
+TODAY_PLACEHOLDER = '{today}'
 
 TEMPLATE = """\
 # Which apps doit asks, and what it asks them.
@@ -214,7 +214,7 @@ def resolved_command(command: list[str], today: date | None = None) -> list[str]
     token is passed through untouched rather than silently rewritten.
     """
     stamp = (today or date.today()).isoformat()
-    return [stamp if part == TODAY_TOKEN else part for part in command]
+    return [stamp if part == TODAY_PLACEHOLDER else part for part in command]
 
 
 def run(source: Source) -> Result:
