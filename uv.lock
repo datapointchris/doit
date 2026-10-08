@@ -243,7 +243,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pyselfupdate", extras = ["typer"], specifier = ">=0.2.2" },
+    { name = "pyselfupdate", extras = ["typer"], specifier = ">=0.5.0" },
     { name = "pyyaml" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "typer", specifier = ">=0.15.0" },
@@ -522,11 +522,11 @@ wheels = [
 
 [[package]]
 name = "pyselfupdate"
-version = "0.3.0"
+version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7c/f6/03098c70e5857135f6a9d90685f06d66dca69f76b2ab627c33bfccadd90c/pyselfupdate-0.3.0.tar.gz", hash = "sha256:6eddbe8d0efce18f6fb31ce739d0adc40889be6fae5c900ee82123ad0bf2a11b", size = 24230, upload-time = "2026-08-21T17:32:42.248Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f2/56/37363aeddfe8d3b3e40ed9000a13be524d5b28fd735cda29a99b0b086460/pyselfupdate-0.5.0.tar.gz", hash = "sha256:c14f221cd445e90f7be6d0977c3662682f8e1857e819456f5bb9be8cec4384e8", size = 32239, upload-time = "2026-10-08T21:44:05.782Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/a6/fc2f645f74c8a6f564d77065c5bb7d577e39085bba9293cac8b38f92ecf8/pyselfupdate-0.3.0-py3-none-any.whl", hash = "sha256:cb968e65ef45af0ec6a923f7bc95d48b4024f10d1b45e94550ef2a7f9ed9e333", size = 28775, upload-time = "2026-08-21T17:32:41.18Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/88/0378a3d6a164e2da5dc06eccfa16818fead2520e55a6a04b38beca01f350/pyselfupdate-0.5.0-py3-none-any.whl", hash = "sha256:ccbad29973e308fef2eb21b5714e0cbce1855aec791ed2424c20551e8e2d478e", size = 36830, upload-time = "2026-10-08T21:44:04.9Z" },
 ]
 
 [package.optional-dependencies]
