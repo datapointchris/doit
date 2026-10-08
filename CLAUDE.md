@@ -6,7 +6,7 @@ The layer that decides what to attend to and drives it. It stewards no records o
 per-domain CLIs do that — so a change that has `doit` deciding a domain rule belongs in the CLI
 that owns the domain, not here.
 
-## Three things that will look like bugs and are not
+## What will look like a bug and is not
 
 **The dashboard duplicates due-ness.** It imports nothing from the cadence module and instead
 mirrors the `overdue` field the backends already emit. Backends own due-ness and speak `--json`;
@@ -20,11 +20,18 @@ open, whereas atuin is the only source that knows which machine ran a command, w
 `scope: machine` item answerable at all. It is one query per process, shared by every item, and it
 falls back to this machine's zsh history whenever atuin cannot be asked.
 
-**That one read now has two consumers, and must keep having one parser.** `observe.history_entries`
-answers "when was this register item last done"; `usage.measure` folds the same cached read into a
-count and a last-run date per row of your kit. A second parser would answer a subtly different
-question within a month, and then `review` and `kit` would disagree about whether you had used `rg`.
-Anything else needing history folds this, never re-reads it.
+**That one read has one parser, and every consumer folds it.** `observe.shell_history` answers "when
+was this register item last done". `usage.measure` folds the same cached read into a count and a
+last-run date per row of your kit, and `doit kit digest export` folds it per host into the table the
+digest reads. A second parser would answer a subtly different question within a month, and then
+`review` and `kit` would disagree about whether you had used `rg`. Anything else needing history
+folds this, never re-reads it.
+
+**`doit kit digest run` reads no shell history at all.** It may run where no shell history is
+yours, so its own history would answer for the fleet and the run would still succeed. It reads the
+`usage-table-<machine>.json` files `export` writes into the journal directory instead. It takes each
+host once, from the table whose history for that host runs latest, and refuses before the request
+when a table will not read.
 
 **`doit.machine` calls `dotfiles` from code, not through `sources.yml`.** The registry is one flat
 file for the whole fleet, and everything it gets checked against is scoped to one box, so a row for
@@ -48,8 +55,14 @@ would file every package-installed row as foreign and empty the report.
 - **Config** — `pursuits.yml`, the review register, `sources.yml`. `$XDG_CONFIG_HOME/doit/`,
   hand-edited, and only ever *read* here so comments and layout survive. Never in either repo: it is
   personal, and both repos are public.
-- **State** — `$XDG_STATE_HOME/doit/`. Per-machine wherever a sync layer would otherwise have to
-  merge concurrent writes, which it cannot.
+- **State** — `$XDG_STATE_HOME/doit/`, or `$DOIT_JOURNAL_DIR` where a box reads the share somewhere
+  else, resolved once by `paths.journal_dir()`. Per-machine wherever a sync layer would otherwise
+  have to merge concurrent writes, which it cannot.
+
+A path `$DOIT_JOURNAL_DIR` or `$DOIT_PURSUITS` names must exist, and doit refuses one that does not,
+naming the variable. A missing default is a fresh machine and reads as empty. A missing named path
+is a share that has not arrived. Read as empty, it lets a scheduled job run on no data and exit 0,
+writing into a directory that never syncs.
 
 ## One renderer per collection, and `doit.tools` owns most of them
 

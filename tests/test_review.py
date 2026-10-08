@@ -82,7 +82,7 @@ def observe_history(tmp_path, monkeypatch, entries: dict) -> None:
     history = tmp_path / 'history'
     history.write_text('\n'.join(lines) + '\n')
     monkeypatch.setattr(observe, 'HISTORY', history)
-    observe.history_entries.cache_clear()
+    observe.shell_history.cache_clear()
 
 
 def test_running_the_command_clears_an_item_a_stale_stamp_left_overdue(tmp_path, monkeypatch):

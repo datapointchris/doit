@@ -89,10 +89,13 @@ from doit.journal import latest_occurrence
 from doit.journal import load_counts
 from doit.journal import new_id
 from doit.journal import rate_per_day
+from doit.paths import NamedPathMissing
+from doit.paths import env_path
+from doit.paths import journal_dir
 from doit.paths import machine_name
+from doit.paths import require_named
 from doit.paths import xdg_cache_home
 from doit.paths import xdg_config_home
-from doit.paths import xdg_state_home
 from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
@@ -102,8 +105,8 @@ from doit.render import join_context
 from doit.render import span_text
 from doit.render import terminal_width
 
-REGISTER = Path(os.environ.get('DOIT_PURSUITS') or xdg_config_home() / 'doit' / 'pursuits.yml')
-JOURNAL_DIR = Path(os.environ.get('DOIT_JOURNAL_DIR') or xdg_state_home() / 'doit')
+REGISTER_ENV = 'DOIT_PURSUITS'
+REGISTER = env_path(REGISTER_ENV, xdg_config_home() / 'doit' / 'pursuits.yml')
 CACHE_DIR = Path(os.environ.get('DOIT_CACHE_DIR') or xdg_cache_home() / 'doit')
 DRAW_CACHE = CACHE_DIR / 'next-draw.json'
 NAMES_CACHE = CACHE_DIR / 'next-names.txt'
@@ -295,6 +298,11 @@ class RegisterError(Exception):
     """A pursuits file that cannot be trusted to allocate attention correctly."""
 
 
+def register_path() -> Path:
+    """The register, refused when `$DOIT_PURSUITS` names a file that is not there."""
+    return require_named(REGISTER_ENV, REGISTER)
+
+
 def load_pursuits(path: Path | None = None) -> dict:
     """The register, validated. Raises rather than guessing at a malformed entry.
 
@@ -306,7 +314,7 @@ def load_pursuits(path: Path | None = None) -> dict:
     The default is read at call time rather than bound as a parameter default, so
     a test repointing REGISTER is seen by everything that reads it.
     """
-    path = REGISTER if path is None else path
+    path = register_path() if path is None else path
     if not path.exists():
         return {}
     document = yaml.safe_load(path.read_text()) or {}
@@ -363,7 +371,7 @@ def register_block(key: str, known: set[str], path: Path | None) -> dict:
     reverting to a default nobody chose is the same silent misallocation a
     misspelled `weight` would be.
     """
-    path = REGISTER if path is None else path
+    path = register_path() if path is None else path
     if not path.exists():
         return {}
     document = yaml.safe_load(path.read_text()) or {}
@@ -583,7 +591,8 @@ def build_state(
     sizes = {name: checkoff_minutes.get(name, 1.0) for name in active}
 
     if records is None:
-        records = journal.read_all(JOURNAL_DIR) if JOURNAL_DIR.exists() else []
+        directory = journal_dir()
+        records = journal.read_all(directory) if directory.exists() else []
     if balance_settings is None:
         balance_settings = load_balance_settings()
     register_warn_weeks = float(balance_settings.get('warn_weeks') or DEFAULT_WARN_WEEKS)
@@ -1336,7 +1345,7 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
         names = selection['offered']
         selection['resolved'] = resolve_all(names, pursuits)
         save_cached_draw(selection)
-        bump_counts(counts_path(JOURNAL_DIR, machine_name()), names)
+        bump_counts(counts_path(journal_dir(), machine_name()), names)
     else:
         selection = cached
         names = selection['offered']
@@ -1617,7 +1626,7 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt
     }
     if state is not None:
         record['state_at_log'] = explain_payload(state)
-    return journal.append(journal_path(JOURNAL_DIR, machine_name()), record)
+    return journal.append(journal_path(journal_dir(), machine_name()), record)
 
 
 def restated_balance(state: dict, name: str, entry: dict) -> str:
@@ -1963,7 +1972,7 @@ def orphaned_offer_counts(register: dict) -> list[str]:
     and nothing else would ever mention it. The review deck has the same failure
     and already warns about it; this is the other half of the pair.
     """
-    return sorted(name for name in load_counts(JOURNAL_DIR) if name not in register)
+    return sorted(name for name in load_counts(journal_dir()) if name not in register)
 
 
 def render_orphaned_counters(register: dict) -> None:
@@ -1978,7 +1987,7 @@ def render_orphaned_counters(register: dict) -> None:
     if not orphans:
         return
     here = machine_name()
-    by_machine = counts_by_machine(JOURNAL_DIR)
+    by_machine = counts_by_machine(journal_dir())
     console.print(Text('\n  Offer counts with no pursuit:', style='yellow'))
     for name in orphans:
         for machine, counts in sorted(by_machine.items()):
@@ -1991,7 +2000,7 @@ def render_orphaned_counters(register: dict) -> None:
             whose = '' if machine == here else ' [dim](another box — clear it there)[/]'
             console.print(f'    [yellow]{name}[/]  {counts[name]}  {machine}{whose}')
     console.print('  Renaming a pursuit strands its total — rename the key in the counter to keep it.')
-    console.print(f'  [cyan]{JOURNAL_DIR}[/]')
+    console.print(f'  [cyan]{journal_dir()}[/]')
 
 
 def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
@@ -2005,7 +2014,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     cutoff = now - dt.timedelta(days=days)
     sizes = declared_minutes(pursuits)
     mine = records_by_pursuit(state['records'])
-    counts = load_counts(JOURNAL_DIR)
+    counts = load_counts(journal_dir())
 
     rows = []
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
@@ -2199,10 +2208,22 @@ def cmd_evidence(as_json: bool = False) -> int:
 
 
 def cmd_edit() -> int:
-    if not REGISTER.exists():
-        REGISTER.parent.mkdir(parents=True, exist_ok=True)
-        REGISTER.write_text(TEMPLATE)
-    subprocess.run([os.environ.get('EDITOR', 'vi'), str(REGISTER)], check=False)
+    """Open the register in $EDITOR, writing the template first where there is none.
+
+    A file `$DOIT_PURSUITS` names in a directory that exists is a register not
+    yet written, and writing it is this command's job. Only a missing directory
+    is refused, because that is the share the variable stands for.
+    """
+    try:
+        register = register_path()
+    except NamedPathMissing as missing:
+        if not missing.path.parent.is_dir():
+            raise
+        register = missing.path
+    if not register.exists():
+        register.parent.mkdir(parents=True, exist_ok=True)
+        register.write_text(TEMPLATE)
+    subprocess.run([os.environ.get('EDITOR', 'vi'), str(register)], check=False)
     try:
         write_names_cache(load_pursuits())
     except RegisterError as error:
@@ -2225,12 +2246,16 @@ def run(action: Callable[[], int]) -> None:
 
     Every entry point loads the register, so without this each would need its own
     try/except — and a RegisterError escaping as a traceback would bury the one
-    line saying which field is wrong.
+    line saying which field is wrong. A path a variable names and nothing holds
+    is the same kind of refusal, and it gets the same one line.
     """
     try:
         code = action()
     except RegisterError as error:
         error_console.print(f'[yellow]pursuits.yml:[/] {error}')
+        raise typer.Exit(1) from None
+    except NamedPathMissing as missing:
+        error_console.print(str(missing))
         raise typer.Exit(1) from None
     raise typer.Exit(code)
 

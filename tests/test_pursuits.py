@@ -20,9 +20,11 @@ import pytest
 from typer.testing import CliRunner
 
 from doit import journal
+from doit import paths
 from doit import pursuits
 from doit import render
 from doit.cli import app as cli_app
+from doit.paths import NamedPathMissing
 
 runner = CliRunner()
 
@@ -34,14 +36,14 @@ NOW = dt.datetime.fromisoformat('2026-08-04T12:00:00-04:00')
 def register(monkeypatch):
     """The committed fixture register, with no journal or cache behind it."""
     monkeypatch.setattr(pursuits, 'REGISTER', FIXTURE_DIR / 'pursuits.yml')
-    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', FIXTURE_DIR / 'does-not-exist-journal')
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', FIXTURE_DIR / 'does-not-exist-journal')
     monkeypatch.setattr(pursuits, 'CACHE_DIR', FIXTURE_DIR / 'does-not-exist-cache')
 
 
 @pytest.fixture
 def sandbox(tmp_path, monkeypatch):
     """Point the journal and cache at a writable temp directory."""
-    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', tmp_path / 'state')
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', tmp_path / 'state')
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     monkeypatch.setattr(pursuits, 'DRAW_CACHE', tmp_path / 'cache' / 'next-draw.json')
     monkeypatch.setattr(pursuits, 'NAMES_CACHE', tmp_path / 'cache' / 'next-names.txt')
@@ -986,7 +988,7 @@ def balance_state(tmp_path, monkeypatch, records: list[dict], register: str = BA
     register_path = tmp_path / 'pursuits.yml'
     register_path.write_text(register)
     monkeypatch.setattr(pursuits, 'REGISTER', register_path)
-    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', tmp_path / 'state')
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', tmp_path / 'state')
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     write_records(tmp_path / 'state', records)
     return pursuits.build_state(pursuits.load_pursuits(), NOW)
@@ -1181,7 +1183,7 @@ def test_the_balance_spans_every_machines_journal(tmp_path, monkeypatch):
     register_path = tmp_path / 'pursuits.yml'
     register_path.write_text(BALANCE_REGISTER)
     monkeypatch.setattr(pursuits, 'REGISTER', register_path)
-    monkeypatch.setattr(pursuits, 'JOURNAL_DIR', tmp_path / 'state')
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', tmp_path / 'state')
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     for machine, minutes in (('archlinux', 30), ('macmini', 45), ('mbp', 15)):
         journal.append(journal.journal_path(tmp_path / 'state', machine), zeroed('read', 1.0))
@@ -2011,3 +2013,55 @@ def test_a_paused_timed_pursuit_keeps_its_unit_in_drift(tmp_path, sandbox, monke
 
     assert (row['unit'], row['amount']) == ('minutes', 135.0)
     assert row['checkoff_minutes'] == 45.0
+
+
+def test_a_named_journal_directory_that_is_missing_stops_a_log_before_it_writes(tmp_path, monkeypatch):
+    """Creating it would file the record in a directory the share never reaches."""
+    missing = tmp_path / 'share' / 'doit-state'
+    monkeypatch.setenv(paths.JOURNAL_DIR_ENV, str(missing))
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', missing)
+    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
+
+    ran = runner.invoke(cli_app, ['log', 'chores', '--yes', '--no-write'])
+
+    assert ran.exit_code == 1
+    assert '$DOIT_JOURNAL_DIR' in ran.output
+    assert not missing.exists()
+
+
+def test_a_named_register_that_is_missing_is_refused_rather_than_read_as_empty(tmp_path, monkeypatch):
+    """An empty register draws nothing and exits 0, which a scheduled run reports as clean."""
+    missing = tmp_path / 'share' / 'pursuits.yml'
+    monkeypatch.setenv(pursuits.REGISTER_ENV, str(missing))
+    monkeypatch.setattr(pursuits, 'REGISTER', missing)
+
+    with pytest.raises(NamedPathMissing):
+        pursuits.load_pursuits()
+
+
+def test_edit_writes_a_named_register_that_does_not_exist_yet(tmp_path, sandbox, monkeypatch):
+    """Refused, a user who sets the variable first has no command that creates the register."""
+    named = tmp_path / 'config' / 'pursuits.yml'
+    named.parent.mkdir()
+    monkeypatch.setenv(pursuits.REGISTER_ENV, str(named))
+    monkeypatch.setattr(pursuits, 'REGISTER', named)
+    monkeypatch.setenv('EDITOR', 'true')
+
+    ran = runner.invoke(cli_app, ['pursuits', 'edit'])
+
+    assert ran.exit_code == 0
+    assert named.read_text() == pursuits.TEMPLATE
+
+
+def test_edit_refuses_a_named_register_whose_directory_is_missing(tmp_path, sandbox, monkeypatch):
+    """A missing directory is the share the variable stands for. A register written there would sync nowhere."""
+    missing = tmp_path / 'share' / 'pursuits.yml'
+    monkeypatch.setenv(pursuits.REGISTER_ENV, str(missing))
+    monkeypatch.setattr(pursuits, 'REGISTER', missing)
+    monkeypatch.setenv('EDITOR', 'true')
+
+    ran = runner.invoke(cli_app, ['pursuits', 'edit'])
+
+    assert ran.exit_code == 1
+    assert '$DOIT_PURSUITS' in ran.output
+    assert not missing.parent.exists()

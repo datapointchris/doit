@@ -105,3 +105,21 @@ def test_machine_name_is_the_bare_lowercased_host(monkeypatch):
 def test_machine_name_without_a_domain(monkeypatch):
     monkeypatch.setattr(paths.socket, 'gethostname', lambda: 'archlinux')
     assert paths.machine_name() == 'archlinux'
+
+
+def test_a_named_path_with_nothing_there_is_refused_naming_the_variable(monkeypatch, tmp_path):
+    missing = tmp_path / 'share' / 'doit-state'
+    monkeypatch.setenv('DOIT_JOURNAL_DIR', str(missing))
+
+    with pytest.raises(paths.NamedPathMissing) as refused:
+        paths.require_named('DOIT_JOURNAL_DIR', paths.env_path('DOIT_JOURNAL_DIR', tmp_path / 'default'))
+
+    assert '$DOIT_JOURNAL_DIR' in str(refused.value)
+    assert str(missing) in str(refused.value)
+
+
+def test_a_default_path_with_nothing_there_is_a_fresh_machine(monkeypatch, tmp_path):
+    monkeypatch.delenv('DOIT_JOURNAL_DIR', raising=False)
+    default = tmp_path / 'default'
+
+    assert paths.require_named('DOIT_JOURNAL_DIR', paths.env_path('DOIT_JOURNAL_DIR', default)) == default

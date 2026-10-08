@@ -29,7 +29,7 @@ def isolated_shell_history(monkeypatch, tmp_path):
     """Cut history observation off from both real sources.
 
     atuin is stubbed out rather than pointed somewhere harmless: it is a real
-    binary holding this machine's real history, and `history_entries` prefers it,
+    binary holding this machine's real history, and `shell_history` prefers it,
     so without this every test asking about a fixture command silently answers
     from whoever is running the suite. A test that wants the atuin path calls
     `observe.atuin_invocations` directly.
@@ -40,9 +40,9 @@ def isolated_shell_history(monkeypatch, tmp_path):
     """
     monkeypatch.setattr(observe, 'HISTORY', tmp_path / 'no-shell-history')
     monkeypatch.setattr(observe, 'atuin_invocations', lambda: ())
-    observe.history_entries.cache_clear()
+    observe.shell_history.cache_clear()
     yield
-    observe.history_entries.cache_clear()
+    observe.shell_history.cache_clear()
 
 
 @pytest.fixture(autouse=True)

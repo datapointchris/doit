@@ -34,6 +34,7 @@ import json
 import os
 import re
 import subprocess
+import uuid
 from functools import cache
 from pathlib import Path
 from typing import NamedTuple
@@ -58,12 +59,16 @@ SCOPES = (FLEET, MACHINE)
 
 # `--include-duplicates` is required, not incidental: the default dedupes to the
 # newest run of each distinct command across all hosts, which is exactly the row
-# a machine-scoped question needs to still see for its own host.
+# a machine-scoped question needs to still see for its own host. `--filter-mode
+# global` is pinned because a `filter_mode = "host"` chosen for the interactive
+# search would otherwise narrow this query to one box.
 ATUIN_QUERY = (
     'atuin',
     'search',
     '--search-mode',
     'prefix',
+    '--filter-mode',
+    'global',
     '--include-duplicates',
     '--limit',
     '200000',
@@ -72,6 +77,9 @@ ATUIN_QUERY = (
     '',
 )
 ATUIN_TIMEOUT = 20
+
+ATUIN = 'atuin'
+ZSH = 'zsh'
 
 
 class Observation(NamedTuple):
@@ -95,8 +103,22 @@ class Invocation(NamedTuple):
     command: str
 
 
+class ShellHistory(NamedTuple):
+    """Every recorded invocation, and which source answered for them.
+
+    ``source`` travels with the rows because the two sources hold different
+    spans of the same history. atuin starts where it was installed or last
+    imported, and zsh at whatever its file has kept, so they can differ by
+    months. A count that moved because the source flipped is otherwise
+    indistinguishable from one that moved because you did.
+    """
+
+    source: str
+    entries: tuple[Invocation, ...]
+
+
 @cache
-def history_entries() -> tuple[Invocation, ...]:
+def shell_history() -> ShellHistory:
     """Every recorded shell invocation, from atuin if it answers and zsh if not.
 
     Read once per process and shared: both the dashboard and the review views ask
@@ -110,7 +132,15 @@ def history_entries() -> tuple[Invocation, ...]:
     is written unconditionally by `.zshrc`, so it answers on a box where atuin is
     not installed, not yet syncing, or simply broken.
     """
-    return atuin_invocations() or zsh_invocations()
+    atuin = atuin_invocations()
+    if atuin:
+        return ShellHistory(ATUIN, atuin)
+    return ShellHistory(ZSH, zsh_invocations())
+
+
+def history_entries() -> tuple[Invocation, ...]:
+    """The rows of :func:`shell_history`, for a caller with no use for the source."""
+    return shell_history().entries
 
 
 def atuin_invocations() -> tuple[Invocation, ...]:
@@ -121,13 +151,29 @@ def atuin_invocations() -> tuple[Invocation, ...]:
     to, and a register that stopped rendering because a history tool was missing
     would be worse than one answering from the other source.
     """
+    environment = atuin_environment()
     try:
-        result = subprocess.run(ATUIN_QUERY, capture_output=True, text=True, timeout=ATUIN_TIMEOUT, check=False)  # noqa: S603
+        result = subprocess.run(ATUIN_QUERY, capture_output=True, text=True, timeout=ATUIN_TIMEOUT, check=False, env=environment)  # noqa: S603
     except (OSError, subprocess.SubprocessError):
         return ()
     if result.returncode != 0:
         return ()
     return parse_atuin_rows(result.stdout)
+
+
+def atuin_environment() -> dict[str, str]:
+    """This process's environment, with an atuin session id wherever no shell hook set one.
+
+    atuin 18 refuses `search` without `$ATUIN_SESSION`, and only its shell hook
+    sets that. A scheduled run or an `ssh box doit …` carries none. Without one
+    atuin exits 1, and the read falls back to zsh and answers for this box
+    alone. The id serves atuin's session filter, which this query does not use,
+    so any fresh one does.
+    """
+    environment = dict(os.environ)
+    if not environment.get('ATUIN_SESSION'):
+        environment['ATUIN_SESSION'] = uuid.uuid4().hex
+    return environment
 
 
 def parse_atuin_rows(stdout: str) -> tuple[Invocation, ...]:

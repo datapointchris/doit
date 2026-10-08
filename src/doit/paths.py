@@ -62,6 +62,58 @@ def load_config() -> dict[str, Any]:
         return {}
 
 
+class NamedPathMissing(FileNotFoundError):
+    """A path an environment variable names, with nothing there.
+
+    A default path that is missing is a fresh machine, and it reads as empty. A
+    named one is a share or a mount that has not arrived. Read as empty, it runs
+    a scheduled job against no data, exits 0, and writes into a directory that
+    never syncs.
+
+    A ``FileNotFoundError`` so the readers that already degrade one lane on an
+    ``OSError`` degrade it on this too, with the variable in the message.
+    """
+
+    def __init__(self, env_var: str, path: Path) -> None:
+        self.env_var = env_var
+        self.path = path
+        super().__init__(f'${env_var} names {path}, and nothing is there.')
+
+
+def env_path(env_var: str, default: Path) -> Path:
+    """`$env_var` as a path when it is set and not empty, else ``default``."""
+    value = os.environ.get(env_var)
+    return Path(value).expanduser() if value else default
+
+
+def require_named(env_var: str, path: Path) -> Path:
+    """``path``, refused with :class:`NamedPathMissing` when `$env_var` named it and nothing is there.
+
+    Compared against the variable at call time, so a test that repoints the
+    module constant is not held to a variable naming somewhere else.
+    """
+    value = os.environ.get(env_var)
+    if value and Path(value).expanduser() == path and not path.exists():
+        raise NamedPathMissing(env_var, path)
+    return path
+
+
+JOURNAL_DIR_ENV = 'DOIT_JOURNAL_DIR'
+JOURNAL_DIR = env_path(JOURNAL_DIR_ENV, xdg_state_home() / 'doit')
+
+
+def journal_dir() -> Path:
+    """The directory every per-machine file doit shares lives in.
+
+    The pursuits journal, the usage tables and the digest's readings all live
+    here, so this is the directory a box points at the share. It takes two
+    rungs, the variable and the default. A box that keeps the share elsewhere
+    sets the variable. A directory the variable names that is not there
+    raises :class:`NamedPathMissing`.
+    """
+    return require_named(JOURNAL_DIR_ENV, JOURNAL_DIR)
+
+
 def resolve_path(env_var: str, key: str, default: Path, config: dict[str, Any] | None = None) -> Path:
     """Resolve a shared path: $env_var, then the config key, then the default.
 
