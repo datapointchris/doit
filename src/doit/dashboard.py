@@ -939,10 +939,10 @@ def problem_where(problem: dict) -> str:
     return f'{boxes} ×{seen}' if seen > 1 else boxes
 
 
-def errors_adapter(result: sources.Result) -> list[LaneView]:
-    """An error inbox's open problems, as an alert lane.
+def problems_adapter(result: sources.Result) -> list[LaneView]:
+    """A problem inbox's open problems, as an alert lane.
 
-    Shaped for what `fleet errors list --json` emits, and named for the shape
+    Shaped for what `fleet problems list --json` emits, and named for the shape
     rather than for that binary: doit ships to boxes outside the fleet, where
     nothing declares this source and the adapter is never reached. The lane is
     declared in `sources.yml` like any other, so a machine without the producer
@@ -955,7 +955,7 @@ def errors_adapter(result: sources.Result) -> list[LaneView]:
     """
     payload = result.payload
     if not isinstance(payload, list):
-        broken = unavailable('errors', 'ERRORS', sources.reason('errors', result))
+        broken = unavailable('problems', 'PROBLEMS', sources.reason('problems', result))
         broken.alert = True
         return [broken]
 
@@ -967,19 +967,19 @@ def errors_adapter(result: sources.Result) -> list[LaneView]:
             str(problem.get('title', '')),
             problem_where(problem),
             Urgency.OVERDUE,
-            f'fleet errors show {problem.get("key", "")}',
+            f'fleet problems show {problem.get("key", "")}',
         )
         for problem in open_problems
     ]
     plural = '' if len(rows) == 1 else 's'
     return [
         LaneView(
-            name='errors',
-            title='ERRORS',
+            name='problems',
+            title='PROBLEMS',
             meta=f'{len(rows)} unresolved problem{plural}',
             rows=rows,
             total=len(rows),
-            hints=['fleet errors list'] if rows else [],
+            hints=['fleet problems list'] if rows else [],
             alert=True,
         )
     ]
@@ -996,7 +996,7 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
 # lane `--help` cannot name is a lane nobody can find.
 SHIPPED_ADAPTERS = (
     ('icb', icb_adapter, tuple(name for name, _ in ICB_LANES)),
-    ('errors', errors_adapter, ('errors',)),
+    ('problems', problems_adapter, ('problems',)),
     ('learning', learning_adapter, ('learning',)),
     ('meso', meso_adapter, ('training',)),
     ('prs', prs_adapter, ('prs',)),

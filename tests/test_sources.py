@@ -93,6 +93,21 @@ def test_a_declared_lane_survives_the_call_that_failed():
     assert 'authenticate' in built[0].reason
 
 
+def test_a_declared_lane_whose_adapter_this_doit_lacks_names_the_adapter():
+    """The call succeeded, so the reason is the only thing saying what is wrong.
+
+    sources.yml and the installed doit disagree about an adapter's name across
+    any rename, on every machine, until both have moved.
+    """
+    source = sources.Source(id='problems', command=['fleet'], adapter='no-such-adapter', lanes=('problems',))
+
+    built = sources.lanes_from(source, sources.Result(source='problems', payload=[], exit_code=0))
+
+    assert [lane.name for lane in built] == ['problems']
+    assert built[0].available is False
+    assert 'no-such-adapter' in built[0].reason
+
+
 def test_an_undeclared_lane_still_vanishes_when_its_source_fails():
     """Nothing was claimed, so there is nothing to report missing.
 
@@ -274,6 +289,14 @@ def test_a_failing_source_shows_its_first_stderr_line():
     )
 
     assert sources.reason('icb', result) == 'error: not logged in — run `icb auth login`'
+
+
+def test_a_rejected_command_names_the_program_to_reinstall_rather_than_the_source_id(tmp_path, monkeypatch):
+    """The id is a label in sources.yml, and `prs` runs `pull-requests`."""
+    monkeypatch.setattr(sources, 'SOURCES', write_sources(tmp_path, 'sources:\n  prs:\n    command: [pull-requests, --json]\n'))
+    result = sources.Result(source='prs', exit_code=2, failure=sources.Failure.FAILED)
+
+    assert sources.reason('prs', result) == 'installed pull-requests does not understand `--json` — reinstall it'
 
 
 @pytest.mark.parametrize('bad', [None, {'lanes': 'nope'}, [], 'text'])
