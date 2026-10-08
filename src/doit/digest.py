@@ -202,8 +202,9 @@ class ExportUsed:
 
     ``hosts`` maps each host taken from this table to the newest day its history
     there reaches. A host whose history stops weeks back is a sync that stalled,
-    and this is where that shows. A table whose every host was fresher in
-    another is still listed, with no hosts, because it was read.
+    so the summary, ``list`` and ``show`` print that day beside the host. A table
+    whose every host was fresher in another is still listed, with no hosts,
+    because it was read.
     """
 
     generated: str
@@ -245,9 +246,9 @@ class Digest:
     claude_version: str = ''
     exports: dict[str, ExportUsed] = field(default_factory=dict)
 
-    def hosts(self) -> list[str]:
-        """Every host the reading covers, in name order."""
-        return sorted(host for used in self.exports.values() for host in used.hosts)
+    def histories(self) -> dict[str, str]:
+        """Every host the reading covers, in name order, with the last day its history held."""
+        return dict(sorted((host, through) for used in self.exports.values() for host, through in used.hosts.items()))
 
 
 def row_payload(row: usage.Row, today: dt.date) -> dict[str, object]:
@@ -268,19 +269,38 @@ def payload(rows: list[usage.Row], today: dt.date) -> list[dict[str, object]]:
     return [row_payload(row, today) for row in usage.by_frequency(rows)]
 
 
-def build_prompt(rows: list[usage.Row], today: dt.date, days: int) -> str:
+def history_ages(ends: list[str], today: dt.date) -> str:
+    """How many days before ``today`` each merged history stops, nearest first.
+
+    Ages, never the days themselves and never the host names, so the prompt
+    gains no date and no string the catalog did not supply. The run's summary
+    is where the hosts are named.
+    """
+    ages = sorted(max((today - dt.date.fromisoformat(end)).days, 0) for end in ends)
+    return ', '.join(str(age) for age in ages)
+
+
+def build_prompt(rows: list[usage.Row], today: dt.date, days: int, history_ends: list[str]) -> str:
     """The message sent to the model: the table, what its fields mean, and the questions.
 
     The field glossary is here rather than left implicit because ``sources`` is
     this repo's own vocabulary — a reader who does not know that ``func`` means a
     shell function you wrote yourself cannot tell an unused tool from an unused
     habit, and those want opposite reactions.
+
+    ``history_ends`` is the last day each merged history holds. A row typed only
+    on a desk whose sync stalled reads as cold as that stall is long, and the
+    rows carry no host, so the model is told how far back each history stops.
     """
     table = json.dumps(payload(rows, today), separators=(',', ':'))
     return f"""Read one person's command-line toolkit and say what it shows.
 
 Each row is something they have catalogd as theirs, joined to how often they
 have typed it at a shell prompt. A row counts as cold after {days} days.
+
+The counts merge one shell history per machine. Days before today that each
+history stops: {history_ages(history_ends, today)}.
+Nothing typed on a machine after its history stops is counted.
 
 FIELDS
   typed       what they type to invoke it
@@ -311,6 +331,8 @@ Rules:
 - Only commands typed at a prompt are recorded here, so anything usually driven by an
   agent or an editor leaves no trace. Where a low count looks like that, say so instead
   of concluding disuse.
+- A history that stops weeks back makes a row read colder than it is. Do not call a
+  row dropped where that gap could explain its days_since.
 - At most six short paragraphs of plain text.
 """
 
@@ -572,13 +594,18 @@ def exports_used(tables: list[usage_table.UsageTable], chosen: usage_table.Chose
     }
 
 
+def reaches(histories: dict[str, str]) -> str:
+    """Each host beside the last day its history holds."""
+    return ', '.join(f'{host} through {through}' for host, through in sorted(histories.items()))
+
+
 def coverage(exports: dict[str, ExportUsed]) -> str:
-    """Which hosts came from which machine's table, and when that table was written."""
-    return '; '.join(
-        f"{', '.join(sorted(used.hosts))} from {machine}'s {used.history} export of {used.generated[:10]}"
-        for machine, used in exports.items()
-        if used.hosts
-    )
+    """Which hosts came from which machine's table, and how far each one's history reaches.
+
+    How far the history reaches, never when the table was written: a table
+    written today can carry a host whose sync stalled weeks ago.
+    """
+    return '; '.join(f"{reaches(used.hosts)} from {machine}'s {used.history} export" for machine, used in exports.items() if used.hosts)
 
 
 def refuse(message: str) -> RunOutcome:
@@ -608,7 +635,7 @@ def take_reading(days: int, directory: Path) -> RunOutcome:
 
     error_console.print(f'Reading {len(rows)} rows over {", ".join(chosen)} with claude — this takes a minute.')
     try:
-        reply = ask(build_prompt(rows, today, days))
+        reply = ask(build_prompt(rows, today, days, [host.through for _, host in chosen.values()]))
     except DigestFailed as failure:
         error_console.print(str(failure))
         return RunOutcome(1, str(failure).splitlines()[0], failure.reply)
@@ -771,9 +798,9 @@ def cmd_show(handle: str, as_json: bool, directory: Path) -> int:
 
 
 def over(digest: Digest) -> str:
-    """The hosts a reading covers, as a clause, or nothing for one taken before exports."""
-    hosts = digest.hosts()
-    return f' · over {", ".join(hosts)}' if hosts else ''
+    """The hosts a reading covers and how far each reaches, as a clause, or nothing for one taken before exports."""
+    histories = digest.histories()
+    return f' · over {reaches(histories)}' if histories else ''
 
 
 def cmd_list(as_json: bool, directory: Path) -> int:

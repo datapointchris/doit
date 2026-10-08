@@ -149,7 +149,7 @@ def test_a_recorded_command_line_cannot_reach_the_prompt():
     history = (ran(f'aws configure set aws_secret_access_key {SECRET}'), ran('aws s3 ls'))
     rows = usage.measure([tool('aws', 'aws [command]')], history)
 
-    prompt = digest.build_prompt(rows, TODAY, days=90)
+    prompt = digest.build_prompt(rows, TODAY, days=90, history_ends=['2026-08-12'])
 
     assert SECRET not in prompt
     assert 'configure' not in prompt
@@ -201,9 +201,17 @@ def test_the_prompt_orders_the_table_by_frequency():
 
 def test_the_prompt_names_the_threshold_it_was_built_with():
     """A digest naming cold rows is uninterpretable without the number that made them cold."""
-    prompt = digest.build_prompt([row('fd')], TODAY, days=45)
+    prompt = digest.build_prompt([row('fd')], TODAY, days=45, history_ends=['2026-08-12'])
 
     assert '45 days' in prompt
+
+
+def test_the_prompt_says_how_far_back_each_history_stops():
+    """A row typed only on a desk whose sync stalled reads that much colder, and the rows carry no host."""
+    prompt = digest.build_prompt([row('fd')], TODAY, days=90, history_ends=['2026-07-04', '2026-08-12'])
+
+    assert 'history stops: 0, 39.' in prompt
+    assert '2026-07-04' not in prompt
 
 
 def test_every_tool_is_denied_so_the_session_cannot_open_the_history_file():
@@ -505,8 +513,8 @@ def test_a_run_by_hand_writes_no_result(monkeypatch, tmp_path):
     ]
 
 
-def test_a_run_names_each_host_and_the_export_it_came_from(monkeypatch, tmp_path, scheduled):
-    """A host that stopped arriving has to show as absent in the one line a scheduler keeps."""
+def test_a_run_names_each_host_and_how_far_its_history_reaches(monkeypatch, tmp_path, scheduled):
+    """A table written today can carry a stalled host, so the summary gives each host's last day, not the table's."""
     state = tmp_path / 'state'
     exported(state, 'archlinux', (host('archlinux'), host('mbp', through='2026-09-01')), generated='2026-10-08T09:00:00+00:00')
     exported(state, 'scheduler-lxc', (host('scheduler-lxc', through='2026-10-07'),), generated='2026-10-07T09:00:00+00:00', history='zsh')
@@ -515,11 +523,27 @@ def test_a_run_names_each_host_and_the_export_it_came_from(monkeypatch, tmp_path
     assert digest.cmd_run(days=90, directory=state) == 0
 
     summary = json.loads(scheduled.read_text())['summary']
-    assert "archlinux, mbp from archlinux's atuin export of 2026-10-08" in summary
-    assert "scheduler-lxc from scheduler-lxc's zsh export of 2026-10-07" in summary
+    assert "archlinux through 2026-08-10, mbp through 2026-09-01 from archlinux's atuin export" in summary
+    assert "scheduler-lxc through 2026-10-07 from scheduler-lxc's zsh export" in summary
     reading = digest.read_all(state)[0]
     assert reading.exports['archlinux'].hosts == {'archlinux': '2026-08-10', 'mbp': '2026-09-01'}
-    assert reading.hosts() == ['archlinux', 'mbp', 'scheduler-lxc']
+    assert reading.histories() == {'archlinux': '2026-08-10', 'mbp': '2026-09-01', 'scheduler-lxc': '2026-10-07'}
+
+
+def test_list_prints_how_far_each_hosts_history_reaches(tmp_path, capsys):
+    reading = digest.Digest(
+        generated='2026-10-08T09:00:00+00:00',
+        machine='archlinux',
+        rows=2,
+        days=90,
+        text='a reading',
+        exports={'archlinux': digest.ExportUsed('2026-10-08T09:00:00+00:00', 'atuin', {'archlinux': '2026-10-08', 'mbp': '2026-09-01'})},
+    )
+    digest.append(digest.digest_path(tmp_path, 'archlinux'), reading)
+
+    assert digest.cmd_list(as_json=False, directory=tmp_path) == 0
+
+    assert 'over archlinux through 2026-10-08, mbp through 2026-09-01' in ' '.join(capsys.readouterr().out.split())
 
 
 def test_every_hosts_counts_reach_the_prompt_summed(monkeypatch, tmp_path):
