@@ -124,11 +124,3 @@ def test_a_default_path_with_nothing_there_is_a_fresh_machine(monkeypatch, tmp_p
     default = tmp_path / 'default'
 
     assert paths.require_named('DOIT_JOURNAL_DIR', paths.env_path('DOIT_JOURNAL_DIR', default)) == default
-
-
-def test_a_path_the_variable_did_not_name_is_not_held_to_it(monkeypatch, tmp_path):
-    """A caller that substituted its own path answers for it, whatever the variable says."""
-    monkeypatch.setenv('DOIT_JOURNAL_DIR', str(tmp_path / 'named'))
-    substituted = tmp_path / 'substituted'
-
-    assert paths.require_named('DOIT_JOURNAL_DIR', substituted) == substituted

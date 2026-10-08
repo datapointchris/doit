@@ -492,25 +492,22 @@ def test_a_result_already_written_by_something_else_fails_the_run(monkeypatch, t
     assert json.loads(scheduled.read_text()) == {'summary': 'written by something else'}
 
 
-def test_a_run_by_hand_writes_no_result(monkeypatch, tmp_path):
-    """No scheduler asked, so the reading and the stand-in's own files are all the run leaves."""
+def test_a_run_by_hand_adds_only_its_reading(monkeypatch, tmp_path):
+    """No scheduler asked, so no result file lands where the run started or beside the reading."""
     monkeypatch.delenv(digest.RESULT_FILE_ENV, raising=False)
-    exported(tmp_path / 'state')
+    state = tmp_path / 'state'
+    exported(state)
     monkeypatch.setattr(digest, 'machine_name', lambda: 'archlinux')
     stand_in_claude(tmp_path, monkeypatch, recorded_reply('answered'))
-    monkeypatch.chdir(tmp_path)
+    work = tmp_path / 'work'
+    work.mkdir()
+    monkeypatch.chdir(work)
+    before = set(state.iterdir())
 
-    assert digest.cmd_run(days=90, directory=tmp_path / 'state') == 0
+    assert digest.cmd_run(days=90, directory=state) == 0
 
-    left = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob('*') if path.is_file())
-    assert left == [
-        'bin/claude',
-        'bin/reply.err',
-        'bin/reply.json',
-        'claude-saw-result-file',
-        'state/usage-digest-archlinux.jsonl',
-        'state/usage-table-archlinux.json',
-    ]
+    assert list(work.iterdir()) == []
+    assert set(state.iterdir()) - before == {digest.digest_path(state, 'archlinux')}
 
 
 def test_a_run_names_each_host_and_how_far_its_history_reaches(monkeypatch, tmp_path, scheduled):
@@ -546,9 +543,21 @@ def test_list_prints_how_far_each_hosts_history_reaches(tmp_path, capsys):
     assert 'over archlinux through 2026-10-08, mbp through 2026-09-01' in ' '.join(capsys.readouterr().out.split())
 
 
+def prompt_table(prompt: str) -> dict[str, dict]:
+    """The table a prompt carries, keyed by what is typed."""
+    line = prompt.split('TABLE\n', 1)[1].split('\n', 1)[0]
+    return {entry['typed']: entry for entry in json.loads(line)}
+
+
 def test_every_hosts_counts_reach_the_prompt_summed(monkeypatch, tmp_path):
+    """One row per thing typed, whichever hosts typed it, and no row a single host holds is lost."""
     seen: dict = {}
-    exported(tmp_path, 'archlinux', (host('archlinux', rows=(row('rg', count=5),)), host('mbp', rows=(row('rg', count=3),))))
+    on_archlinux = (
+        usage.Row(typed='rg', sources=('tool',), names=('ripgrep',), count=5, last='2026-08-01'),
+        usage.Row(typed='pacman', sources=('tool',), names=('pacman',), count=2, last='2026-07-01'),
+    )
+    on_mbp = (usage.Row(typed='rg', sources=('alias',), names=('rg',), count=3, last='2026-08-09'),)
+    exported(tmp_path, 'archlinux', (host('archlinux', rows=on_archlinux), host('mbp', rows=on_mbp)))
 
     def capture(prompt):
         seen['prompt'] = prompt
@@ -557,7 +566,11 @@ def test_every_hosts_counts_reach_the_prompt_summed(monkeypatch, tmp_path):
     monkeypatch.setattr(digest, 'ask', capture)
 
     assert digest.cmd_run(days=90, directory=tmp_path) == 0
-    assert '"typed":"rg","sources":["tool"],"count":8' in seen['prompt']
+
+    table = prompt_table(seen['prompt'])
+    newer_run = (dt.date.today() - dt.date(2026, 8, 9)).days
+    assert table['rg'] == {'typed': 'rg', 'sources': ['alias', 'tool'], 'count': 8, 'days_since': newer_run}
+    assert table['pacman']['count'] == 2
 
 
 def test_a_run_with_no_export_spends_no_request(monkeypatch, tmp_path, capsys):
