@@ -89,8 +89,8 @@ def env_path(env_var: str, default: Path) -> Path:
 def require_named(env_var: str, path: Path) -> Path:
     """``path``, refused with :class:`NamedPathMissing` when `$env_var` named it and nothing is there.
 
-    Compared against the variable at call time rather than flagged at import, so
-    a path a caller substituted is never held to a variable that did not name it.
+    Compared against the variable at call time, so a test that repoints the
+    module constant is not held to a variable naming somewhere else.
     """
     value = os.environ.get(env_var)
     if value and Path(value).expanduser() == path and not path.exists():
@@ -108,7 +108,8 @@ def journal_dir() -> Path:
     The pursuits journal, the usage tables and the digest's readings all live
     here, so this is the directory a box points at the share. It takes two
     rungs, the variable and the default. A box that keeps the share elsewhere
-    sets the variable, and one it names that is not there is refused.
+    sets the variable. A directory the variable names that is not there
+    raises :class:`NamedPathMissing`.
     """
     return require_named(JOURNAL_DIR_ENV, JOURNAL_DIR)
 

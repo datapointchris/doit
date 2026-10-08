@@ -207,7 +207,7 @@ def test_the_prompt_names_the_threshold_it_was_built_with():
 
 
 def test_the_prompt_says_how_far_back_each_history_stops():
-    """A row typed only on a desk whose sync stalled reads that much colder, and the rows carry no host."""
+    """The rows carry no host, so a row typed only on a stalled desk reads as cold as the stall is long."""
     prompt = digest.build_prompt([row('fd')], TODAY, days=90, history_ends=['2026-07-04', '2026-08-12'])
 
     assert 'history stops: 0, 39.' in prompt
@@ -493,7 +493,7 @@ def test_a_result_already_written_by_something_else_fails_the_run(monkeypatch, t
 
 
 def test_a_run_by_hand_adds_only_its_reading(monkeypatch, tmp_path):
-    """No scheduler asked, so no result file lands where the run started or beside the reading."""
+    """With `$FLEET_RESULT_FILE` unset, no result file lands in the working directory or beside the reading."""
     monkeypatch.delenv(digest.RESULT_FILE_ENV, raising=False)
     state = tmp_path / 'state'
     exported(state)
@@ -511,7 +511,7 @@ def test_a_run_by_hand_adds_only_its_reading(monkeypatch, tmp_path):
 
 
 def test_a_run_names_each_host_and_how_far_its_history_reaches(monkeypatch, tmp_path, scheduled):
-    """A table written today can carry a stalled host, so the summary gives each host's last day, not the table's."""
+    """Labeled with the table's own date instead, a host whose sync stalled would read as current."""
     state = tmp_path / 'state'
     exported(state, 'archlinux', (host('archlinux'), host('mbp', through='2026-09-01')), generated='2026-10-08T09:00:00+00:00')
     exported(state, 'scheduler-lxc', (host('scheduler-lxc', through='2026-10-07'),), generated='2026-10-07T09:00:00+00:00', history='zsh')
@@ -550,7 +550,7 @@ def prompt_table(prompt: str) -> dict[str, dict]:
 
 
 def test_every_hosts_counts_reach_the_prompt_summed(monkeypatch, tmp_path):
-    """One row per thing typed, whichever hosts typed it, and no row a single host holds is lost."""
+    """One row per thing typed, whichever hosts typed it, and a row one host holds keeps that host's count."""
     seen: dict = {}
     on_archlinux = (
         usage.Row(typed='rg', sources=('tool',), names=('ripgrep',), count=5, last='2026-08-01'),
@@ -605,7 +605,7 @@ def test_a_share_that_has_not_arrived_reaches_the_scheduler_as_the_reason(monkey
 
 
 def test_list_refuses_a_named_journal_directory_that_is_missing(monkeypatch, tmp_path):
-    """Read as empty, it would report no readings where the share has simply not arrived."""
+    """Read as empty, it would print `No reading stored yet.` where the share has not arrived."""
     missing = tmp_path / 'share' / 'doit-state'
     monkeypatch.setenv(paths.JOURNAL_DIR_ENV, str(missing))
     monkeypatch.setattr(paths, 'JOURNAL_DIR', missing)
@@ -619,13 +619,13 @@ def test_list_refuses_a_named_journal_directory_that_is_missing(monkeypatch, tmp
 
 @pytest.fixture
 def kit(monkeypatch):
-    """Two catalogued tools, standing in for this machine's index."""
+    """Two cataloged tools, standing in for this machine's index."""
     monkeypatch.setattr(digest, 'build_index', lambda: [tool('fd', 'fd [pattern]'), tool('rg', 'rg [pattern]')])
     monkeypatch.setattr(digest, 'machine_name', lambda: 'archlinux')
 
 
 def test_an_export_holds_every_host_atuin_holds(monkeypatch, tmp_path, kit):
-    """Sync puts the other desks in this history, which is what lets one desk export for all of them."""
+    """atuin syncs, so this history holds the other desks' commands too."""
     history = (ran('rg a', '2026-10-08', 'archlinux'), ran('rg b', '2026-09-01', 'mbp'), ran('fd c', '2026-10-07', 'macmini'))
     monkeypatch.setattr(digest.observe, 'atuin_invocations', lambda: history)
 

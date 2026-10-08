@@ -43,10 +43,10 @@ summary and kept on the reading: each host, the export it came from, and the
 last day that export's history holds for it.
 
 Readings are kept in the journal directory, beside the tables they read, and not
-in the cache directory: a recompute cannot rebuild one, because a second call
-costs another request and reads a table that has moved since. One append-only
-file per machine, for the reason :mod:`doit.journal` gives at length: Syncthing
-resolves conflicts per file, so two machines appending to one file lose a tail.
+in the cache directory. A recompute cannot rebuild one: a second call costs
+another request and reads a table that has moved since. One append-only file
+per machine, because Syncthing resolves conflicts per file, so two machines
+appending to one file lose a tail.
 """
 
 import dataclasses
@@ -199,7 +199,7 @@ class DigestFailed(Exception):
 
 @dataclass(frozen=True)
 class ExportUsed:
-    """One usage table a reading read: when it was written, from which history, and what it gave.
+    """One usage table a reading was taken from: when it was written, which history it measured, and which hosts it gave.
 
     ``hosts`` maps each host taken from this table to the newest day its history
     there reaches. A host whose history stops weeks back is a sync that stalled,
@@ -273,9 +273,8 @@ def payload(rows: list[usage.Row], today: dt.date) -> list[dict[str, object]]:
 def history_ages(ends: list[str], today: dt.date) -> str:
     """How many days before ``today`` each merged history stops, nearest first.
 
-    Ages, never the days themselves and never the host names, so the prompt
-    gains no date and no string the catalog did not supply. The run's summary
-    is where the hosts are named.
+    Ages, never dates and never host names, so the prompt carries no date and
+    no string the catalog did not supply. The run's summary names the hosts.
     """
     ages = sorted(max((today - dt.date.fromisoformat(end)).days, 0) for end in ends)
     return ', '.join(str(age) for age in ages)
@@ -290,8 +289,8 @@ def build_prompt(rows: list[usage.Row], today: dt.date, days: int, history_ends:
     habit, and those want opposite reactions.
 
     ``history_ends`` is the last day each merged history holds. A row typed only
-    on a desk whose sync stalled reads as cold as that stall is long, and the
-    rows carry no host, so the model is told how far back each history stops.
+    on a desk whose sync stalled reads as cold as the stall is long. The rows
+    carry no host, so the prompt says how far back each history stops.
     """
     table = json.dumps(payload(rows, today), separators=(',', ':'))
     return f"""Read one person's command-line toolkit and say what it shows.
@@ -507,10 +506,12 @@ def store(path: Path, digest: Digest) -> str:
 
 
 def exports_of(value: object) -> dict[str, ExportUsed]:
-    """A stored ``exports`` map, or none where it is absent or not that shape.
+    """A stored ``exports`` map, empty where the field is absent or not a map.
 
-    Forgiving where :func:`usage_table.parse` is strict. That one guards what a
-    reading is built from, and this only labels a reading already taken.
+    An entry without a ``hosts`` map is skipped, and the reading still loads.
+    :func:`usage_table.parse` refuses a whole table over one bad field, because
+    it guards what a reading is built from. This only labels a reading already
+    taken.
     """
     if not isinstance(value, dict):
         return {}
@@ -603,14 +604,14 @@ def reaches(histories: dict[str, str]) -> str:
 def coverage(exports: dict[str, ExportUsed]) -> str:
     """Which hosts came from which machine's table, and how far each one's history reaches.
 
-    How far the history reaches, never when the table was written: a table
-    written today can carry a host whose sync stalled weeks ago.
+    Never the table's own date. A table written today can carry a host whose
+    sync stalled weeks ago.
     """
     return '; '.join(f"{reaches(used.hosts)} from {machine}'s {used.history} export" for machine, used in exports.items() if used.hosts)
 
 
 def refuse(message: str) -> RunOutcome:
-    """A run that stopped before spending a request, said once to the person and once to the scheduler."""
+    """Print ``message`` to stderr and return it as a failed run's summary, with no request spent."""
     error_console.print(message)
     return RunOutcome(1, message)
 
@@ -618,8 +619,8 @@ def refuse(message: str) -> RunOutcome:
 def take_reading(days: int, directory: Path) -> RunOutcome:
     """Take a reading from every exported table and store it, saying what came of it at every exit.
 
-    Everything that can refuse does so before the request, so a run that was
-    never going to be kept costs nothing.
+    Every refusal returns before :func:`ask`, so a run that was never going to
+    be stored spends no request.
     """
     today = dt.date.today()
     found = usage_table.read_all(directory)
@@ -662,8 +663,8 @@ def take_reading(days: int, directory: Path) -> RunOutcome:
 def take_export(directory: Path) -> RunOutcome:
     """Measure this machine's history, every host it holds, and replace this machine's table.
 
-    A history that holds nothing refuses rather than writing a table of zeros,
-    which a reading would take as every row gone unused.
+    An empty history is refused rather than written as a table of zeros, which
+    a reading would take as every row gone unused.
     """
     history = observe.shell_history()
     if not history.entries:
@@ -799,7 +800,7 @@ def cmd_show(handle: str, as_json: bool, directory: Path) -> int:
 
 
 def over(digest: Digest) -> str:
-    """The hosts a reading covers and how far each reaches, as a clause, or nothing for one taken before exports."""
+    """The hosts a reading covers and how far each reaches, as a clause, or '' for a reading with no exports."""
     histories = digest.histories()
     return f' · over {reaches(histories)}' if histories else ''
 

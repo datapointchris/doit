@@ -108,7 +108,6 @@ def test_machine_name_without_a_domain(monkeypatch):
 
 
 def test_a_named_path_with_nothing_there_is_refused_naming_the_variable(monkeypatch, tmp_path):
-    """A share that has not arrived must not read as an empty one."""
     missing = tmp_path / 'share' / 'doit-state'
     monkeypatch.setenv('DOIT_JOURNAL_DIR', str(missing))
 

@@ -60,8 +60,8 @@ SCOPES = (FLEET, MACHINE)
 # `--include-duplicates` is required, not incidental: the default dedupes to the
 # newest run of each distinct command across all hosts, which is exactly the row
 # a machine-scoped question needs to still see for its own host. `--filter-mode
-# global` is pinned for the same reason: a `filter_mode = "host"` chosen for the
-# interactive search would otherwise narrow this query to one box.
+# global` is pinned because a `filter_mode = "host"` chosen for the interactive
+# search would otherwise narrow this query to one box.
 ATUIN_QUERY = (
     'atuin',
     'search',

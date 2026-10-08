@@ -213,9 +213,9 @@ def measure(entries: list[Entry] | None = None, invocations: tuple[Invocation, .
 def combine(tables: Iterable[Iterable[Row]]) -> list[Row]:
     """Several tables as one: counts summed, the newest last run, catalogs unioned.
 
-    The unit is still a thing you can type, for the reason :func:`measure` merges
-    by it. Each table is one host's history measured against one machine's kit, so
-    a row only one of them catalogs is kept with that table's count alone.
+    Rows merge by ``typed``, the key :func:`measure` builds them on. Each table is
+    one host's history measured against one machine's kit, so a row only one of
+    them catalogs is kept with that table's count alone.
     """
     merged: dict[str, tuple[set[str], set[str], list[int], list[str]]] = {}
     for table in tables:

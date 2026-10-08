@@ -19,10 +19,11 @@ folder would put every command line you typed, secrets included, on every box th
 folder reaches.
 
 A host is measured against the exporting machine's kit. A shell function defined
-only on one desk is invisible in another desk's export of that desk's history.
+only on one desk has no row in another desk's export of that desk's history.
 
-One file per exporting machine, rewritten whole by temp file and rename. One
-writer per file is the whole sync story, for the reason :mod:`doit.journal` gives.
+One file per exporting machine, rewritten whole by temp file and rename.
+Syncthing resolves conflicts per file, so one writer per file leaves it nothing
+to resolve.
 """
 
 import dataclasses
@@ -97,7 +98,7 @@ class Malformed(ValueError):
 
 
 def table_path(directory: Path, machine: str) -> Path:
-    """This machine's export. Its name carries the machine, and so does the document."""
+    """A machine's export. The filename and the document both carry the machine, and :func:`parse` requires them to agree."""
     return directory / f'usage-table-{machine}.json'
 
 
@@ -181,8 +182,8 @@ def utc_timestamp(value: object, where: str) -> str:
         parsed = dt.datetime.fromisoformat(stamp)
     except ValueError:
         raise Malformed(f'{where} is not an ISO 8601 timestamp') from None
-    # Compared across machines by :func:`rank`, where a naive time cannot be
-    # ordered against an aware one at all.
+    # :func:`rank` compares these across machines, and comparing a naive time
+    # with an aware one raises TypeError.
     if parsed.tzinfo is None:
         raise Malformed(f'{where} carries no UTC offset')
     return stamp
@@ -197,7 +198,7 @@ def parse_row(value: object, where: str) -> usage.Row:
         sources=string_list(value.get('sources'), f'{where}.sources'),
         names=string_list(value.get('names'), f'{where}.names'),
         count=whole_number(value.get('count'), f'{where}.count'),
-        # Empty is a row that never ran, which a table has to be able to say.
+        # An empty `last` is a row that never ran.
         last='' if last == '' else iso_date(last, f'{where}.last'),
     )
 
@@ -220,8 +221,8 @@ def parse_host(host: str, value: object) -> HostUsage:
 def parse(document: object, machine: str) -> UsageTable:
     """A usage table, or :class:`Malformed` naming the first field that is wrong.
 
-    Whole or not at all. A table missing one host or one row would still merge,
-    and the reading would undercount with nothing to say so.
+    One bad field refuses the whole table. A table missing one host or one row
+    would still merge, and the run would exit 0 over a smaller count.
 
     ``machine`` is the name the file carries, and the document has to agree. A
     file copied under another machine's name would otherwise count one history

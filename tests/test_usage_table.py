@@ -1,9 +1,9 @@
 """Tests for doit.usage_table — one machine's usage, written for a digest on another box.
 
-Two things decide whether a reading built from these files is true. Each host
-has to arrive exactly once, however many exports hold it and however stale one
-of them is. And a file that cannot be read has to say so, because a digest that
-skips it reports the hosts it held as idle.
+A reading built from these files is true only where each host arrives exactly
+once, however many exports hold it and however stale one of them is. A file
+that cannot be read has to say so, because a digest that skips it reports the
+hosts it held as idle.
 """
 
 import json
@@ -36,7 +36,7 @@ def written(directory: Path, machine: str, document: object) -> Path:
 
 
 def test_each_host_in_a_history_is_measured_on_its_own():
-    """atuin carries every desk's commands, so one export answers for each desk separately."""
+    """atuin's history holds every desk's commands, each tagged with its host."""
     history = ShellHistory(
         'atuin',
         (
@@ -63,7 +63,7 @@ def test_an_export_reads_back_as_the_table_that_was_written(tmp_path):
 
 
 def test_a_host_two_exports_hold_is_taken_from_the_history_that_runs_latest():
-    """A desk whose sync stalled writes a fresh file around stale rows, so the file's date cannot decide."""
+    """A desk whose sync stalled writes a fresh file around stale rows, so ranking by the file's date takes the stale ones."""
     stalled = table(
         'archlinux', host('archlinux', '2026-10-08'), host('mbp', '2026-09-01', count=50), generated='2026-10-08T09:00:00+00:00'
     )
@@ -98,7 +98,7 @@ def test_a_file_naming_another_machine_is_unreadable(tmp_path):
 
 
 def test_one_bad_row_makes_the_whole_table_unreadable(tmp_path):
-    """Dropping the row would undercount the reading with nothing to say so."""
+    """Dropping the row instead would lower the count, and the run would still exit 0."""
     document = usage_table.to_document(table('archlinux', host('archlinux', '2026-08-10')))
     document['hosts']['archlinux']['rows'][0]['count'] = 'many'
     written(tmp_path, 'archlinux', document)
