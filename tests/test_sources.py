@@ -93,6 +93,21 @@ def test_a_declared_lane_survives_the_call_that_failed():
     assert 'authenticate' in built[0].reason
 
 
+def test_a_declared_lane_whose_adapter_this_doit_lacks_names_the_adapter():
+    """The call succeeded, so the reason is the only thing saying what is wrong.
+
+    sources.yml and the installed doit disagree about an adapter's name across
+    any rename, on every machine, until both have moved.
+    """
+    source = sources.Source(id='problems', command=['fleet'], adapter='no-such-adapter', lanes=('problems',))
+
+    built = sources.lanes_from(source, sources.Result(source='problems', payload=[], exit_code=0))
+
+    assert [lane.name for lane in built] == ['problems']
+    assert built[0].available is False
+    assert 'no-such-adapter' in built[0].reason
+
+
 def test_an_undeclared_lane_still_vanishes_when_its_source_fails():
     """Nothing was claimed, so there is nothing to report missing.
 

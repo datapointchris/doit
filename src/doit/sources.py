@@ -299,8 +299,13 @@ def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
     adapter stops being reached without anything here changing.
     """
     built = lanes.from_document(result.payload)
+    missing = ''
     if not built and source.adapter:
-        built = ADAPTERS.get(source.adapter, lambda _: [])(result)
+        adapter = ADAPTERS.get(source.adapter)
+        if adapter is None:
+            missing = f'this doit has no adapter named {source.adapter} — update doit, or correct `adapter:` in sources.yml'
+        else:
+            built = adapter(result)
     if source.lanes:
         # A conforming source names its lanes only in its payload, so a call that
         # failed produces no payload and the lane disappears — the silent drop
@@ -308,7 +313,8 @@ def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
         # is broken. `lanes` is the only declaration of what should have been
         # there, so it doubles as the fallback rather than staying a filter.
         if not built:
-            return [lanes.unavailable(name, name.upper(), reason(source.id, result)) for name in source.lanes]
+            why = missing or reason(source.id, result)
+            return [lanes.unavailable(name, name.upper(), why) for name in source.lanes]
         built = [lane for lane in built if lane.name in source.lanes]
     return built
 
