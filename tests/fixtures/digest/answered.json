@@ -1,0 +1,214 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "cwd": "/tmp/doit-digest-q8x1v0",
+    "session_id": "2f02c17c-327c-400b-97c9-294b4304aaa3",
+    "tools": [],
+    "mcp_servers": [],
+    "model": "claude-opus-5-5[1m]",
+    "permissionMode": "default",
+    "slash_commands": [],
+    "terminal_slash_commands": [],
+    "apiKeySource": "none",
+    "claude_code_version": "2.1.293",
+    "output_style": "default",
+    "agents": [],
+    "skills": [],
+    "plugins": [],
+    "capabilities": [
+      "interrupt_receipt_v1",
+      "interrupt_cancel_queued_v1",
+      "interrupt_send_now_v1",
+      "msg_lifecycle_v1",
+      "request_marker_lists_v1",
+      "sdk_mcp_tools_list_changed",
+      "sdk_mcp_manifests",
+      "mcp_read_resource_v1",
+      "mcp_tool_ui_meta_v1",
+      "ui_surface_v1"
+    ],
+    "analytics_disabled": false,
+    "product_feedback_disabled": false,
+    "uuid": "21b2b66f-e162-42c3-b5d0-1961cac812c0",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "per_turn_effort_active": true,
+    "view_mode": "default"
+  },
+  {
+    "type": "assistant",
+    "message": {
+      "model": "claude-opus-5-5",
+      "id": "msg_011Cfp4wfyCnP1SN628UaHs1",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "You reach for rg and fd every day, so most of your work starts by finding something.\n\nsd has never run, and sed covers the same job."
+        }
+      ],
+      "container": null,
+      "stop_reason": null,
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 2,
+        "cache_creation_input_tokens": 9567,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 9567
+        },
+        "output_tokens": 4,
+        "service_tier": "standard",
+        "inference_geo": "not_available"
+      },
+      "input_transformations": [],
+      "diagnostics": null,
+      "context_management": null
+    },
+    "parent_tool_use_id": null,
+    "session_id": "2f02c17c-327c-400b-97c9-294b4304aaa3",
+    "uuid": "101d57ad-d268-42c5-8232-4673fb08cc49",
+    "timestamp": "2026-10-08T03:35:03.840Z",
+    "request_id": "req_011Cfp4wfj4QJyW8FENcRmDR"
+  },
+  {
+    "type": "rate_limit_event",
+    "rate_limit_info": {
+      "status": "allowed_warning",
+      "resetsAt": 1791431400,
+      "rateLimitType": "five_hour",
+      "utilization": 0.91,
+      "isUsingOverage": false,
+      "surpassedThreshold": 0.9,
+      "unifiedWindows": {
+        "five_hour": {
+          "utilization": 0.91,
+          "resetsAt": 1791431400
+        },
+        "seven_day": {
+          "utilization": 0.35,
+          "resetsAt": 1791640800
+        }
+      }
+    },
+    "uuid": "8fcd9092-f6cf-4510-845d-8e4ac648584f",
+    "session_id": "2f02c17c-327c-400b-97c9-294b4304aaa3"
+  },
+  {
+    "duration_api_ms": 1001,
+    "stop_reason": "end_turn",
+    "session_id": "2f02c17c-327c-400b-97c9-294b4304aaa3",
+    "total_cost_usd": 0.07662400000000001,
+    "usage": {
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 9567,
+      "cache_read_input_tokens": 0,
+      "output_tokens": 4,
+      "output_tokens_details": {
+        "thinking_tokens": 0
+      },
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 9567,
+        "ephemeral_5m_input_tokens": 0
+      },
+      "inference_geo": "not_available",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 4,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 9567,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 0,
+            "ephemeral_1h_input_tokens": 9567
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "modelUsage": {
+      "claude-opus-5-5[1m]": {
+        "inputTokens": 2,
+        "outputTokens": 4,
+        "cacheReadInputTokens": 0,
+        "cacheCreationInputTokens": 9567,
+        "webSearchRequests": 0,
+        "costUSD": 0.07662400000000001,
+        "contextWindow": 1000000,
+        "maxOutputTokens": 128000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-opus-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      },
+      "claude-haiku-5-5": {
+        "inputTokens": 437,
+        "outputTokens": 621,
+        "cacheReadInputTokens": 401,
+        "cacheCreationInputTokens": 750,
+        "webSearchRequests": 0,
+        "costUSD": 0.004,
+        "contextWindow": 200000,
+        "maxOutputTokens": 64000,
+        "thinkingTokens": 0,
+        "canonicalModel": "claude-haiku-5-5",
+        "provider": "firstParty",
+        "costBasis": "list"
+      }
+    },
+    "permission_denials": [],
+    "terminal_reason": "completed",
+    "fast_mode_state": "off",
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "subagent_stats": {
+      "spawned": 0,
+      "requested": {
+        "background": 0,
+        "foreground": 0,
+        "unset": 0
+      },
+      "started_in_background": 0,
+      "max_depth": 0,
+      "spawned_by_subagents": 0,
+      "completed": 0,
+      "failed": 0,
+      "killed": {
+        "parent": 0,
+        "user": 0,
+        "system": 0
+      },
+      "refused": {
+        "depth_limit": 0,
+        "concurrency_limit": 0,
+        "budget": 0
+      },
+      "by_type": {}
+    },
+    "safety_stops": 0,
+    "is_error": false,
+    "num_turns": 1,
+    "subtype": "success",
+    "api_error_status": null,
+    "result": "You reach for rg and fd every day, so most of your work starts by finding something.\n\nsd has never run, and sed covers the same job.",
+    "ttft_ms": 1060,
+    "type": "result",
+    "duration_ms": 1074,
+    "uuid": "bb18f678-29c7-4580-a4d1-d73704aa4e4b",
+    "ttft_stream_ms": 1060,
+    "time_to_request_ms": 70,
+    "first_content_frame_ms": 1060,
+    "queued_turn_count": 0,
+    "result_index": 0
+  }
+]

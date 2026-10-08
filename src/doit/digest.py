@@ -44,6 +44,7 @@ file, so two machines appending to one file lose a tail.
 import dataclasses
 import datetime as dt
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -107,21 +108,27 @@ HANDLES_ON_MISS = 5
 
 STATE_DIR = xdg_state_home() / 'doit'
 
+# Where fleet's scheduler asks a job to say what came of its run. Set only on a
+# scheduled run, to a file that does not exist yet.
+RESULT_FILE_ENV = 'FLEET_RESULT_FILE'
+
 
 class Failure(StrEnum):
     """Why a reading could not be taken, as a key rather than as a sentence.
 
-    The four want different reactions — an absent binary is a machine to fix, a
-    timeout is worth retrying, an empty answer is not — so a caller has to be
-    able to tell them apart, which a printable string does not allow. Wording
-    lives once in :data:`FAILURE_TEXT` keyed by this, so a sentence can be
-    rewritten without a test noticing.
+    Each wants a different reaction — an absent binary is a machine to fix, a
+    timeout is worth retrying, an empty answer is not, and a reply with no result
+    frame is a CLI whose output format moved — so a caller has to be able to tell
+    them apart, which a printable string does not allow. Wording lives once in
+    :data:`FAILURE_TEXT` keyed by this, so a sentence can be rewritten without a
+    test noticing.
     """
 
     NOT_INSTALLED = 'not-installed'
     TIMED_OUT = 'timed-out'
     FAILED = 'failed'
     EMPTY = 'empty'
+    NO_RESULT = 'no-result'
 
 
 FAILURE_TEXT: dict[Failure, str] = {
@@ -129,7 +136,37 @@ FAILURE_TEXT: dict[Failure, str] = {
     Failure.TIMED_OUT: 'claude did not answer within {detail}.',
     Failure.FAILED: 'claude failed: {detail}',
     Failure.EMPTY: 'claude returned nothing.',
+    Failure.NO_RESULT: 'claude replied without a result frame. The reply began {detail}',
 }
+
+
+@dataclass(frozen=True)
+class Usage:
+    """What one call spent, in tokens, each kind on its own.
+
+    The keys are fleet's ``usage.Usage`` keys, because this is written into the
+    run record fleet reads. Never one total: a total ranks a call by how much
+    context it re-read rather than by what it did.
+    """
+
+    input: int = 0
+    cache_creation: int = 0
+    cache_read: int = 0
+    output: int = 0
+
+
+@dataclass(frozen=True)
+class Reply:
+    """The result frame of one ``claude -p`` call: what it answered and what it spent.
+
+    A call that failed has one too. A refusal exits 1 with its diagnosis in
+    ``text``, ``is_error`` set, and the session and tokens beside it.
+    """
+
+    text: str
+    session_id: str
+    usage: Usage
+    is_error: bool = False
 
 
 class DigestFailed(Exception):
@@ -137,12 +174,14 @@ class DigestFailed(Exception):
 
     ``reason`` is the key a caller branches on and a test asserts; the sentence
     is derived from it, and ``detail`` carries whatever the runtime knew that the
-    wording could not.
+    wording could not. ``reply`` is the result frame where the call got far
+    enough to write one, so a failure still says what it spent.
     """
 
-    def __init__(self, reason: Failure, detail: str = '') -> None:
+    def __init__(self, reason: Failure, detail: str = '', reply: Reply | None = None) -> None:
         self.reason = reason
         self.detail = detail
+        self.reply = reply
         super().__init__(FAILURE_TEXT[reason].format(detail=detail))
 
 
@@ -259,12 +298,75 @@ def claude_version(timeout: float = VERSION_TIMEOUT_SECONDS) -> str:
     return next(iter(result.stdout.split()), '')
 
 
-def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
-    """Send the prompt to `claude -p` and return what it wrote.
+def tokens(counts: object, key: str) -> int:
+    """One count out of a usage block, or 0 where the block or the key is missing."""
+    return int(counts.get(key) or 0) if isinstance(counts, dict) else 0
+
+
+def spent(frame: dict) -> Usage:
+    """What the call cost, summed over every model it reached.
+
+    The frame's own ``usage`` counts the main model alone, so reading it
+    undercounts every call that reached a second model, and nothing fails.
+    ``modelUsage`` breaks the call down per model, and the envelope is read only
+    where that breakdown is empty. fleet's ``usage.Report.Sum`` reads a frame the
+    same way, and both land in one ledger.
+    """
+    per_model = frame.get('modelUsage')
+    if isinstance(per_model, dict) and per_model:
+        models = list(per_model.values())
+        return Usage(
+            input=sum(tokens(model, 'inputTokens') for model in models),
+            cache_creation=sum(tokens(model, 'cacheCreationInputTokens') for model in models),
+            cache_read=sum(tokens(model, 'cacheReadInputTokens') for model in models),
+            output=sum(tokens(model, 'outputTokens') for model in models),
+        )
+    envelope = frame.get('usage')
+    return Usage(
+        input=tokens(envelope, 'input_tokens'),
+        cache_creation=tokens(envelope, 'cache_creation_input_tokens'),
+        cache_read=tokens(envelope, 'cache_read_input_tokens'),
+        output=tokens(envelope, 'output_tokens'),
+    )
+
+
+def read_reply(stdout: str) -> Reply | None:
+    """The result frame out of ``--output-format json``, or None where there is none.
+
+    That format is an array of every frame in the session. It is searched from
+    the end for the frame whose type is ``result`` rather than taken as the last
+    element. The CLI interleaves other frames, ``rate_limit_event`` among them,
+    and nothing promises the result comes last. A lone object is read as an
+    array of one.
+    """
+    try:
+        parsed = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    frames = parsed if isinstance(parsed, list) else [parsed]
+    for frame in reversed(frames):
+        if isinstance(frame, dict) and frame.get('type') == 'result':
+            return Reply(
+                text=str(frame.get('result') or ''),
+                session_id=str(frame.get('session_id') or ''),
+                usage=spent(frame),
+                is_error=bool(frame.get('is_error')),
+            )
+    return None
+
+
+def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> Reply:
+    """Send the prompt to `claude -p` and return its result frame.
 
     The prompt goes over stdin rather than argv: a two-hundred-row table is an
     argument list a shell refuses, and argv is readable from `ps` by anything on
     the machine.
+
+    `--output-format json` is what carries the session id and the tokens back
+    beside the answer. A call that fails carries them too, and puts its
+    diagnosis in the frame's text: measured on 2.1.293, an unknown model exited
+    1 with a sentence there and only an error code on stderr. So a failure reads
+    the frame before stderr.
 
     `--safe-mode` is what keeps the payload the payload. Without it the session
     loads the machine's own configuration and sends it ahead of the prompt, so a
@@ -283,6 +385,8 @@ def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
         'claude',
         '-p',
         '--safe-mode',
+        '--output-format',
+        'json',
         '--system-prompt',
         SYSTEM_PROMPT,
         '--disallowed-tools',
@@ -294,12 +398,17 @@ def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
         except subprocess.TimeoutExpired as expired:
             raise DigestFailed(Failure.TIMED_OUT, f'{timeout:.0f}s') from expired
 
-    if result.returncode != 0:
-        raise DigestFailed(Failure.FAILED, result.stderr.strip() or f'exit {result.returncode}')
-    text = result.stdout.strip()
-    if not text:
+    reply = read_reply(result.stdout)
+    if result.returncode != 0 or (reply is not None and reply.is_error):
+        detail = (reply.text.strip() if reply else '') or result.stderr.strip() or f'exit {result.returncode}'
+        raise DigestFailed(Failure.FAILED, detail, reply)
+    if not result.stdout.strip():
         raise DigestFailed(Failure.EMPTY)
-    return text
+    if reply is None:
+        raise DigestFailed(Failure.NO_RESULT, repr(result.stdout.strip()[:80]))
+    if not reply.text.strip():
+        raise DigestFailed(Failure.EMPTY, reply=reply)
+    return dataclasses.replace(reply, text=reply.text.strip())
 
 
 def digest_path(directory: Path, machine: str) -> Path:
@@ -321,8 +430,8 @@ def append(path: Path, digest: Digest) -> Digest:
     return digest
 
 
-def store(path: Path, digest: Digest) -> bool:
-    """Append the reading, reporting a write failure instead of raising through it.
+def store(path: Path, digest: Digest) -> str:
+    """Append the reading, returning why it could not be kept, or '' when it was.
 
     Two things are at stake and only one of them can be recovered. The request is
     spent whether or not the file is writable, so a caller that lets the write
@@ -334,9 +443,8 @@ def store(path: Path, digest: Digest) -> bool:
     try:
         append(path, digest)
     except OSError as failure:
-        error_console.print(f'Reading taken but not stored at {path} — {failure}')
-        return False
-    return True
+        return f'Reading taken but not stored at {path} — {failure}'
+    return ''
 
 
 def read_all(directory: Path) -> list[Digest]:
@@ -383,32 +491,110 @@ def select(stored: list[Digest], handle: str = '') -> Digest | None:
     return matching[-1] if matching else None
 
 
-def cmd_run(days: int, directory: Path) -> int:
-    """Take a reading and store it."""
+@dataclass(frozen=True)
+class RunOutcome:
+    """What one ``run`` came to.
+
+    ``summary`` is the line a scheduler shows for the run. ``reply`` is the
+    call's result frame where the call got far enough to write one.
+    """
+
+    code: int
+    summary: str
+    reply: Reply | None = None
+
+
+def take_reading(days: int, directory: Path) -> RunOutcome:
+    """Take a reading and store it, saying what came of it at every exit."""
     today = dt.date.today()
     rows = usage.measure()
     if not rows:
-        error_console.print('Nothing measurable in your kit, so there is nothing to read.')
-        return 1
+        nothing = 'Nothing measurable in your kit, so there is nothing to read.'
+        error_console.print(nothing)
+        return RunOutcome(1, nothing)
 
     error_console.print(f'Reading {len(rows)} rows with claude — this takes a minute.')
     try:
-        text = ask(build_prompt(rows, today, days))
+        reply = ask(build_prompt(rows, today, days))
     except DigestFailed as failure:
         error_console.print(str(failure))
-        return 1
+        return RunOutcome(1, str(failure).splitlines()[0], failure.reply)
 
     digest = Digest(
         generated=dt.datetime.now(dt.UTC).isoformat(timespec='seconds'),
         machine=machine_name(),
         rows=len(rows),
         days=days,
-        text=text,
+        text=reply.text,
         model=MODEL,
         claude_version=claude_version(),
     )
     print(digest.text)
-    return 0 if store(digest_path(directory, digest.machine), digest) else 1
+    unstored = store(digest_path(directory, digest.machine), digest)
+    if unstored:
+        error_console.print(unstored)
+        return RunOutcome(1, unstored, reply)
+    return RunOutcome(0, f'digest of {digest.rows} rows stored as {digest.generated}', reply)
+
+
+def claim_result_file() -> str:
+    """Take the scheduler's result path out of the environment, or '' on a run by hand.
+
+    Every process started afterwards inherits nothing, so neither the claude
+    session nor anything it runs can write this run's result in its place.
+    fleet's own verbs claim the variable the same way, before they start
+    anything.
+    """
+    return os.environ.pop(RESULT_FILE_ENV, '')
+
+
+def result_record(outcome: RunOutcome) -> dict[str, object]:
+    """The run's result as fleet's scheduler reads it.
+
+    ``session_id`` and ``usage`` are what make the run an agent run in the
+    ledger, so they ride along whenever the call wrote a frame, a failed call
+    included. A run that never reached claude carries its summary alone.
+    """
+    record: dict[str, object] = {'summary': outcome.summary}
+    if outcome.reply is not None:
+        if outcome.reply.session_id:
+            record['session_id'] = outcome.reply.session_id
+        record['usage'] = dataclasses.asdict(outcome.reply.usage)
+    return record
+
+
+def write_result(path: Path, outcome: RunOutcome) -> str:
+    """Hand the scheduler the run's result, returning why it could not, or '' when it did.
+
+    Created exclusively, as fleet's own writer creates it. A file already there
+    was written by something else under this job, and writing beside it would
+    leave the scheduler two documents or the wrong one.
+    """
+    try:
+        with path.open('x', encoding='utf-8') as handle:
+            handle.write(json.dumps(result_record(outcome)) + '\n')
+    except OSError as failure:
+        return f'Result not written to {path} — {failure}'
+    return ''
+
+
+def cmd_run(days: int, directory: Path) -> int:
+    """Take a reading, store it, and say what came of it to a scheduler that asked.
+
+    The result is claimed before anything starts, so no child sees the path. A
+    result that cannot be written fails the run: the scheduler would otherwise
+    record a clean run with nothing to show for it, which is the run the ledger
+    hides.
+    """
+    result_file = claim_result_file()
+    outcome = take_reading(days, directory)
+    if not result_file:
+        return outcome.code
+    unwritten = write_result(Path(result_file), outcome)
+    if unwritten:
+        error_console.print(unwritten)
+        return 1
+    return outcome.code
 
 
 def emit(digest: Digest) -> None:
@@ -488,6 +674,9 @@ def digest_run_command(days: DaysOption = usage.DEFAULT_DAYS) -> None:
     The only command here that reaches the network, and one run is one request.
     It sends the aggregated table — what you type, how often, how long ago — and
     never a command line.
+
+    Run by fleet's scheduler, it also writes the outcome, the session id and the
+    tokens spent to $FLEET_RESULT_FILE. Run by hand, it writes nothing there.
 
         doit kit digest run             read the table as it stands today
         doit kit digest run --days 30   count a row cold after a month, not a season
