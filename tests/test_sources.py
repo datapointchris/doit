@@ -276,6 +276,14 @@ def test_a_failing_source_shows_its_first_stderr_line():
     assert sources.reason('icb', result) == 'error: not logged in — run `icb auth login`'
 
 
+def test_a_rejected_command_names_the_program_to_reinstall_rather_than_the_source_id(tmp_path, monkeypatch):
+    """The id is a label in sources.yml, and `prs` runs `pull-requests`."""
+    monkeypatch.setattr(sources, 'SOURCES', write_sources(tmp_path, 'sources:\n  prs:\n    command: [pull-requests, --json]\n'))
+    result = sources.Result(source='prs', exit_code=2, failure=sources.Failure.FAILED)
+
+    assert sources.reason('prs', result) == 'installed pull-requests does not understand `--json` — reinstall it'
+
+
 @pytest.mark.parametrize('bad', [None, {'lanes': 'nope'}, [], 'text'])
 def test_only_a_lane_document_is_read_as_one(bad):
     assert lanes.from_document(bad) == []

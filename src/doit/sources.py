@@ -263,20 +263,22 @@ def reason(name: str, result: Result | None) -> str:
         # Exit 2 is a usage error across these CLIs, so a rejected command means
         # the installed binary predates it.
         if result.exit_code == 2:
-            return f'installed {name} does not understand `{" ".join(result_command(name))}` — reinstall it'
+            program, *args = result_command(name)
+            return f'installed {program} does not understand `{" ".join(args)}` — reinstall it'
         return first_line(result.stderr) or f'{name} exited {result.exit_code}'
     return ''
 
 
 def result_command(name: str) -> list[str]:
-    """The configured command for a source id, for use in an error message.
+    """The configured argv for a source id, for use in an error message.
 
-    Both blocks, because an id is unique across the file and a caller holding a
-    failed `Result` has no idea which block the entry came from.
+    The id alone when nothing configures it. Both blocks, because an id is
+    unique across the file and a caller holding a failed `Result` has no idea
+    which block the entry came from.
     """
     registry = load()
     source = registry.sources.get(name) or registry.completions.get(name)
-    return source.command[1:] if source else []
+    return list(source.command) if source else [name]
 
 
 # An adapter turns a non-conforming source's own model into lanes. Registered by
