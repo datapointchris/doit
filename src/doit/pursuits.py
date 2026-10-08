@@ -2208,7 +2208,18 @@ def cmd_evidence(as_json: bool = False) -> int:
 
 
 def cmd_edit() -> int:
-    register = register_path()
+    """Open the register in $EDITOR, writing the template first where there is none.
+
+    A file `$DOIT_PURSUITS` names in a directory that exists is a register not
+    yet written, and writing it is this command's job. Only a missing directory
+    is refused, because that is the share the variable stands for.
+    """
+    try:
+        register = register_path()
+    except NamedPathMissing as missing:
+        if not missing.path.parent.is_dir():
+            raise
+        register = missing.path
     if not register.exists():
         register.parent.mkdir(parents=True, exist_ok=True)
         register.write_text(TEMPLATE)

@@ -2037,3 +2037,31 @@ def test_a_named_register_that_is_missing_is_refused_rather_than_read_as_empty(t
 
     with pytest.raises(NamedPathMissing):
         pursuits.load_pursuits()
+
+
+def test_edit_writes_a_named_register_that_does_not_exist_yet(tmp_path, sandbox, monkeypatch):
+    """Setting the variable first is a way to start, and edit is the command that writes the file."""
+    named = tmp_path / 'config' / 'pursuits.yml'
+    named.parent.mkdir()
+    monkeypatch.setenv(pursuits.REGISTER_ENV, str(named))
+    monkeypatch.setattr(pursuits, 'REGISTER', named)
+    monkeypatch.setenv('EDITOR', 'true')
+
+    ran = runner.invoke(cli_app, ['pursuits', 'edit'])
+
+    assert ran.exit_code == 0
+    assert named.read_text() == pursuits.TEMPLATE
+
+
+def test_edit_refuses_a_named_register_whose_directory_is_missing(tmp_path, sandbox, monkeypatch):
+    """A missing directory is the share the variable stands for, and a register written there would sync nowhere."""
+    missing = tmp_path / 'share' / 'pursuits.yml'
+    monkeypatch.setenv(pursuits.REGISTER_ENV, str(missing))
+    monkeypatch.setattr(pursuits, 'REGISTER', missing)
+    monkeypatch.setenv('EDITOR', 'true')
+
+    ran = runner.invoke(cli_app, ['pursuits', 'edit'])
+
+    assert ran.exit_code == 1
+    assert '$DOIT_PURSUITS' in ran.output
+    assert not missing.parent.exists()
