@@ -221,6 +221,7 @@ def test_logging_one_pursuit_moves_no_other_pursuits_numbers(sandbox):
     for name in others:
         assert after['intervals'][name] == before['intervals'][name], name
         assert after['balance'][name] == before['balance'][name], name
+        assert after['due'][name] == before['due'][name], name
 
 
 def test_every_pursuit_never_done_is_pinned_heaviest_first(sandbox):
@@ -1277,9 +1278,9 @@ WINDOW_HISTORIES = {
 }
 
 
-def window_state(tmp_path, monkeypatch, records: list[dict], days_on: float) -> dict:
+def window_state(tmp_path, monkeypatch, records: list[dict], days_on: float, register: str = WINDOW_REGISTER) -> dict:
     """State ``days_on`` after NOW with nothing further logged, without touching a journal."""
-    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, WINDOW_REGISTER))
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     return pursuits.build_state(pursuits.load_pursuits(), NOW + dt.timedelta(days=days_on), records=records, observed={})
 
@@ -1320,6 +1321,22 @@ def test_a_pursuit_left_alone_ends_a_full_window_overdue(tmp_path, monkeypatch, 
         later = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], window + interval + 1.0)
 
         assert pursuits.due_in_days(later, name) <= -(window - interval) + 0.01, name
+
+
+@pytest.mark.parametrize('history', WINDOW_HISTORIES)
+@pytest.mark.parametrize('name', WINDOW_NAMES)
+@pytest.mark.parametrize('weight', [1, 500])
+def test_no_weight_moves_any_pursuits_standing(tmp_path, monkeypatch, history, name, weight):
+    """A weight orders what is owed and nothing else. Whether a pursuit is
+    getting enough has to read the same whatever any pursuit weighs."""
+    reweighed = re.sub(rf'(  {name}:\n    description: [^\n]*\n    weight: )25', rf'\g<1>{weight}', WINDOW_REGISTER)
+    standing = ('intervals', 'checkoff_size', 'asked', 'done', 'balance', 'due')
+
+    before = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], 0.0)
+    after = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], 0.0, register=reweighed)
+
+    assert after['weights'][name] == weight
+    assert {key: after[key] for key in standing} == {key: before[key] for key in standing}
 
 
 def test_a_pursuit_with_no_record_anywhere_opens_one_checkoff_behind(tmp_path, monkeypatch):
