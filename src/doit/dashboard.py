@@ -2,7 +2,7 @@
 
 Answers "what is outstanding across everything?" in one glance: open tasks,
 habits still due, what you're learning, what you're reading, maintenance due, the
-next project items, and what's approaching.
+next project items, the development issues, and what's approaching.
 
 Lanes, not a merged list. Each lane is independently ordered by its own backend
 and you pick one by time and energy — there is no cross-source ranking, no
@@ -177,8 +177,9 @@ def view_handle(command: str, item: dict, key: str = 'id') -> str:
     when the backend gave no id, because a handle that would fail is worse than
     no handle — it reads as something you can run.
 
-    `key` exists for project items, whose id is a UUID that would run to sixty
-    columns. They carry a short `number` alongside it, and `icb` takes either.
+    `key` exists for project items and issues, whose id is a UUID that would run
+    to sixty columns. They carry a short `number` alongside it, and `icb` takes
+    either.
     """
     identifier = item.get(key)
     return f'{command} {identifier}' if identifier else ''
@@ -424,6 +425,56 @@ def project_item_row(label: str, item: dict) -> Row:
         describe(item.get('title', ''), item.get('notes', '')),
         where,
         handle=view_handle('icb projects items show', item, key='number'),
+    )
+
+
+def build_issues_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
+    """Decisions waiting on you, what an agent takes next, and what is claimed.
+
+    Interleaved, so a ready queue in the hundreds cannot push a decision off a
+    three-row lane. The labels and their order are `icb overview`'s own.
+    """
+    payload, reason = icb_context(results, ('issues',))
+    if payload is None:
+        return unavailable('issues', 'ISSUES', reason)
+    if 'issues' not in payload:
+        return unavailable('issues', 'ISSUES', 'icb overview has no issues section — update icb')
+
+    section = payload['issues'] or {}
+    decisions = section.get('decisions') or []
+    ready = section.get('ready') or []
+    claimed = section.get('in_progress') or []
+    decisions_total = section.get('decisions_total', len(decisions))
+    ready_total = section.get('ready_total', len(ready))
+    claimed_total = section.get('in_progress_total', len(claimed))
+    triage_total = section.get('triage_total', 0)
+
+    rows = round_robin(
+        [issue_row('decide', issue) for issue in decisions],
+        [issue_row('next', issue) for issue in ready],
+        [issue_row('claimed', issue) for issue in claimed],
+    )
+    return LaneView(
+        name='issues',
+        title='ISSUES',
+        meta=f'{ready_total} ready · {claimed_total} in progress · {plural(decisions_total, "decision")} · {triage_total} in triage',
+        rows=rows,
+        total=ready_total + claimed_total + decisions_total,
+        hints=['icb issues next'],
+        reason=reason,
+    )
+
+
+def issue_row(label: str, issue: dict) -> Row:
+    """The title alone, because it states the finding while the description
+    opens on a design pointer or a measurement date. Placed by repo and
+    initiative, either of which an issue can lack."""
+    initiative = (issue.get('initiative') or {}).get('name')
+    return Row(
+        label,
+        clean(issue.get('title', '')),
+        join_context([issue.get('repo'), initiative]),
+        handle=view_handle('icb issues show', issue, key='number'),
     )
 
 
@@ -805,6 +856,7 @@ ICB_LANES = (
     ('books', build_books_lane),
     ('articles', build_articles_lane),
     ('projects', build_projects_lane),
+    ('issues', build_issues_lane),
     ('upcoming', build_upcoming_lane),
 )
 

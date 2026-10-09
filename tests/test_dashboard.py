@@ -460,7 +460,7 @@ def test_every_lane_that_can_name_a_handle_does():
     """
     lanes = lanes_by_name(all_results())
 
-    for name in ('tasks', 'books', 'articles', 'upcoming', 'learning', 'projects'):
+    for name in ('tasks', 'books', 'articles', 'upcoming', 'learning', 'projects', 'issues'):
         assert all(row.handle for row in lanes[name].rows), f'{name} has a row with nothing to act on'
     # Maintenance is the one lane whose handle is the register's to supply, so a
     # review entry that declares no command has none to show.
@@ -475,6 +475,7 @@ def test_a_handle_is_the_read_verb_not_a_write():
     assert lanes['articles'].rows[0].handle.startswith('icb articles show ')
     assert lanes['learning'].rows[0].handle.startswith('learning resources show ')
     assert lanes['projects'].rows[0].handle.startswith('icb projects items show ')
+    assert lanes['issues'].rows[0].handle.startswith('icb issues show ')
 
 
 def test_a_row_whose_backend_gave_no_id_offers_no_handle():
@@ -631,6 +632,38 @@ def test_projects_lane_survives_an_icb_that_omits_membership():
 
     assert lane.available is True
     assert lane.rows[0].note == ''
+
+
+def test_issues_lane_gives_each_kind_a_row_before_any_gets_a_second():
+    """Two ready issues listed first would push the decision off a three-row lane."""
+    lane = lanes_by_name(all_results())['issues']
+
+    assert [row.label for row in lane.rows] == ['decide', 'next', 'claimed', 'next']
+    assert lane.meta == '40 ready · 1 in progress · 1 decision · 2 in triage'
+    assert lane.total == 42, 'triage is counted in the heading and never listed'
+
+
+def test_issues_lane_reads_the_title_and_places_it_by_repo_and_initiative():
+    lane = lanes_by_name(all_results())['issues']
+
+    rows = {row.handle: row for row in lane.rows}
+    first = rows['icb issues show 201']
+    assert first.text == "Tests read the workstation's clock and fail on the runner", 'the description opens on a design pointer'
+    assert first.note == 'somerepo · An Initiative'
+    assert rows['icb issues show 202'].note == '', 'an issue can carry neither'
+    assert rows['icb issues show 204'].note == 'An Initiative'
+
+
+def test_issues_lane_is_unavailable_from_an_icb_that_predates_issues():
+    """An empty lane would read as nothing outstanding while the work sits in issues."""
+    payload = fixture('icb-overview.json')
+    del payload['issues']
+    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+
+    lane = dashboard.build_issues_lane(results, TODAY)
+
+    assert lane.available is False
+    assert lane.reason == 'icb overview has no issues section — update icb'
 
 
 def test_totals_come_from_the_backend_not_the_row_count():

@@ -131,6 +131,81 @@
     ],
     "blocked_total": 1
   },
+  "issues": {
+    "ready": [
+      {
+        "id": "01a0c53f-e5df-7308-bf37-45e17aee0001",
+        "number": 201,
+        "title": "Tests read the workstation's clock and fail on the runner",
+        "description": "Design: `.planning/tests.md`. A test passes on a workstation and fails on the runner.",
+        "repo": "somerepo",
+        "type": "task",
+        "status": "open",
+        "initiative": {
+          "id": "i1",
+          "name": "An Initiative",
+          "status": "active",
+          "priority": 2
+        },
+        "labels": [],
+        "is_ready": true,
+        "closed_ts": null
+      },
+      {
+        "id": "01a0c53f-e5df-7308-bf37-45e17aee0002",
+        "number": 202,
+        "title": "A second ready issue",
+        "description": null,
+        "repo": null,
+        "type": "bug",
+        "status": "open",
+        "initiative": null,
+        "labels": [],
+        "is_ready": true,
+        "closed_ts": null
+      }
+    ],
+    "ready_total": 40,
+    "in_progress": [
+      {
+        "id": "01a0c53f-e5df-7308-bf37-45e17aee0003",
+        "number": 203,
+        "title": "A claimed issue",
+        "description": "Measured 2026-07-20.",
+        "repo": "otherrepo",
+        "type": "feature",
+        "status": "in_progress",
+        "initiative": null,
+        "labels": [],
+        "is_ready": false,
+        "claimed_by": "an-agent",
+        "closed_ts": null
+      }
+    ],
+    "in_progress_total": 1,
+    "decisions": [
+      {
+        "id": "01a0c53f-e5df-7308-bf37-45e17aee0004",
+        "number": 204,
+        "title": "Which runner carries the suite",
+        "description": null,
+        "repo": null,
+        "type": "decision",
+        "status": "open",
+        "initiative": {
+          "id": "i1",
+          "name": "An Initiative",
+          "status": "active",
+          "priority": 2
+        },
+        "labels": [],
+        "is_ready": true,
+        "closed_ts": null
+      }
+    ],
+    "decisions_total": 1,
+    "triage_total": 2
+  },
   "countdowns": {
     "items": [
       {
