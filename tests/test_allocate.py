@@ -1,4 +1,4 @@
-"""Tests for doit.allocate — implied intervals, urgency, and the weighted draw.
+"""Tests for doit.allocate — the balance, the due date, and the weighted draw.
 
 Every function here is pure, so the draw is tested against a seeded Random rather
 than by sampling: a statistical assertion on an unseeded generator either passes
@@ -11,32 +11,6 @@ import random
 from doit import allocate
 
 
-def test_implied_shares_normalizes_relative_magnitudes():
-    # 35/30/70 is a legitimate register — nothing has to add up to 100.
-    shares = allocate.implied_shares({'cs': 35, 'read': 30, 'travel': 70})
-    assert sum(shares.values()) == 1.0
-    assert shares['travel'] > shares['cs'] > shares['read']
-
-
-def test_implied_shares_survives_an_all_zero_register():
-    assert allocate.implied_shares({'a': 0, 'b': 0}) == {'a': 0.0, 'b': 0.0}
-
-
-def test_implied_interval_is_inverse_to_share_and_rate():
-    # A quarter of the attention at two logs a day is one appearance every two days.
-    assert allocate.implied_interval(0.25, 2.0) == 2.0
-    assert allocate.implied_interval(0.5, 2.0) == 1.0
-
-
-def test_implied_interval_floors_the_rate():
-    # A near-idle journal would otherwise divide by ~0 and imply an interval of years.
-    assert allocate.implied_interval(0.5, 0.0) == 1.0 / (0.5 * allocate.MIN_LOGS_PER_DAY)
-
-
-def test_implied_interval_of_a_weightless_pursuit_is_infinite():
-    assert math.isinf(allocate.implied_interval(0.0, 2.0))
-
-
 def test_one_checkoff_an_interval_is_exactly_current():
     assert allocate.balance(elapsed=3.0, interval=3.0, size=1.0, done=1.0) == 0.0
     assert allocate.balance(elapsed=7.0, interval=7.0, size=45.0, done=45.0) == 0.0
@@ -45,9 +19,7 @@ def test_one_checkoff_an_interval_is_exactly_current():
 def test_a_burst_counts_for_every_checkoff_it_was():
     # Three chores in one evening is three days of cover at a daily interval, and
     # nothing caps how far forward that reaches.
-    owed = allocate.balance(elapsed=0.0, interval=1.0, size=1.0, done=3.0)
-    assert owed == -3.0
-    assert allocate.urgency(owed, 1.0) == 0.0
+    assert allocate.balance(elapsed=0.0, interval=1.0, size=1.0, done=3.0) == -3.0
 
 
 def test_partial_time_rolls_over_rather_than_stranding():
@@ -63,6 +35,12 @@ def test_four_fragments_and_one_sitting_pay_the_same_amount():
     assert fragments == sitting
 
 
+def test_a_week_of_minutes_accrues_evenly_across_the_week():
+    # A goal in minutes a week asks for its weekly amount once per week, so two
+    # days into one it has asked for two sevenths.
+    assert allocate.balance(elapsed=2.0, interval=allocate.WEEK_DAYS, size=1200.0, done=0.0) == 2.0 / 7.0 * 1200.0
+
+
 def test_a_fortnight_away_is_owed_in_full():
     assert allocate.balance(elapsed=14.0, interval=1.0, size=1.0, done=0.0) == 14.0
 
@@ -71,7 +49,7 @@ def test_being_far_ahead_is_not_forgiven_either():
     assert allocate.balance(elapsed=1.0, interval=1.0, size=1.0, done=20.0) == -19.0
 
 
-def test_a_weightless_pursuit_owes_nothing():
+def test_a_pursuit_with_no_schedule_owes_nothing():
     assert allocate.balance(3.0, math.inf, 1.0, 0.0) == 0.0
 
 
@@ -101,101 +79,46 @@ def test_a_pursuit_with_no_schedule_is_due_at_no_time():
     assert allocate.days_until_due(1.0, 3.0, 0.0) is None
 
 
-def test_period_amount_is_what_a_week_of_the_schedule_asks_for():
-    # A 45-minute checkoff every day and a half is 210 minutes a week.
-    assert allocate.period_amount(1.5, 45.0, 7.0) == 210.0
+def test_the_pool_holds_nothing_owed():
+    # Anything a whole checkoff behind is shown outright, so sampling it as well
+    # would spend a row of the screen on it twice.
+    assert allocate.candidates({'a': 30.0, 'b': 10.0}, {'a': 1.5, 'b': 0.0}, ()) == {'b': 10.0}
 
 
-def test_period_amount_of_a_weightless_pursuit_is_nothing():
-    assert allocate.period_amount(math.inf, 45.0, 7.0) == 0.0
+def test_the_pool_draws_at_the_stated_weight_and_nothing_else():
+    # A balance decides membership and never scales a weight, so a pursuit's odds
+    # are what the register says whatever the others owe.
+    pool = allocate.candidates({'a': 30.0, 'b': 10.0, 'c': 5.0}, {'a': 0.9, 'b': 0.0, 'c': -0.5}, ())
+
+    assert pool == {'a': 30.0, 'b': 10.0, 'c': 5.0}
 
 
-def test_urgency_is_one_at_exactly_one_checkoff_behind():
-    assert allocate.urgency(1.0, 1.0) == 1.0
-    assert allocate.urgency(45.0, 45.0) == 1.0
+def test_the_pool_leaves_a_skipped_pursuit_out():
+    assert allocate.candidates({'a': 30.0, 'b': 10.0}, {'a': 0.0, 'b': 0.0}, ['b']) == {'a': 30.0}
 
 
-def test_urgency_is_zero_for_anything_current_or_ahead():
-    # Doing a pursuit that was on schedule takes its balance to zero, so it
-    # cannot be the heaviest candidate again a minute later.
-    assert allocate.urgency(0.0, 45.0) == 0.0
-    assert allocate.urgency(-90.0, 45.0) == 0.0
+def test_a_weightless_pursuit_is_never_in_the_pool():
+    assert allocate.candidates({'a': 0.0, 'b': 10.0}, {'a': 0.0, 'b': 0.0}, ()) == {'b': 10.0}
 
 
-def test_a_pursuit_already_behind_stays_urgent_after_one_checkoff():
-    behind = allocate.balance(elapsed=4.0, interval=1.0, size=1.0, done=1.0)
-    assert allocate.urgency(behind, 1.0) > 1.0
-
-
-def test_urgency_climbs_superlinearly_past_one_checkoff():
-    single = allocate.urgency(45.0, 45.0)
-    double = allocate.urgency(90.0, 45.0)
-    assert double > 2 * single
-
-
-def test_urgency_is_unbounded():
-    # A ceiling would cap the one signal saying the register needs editing, so a
-    # long-neglected pursuit is meant to dominate until someone edits it.
-    assert allocate.urgency(10_000.0, 1.0) > 100_000
-
-
-def test_a_pursuit_with_no_checkoff_to_owe_is_never_urgent():
-    assert allocate.urgency(5.0, 0.0) == 0.0
-
-
-def test_effective_weight_multiplies_stated_weight_by_urgency():
-    effective = allocate.effective_weights({'a': 30}, {'a': 2.0}, {'a': 1.0}, {'a': 1.5}, ())
-    assert effective['a'] == 30 * allocate.urgency(2.0, 1.0)
-
-
-def test_a_skip_removes_a_pursuit_rather_than_suppressing_it():
-    plain = allocate.effective_weights({'a': 30}, {'a': 2.0}, {'a': 1.0}, {'a': 1.5}, ())
-    skipped = allocate.effective_weights({'a': 30}, {'a': 2.0}, {'a': 1.0}, {'a': 1.5}, ['a'])
-    assert plain['a'] > 0
-    assert skipped['a'] == 0.0
-
-
-def test_a_steeper_catchup_exponent_makes_the_same_debt_weigh_more():
-    steep = allocate.effective_weights({'a': 10}, {'a': 4.0}, {'a': 1.0}, {'a': 3.0}, ())
-    flat = allocate.effective_weights({'a': 10}, {'a': 4.0}, {'a': 1.0}, {'a': 1.0}, ())
-    assert steep['a'] > flat['a']
-
-
-def test_the_pool_falls_back_to_stated_weight_when_nothing_is_owed():
-    # A register with no debt anywhere would otherwise offer nothing at all, and
-    # a blank screen reads as the tool having broken rather than as being current.
-    assert allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, {'a': 0.0, 'b': 0.0}, (), 5) == {'a': 30.0, 'b': 10.0}
-
-
-def test_the_pool_leaves_a_skipped_pursuit_out_of_both_tiers():
-    assert allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, {'a': 0.0, 'b': 0.0}, ['b'], 5) == {'a': 30.0}
-    assert 'b' not in allocate.candidates({'a': 4.0, 'b': 0.0}, {'a': 30.0, 'b': 10.0}, {'a': 4.0, 'b': 0.0}, ['b'], 5)
-
-
-def test_one_pursuit_owing_does_not_empty_the_screen():
-    """The failure this guards: `any owed` as a switch made the pool the owed set,
-    so one pursuit a minute past its interval put one row on a screen sized for
-    five — the queue the weighted draw exists not to be."""
+def test_a_pursuit_a_whole_checkoff_ahead_is_not_offered_back():
+    """It is the thing just done, and offering it back reads as the log having
+    gone nowhere. One merely level with its schedule still fills a row."""
     pool = allocate.candidates(
-        {'a': 0.0, 'b': 0.0, 'c': 0.0, 'd': 0.0, 'e': 4.0}, dict.fromkeys('abcde', 20.0), dict.fromkeys('abcde', 0.0) | {'e': 4.0}, (), 5
+        {'owed': 10.0, 'ahead': 10.0, 'level': 10.0},
+        {'owed': 2.0, 'ahead': -2.0, 'level': -0.1},
+        (),
     )
 
-    assert sorted(pool) == ['a', 'b', 'c', 'd', 'e']
-    assert all(value > 0 for value in pool.values())
+    assert pool == {'level': 10.0}
 
 
-def test_what_is_owed_always_outranks_what_is_resting():
-    pool = allocate.candidates({'light': 0.5, 'heavy': 0.0}, {'light': 1.0, 'heavy': 100.0}, {'light': 0.5, 'heavy': 0.0}, (), 5)
+def test_the_whole_register_is_offered_rather_than_a_blank_screen():
+    """Holding that line where everything is ahead would leave nothing on offer,
+    and a blank screen says the tool broke rather than that you are done."""
+    pool = allocate.candidates({'a': 10.0, 'b': 20.0}, {'a': -3.0, 'b': -4.0}, ())
 
-    assert pool['light'] > pool['heavy'], 'a weight of 100 that owes nothing sits under one of 1 that does'
-    assert pool['heavy'] == 0.5 * allocate.RESTING_SHARE
-
-
-def test_the_pool_stops_topping_up_once_it_is_full():
-    owed = {'a': 3.0, 'b': 2.0, 'c': 1.0}
-    pool = allocate.candidates({**owed, 'd': 0.0}, {'a': 10.0, 'b': 10.0, 'c': 10.0, 'd': 10.0}, {**owed, 'd': 0.0}, (), 3)
-
-    assert pool == owed
+    assert pool == {'a': 10.0, 'b': 20.0}
 
 
 def test_draw_returns_distinct_names_up_to_size():
@@ -231,26 +154,3 @@ def test_first_draw_probabilities_sum_to_one_and_exclude_zeros():
     assert probabilities['cooling'] == 0.0
     assert abs(sum(probabilities.values()) - 1.0) < 1e-9
     assert probabilities['a'] == 0.75
-
-
-def test_a_pursuit_a_whole_checkoff_ahead_is_not_offered_back():
-    """It is the thing just done, and offering it back reads as the log having
-    gone nowhere. One merely level with its schedule still fills a row."""
-    pool = allocate.candidates(
-        {'owed': 2.0, 'ahead': 0.0, 'level': 0.0},
-        {'owed': 10.0, 'ahead': 10.0, 'level': 10.0},
-        {'owed': 2.0, 'ahead': -2.0, 'level': -0.1},
-        (),
-        5,
-    )
-
-    assert 'ahead' not in pool
-    assert sorted(pool) == ['level', 'owed']
-
-
-def test_the_whole_register_is_offered_rather_than_a_blank_screen():
-    """Holding that line where everything is ahead would leave nothing on offer,
-    and a blank screen says the tool broke rather than that you are done."""
-    pool = allocate.candidates({'a': 0.0, 'b': 0.0}, {'a': 10.0, 'b': 20.0}, {'a': -3.0, 'b': -4.0}, (), 5)
-
-    assert pool == {'a': 10.0, 'b': 20.0}

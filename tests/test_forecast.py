@@ -50,21 +50,22 @@ def reading(generated: dt.datetime, horizons: dict, machine: str = 'testbox') ->
         machine=machine,
         budget_minutes=120,
         replicates=10,
-        logs_per_day=2.0,
-        measured_rate=2.0,
         weights={'chores': 25.0},
-        durations={'chores': {'minutes': 25.0, 'source': 'declared', 'samples': 0}},
+        goals={'chores': 'every 7d'},
+        durations={'chores': {'minutes': 25.0, 'source': 'default', 'samples': 0}},
         horizons=horizons,
     )
 
 
-def test_a_declared_estimate_is_used_until_the_journal_can_answer():
-    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
-    assert forecast.durations(register, [done('a', 90)]).get('a') == forecast.Duration(30.0, 'declared', 1)
+def test_a_weekly_goal_is_never_read_as_the_length_of_a_sitting():
+    # Twenty hours a week says how much, not how long one sitting is, so the
+    # fallback answers until the journal can.
+    register = {'a': {'weight': 5, 'weekly_minutes': 1200}}
+    assert forecast.durations(register, [done('a', 90)]).get('a') == forecast.Duration(float(forecast.FALLBACK_MINUTES), 'default', 1)
 
 
-def test_the_journal_outranks_the_estimate_once_it_has_enough_samples():
-    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
+def test_the_journal_outranks_the_fallback_once_it_has_enough_samples():
+    register = {'a': {'weight': 5, 'weekly_minutes': 30}}
     records = [done('a', 60), done('a', 90), done('a', 120)]
     measured = forecast.durations(register, records)['a']
     assert measured.source == 'measured'
@@ -85,13 +86,13 @@ def test_a_pursuit_declaring_nothing_falls_back_rather_than_costing_nothing():
 
 @pytest.mark.parametrize('bad', [0, -10, None, True])
 def test_a_duration_that_is_not_a_positive_number_is_not_a_sample(bad):
-    register = {'a': {'weight': 5, 'checkoff_minutes': 30}}
+    register = {'a': {'weight': 5, 'weekly_minutes': 30}}
     records = [done('a', bad), done('a', bad), done('a', bad)]
-    assert forecast.durations(register, records)['a'].source == 'declared'
+    assert forecast.durations(register, records)['a'].source == 'default'
 
 
 def costs(**pairs: float) -> dict[str, forecast.Duration]:
-    return {name: forecast.Duration(minutes, 'declared', 0) for name, minutes in pairs.items()}
+    return {name: forecast.Duration(minutes, 'default', 0) for name, minutes in pairs.items()}
 
 
 def test_a_day_is_spent_from_the_top_of_the_offered_list():
@@ -121,11 +122,11 @@ def test_an_unpriced_pursuit_still_costs_something():
 
 
 def test_the_simulation_feeds_its_own_logs_back_into_the_next_day(register):
-    # The loop that makes this worth simulating: a log moves the measured rate,
-    # the rate moves every implied interval, and the intervals move the draw.
+    # The loop that makes this worth simulating: a log pays off that pursuit's
+    # balance, which changes what is owed tomorrow and so what heads the list.
     active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
     cost = forecast.durations(active, [])
-    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 5, 120, replicate=1, balance_settings={})
+    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 5, 120, replicate=1)
     assert run
     assert {day for day, _, _ in run} <= set(range(5))
     # Nothing is done twice in one day: the draw samples without replacement.
@@ -135,12 +136,13 @@ def test_the_simulation_feeds_its_own_logs_back_into_the_next_day(register):
 
 
 def test_the_simulation_reaches_the_pursuit_the_real_draw_pins(register):
-    # `chores` is the fixture's cadence pursuit and has never been done, so the
-    # live allocator pins it. A forecast that never offered it would mean the
-    # simulation had stopped running the same draw.
+    # `chores` has never been done, so the live allocator pins it. It is lighter
+    # than the two pursuits ahead of it, so it waits a day for the budget, and a
+    # forecast that never offered it would mean the simulation had stopped
+    # running the same draw.
     active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
     cost = forecast.durations(active, [])
-    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 3, 120, replicate=1, balance_settings={})
+    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 3, 120, replicate=1)
     assert 'chores' in {name for _, name, _ in run}
 
 
@@ -170,7 +172,35 @@ def test_a_bigger_budget_never_predicts_less_work(register):
 
 def test_a_reading_records_where_each_duration_came_from(register):
     result = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=5)
-    assert {value['source'] for value in result.durations.values()} <= {'measured', 'declared', 'default'}
+    assert {value['source'] for value in result.durations.values()} <= {'measured', 'default'}
+
+
+def test_a_reading_carries_what_each_goal_asks_over_each_horizon(register):
+    # Stored beside the prediction, because the register can move after the
+    # reading is taken and the comparison has to be against the goal it ran on.
+    result = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=3)
+
+    week = result.horizons['7']
+    assert (week['chores']['asked'], week['chores']['unit']) == (1.0, 'checkoffs')
+    assert (week['study-computer-science']['asked'], week['study-computer-science']['unit']) == (3.5, 'checkoffs')
+    assert (week['read-library']['asked'], week['read-library']['unit']) == (45.0, 'minutes')
+    assert result.goals['read-library'] == '45m a week'
+
+
+def test_a_goal_is_met_in_its_own_unit():
+    assert forecast.goal_met({'asked': 4.0, 'occasions': 3.0, 'minutes': 999.0, 'unit': 'checkoffs'}) == 75.0
+    assert forecast.goal_met({'asked': 200.0, 'occasions': 9.0, 'minutes': 100.0, 'unit': 'minutes'}) == 50.0
+
+
+def test_a_reading_taken_before_goals_were_recorded_still_renders(capsys):
+    old = reading(NOW, {'30': {'chores': {'occasions': 2.0, 'minutes': 50.0}}, '7': {}})
+    old = forecast.Reading(**{**old.__dict__, 'goals': {}})
+
+    assert forecast.goal_met(old.horizons['30']['chores']) is None
+    forecast.emit(old)
+
+    row = [line for line in capsys.readouterr().out.splitlines() if 'chores' in line]
+    assert row and '—' in row[0]
 
 
 def test_a_reading_round_trips_through_the_store(tmp_path):

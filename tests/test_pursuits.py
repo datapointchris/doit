@@ -65,7 +65,7 @@ def log_done(directory: Path, pursuit: str, days_ago: float) -> None:
 
 def test_load_pursuits_reads_the_register():
     register = pursuits.load_pursuits()
-    assert register['chores']['cadence'] == '1w'
+    assert register['chores']['cadence'] == '7d'
     assert register['read-library']['weight'] == 30
 
 
@@ -142,20 +142,43 @@ def test_a_nonsense_cadence_is_refused(tmp_path):
 
 
 def test_on_log_without_resolve_is_refused(tmp_path):
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    on_log: echo hi\n')
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    on_log: echo hi\n')
     with pytest.raises(pursuits.RegisterError, match='on_log'):
         pursuits.load_pursuits(path)
 
 
-def test_minutes_is_read_as_an_estimate(tmp_path):
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    checkoff_minutes: 40\n')
-    assert pursuits.load_pursuits(path)['a']['checkoff_minutes'] == 40
+def test_weekly_minutes_is_read_as_the_pace(tmp_path):
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    weekly_minutes: 40\n')
+    assert pursuits.load_pursuits(path)['a']['weekly_minutes'] == 40
 
 
 @pytest.mark.parametrize('value', ['0', '-5', 'true', '"40"', '12.5'])
-def test_a_minutes_that_is_not_a_positive_whole_number_is_refused(tmp_path, value):
-    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    checkoff_minutes: {value}\n')
-    with pytest.raises(pursuits.RegisterError, match='checkoff_minutes'):
+def test_weekly_minutes_that_is_not_a_positive_whole_number_is_refused(tmp_path, value):
+    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    weekly_minutes: {value}\n')
+    with pytest.raises(pursuits.RegisterError, match='weekly_minutes'):
+        pursuits.load_pursuits(path)
+
+
+@pytest.mark.parametrize('token', ['1w', '2mo', '3.5d', '1w2d', '0d', '7', 'd'])
+def test_a_cadence_that_is_not_whole_days_is_refused(tmp_path, token):
+    # `1w` reads naturally and invites `1w2d` and `3.5d`, which nobody checks
+    # twice. Days are the one unit every cadence can be written in exactly.
+    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    cadence: {token}\n')
+    with pytest.raises(pursuits.RegisterError, match='whole number of days'):
+        pursuits.load_pursuits(path)
+
+
+def test_a_pursuit_declaring_no_pace_is_refused(tmp_path):
+    # With no pace there is nothing to fall behind on, so the pursuit would never
+    # be owed and never be shown ahead of anything — a weight with nothing to order.
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n')
+    with pytest.raises(pursuits.RegisterError, match='needs a pace'):
+        pursuits.load_pursuits(path)
+
+
+def test_a_pursuit_declaring_both_paces_is_refused(tmp_path):
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 7d\n    weekly_minutes: 60\n')
+    with pytest.raises(pursuits.RegisterError, match='not both'):
         pursuits.load_pursuits(path)
 
 
@@ -171,54 +194,56 @@ def test_a_paused_pursuit_is_still_listed(sandbox):
     assert 'paused-thing' in pursuits.build_state(pursuits.load_pursuits(), NOW)['pursuits']
 
 
-def test_an_explicit_cadence_overrides_the_implied_interval(sandbox):
+def test_the_interval_and_size_are_the_declared_pace(sandbox):
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     assert state['intervals']['chores'] == 7.0
-    assert state['intervals']['read-library'] != 7.0
+    assert state['intervals']['study-computer-science'] == 2.0
+    assert state['intervals']['read-library'] == 7.0, 'minutes a week are asked for once a week'
+    assert state['checkoff_size']['chores'] == 1.0
+    assert state['checkoff_size']['read-library'] == 45.0
 
 
-def test_shares_come_from_active_weights_only(sandbox):
+def test_logging_one_pursuit_moves_no_other_pursuits_numbers(sandbox):
+    """The property a declared pace exists for: each goal answers for itself.
+
+    A pace derived from the register as a whole moved every interval whenever
+    anything was logged, so a long week of one pursuit made every other one read
+    as further behind. Any shared input between two pursuits fails this.
+    """
+    before = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    for day in range(10):
+        log_done(sandbox / 'state', 'study-computer-science', day / 3)
+    after = pursuits.build_state(pursuits.load_pursuits(), NOW)
+
+    others = [name for name in before['active'] if name != 'study-computer-science']
+    assert after['balance']['study-computer-science'] < before['balance']['study-computer-science']
+    for name in others:
+        assert after['intervals'][name] == before['intervals'][name], name
+        assert after['balance'][name] == before['balance'][name], name
+
+
+def test_every_pursuit_never_done_is_pinned_heaviest_first(sandbox):
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    assert abs(sum(state['shares'].values()) - 1.0) < 1e-9
-    assert 'paused-thing' not in state['shares']
+    assert pursuits.pinned(state) == ['study-computer-science', 'read-library', 'chores', 'read-longform']
 
 
-def test_the_rate_falls_back_before_there_is_anything_to_measure(sandbox):
-    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    assert state['measured_rate'] is None
-    assert state['logs_per_day'] == pursuits.FALLBACK_LOGS_PER_DAY
-
-
-def test_the_rate_is_measured_once_the_journal_has_history(sandbox):
-    for day in range(6):
-        log_done(sandbox / 'state', 'read-library', day / 2)
-    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    assert state['measured_rate'] is not None
-    assert state['logs_per_day'] == state['measured_rate']
-
-
-def test_a_cadence_pursuit_never_done_is_pinned(sandbox):
-    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    assert pursuits.pinned(state) == ['chores']
-
-
-def test_a_cadence_pursuit_done_inside_its_cadence_is_not_pinned(sandbox):
+def test_a_pursuit_done_inside_its_cadence_is_not_pinned(sandbox):
     log_done(sandbox / 'state', 'chores', 2)
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    assert pursuits.pinned(state) == []
+    assert 'chores' not in pursuits.pinned(state)
 
 
-def test_a_cadence_pursuit_past_its_cadence_is_pinned_again(sandbox):
+def test_a_pursuit_past_its_cadence_is_pinned_again(sandbox):
     log_done(sandbox / 'state', 'chores', 30)
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    assert pursuits.pinned(state) == ['chores']
+    assert 'chores' in pursuits.pinned(state)
 
 
 def test_a_pinned_pursuit_is_not_also_sampled(sandbox):
     # Pinned means guaranteed; drawing it again would waste a slot on it.
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     selection = pursuits.compute_draw(state, seed=1)
-    assert selection['pinned'] == ['chores']
+    assert 'chores' in selection['pinned']
     assert selection['offered'].count('chores') == 1
 
 
@@ -229,16 +254,16 @@ def test_the_draw_fills_up_to_the_screen_size_across_pins_and_samples(sandbox):
     assert set(selection['pinned']) <= set(selection['offered']), 'a pin is offered, and pinned records only how'
 
 
-def test_a_just_logged_pursuit_is_never_the_heaviest_candidate(sandbox):
+def test_a_just_logged_pursuit_never_outranks_anything_owed(sandbox):
     """It can still fill a row — the screen is sized for five and a one-row draw
     is a queue. What it cannot do is outrank anything that is actually owed,
     which is what reads as the tool not having noticed the log."""
     log_done(sandbox / 'state', 'read-library', 0.0)
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    selection = pursuits.compute_draw(state, seed=1)
 
-    assert state['effective']['read-library'] == 0.0
-    owed = [value for name, value in state['pool'].items() if state['effective'][name] > 0]
-    assert owed and state['pool']['read-library'] < min(owed)
+    assert 'read-library' not in selection['pinned']
+    assert selection['offered'][-1] == 'read-library'
 
 
 def test_a_cached_draw_is_reused_inside_the_window(sandbox):
@@ -535,7 +560,7 @@ def test_a_view_command_needing_no_id_is_printed_as_written():
 
 
 def test_view_without_resolve_is_refused(tmp_path):
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    view: icb tasks show {id}\n')
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    view: icb tasks show {id}\n')
     with pytest.raises(pursuits.RegisterError, match='view'):
         pursuits.load_pursuits(path)
 
@@ -543,7 +568,7 @@ def test_view_without_resolve_is_refused(tmp_path):
 def test_context_and_detail_without_a_label_are_refused(tmp_path):
     # Both read fields off a parsed row, and there is no row without `label` —
     # the resolver falls back to reading plain lines.
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    resolve: echo hi\n    context: repo\n')
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    resolve: echo hi\n    context: repo\n')
     with pytest.raises(pursuits.RegisterError, match='label'):
         pursuits.load_pursuits(path)
 
@@ -659,6 +684,7 @@ def test_logging_re_resolves_past_a_cached_failure(sandbox, tmp_path, monkeypatc
         'pursuits:\n'
         '  chores:\n'
         '    weight: 25\n'
+        '    cadence: 3d\n'
         f'    resolve: cat {payload}\n'
         '    label: name\n'
         '    id: id\n'
@@ -706,6 +732,7 @@ def test_logging_names_the_item_the_write_through_completed(sandbox, monkeypatch
         'pursuits:\n'
         '  chores:\n'
         '    weight: 25\n'
+        '    cadence: 3d\n'
         '    resolve: echo unused-the-draw-already-resolved-it\n'
         f'    on_log: sh -c "echo {{id}} > {marker}"\n',
     )
@@ -724,6 +751,7 @@ def logging_register(tmp_path, marker) -> Path:
         'pursuits:\n'
         '  chores:\n'
         '    weight: 25\n'
+        '    cadence: 3d\n'
         '    resolve: echo unused-the-draw-already-resolved-it\n'
         f'    on_log: sh -c "echo {{id}} > {marker}"\n',
     )
@@ -950,10 +978,9 @@ pursuits:
     cadence: 1d
 
   read:
-    description: The same schedule, measured in minutes rather than occurrences
+    description: Forty-five minutes a day, measured in minutes rather than occurrences
     weight: 25
-    cadence: 1d
-    checkoff_minutes: 45
+    weekly_minutes: 315
 """
 
 
@@ -1000,9 +1027,9 @@ def test_a_counted_pursuit_owes_one_checkoff_per_interval(tmp_path, monkeypatch)
     assert 'chore' in pursuits.pinned(state)
 
 
-def test_a_timed_pursuit_owes_a_checkoffs_worth_of_minutes_per_interval(tmp_path, monkeypatch):
+def test_a_timed_pursuit_owes_its_weekly_minutes_spread_across_the_week(tmp_path, monkeypatch):
     state = balance_state(tmp_path, monkeypatch, [zeroed('read', 2.0)])
-    assert state['balance']['read'] == 90.0, 'two days at a 45-minute checkoff a day'
+    assert state['balance']['read'] == pytest.approx(90.0), 'two days of 315 minutes a week'
 
 
 def test_a_burst_pays_several_intervals_forward(tmp_path, monkeypatch):
@@ -1012,7 +1039,6 @@ def test_a_burst_pays_several_intervals_forward(tmp_path, monkeypatch):
 
     assert state['balance']['chore'] == -3.0
     assert 'chore' not in pursuits.pinned(state)
-    assert state['effective']['chore'] == 0.0
 
 
 def test_partial_minutes_roll_over_rather_than_stranding(tmp_path, monkeypatch):
@@ -1111,7 +1137,7 @@ def test_a_pursuit_with_no_record_anywhere_opens_one_checkoff_behind(tmp_path, m
     it out of the draw until someone zeroed it by hand."""
     state = balance_state(tmp_path, monkeypatch, [])
 
-    assert state['balance'] == {'chore': 1.0, 'read': 45.0}
+    assert state['balance'] == {'chore': 1.0, 'read': 315.0}, 'one occurrence, and one week of minutes'
     assert sorted(pursuits.pinned(state)) == ['chore', 'read']
 
 
@@ -1138,7 +1164,7 @@ def test_a_standing_skip_reaches_the_pins_as_well_as_the_draw(tmp_path, monkeypa
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 10.0), skipped('chore', 0.0, 14.0)])
 
     assert state['suppressed'] == ['chore']
-    assert state['effective']['chore'] == 0.0
+    assert 'chore' not in state['pool']
     assert 'chore' not in pursuits.pinned(state)
 
 
@@ -1146,7 +1172,7 @@ def test_a_skip_that_has_run_out_suppresses_nothing(tmp_path, monkeypatch):
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 10.0), skipped('chore', 8.0, 4.0)])
 
     assert state['suppressed'] == []
-    assert state['effective']['chore'] > 0
+    assert 'chore' in pursuits.pinned(state)
 
 
 def test_the_standing_line_names_what_is_behind_and_no_more(tmp_path, monkeypatch):
@@ -1155,13 +1181,13 @@ def test_the_standing_line_names_what_is_behind_and_no_more(tmp_path, monkeypatc
     The question the line answers is which strands are slipping, and the names
     alone answer it. How far behind each one is has a column on the row.
     """
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 2.0)])
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 8.0)])
 
     assert pursuits.standing_line(state, exclude=()) == 'behind · chore · read'
 
 
 def test_the_standing_line_leaves_out_what_is_already_on_screen(tmp_path, monkeypatch):
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 2.0)])
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 8.0)])
 
     # "also", because a narrowed count that drops the qualifier reads as the
     # whole set — the four named here would be the register's only debts.
@@ -1171,30 +1197,6 @@ def test_the_standing_line_leaves_out_what_is_already_on_screen(tmp_path, monkey
 def test_the_standing_line_is_silent_when_nothing_is_owed(tmp_path, monkeypatch):
     ahead = [zeroed('chore', 0.0), done('chore', 0.0), zeroed('read', 0.0), done('read', 0.0, minutes=60)]
     assert pursuits.standing_line(balance_state(tmp_path, monkeypatch, ahead), exclude=()) == ''
-
-
-def test_a_balance_past_its_band_is_reported(tmp_path, monkeypatch):
-    """A daily chore asks for seven a week, so two weeks of band is fourteen."""
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 30.0), zeroed('read', 0.0)])
-
-    assert [name for name, _, _ in pursuits.out_of_band(state)] == ['chore']
-
-
-def test_a_surplus_is_reported_as_loudly_as_a_debt(tmp_path, monkeypatch):
-    """Both say the weight is wrong, and only one of them ever feels like it."""
-    burst = [zeroed('chore', 1.0), zeroed('read', 0.0)] + [done('chore', 0.5) for _ in range(30)]
-    state = balance_state(tmp_path, monkeypatch, burst)
-
-    assert state['balance']['chore'] == -29.0
-    assert [name for name, _, _ in pursuits.out_of_band(state)] == ['chore']
-
-
-def test_a_pursuit_declaring_its_own_band_is_judged_by_that_one(tmp_path, monkeypatch):
-    wider = BALANCE_REGISTER.replace('    cadence: 1d\n\n  read:', '    cadence: 1d\n    warn_weeks: 10\n\n  read:')
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 30.0), zeroed('read', 0.0)], register=wider)
-
-    assert state['balance']['chore'] == 30.0
-    assert pursuits.out_of_band(state) == []
 
 
 def test_the_balance_spans_every_machines_journal(tmp_path, monkeypatch):
@@ -1217,10 +1219,9 @@ def test_the_balance_spans_every_machines_journal(tmp_path, monkeypatch):
 def test_the_draw_still_offers_something_when_nothing_is_owed(tmp_path, monkeypatch):
     """Seeing what else is on offer while nothing is urgent is the point of the
     fallback. An empty screen reads as the tool having broken, not as current."""
-    current = [zeroed('chore', 0.0), done('chore', 0.0), zeroed('read', 0.0), done('read', 0.0, minutes=60)]
-    state = balance_state(tmp_path, monkeypatch, current)
+    ahead = [zeroed('chore', 0.0), done('chore', 0.0), zeroed('read', 0.0), done('read', 0.0, minutes=400)]
+    state = balance_state(tmp_path, monkeypatch, ahead)
 
-    assert set(state['effective'].values()) == {0.0}
     assert pursuits.pinned(state) == []
     assert sorted(pursuits.compute_draw(state, seed=1)['offered']) == ['chore', 'read']
 
@@ -1244,15 +1245,23 @@ def test_the_offered_list_leads_with_whatever_is_furthest_past_due(tmp_path, mon
     assert pursuits.offered_order(state, ['read', 'chore']) == ['read', 'chore'], 'the input order is not the answer'
 
 
-def test_a_pin_is_ordered_among_the_sample_rather_than_above_it(tmp_path, monkeypatch):
-    """Only a declared cadence can pin, so pin membership says a pursuit has a
-    schedule and not that it is the most urgent thing on offer."""
-    register = BALANCE_REGISTER + '\n  weighted:\n    weight: 25\n'
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 1.2), zeroed('weighted', 40.0)], register=register)
+def test_an_owed_row_is_ordered_by_weight_before_lateness(tmp_path, monkeypatch):
+    """Ordering what is owed is the one thing a weight says: which of two debts
+    you would rather clear first. Lateness only breaks a tie between equals."""
+    register = BALANCE_REGISTER + '\n  light:\n    weight: 5\n    cadence: 1d\n'
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 1.2), zeroed('light', 40.0)], register=register)
 
-    assert 'weighted' not in pursuits.pinned(state), 'no cadence, so it cannot pin however far behind'
-    assert 'chore' in pursuits.pinned(state)
-    assert pursuits.offered_order(state, ['chore', 'weighted'])[0] == 'weighted'
+    assert pursuits.due_in_days(state, 'light') < pursuits.due_in_days(state, 'chore')
+    assert pursuits.offered_order(state, ['light', 'chore']) == ['chore', 'light']
+    assert pursuits.pinned(state)[-1] == 'light', 'the furthest behind, and the lightest of everything owed'
+
+
+def test_a_weight_never_moves_a_row_that_is_not_owed_above_one_that_is(tmp_path, monkeypatch):
+    register = BALANCE_REGISTER + '\n  heavy:\n    weight: 90\n    cadence: 1d\n'
+    records = [zeroed('chore', 1.2), zeroed('heavy', 0.0), done('heavy', 0.0)]
+    state = balance_state(tmp_path, monkeypatch, records, register=register)
+
+    assert pursuits.offered_order(state, ['heavy', 'chore']) == ['chore', 'heavy']
 
 
 def test_an_unpriced_row_sorts_last_rather_than_first(tmp_path, monkeypatch):
@@ -1261,30 +1270,6 @@ def test_an_unpriced_row_sorts_last_rather_than_first(tmp_path, monkeypatch):
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 4.0)])
 
     assert pursuits.offered_order(state, ['edited-away', 'chore']) == ['chore', 'edited-away']
-
-
-def test_the_weight_warning_reports_displacement_and_not_the_due_date(tmp_path, monkeypatch, capsys):
-    """The two differ by exactly one interval, so the due date understates a debt
-    and overstates a surplus — under a heading claiming the weight is wrong."""
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 21.0)])
-
-    assert state['balance']['chore'] == 21.0, 'a daily chore, three weeks on, nothing done'
-    assert pursuits.drift_days(state, 'chore') == 21.0
-    assert pursuits.due_in_days(state, 'chore') == -20.0
-
-    pursuits.render_out_of_band(state)
-
-    assert 'behind goal by 3w' in capsys.readouterr().out
-
-
-def test_the_weight_warning_ends_with_the_repair(tmp_path, monkeypatch, capsys):
-    """It names a register that needs editing, so a screen offering nothing to
-    type is a dead end at the moment someone is stuck."""
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 21.0)])
-
-    pursuits.render_out_of_band(state)
-
-    assert 'doit pursuits edit' in capsys.readouterr().out
 
 
 def test_the_due_column_is_colored_only_once_something_is_late():
@@ -1305,46 +1290,27 @@ def test_the_due_text_says_which_side_of_the_schedule_it_is_on():
     assert pursuits.format_due(120.0) == 'due in 4mo'
 
 
-def schedule_state(implied: float) -> dict:
-    return {'implied_intervals': {'a': implied}}
+@pytest.mark.parametrize(
+    ('config', 'expected'),
+    [
+        ({'cadence': '9d'}, 'every 9d'),
+        ({'cadence': '14d'}, 'every 14d'),
+        ({'weekly_minutes': 45}, '45m a week'),
+        ({'weekly_minutes': 90}, '1h 30m a week'),
+        ({'weekly_minutes': 1200}, '20h a week'),
+        ({}, '—'),
+    ],
+)
+def test_the_goal_is_stated_as_the_register_writes_it(config, expected):
+    # Days stay days. `14d` printed as `2w` is a rounding of what was written,
+    # and the list is the one screen whose job is to show the register.
+    assert pursuits.goal_text(config) == expected
 
 
-def test_a_cadence_shorter_than_the_implied_interval_names_both():
-    # The number that was invisible: `cadence: 1d` against an implied 3.7d is
-    # what took a third of every draw on a weight claiming a ninth of it.
-    assert pursuits.schedule_text(schedule_state(3.7), {'cadence': '1d'}, 'a') == 'every 1d, weight says 4d'
-
-
-def test_a_cadence_longer_than_the_implied_interval_names_both():
-    assert pursuits.schedule_text(schedule_state(3.7), {'cadence': '1w'}, 'a') == 'every 7d, weight says 4d'
-
-
-@pytest.mark.parametrize('implied', [3.7, 4.0, 4.3])
-def test_a_cadence_within_a_tenth_of_the_implied_interval_names_only_itself(implied):
-    # That close is the measured logging rate wobbling, not a decision.
-    assert pursuits.schedule_text(schedule_state(implied), {'cadence': '4d'}, 'a') == 'every 4d'
-
-
-def test_a_pursuit_declaring_no_cadence_says_the_schedule_came_from_its_weight():
-    """`state['intervals']` holds the implied interval where no cadence is declared,
-    so reading it as the register's own answer states a schedule nobody wrote."""
-    assert pursuits.schedule_text(schedule_state(3.7), {}, 'a') == 'every 4d from its weight'
-
-
-def test_a_paused_pursuit_still_reports_the_cadence_it_declares():
+def test_a_paused_pursuit_still_reports_the_goal_it_declares():
     """`build_state` fills `intervals` from the active set, so a paused pursuit is
-    absent from it — and the register still says `cadence: 1mo`."""
-    assert pursuits.schedule_text({'implied_intervals': {}}, {'cadence': '1mo', 'paused': True}, 'a') == 'every 4w'
-
-
-def test_a_pursuit_with_no_interval_at_all_has_no_schedule_to_state():
-    assert pursuits.schedule_text({'implied_intervals': {}}, {}, 'a') == '—'
-
-
-def test_an_infinite_implied_interval_names_only_the_cadence():
-    # A zero-weight pursuit implies an infinite interval; comparing against it is
-    # not a reading anyone can use.
-    assert pursuits.schedule_text(schedule_state(math.inf), {'cadence': '3d'}, 'a') == 'every 3d'
+    absent from it — and the register still declares its pace."""
+    assert pursuits.goal_text({'cadence': '9d', 'paused': True}) == 'every 9d'
 
 
 def answers(monkeypatch, *replies: str) -> list[str]:
@@ -1550,9 +1516,9 @@ def test_did_counts_what_an_app_saw_and_the_journal_never_did(sandbox, monkeypat
 
     row = drift_rows(capsys)['study-computer-science']
 
-    assert row['amount'] == 8.0
+    assert row['done'] == 8.0
     assert row['logs'] == 0, 'nothing was ever typed for it'
-    assert row['realized_share'] == 100.0
+    assert row['asked'] == 45.0, 'ninety days at one every two days'
 
 
 def test_a_day_carried_by_both_records_counts_once(sandbox, monkeypatch, capsys):
@@ -1562,39 +1528,47 @@ def test_a_day_carried_by_both_records_counts_once(sandbox, monkeypatch, capsys)
 
     row = drift_rows(capsys)['chores']
 
-    assert (row['amount'], row['logs']) == (1.0, 1)
+    assert (row['done'], row['logs']) == (1.0, 1)
 
 
-def test_a_retired_pursuit_takes_no_slice_of_the_denominator(sandbox, capsys):
-    """drift iterates the register, so a stranded name can never get a row — and
-    activity counted into a total it never appears in leaves every share short."""
+def test_drift_asks_nothing_from_before_a_reset(sandbox, capsys):
+    """A pursuit begun inside the window would otherwise read as having missed
+    the weeks before it existed."""
+    reset = dt.datetime.now().astimezone() - dt.timedelta(days=14)
+    write_records(sandbox / 'state', [{'pursuit': 'chores', 'event': 'reset', 'occurred_at': reset.isoformat()}])
+    log_days_ago(sandbox / 'state', 'chores', 30)
+
+    row = drift_rows(capsys)['chores']
+
+    assert row['since'][:10] == days_ago_iso(14)
+    assert row['asked'] == pytest.approx(2.0, abs=0.2), 'two weeks at one a week'
+    assert row['done'] == 0.0, 'the entry before the reset is history, not progress'
+
+
+def test_a_retired_pursuit_gets_no_row(sandbox, capsys):
+    """drift iterates the register, so a stranded name never gets a row."""
     log_days_ago(sandbox / 'state', 'chores', 1)
     log_days_ago(sandbox / 'state', 'gone-from-the-register', 2)
 
-    rows = drift_rows(capsys)
-
-    assert 'gone-from-the-register' not in rows
-    counted = [row for row in rows.values() if row['unit'] == 'checkoffs']
-    assert sum(row['realized_share'] for row in counted) == 100.0
+    assert 'gone-from-the-register' not in drift_rows(capsys)
 
 
-def test_the_two_units_are_reported_against_their_own_denominators(sandbox, capsys):
-    """Minutes and completions do not add, so a single cross-register share would
-    be a number with no denominator behind it."""
+def test_each_pursuit_is_reported_in_its_own_unit(sandbox, capsys):
+    """Minutes and completions do not add, so each row is read against its own
+    goal and never against another row."""
     log_days_ago(sandbox / 'state', 'chores', 1)
     log_days_ago(sandbox / 'state', 'read-library', 1, minutes=90)
 
     rows = drift_rows(capsys)
 
-    assert (rows['chores']['unit'], rows['chores']['amount']) == ('checkoffs', 1.0)
-    assert (rows['read-library']['unit'], rows['read-library']['amount']) == ('minutes', 90.0)
-    assert rows['chores']['realized_share'] == rows['read-library']['realized_share'] == 100.0
+    assert (rows['chores']['unit'], rows['chores']['done']) == ('checkoffs', 1.0)
+    assert (rows['read-library']['unit'], rows['read-library']['done']) == ('minutes', 90.0)
 
 
 def test_an_app_date_older_than_the_window_is_not_counted(sandbox, monkeypatch, capsys):
     stub_evidence_days(monkeypatch, {'chores': [days_ago_iso(3), days_ago_iso(40)]})
 
-    assert drift_rows(capsys, days=7)['chores']['amount'] == 1.0
+    assert drift_rows(capsys, days=7)['chores']['done'] == 1.0
 
 
 def test_the_table_renders_when_only_an_app_recorded_anything(sandbox, monkeypatch, capsys):
@@ -1604,9 +1578,8 @@ def test_the_table_renders_when_only_an_app_recorded_anything(sandbox, monkeypat
 
     assert pursuits.cmd_drift(days=90, as_json=False) == 0
 
-    printed = capsys.readouterr().out
-    assert 'chores' in printed
-    assert 'Counted in completions' in printed
+    printed = [line for line in capsys.readouterr().out.splitlines() if line.startswith('chores')]
+    assert printed and 'every 7d' in printed[0]
 
 
 def test_a_window_with_nothing_in_it_says_so_rather_than_drawing_an_empty_table(sandbox, capsys):
@@ -1681,7 +1654,7 @@ def test_a_backed_pursuit_reads_the_days_its_app_reported(tmp_path, sandbox, mon
     state = pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())
 
     assert state['balance']['backed'] < 0, 'four days running against a 3-day cadence is ahead, not overdue'
-    assert state['effective']['backed'] == 0.0
+    assert 'backed' not in pursuits.pinned(state)
 
 
 def test_a_backed_pursuit_with_no_record_anywhere_opens_one_checkoff_behind(tmp_path, sandbox, monkeypatch):
@@ -1704,18 +1677,18 @@ def test_a_paused_pursuit_with_no_days_gets_no_row(sandbox, monkeypatch, capsys)
     assert 'paused-thing' not in drift_rows(capsys)
 
 
-def test_a_paused_pursuit_with_days_keeps_them_and_states_no_share(sandbox, capsys):
-    """Paused mid-window, its history is still history. It stated nothing for the
-    window though, and 0% would read as a claim it never made."""
+def test_a_paused_pursuit_with_days_keeps_them_and_asks_nothing(sandbox, capsys):
+    """Paused mid-window, its history is still history. It asked for nothing
+    while paused though, and zero would read as a goal it was held to."""
     log_days_ago(sandbox / 'state', 'paused-thing', 1)
 
     row = drift_rows(capsys)['paused-thing']
 
-    assert row['amount'] == 1.0
-    assert row['stated_share'] is None
+    assert row['done'] == 1.0
+    assert row['asked'] is None
 
 
-def test_a_paused_pursuit_renders_a_dash_rather_than_a_share(sandbox, capsys):
+def test_a_paused_pursuit_renders_a_dash_rather_than_an_amount_asked(sandbox, capsys):
     log_days_ago(sandbox / 'state', 'paused-thing', 1)
 
     assert pursuits.cmd_drift(days=90, as_json=False) == 0
@@ -1809,21 +1782,20 @@ def test_the_odds_reported_are_the_odds_the_draw_ran_on(tmp_path, monkeypatch):
     assert abs(sum(state['probability'].values()) - 1.0) < 1e-9
 
 
-def test_pausing_a_timed_pursuit_does_not_move_every_other_interval(tmp_path, monkeypatch):
-    """The measured rate walks every record in the journal, so the size map it
-    reads is register-wide. Scoping it to the active set reclassified a paused
-    pursuit's whole history as one-checkoff-per-entry and tripled the divisor
-    every other pursuit's interval is derived from."""
-    logs = [done('read', days_ago=index / 2, minutes=90) for index in range(20)]
+def test_pausing_one_pursuit_moves_no_other_pursuits_numbers(tmp_path, monkeypatch):
+    """A pace read off the register as a whole moved every interval when one
+    pursuit left the active set. Each goal answers for itself."""
+    logs = [zeroed('chore', 3.0), *[done('read', days_ago=index / 2, minutes=90) for index in range(20)]]
     running = balance_state(tmp_path, monkeypatch, logs)
     paused = balance_state(tmp_path, monkeypatch, logs, register=BALANCE_REGISTER + '    paused: true\n')
 
     assert 'read' not in paused['active']
-    assert paused['logs_per_day'] == running['logs_per_day']
+    assert paused['intervals']['chore'] == running['intervals']['chore']
+    assert paused['balance']['chore'] == running['balance']['chore']
 
 
-def test_the_register_wide_size_map_covers_a_pursuit_the_active_set_drops():
-    register = {'read': {'weight': 1, 'checkoff_minutes': 30}, 'gone': {'weight': 0, 'checkoff_minutes': 45}}
+def test_the_register_wide_minutes_map_covers_a_pursuit_the_active_set_drops():
+    register = {'read': {'weight': 1, 'weekly_minutes': 30}, 'gone': {'weight': 0, 'weekly_minutes': 45}}
     assert pursuits.declared_minutes(register) == {'read': 30.0, 'gone': 45.0}
 
 
@@ -1857,18 +1829,6 @@ def test_an_unpriced_row_says_which_of_the_four_reasons_it_is():
     assert pursuits.why_unpriced(state, 'weightless') == 'no schedule'
 
 
-def test_the_warning_band_never_falls_below_one_checkoff(tmp_path, monkeypatch):
-    """Weeks and checkoffs are different units, so two weeks of band on a monthly
-    cadence is 0.47 of a chore — one chore coming due pinned as overdue and
-    reported as a weight that is not true, on the same screen."""
-    monthly = BALANCE_REGISTER.replace('cadence: 1d', 'cadence: 1mo')
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 30.0), zeroed('read', 0.0)], register=monthly)
-
-    assert state['balance']['chore'] == 1.0
-    assert pursuits.warn_threshold(state, 'chore') == 1.0
-    assert pursuits.out_of_band(state) == [], 'exactly one checkoff owed is due, not a wrong weight'
-
-
 def test_the_standing_line_needs_a_whole_checkoff_before_it_says_behind(tmp_path, monkeypatch):
     """A balance climbs continuously from zero, so every pursuit passes through
     the fraction just above it. `behind · read +0m` names nothing anyone can act on."""
@@ -1892,7 +1852,7 @@ def test_a_backdated_log_reports_the_standing_the_next_command_will(sandbox, mon
 
     assert pursuits.cmd_log('chores', [], '3d', None, assume_yes=True, no_write=True) == 0
 
-    # `chores` is a 1w cadence reset just now, so the entry lands three days
+    # `chores` is a 7d cadence reset just now, so the entry lands three days
     # before the zero point, pays nothing off, and the first checkoff is still
     # asked for at the end of the week.
     assert 'due in 7d' in capsys.readouterr().out
@@ -1961,10 +1921,10 @@ def test_zeroing_the_register_writes_one_state_snapshot_not_one_per_pursuit(sand
 def test_an_unknown_key_in_a_sibling_block_is_refused(tmp_path):
     """A file that refuses one typo and silently defaults another teaches the
     reader it is strict, and they stop proofreading the half that is not."""
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 1\nbalance:\n  warn_weekz: 2\n')
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 1\n    cadence: 3d\nforecast:\n  budget_minute: 90\n')
 
-    with pytest.raises(pursuits.RegisterError, match='warn_weekz'):
-        pursuits.load_balance_settings(path)
+    with pytest.raises(pursuits.RegisterError, match='budget_minute'):
+        pursuits.load_settings(path)
 
 
 def test_a_negative_duration_never_reaches_the_journal(sandbox, monkeypatch):
@@ -1976,30 +1936,12 @@ def test_a_negative_duration_never_reaches_the_journal(sandbox, monkeypatch):
     assert journal.read_all(sandbox / 'state') == []
 
 
-def test_the_explain_payload_carries_the_band_each_row_is_judged_against(sandbox):
+def test_the_explain_payload_carries_the_zero_point_each_balance_counts_from(sandbox):
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
     payload = pursuits.explain_payload(state)
 
-    assert set(payload['warn_bands']) == set(state['active'])
-    assert payload['pool'] and set(payload['pool']) <= set(state['active'])
-
-
-def test_drift_compares_both_shares_against_the_same_population(sandbox, capsys):
-    """Reading `said` off the register-wide weights while `did` runs inside one
-    unit compares two denominators, so a register lived exactly to its weights
-    was flagged yellow — and a pursuit alone in its unit read 100% whatever it did."""
-    # The counted weights are 25 / 5 / 35, so this is the register lived to plan.
-    for name, times in (('chores', 5), ('read-longform', 1), ('study-computer-science', 7)):
-        for _ in range(times):
-            log_days_ago(sandbox / 'state', name, 1)
-    log_days_ago(sandbox / 'state', 'read-library', 1, minutes=45)
-
-    rows = drift_rows(capsys)
-    counted = [row for row in rows.values() if row['unit'] == 'checkoffs']
-
-    assert round(sum(row['stated_share'] for row in counted)) == 100
-    assert all(abs(row['stated_share'] - row['realized_share']) < 1 for row in counted), 'lived to plan is not drift'
-    assert rows['read-library']['stated_share'] == 100.0, 'the only timed pursuit is the whole of its unit'
+    assert set(payload['zero_points']) == set(state['active'])
+    assert set(payload['pool']) <= set(state['active'])
 
 
 def test_drift_reads_an_unparsable_timestamp_one_way(sandbox, capsys):
@@ -2009,30 +1951,30 @@ def test_drift_reads_an_unparsable_timestamp_one_way(sandbox, capsys):
 
     row = drift_rows(capsys).get('chores')
 
-    assert row is None or (row['logs'], row['amount']) == (0, 0.0)
+    assert row is None or (row['logs'], row['done']) == (0, 0.0)
 
 
-def test_the_register_names_a_checkoff_size_and_the_log_names_a_measurement():
-    """Two different quantities, so they do not share a word. `checkoff_minutes:`
-    is how much counts as one checkoff; `--minutes` is what a sitting took."""
-    assert 'checkoff_minutes' in pursuits.KNOWN_FIELDS
+def test_the_register_names_a_weekly_goal_and_the_log_names_a_measurement():
+    """Two different quantities, so they do not share a word. `weekly_minutes:`
+    is what a week asks for; `--minutes` is what one sitting took."""
+    assert 'weekly_minutes' in pursuits.KNOWN_FIELDS
     assert 'minutes' not in pursuits.KNOWN_FIELDS
-    assert '--minutes' in pursuits.TEMPLATE, 'the template says which is which'
+    assert '`doit log` asks how long' in pursuits.TEMPLATE, 'the template says which is which'
 
 
 def test_a_paused_timed_pursuit_keeps_its_unit_in_drift(tmp_path, sandbox, monkeypatch, capsys):
-    """A record keeps the size it was logged under. Reading the sizes off the
-    active set drops a paused pursuit's, so its row lands in the counted table
-    and reports 3 completions where it did 135 minutes."""
-    register = 'pursuits:\n  read:\n    weight: 30\n    checkoff_minutes: 45\n    paused: true\n  chores:\n    weight: 25\n'
+    """A record keeps the unit it was logged in. Reading the minutes off the
+    active set drops a paused pursuit's, so its row would report 3 completions
+    where it did 135 minutes."""
+    register = 'pursuits:\n  read:\n    weight: 30\n    weekly_minutes: 45\n    paused: true\n  chores:\n    weight: 25\n    cadence: 3d\n'
     monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
     for _ in range(3):
         log_days_ago(sandbox / 'state', 'read', 1, minutes=45)
 
     row = drift_rows(capsys)['read']
 
-    assert (row['unit'], row['amount']) == ('minutes', 135.0)
-    assert row['checkoff_minutes'] == 45.0
+    assert (row['unit'], row['done']) == ('minutes', 135.0)
+    assert row['goal'] == '45m a week'
 
 
 def test_a_named_journal_directory_that_is_missing_stops_a_log_before_it_writes(tmp_path, monkeypatch):

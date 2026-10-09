@@ -1,30 +1,24 @@
-"""Weighted attention allocation — the probabilistic half of the family's scheduling model.
+"""Standing and the draw — the arithmetic behind `doit next`.
 
-``cadence`` is the deterministic half: a declared interval, a derived due date, an
-item that is either due or not. This module is for pursuits whose weight states a
-*share of attention* rather than a deadline. Three consequences follow, and they
-are the whole design:
+``cadence`` is the deterministic half of the family's scheduling: a declared
+interval, a derived due date, an item that is either due or not. This module is
+the half `doit next` runs on, and it has two jobs that never touch.
 
-**How often something should come up is derived, not declared.** A pursuit's share
-of the total weight, against how many checkoffs actually get done per day, gives
-the interval at which it would come up if you were living exactly as you said. So
-a weight is the only number to hand-maintain; the schedule falls out of it. An
-explicit cadence overrides the implied interval for the things that genuinely are
-weekly.
+**Standing is a running balance, in the pursuit's own unit.** Every pursuit
+declares its pace — one occurrence every so many days, or so many minutes a
+week — and the schedule asks for one checkoff per interval: one occurrence, or
+one week's minutes. What has been asked for less what has been done is the
+balance. The pace is declared rather than derived, so nothing else in the
+register can move it: a pursuit's goal says the same thing whatever the other
+pursuits weigh and however much got logged last week.
 
-**Standing is a running balance, in the pursuit's own unit.** The schedule asks
-for one checkoff per interval; what a checkoff *is* is a fixed number of minutes
-where the pursuit declares one, and a single completion where it does not. The
-difference between what has been asked for and what has been done is the balance,
-and it is unbounded in both directions. So a burst counts for exactly what it was,
-a fortnight away is owed in full, and no fragment of time can strand.
-
-**What to do next is drawn, not ranked.** A ranked list is a queue: the same five
-items every run until one is cleared. A weighted draw makes a heavy pursuit likely
-rather than certain, so the list moves, and rarely-picked pursuits still surface.
-Sampling is Efraimidis–Spirakis: give each candidate the key ``-ln(U)/w`` and take
-the smallest ``k``. That draws without replacement with probability proportional to
-weight in one pass, with no rejection loop and no renormalizing after each pick.
+**Weight decides order and nothing else.** Whatever is owed is shown, heaviest
+first. Whatever room is left on the screen is drawn, not ranked: a ranked list
+is a queue, the same rows every run until one clears, and a weighted draw makes
+a heavy pursuit likely rather than certain. Sampling is Efraimidis–Spirakis:
+give each candidate the key ``-ln(U)/w`` and take the smallest ``k``. That draws
+without replacement with probability proportional to weight in one pass, with
+no rejection loop and no renormalizing after each pick.
 
 Nothing here reads a file or a clock — every function takes numbers and returns
 numbers, so the model is testable without a journal or a register.
@@ -34,214 +28,62 @@ import math
 import random
 from collections.abc import Iterable
 
-# How sharply urgency climbs once a pursuit owes more than one checkoff.
-# Superlinear, so something well behind outruns a merely heavier pursuit that is
-# current.
-DEFAULT_CATCHUP_EXPONENT = 1.5
-
-# Guard for the interval divisor. A brand-new or long-idle journal reports a rate
-# near zero, and 1/(share × rate) would blow the implied interval up to years.
-MIN_LOGS_PER_DAY = 0.25
-
-# Assumed rate when the journal has nothing to measure yet, so a fresh install
-# still produces sane intervals on its first run.
-FALLBACK_LOGS_PER_DAY = 2.0
-
-# Days a period covers when a balance is judged against what the schedule asks
-# for over one. A week is the shortest span a weekly cadence can express itself
-# in, so it is the shortest one a surplus or a debt can be read against.
-PERIOD_DAYS = 7.0
-
-# What the heaviest pursuit that owes nothing is worth against the least urgent
-# one that does. A tenth, so a resting row is an order of magnitude off being
-# picked first — on the screen to be seen, never to be pressed.
-RESTING_SHARE = 0.1
-
-
-def implied_shares(weights: dict[str, float]) -> dict[str, float]:
-    """Each pursuit's fraction of the total weight.
-
-    Weights are relative magnitudes and are never normalized on disk — 35/30/70 is
-    a legitimate register. This is what turns them into the shares to display, so a
-    number that is more dominant than it looked is visible without doing the
-    arithmetic by hand.
-    """
-    total = sum(w for w in weights.values() if w > 0)
-    if total <= 0:
-        return {name: 0.0 for name in weights}
-    return {name: max(w, 0.0) / total for name, w in weights.items()}
-
-
-def implied_interval(share: float, logs_per_day: float) -> float:
-    """Days between appearances for a pursuit holding ``share`` of the attention.
-
-    At ``logs_per_day`` checkoffs a day, a pursuit owed ``share`` of them comes up
-    every ``1 / (share × rate)`` days. The rate is measured from the journal rather
-    than configured, so the whole register retunes itself as the real pace changes.
-    """
-    if share <= 0:
-        return math.inf
-    return 1.0 / (share * max(logs_per_day, MIN_LOGS_PER_DAY))
-
-
-def implied_intervals(weights: dict[str, float], logs_per_day: float) -> dict[str, float]:
-    """:func:`implied_interval` for every pursuit in one call."""
-    return {name: implied_interval(share, logs_per_day) for name, share in implied_shares(weights).items()}
+# The interval of a pursuit measured in time. Its pace is declared as minutes a
+# week, so one checkoff is one week's minutes and the schedule asks for it weekly.
+WEEK_DAYS = 7.0
 
 
 def balance(elapsed: float, interval: float, size: float, done: float) -> float:
     """What the schedule has asked for over ``elapsed`` days, less what was done.
 
     Positive is behind and negative is ahead, in whatever unit ``size`` counts in:
-    minutes for a pursuit that declares a checkoff size, whole checkoffs for one
-    that does not. A pursuit whose weight implies no interval at all is owed
-    nothing, since there is no schedule to fall behind.
-
-    Nothing is clamped, dropped or forgiven at either end. A balance far enough
-    from zero to look wrong is the register saying its weight is wrong, and that
-    is the one reading that has to survive to be acted on.
+    minutes for a pursuit measured in time, whole checkoffs for one counted in
+    occurrences. A pursuit with no interval is owed nothing, since there is no
+    schedule to fall behind.
     """
     if interval <= 0 or math.isinf(interval):
         return 0.0
     return (elapsed / interval) * size - done
 
 
-def days_adrift(owed: float, interval: float, size: float) -> float | None:
-    """How far from current a balance stands, in days of that pursuit's schedule.
+def days_until_due(owed: float, interval: float, size: float) -> float | None:
+    """Days until one more checkoff is owed. Negative is already overdue.
 
     The balance restated on the one axis every pursuit shares. A balance counts
-    minutes for a pursuit that declares a checkoff size and whole checkoffs for
-    one that does not, so two rows cannot be compared without converting by hand.
-    Dividing by the size gives checkoffs owed; multiplying by the interval turns
-    that into time, which needs no conversion and no legend.
+    minutes for one pursuit and checkoffs for another, so two rows cannot be
+    compared without converting by hand; dividing by the size gives checkoffs, and
+    the interval turns those into days. A pursuit owing nothing is due one
+    interval from now, and each checkoff owed past the first is one interval late.
 
-    Linear in ``owed``, so a pursuit twice as far behind in its own unit is twice
-    as far behind in days. That holds within one pursuit and across two only when
-    both have the same interval — the factor is each pursuit's own. None where a
-    pursuit has no schedule to drift from.
+    Ordering by this deliberately re-orders against checkoffs owed, because the
+    interval differs per pursuit. Two checkoffs owed on a daily schedule is one
+    day late; one and a half on a ten-day schedule is five. The second is the one
+    that has been waiting, and that is the question the screen asks.
     """
     if interval <= 0 or math.isinf(interval) or size <= 0:
         return None
-    return owed / size * interval
+    return interval - owed / size * interval
 
 
-def days_until_due(owed: float, interval: float, size: float) -> float | None:
-    """Days until one more checkoff is asked for. Negative is already overdue.
+def candidates(weights: dict[str, float], ratios: dict[str, float], suppressed: Iterable[str]) -> dict[str, float]:
+    """What the draw fills the screen from, at each pursuit's stated weight.
 
-    One interval further on than :func:`days_adrift`, because a pursuit owing
-    nothing is due at the end of its interval rather than now. The offset makes
-    this affine in ``owed`` rather than linear, so a row twice as far behind
-    another does not read as twice the number — it is strictly decreasing in
-    ``owed``, which is all a furthest-behind-first ordering needs.
-
-    Ordering by this deliberately re-orders against checkoffs owed, because the
-    interval factor differs per pursuit. Two checkoffs owed on a daily schedule
-    is one day late; one and a half on a ten-day schedule is five. The second is
-    the one that has been waiting, and that is the question the screen asks.
-    """
-    adrift = days_adrift(owed, interval, size)
-    return None if adrift is None else interval - adrift
-
-
-def period_amount(interval: float, size: float, period_days: float = PERIOD_DAYS) -> float:
-    """How much of its own unit a pursuit's schedule asks for over ``period_days``.
-
-    The scale a balance is read against. A heavy strand and a light one are both
-    judged by how many periods of their own schedule they have drifted, so one
-    threshold covers a register whose pursuits ask for wildly different amounts.
-    """
-    if interval <= 0 or math.isinf(interval):
-        return 0.0
-    return period_days / interval * size
-
-
-def urgency(owed: float, size: float, catchup_exponent: float = DEFAULT_CATCHUP_EXPONENT) -> float:
-    """How much a pursuit's weight is multiplied by, given what it owes.
-
-    Zero for anything current or ahead, 1.0 at exactly one checkoff behind, and
-    ``ratio ^ exponent`` past that. Unbounded above: a pursuit left long enough to
-    dominate every draw is a weight nobody has revisited, and a ceiling there
-    suppresses the one signal saying the register needs editing.
-
-    The zero at current is what keeps a pursuit just done off the next screen.
-    Doing one that was on schedule takes its balance to zero or below, so it
-    cannot be the heaviest candidate a minute later — while one that was three
-    checkoffs behind still is, which is the answer that has to survive.
-    """
-    if size <= 0:
-        return 0.0
-    ratio = owed / size
-    if ratio <= 0:
-        return 0.0
-    return ratio**catchup_exponent
-
-
-def effective_weights(
-    weights: dict[str, float],
-    balances: dict[str, float],
-    sizes: dict[str, float],
-    exponents: dict[str, float],
-    suppressed: Iterable[str],
-) -> dict[str, float]:
-    """The weights the draw actually runs on: stated weight × urgency, minus skips.
-
-    A skip is a hard zero for as long as it runs rather than a factor that decays,
-    because a pass with an expiry is a decision about a span of time and a
-    suppression multiplier is a guess about one draw. Skips never touch the stated
-    weight — revealed and stated preference stay separate signals, and divergence
-    surfaces in `drift`.
-    """
-    passed = set(suppressed)
-    effective = {}
-    for name, weight in weights.items():
-        if name in passed:
-            effective[name] = 0.0
-            continue
-        effective[name] = max(weight, 0.0) * urgency(balances[name], sizes[name], exponents[name])
-    return effective
-
-
-def candidates(
-    effective: dict[str, float],
-    weights: dict[str, float],
-    ratios: dict[str, float],
-    suppressed: Iterable[str],
-    size: int,
-) -> dict[str, float]:
-    """What to sample from: everything owed, topped up to ``size`` from what is not.
-
-    Urgency is zero for anything current, so the owed set alone is a queue — one
-    pursuit a minute past its interval puts one row on a screen sized for five,
-    and the same row every run until it is cleared. That is the shape the whole
-    weighted draw exists not to be.
-
-    So a resting tier sits underneath, scaled to :data:`RESTING_SHARE` of the
-    least urgent owed pursuit: visible without competing to be picked first. That
-    is what makes an evening spendable deliberately — seeing what else there is
-    says the register is current, which a one-row screen cannot.
+    ``ratios`` is each pursuit's balance in checkoffs. Anything a whole checkoff
+    behind is shown outright rather than left to chance, so it is never sampled
+    here — the draw only decides what else to put beside it.
 
     **A pursuit a whole checkoff or more ahead is not in it.** That is the thing
     just done, and offering it back reads as the log having gone nowhere. Where
-    holding that line would empty the pool, the whole register is offered instead
-    — a blank screen says the tool broke rather than that you are done.
+    holding that line would empty the pool, everything not owed is offered
+    instead — a blank screen says the tool broke rather than that you are done.
 
-    A skip is in neither tier. It is the one statement about a pursuit that is
-    not about being behind, so it has to survive a state where nothing is.
+    A skip is in neither. It is the one statement about a pursuit that is not
+    about its balance, so it has to survive a state where nothing is owed.
     """
     passed = set(suppressed)
-    owed = {name: value for name, value in effective.items() if value > 0 and name not in passed}
-    if len(owed) >= size:
-        return owed
-    available = [name for name in weights if name not in owed and name not in passed and weights[name] > 0]
-    resting = {name: weights[name] for name in available if ratios[name] > -1.0}
-    if not resting:
-        resting = {name: weights[name] for name in available}
-    if not resting:
-        return owed
-    if owed:
-        scale = min(owed.values()) * RESTING_SHARE / max(resting.values())
-        resting = {name: value * scale for name, value in resting.items()}
-    return {**owed, **resting}
+    open_rows = {name: weight for name, weight in weights.items() if weight > 0 and name not in passed and ratios[name] < 1.0}
+    resting = {name: weight for name, weight in open_rows.items() if ratios[name] > -1.0}
+    return resting or open_rows
 
 
 def draw(effective: dict[str, float], size: int, rng: random.Random | None = None) -> list[str]:
@@ -250,7 +92,7 @@ def draw(effective: dict[str, float], size: int, rng: random.Random | None = Non
     Efraimidis–Spirakis: the smallest ``k`` of the keys ``-ln(U_i)/w_i`` is exactly a
     weighted sample without replacement, so one pass over the candidates does it —
     no rejection loop, and no renormalizing the remaining weights after each pick.
-    Anything at or below zero (ahead, skipped, paused, weightless) is not a candidate.
+    Anything at or below zero is not a candidate.
     """
     rng = rng or random.Random()
     keys = []

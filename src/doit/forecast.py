@@ -1,10 +1,10 @@
 """What the register would actually have you do, simulated forward a month at a time.
 
-`doit pursuits drift` answers this backwards — stated weight against what you did.
+`doit pursuits drift` answers this backwards — each goal against what you did.
 It can only speak about days that already happened, and it needs a season of them
 before it says anything. This answers it forwards, from the register as it stands
-right now, which is what makes a weight arguable *before* a month is spent proving
-it wrong.
+right now, which is what makes a goal or a weight arguable *before* a month is
+spent proving it wrong.
 
 **It runs the real draw, never a model of it.** Every simulated day calls
 :func:`doit.pursuits.build_state` and :func:`doit.pursuits.compute_draw` against a
@@ -13,30 +13,31 @@ to read and would start disagreeing with the allocator the first time either
 moved, at which point the forecast becomes a confident description of a tool that
 no longer exists. The injection points on ``build_state`` exist for this.
 
-**The feedback loop is the thing worth simulating, and it is why a spreadsheet
-cannot do this.** Logging changes the measured rate; the rate sets every implied
-interval; the intervals set urgency; urgency sets the draw. So a register cannot
-be read off the page — twelve of the numbers move when any one of them does.
+**The competition for a day is the thing worth simulating, and it is why a
+spreadsheet cannot do this.** Every goal is declared on its own, but a day's
+budget is shared. What is owed comes first, heaviest first, so a heavy pursuit
+falling behind takes the head of the list, and whatever it pushes off the end of
+a short day falls behind in turn. Whether a register's goals fit in its budget
+cannot be read off the page.
 
 Two inputs it cannot derive and does not pretend to:
 
-**How long a pursuit takes.** Measured from ``duration_minutes`` in the journal
-once :data:`MEASURED_MINIMUM` logs carry one, and taken from the register's
-``checkoff_minutes:`` until then. A pursuit counted in occurrences
-declares no size, so it rests on :data:`FALLBACK_MINUTES` until the journal can
-answer. Which of the three answered is recorded per pursuit and printed, because
-a forecast resting on eight declared estimates is a different claim from one
-resting on eight measurements, and nothing else on screen would say which you
-are reading.
+**How long a sitting takes.** Measured from ``duration_minutes`` in the journal
+once :data:`MEASURED_MINIMUM` logs carry one, and :data:`FALLBACK_MINUTES` until
+then. A goal in minutes a week says how much, never how long one sitting is, so
+the register has no estimate to offer. Which of the two answered is recorded per
+pursuit and printed, because a forecast resting on eight defaults is a different
+claim from one resting on eight measurements, and nothing else on screen would
+say which you are reading.
 
 **What a day holds.** ``forecast.budget_minutes`` in the register. Discretionary
 time the draw is allowed to spend, not the length of a day.
 
 The behavioral model is one rule: walk the offered list from the top, do what
 fits in what is left, stop when nothing left fits. What that order is belongs to
-`pursuits.offered_order`, which puts the furthest past due first — so the budget
-runs out on whatever has been waiting longest, and the tail of the list is what a
-short day never reaches.
+`pursuits.offered_order`, which puts what is owed first, heaviest first — so the
+budget goes to the heaviest debt, and the tail of the list is what a short day
+never reaches.
 
 Durations are point estimates rather than sampled from an invented spread. What
 varies across replicates is then which pursuits the draw offers, which is a real
@@ -63,6 +64,7 @@ from rich.text import Text
 
 from doit import journal
 from doit import pursuits
+from doit.allocate import balance
 from doit.paths import journal_dir
 from doit.paths import machine_name
 from doit.render import console
@@ -71,8 +73,8 @@ from doit.render import error_console
 SCHEMA_VERSION = 1
 
 # Horizons a reading reports. A week is the shortest span over which a weekly
-# cadence can express itself at all, and a month is long enough for the measured
-# rate to have moved every implied interval at least once.
+# goal can express itself at all, and a month is long enough for every cadence a
+# real register declares to come round more than once.
 HORIZONS = (7, 14, 30)
 
 DEFAULT_BUDGET_MINUTES = 120
@@ -102,18 +104,25 @@ class Duration:
     """What one occasion of a pursuit is assumed to cost, and where that came from."""
 
     minutes: float
-    source: str  # 'measured' | 'declared' | 'default'
+    source: str  # 'measured' | 'default'
     samples: int
 
 
 @dataclass(frozen=True)
 class Prediction:
-    """One pursuit's share of one horizon."""
+    """One pursuit's share of one horizon, beside what its goal asks over the same span.
+
+    ``asked`` is in the pursuit's own unit — minutes where it declares
+    `weekly_minutes`, occurrences where it declares a cadence — so it is read
+    against ``minutes`` for one and ``occasions`` for the other.
+    """
 
     occasions: float
     minutes: float
     occasions_low: float
     occasions_high: float
+    asked: float
+    unit: str  # 'minutes' | 'checkoffs'
 
 
 @dataclass(frozen=True)
@@ -121,25 +130,24 @@ class Reading:
     """One forecast, beside every input it was taken from.
 
     The inputs are stored because a prediction is only interpretable against them:
-    the same register forecasts differently at two logs a day and at four, and a
-    reading that recorded only its output could not later be told apart from one
-    taken under a budget nobody uses any more.
+    the same register forecasts differently under one hour a day and under two,
+    and a reading that recorded only its output could not later be told apart
+    from one taken under a goal nobody holds any more.
     """
 
     generated: str
     machine: str
     budget_minutes: int
     replicates: int
-    logs_per_day: float
-    measured_rate: float | None
     weights: dict[str, float] = field(default_factory=dict)
+    goals: dict[str, str] = field(default_factory=dict)
     durations: dict[str, dict] = field(default_factory=dict)
     horizons: dict[str, dict[str, dict]] = field(default_factory=dict)
     unspent_minutes_per_day: float = 0.0
 
 
 def durations(register: dict, records: list[dict]) -> dict[str, Duration]:
-    """How long each pursuit takes, measured where the journal can say and declared where it cannot.
+    """How long one sitting of each pursuit takes, measured where the journal can say.
 
     The median rather than the mean, because one evening that ran long is exactly
     the shape of outlier a small journal will hold and exactly the one a mean
@@ -154,12 +162,10 @@ def durations(register: dict, records: list[dict]) -> dict[str, Duration]:
             logged.setdefault(str(record.get('pursuit')), []).append(float(minutes))
 
     answer: dict[str, Duration] = {}
-    for name, config in register.items():
+    for name in register:
         samples = logged.get(name, [])
         if len(samples) >= MEASURED_MINIMUM:
             answer[name] = Duration(statistics.median(samples), 'measured', len(samples))
-        elif config.get('checkoff_minutes'):
-            answer[name] = Duration(float(config['checkoff_minutes']), 'declared', len(samples))
         else:
             answer[name] = Duration(float(FALLBACK_MINUTES), 'default', len(samples))
     return answer
@@ -198,7 +204,6 @@ def simulate(
     days: int,
     budget: float,
     replicate: int,
-    balance_settings: dict,
 ) -> list[tuple[int, str, float]]:
     """One replicate: the real draw, run forward a day at a time against its own journal.
 
@@ -206,16 +211,12 @@ def simulate(
     have to be invented for a future the backends cannot be asked about, and an
     invented one would decide the answer — a pursuit whose backend keeps reporting
     it as freshly done never comes up at all.
-
-    ``balance_settings`` is read once and handed down for the same reason the
-    records are: a simulated day that re-read the register would be measuring a
-    file the simulation is not running against, thirty times per replicate.
     """
     records = list(seed_records)
     done: list[tuple[int, str, float]] = []
     for day in range(days):
         when = start + dt.timedelta(days=day)
-        state = pursuits.build_state(register, when, records=records, observed=observed, balance_settings=balance_settings)
+        state = pursuits.build_state(register, when, records=records, observed=observed)
         selection = pursuits.compute_draw(state, seed=replicate * 100_003 + day)
         for name, minutes in spend_a_day(selection['offered'], cost, budget):
             done.append((day, name, minutes))
@@ -243,13 +244,13 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
     """Run every replicate and fold them into one reading."""
     directory = journal_dir()
     records = journal.read_all(directory) if directory.exists() else []
-    bands = pursuits.load_balance_settings()
-    live = pursuits.build_state(register, now, balance_settings=bands)
+    live = pursuits.build_state(register, now)
     active = live['active']
     cost = durations(active, records)
     horizon = max(HORIZONS)
+    units = {name: 'minutes' if name in live['weekly_minutes'] else 'checkoffs' for name in active}
 
-    runs = [simulate(register, records, live['observed'], cost, now, horizon, budget, replicate, bands) for replicate in range(replicates)]
+    runs = [simulate(register, records, live['observed'], cost, now, horizon, budget, replicate) for replicate in range(replicates)]
 
     horizons: dict[str, dict[str, dict]] = {}
     for days in HORIZONS:
@@ -272,6 +273,8 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
                     round(statistics.mean(minutes[name]), 1),
                     percentile(counts[name], 0.1),
                     percentile(counts[name], 0.9),
+                    round(balance(days, live['intervals'][name], live['checkoff_size'][name], 0.0), 1),
+                    units[name],
                 )
             )
             for name in active
@@ -283,9 +286,8 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
         machine=machine_name(),
         budget_minutes=int(budget),
         replicates=replicates,
-        logs_per_day=round(live['logs_per_day'], 3),
-        measured_rate=None if live['measured_rate'] is None else round(live['measured_rate'], 3),
         weights=dict(live['weights']),
+        goals={name: pursuits.goal_text(config) for name, config in active.items()},
         durations={name: dataclasses.asdict(value) for name, value in cost.items()},
         horizons=horizons,
         unspent_minutes_per_day=round(budget - spent_per_day, 1),
@@ -413,36 +415,43 @@ def source_summary(reading: Reading) -> str:
     return ' · '.join(parts)
 
 
+def goal_met(prediction: dict) -> float | None:
+    """How much of its goal a pursuit's horizon reaches, as a percentage.
+
+    Read in the goal's own unit: minutes for a pursuit declaring weekly minutes,
+    occasions for one declaring a cadence. A reading taken before goals were
+    recorded has nothing to compare against and answers None.
+    """
+    asked = prediction.get('asked')
+    if not asked:
+        return None
+    did = prediction['minutes'] if prediction.get('unit') == 'minutes' else prediction['occasions']
+    return did / asked * 100
+
+
 def emit(reading: Reading) -> None:
-    """One reading, as occasions and hours against the share the weight claims."""
-    weights = reading.weights
-    total = sum(weight for weight in weights.values() if weight > 0)
+    """One reading, as occasions and hours against what each goal asks for in a month."""
     month = reading.horizons.get('30', {})
     week = reading.horizons.get('7', {})
-    occasions_total = sum(row['occasions'] for row in month.values()) or 1.0
+    goals = max((len(text) for text in reading.goals.values()), default=4)
 
     console.rule(f'[cyan]Forecast · {reading.budget_minutes} min a day', align='left')
     header = Text('  ')
-    header.append(f'{"pursuit":<9} {"/wk":>5} {"/mo":>6} {"h/mo":>6} {"got":>6} {"said":>6}  {"est":<9}', style='dim')
+    header.append(f'{"pursuit":<9} {"/wk":>5} {"/mo":>6} {"h/mo":>6}  {"goal":<{goals}} {"of goal":>8}  {"est":<9}', style='dim')
     console.print(header)
     for name in sorted(month, key=lambda row: -month[row]['occasions']):
-        got = month[name]['occasions'] / occasions_total * 100
-        said = (weights.get(name, 0) / total * 100) if total else 0.0
+        met = goal_met(month[name])
         estimate = reading.durations.get(name, {})
         row = Text('  ')
         row.append(f'{name:<9} ', style='white')
         row.append(f'{week.get(name, {}).get("occasions", 0):>5.1f} {month[name]["occasions"]:>6.1f} ')
-        row.append(f'{month[name]["minutes"] / 60:>6.1f} ')
-        row.append(f'{got:>5.1f}% {said:>5.1f}% ', style='yellow' if abs(got - said) >= 5 else '')
-        row.append(f' {int(estimate.get("minutes", 0))}m {estimate.get("source", "")[:4]}', style='dim')
+        row.append(f'{month[name]["minutes"] / 60:>6.1f}  ')
+        row.append(f'{reading.goals.get(name, "—"):<{goals}} ')
+        row.append(f'{"—" if met is None else f"{met:.0f}%":>8}  ', style='yellow' if met is not None and met < 90 else '')
+        row.append(f'{int(estimate.get("minutes", 0))}m {estimate.get("source", "")[:4]}', style='dim')
         console.print(row)
 
-    rate = 'measured' if reading.measured_rate is not None else 'assumed'
-    console.print(
-        f'\n  {reading.logs_per_day:.2f} logs/day ({rate}) · '
-        f'{reading.unspent_minutes_per_day:.0f} min/day left unspent · {reading.replicates} runs'
-    )
-    console.print('  got is the share of occasions spent · said is what the weight claims')
+    console.print(f'\n  {reading.unspent_minutes_per_day:.0f} min/day left unspent · {reading.replicates} runs')
     console.print(f'  estimates: {source_summary(reading)} · [cyan]doit log --minutes[/] measures them')
 
 
@@ -515,7 +524,7 @@ def cmd_list(as_json: bool, directory: Path) -> int:
         row = Text('  ')
         row.append(f'{reading.generated[:16].replace("T", " ")}  ', style='white')
         row.append(f'{reading.machine:<10} {reading.budget_minutes:>4}m/day  ', style='dim')
-        row.append(f'{reading.logs_per_day:.2f} logs/day · {source_summary(reading)}', style='dim')
+        row.append(source_summary(reading), style='dim')
         console.print(row)
     plural = '' if len(stored) == 1 else 's'
     console.print(f'\n  {len(stored)} reading{plural} · [cyan]doit forecast trend[/] grades the matured ones')
