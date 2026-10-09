@@ -46,12 +46,9 @@ CONTENT_DIR = Path(os.environ.get('DOIT_CONTENT_DIR') or library_dir())
 def default_sync_log() -> Path:
     """Where this machine records its own last pull, named for the machine.
 
-    State, not config, and the state directory is shared between machines by a
-    sync layer that cannot merge. One shared name had every machine writing the
-    same file, so the sync layer kept one machine's write and set the others
-    aside as conflict copies nobody reads. The lock beside it derives from this
-    name, so it is per machine too: one machine's pull in flight no longer
-    blocks every other machine's.
+    State, not config, in a directory more than one machine may write, where
+    two writes to one file cannot be merged. The lock beside it derives from
+    this name, so a pull in flight holds back only its own machine's next one.
     """
     return xdg_state_home() / 'doit' / f'content-sync-{machine_name()}.log'
 
