@@ -204,19 +204,22 @@ def simulate(
     days: int,
     budget: float,
     replicate: int,
+    evidence_days: dict[str, list[dt.date]] | None = None,
 ) -> list[tuple[int, str, float]]:
     """One replicate: the real draw, run forward a day at a time against its own journal.
 
-    ``observed`` is frozen at the moment of the forecast. Evidence would otherwise
-    have to be invented for a future the backends cannot be asked about, and an
-    invented one would decide the answer — a pursuit whose backend keeps reporting
-    it as freshly done never comes up at all.
+    ``observed`` and ``evidence_days`` are frozen at the moment of the forecast.
+    Evidence would otherwise have to be invented for a future the backends cannot
+    be asked about, and an invented one would decide the answer — a pursuit whose
+    backend keeps reporting it as freshly done never comes up at all. Frozen
+    rather than dropped, so day one reads a pursuit paid through its app exactly
+    as `doit next` does.
     """
     records = list(seed_records)
     done: list[tuple[int, str, float]] = []
     for day in range(days):
         when = start + dt.timedelta(days=day)
-        state = pursuits.build_state(register, when, records=records, observed=observed)
+        state = pursuits.build_state(register, when, records=records, observed=observed, evidence_days=evidence_days)
         selection = pursuits.compute_draw(state, seed=replicate * 100_003 + day)
         for name, minutes in spend_a_day(selection['offered'], cost, budget):
             done.append((day, name, minutes))
@@ -253,7 +256,10 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
     horizon = max(HORIZONS)
     units = {name: 'minutes' if name in live['weekly_minutes'] else 'checkoffs' for name in active}
 
-    runs = [simulate(register, records, live['observed'], cost, now, horizon, budget, replicate) for replicate in range(replicates)]
+    runs = [
+        simulate(register, records, live['observed'], cost, now, horizon, budget, replicate, live['evidence_days'])
+        for replicate in range(replicates)
+    ]
 
     horizons: dict[str, dict[str, dict]] = {}
     for days in HORIZONS:

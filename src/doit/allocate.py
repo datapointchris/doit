@@ -72,6 +72,7 @@ def projected_days_until_due(
     fills_in: float,
     departures: Iterable[tuple[float, float]],
     returning: Iterable[tuple[float, float]] = (),
+    holding: Iterable[tuple[float, float]] = (),
 ) -> float | None:
     """Days until one checkoff is owed, for a balance kept over a sliding window.
 
@@ -83,6 +84,11 @@ def projected_days_until_due(
     the days until the window is full, ``departures`` is each payment as ``(days
     until it leaves, amount)``, and ``returning`` is each skipped span as ``(days
     until the window's start reaches it, days until it has passed)``.
+
+    A skip still running stops the clock, so ``holding`` is each span from now
+    that it covers, ``(days until it starts, days until it ends)``. Inside one,
+    the schedule asks for nothing new, and a full window sheds the days the skip
+    is taking out of it.
 
     Projected rather than read off the formula. A pursuit paid well ahead by a burst
     a fortnight ago comes due the day that burst leaves the window, which no
@@ -99,12 +105,15 @@ def projected_days_until_due(
         return days_until_due(owed, interval, size)
     rate = size / interval
     # Each moment the balance's growth changes: (day, step in owed, change in how many
-    # sources accrue). Filling is one source until fills_in, and each skipped span
-    # passing out of the window is one more while it does.
+    # sources accrue). Filling is one source until fills_in, each skipped span
+    # passing out of the window is one more while it does, and a running skip is
+    # one fewer, so a full window under a skip sheds what it asked for.
     moments = [(fills_in, 0.0, -1)]
     moments += [(days, amount, 0) for days, amount in departures]
     for start, finish in returning:
         moments += [(start, 0.0, 1), (finish, 0.0, -1)]
+    for start, finish in holding:
+        moments += [(start, 0.0, -1), (finish, 0.0, 1)]
     day, accruing = 0.0, 1
     for when, step, change in sorted(moments, key=lambda moment: (moment[0], -moment[2])):
         when = max(when, day)

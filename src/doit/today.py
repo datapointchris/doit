@@ -412,7 +412,8 @@ def owing(state: dict) -> list[tuple[str, float | None]]:
     """
     behind = []
     for name in state['active']:
-        if state['balance'][name] < state['checkoff_size'][name]:
+        # A skipped pursuit is one you chose to pass on, as `doit next` says.
+        if name in state['suppressed'] or state['balance'][name] < state['checkoff_size'][name]:
             continue
         behind.append((name, pursuits.due_in_days(state, name)))
     return sorted(behind, key=lambda row: (row[1] is None, row[1] if row[1] is not None else 0))

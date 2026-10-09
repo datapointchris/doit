@@ -453,6 +453,7 @@ def pursuit_state(balances, touched=()):
         'checkoff_size': dict.fromkeys(balances, 1.0),
         'intervals': dict.fromkeys(balances, 3.0),
         'due': {name: allocate.days_until_due(owed, 3.0, 1.0) for name, owed in balances.items()},
+        'suppressed': [],
         'evidence_days': evidence.occurrences({'pursuits': {name: {'dates': [TODAY.isoformat()]} for name in touched}}),
         'observed': {},
         'records': [],
@@ -522,6 +523,14 @@ def test_the_pursuits_owed_run_furthest_behind_first_and_carry_a_handle():
 def test_a_pursuit_that_is_current_is_not_owed():
     """`owing` carries why the threshold is a whole checkoff."""
     assert today.pursuits_due(pursuit_state(balances={'chore': 0.4})).rows == []
+
+
+def test_a_skipped_pursuit_is_not_listed_as_owed():
+    """`doit next` says skipped and does not pin it, so this list agrees."""
+    state = pursuit_state(balances={'chore': 2.0, 'read': 2.0})
+    state['suppressed'] = ['chore']
+
+    assert [name for name, _ in today.owing(state)] == ['read']
 
 
 def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():

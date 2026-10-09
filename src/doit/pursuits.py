@@ -50,6 +50,7 @@ import os
 import random
 import re
 import shlex
+import statistics
 import subprocess
 from collections.abc import Callable
 from collections.abc import Iterable
@@ -518,26 +519,27 @@ def credits(
     hour typed once pay the same amount off the balance, and no fragment can
     strand.
 
-    An app day the journal already carries is one act reported by both records, so
-    it counts once. An app answers in days rather than durations, so a day it
-    reports pays one day whatever happened inside it: one occurrence, or on a
-    timed pursuit a seventh of the week's minutes. That is also what keeps a
-    backend emitting a row per task from outrunning one emitting a row per session.
+    An app day the journal carries is one act reported by both records, so it
+    counts once, even after the typed entry has left the window. An app answers in
+    days rather than durations, so a day it reports pays one sitting whatever
+    happened inside it: one occurrence, or on a timed pursuit the median of the
+    durations typed for it, or a seventh of the week's minutes where none was.
+    That is also what keeps a backend emitting a row per task from outrunning one
+    emitting a row per session.
 
     The moment beside each payment is when the start of the window passes it: the
     entry's own time, or the end of the day an app reported.
     """
     size = minutes or 1.0
-    app_day = minutes / WEEK_DAYS if minutes else 1.0
+    typed = [record for record in records if record.get('event') == journal.Event.DONE]
+    typed_days = {journal.local_day(record, now) for record in typed}
+    sittings = [float(record['duration_minutes']) for record in typed if record.get('duration_minutes')]
+    app_day = (statistics.median(sittings) if sittings else minutes / WEEK_DAYS) if minutes else 1.0
     paid = []
-    typed_days = set()
-    for record in records:
-        if record.get('event') != journal.Event.DONE:
-            continue
+    for record in typed:
         when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
         if when is None or when < origin:
             continue
-        typed_days.add(journal.local_day(record, now))
         paid.append((when, checkoff_equivalent(record, minutes) * size))
     opened = origin.astimezone(now.tzinfo).date()
     for day in app_days:
@@ -578,26 +580,29 @@ def standing(
     The clock stops for the span a skip covers, so passing on something is never
     a way to owe more of it later. The due date is projected forward through the
     window, as :func:`allocate.projected_days_until_due` describes: payments
-    leave it, and so do skipped days, after which the schedule asks for them.
+    leave it, a skip still running holds the clock until it ends, and skipped
+    days leave it too, after which the schedule asks for them.
     """
     interval, size = pace_of
     paid = credits(records, app_days, now, origin, minutes)
-    skips = skip_spans(records, now, origin)
+    periods = skip_periods(records, origin)
     elapsed = (now - origin).total_seconds() / 86400.0
-    span = max(elapsed - sum((finish - start).total_seconds() / 86400.0 for start, finish in skips), 0.0)
+    skipped = sum((min(finish, now) - start).total_seconds() / 86400.0 for start, finish in periods if start < now)
+    span = max(elapsed - skipped, 0.0)
     done = sum(amount for _, amount in paid)
     asked, owed = balance(span, interval, size, 0.0), balance(span, interval, size, done)
 
-    def leaves(moment: dt.datetime) -> float:
-        return (moment - now).total_seconds() / 86400.0 + window
+    def ahead(moment: dt.datetime) -> float:
+        return (moment - now).total_seconds() / 86400.0
 
     due = projected_days_until_due(
         owed,
         interval,
         size,
         max(window - elapsed, 0.0),
-        [(leaves(stamp), amount) for stamp, amount in paid],
-        [(leaves(start), leaves(finish)) for start, finish in skips],
+        [(ahead(stamp) + window, amount) for stamp, amount in paid],
+        [(ahead(start) + window, ahead(finish) + window) for start, finish in periods],
+        [(max(ahead(start), 0.0), ahead(finish)) for start, finish in periods if finish > now],
     )
     return Standing(asked, done, owed, due)
 
@@ -630,22 +635,32 @@ def skipped_days(records: list[dict], now: dt.datetime, origin: dt.datetime) -> 
 
 
 def skip_spans(records: list[dict], now: dt.datetime, origin: dt.datetime) -> list[tuple[dt.datetime, dt.datetime]]:
-    """The spans inside the balance window that a skip took out of the schedule.
+    """The spans inside the balance window, up to now, that a skip took out of the schedule."""
+    return merged_spans([(start, min(finish, now)) for start, finish in skip_periods(records, origin)])
+
+
+def skip_periods(records: list[dict], origin: dt.datetime) -> list[tuple[dt.datetime, dt.datetime]]:
+    """Every span from ``origin`` on that a skip takes out of the schedule, merged.
 
     A pass is a decision not to do the thing, never a decision to owe it later, so
-    the clock stops for as long as the skip runs. A skip carrying no expiry states
-    nothing about a span and takes nothing out.
+    the clock stops for as long as the skip runs. A later skip ends an earlier one
+    where it starts, the way :func:`skip_expiry` reads them, so a resume is a skip
+    that stops the one before it. A skip carrying no expiry states nothing about
+    a span and takes nothing out.
     """
-    spans = []
+    stated = []
     for record in records:
         if record.get('event') != journal.Event.SKIP:
             continue
         start = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
         finish = journal.parse_time(record.get('expires_at'))
-        if start is None or finish is None:
-            continue
-        spans.append((max(start, origin), min(finish, now)))
-    return merged_spans(spans)
+        if start is not None and finish is not None:
+            stated.append((start, finish))
+    stated.sort()
+    ended = [
+        (start, min(finish, stated[index + 1][0]) if index + 1 < len(stated) else finish) for index, (start, finish) in enumerate(stated)
+    ]
+    return merged_spans([(max(start, origin), finish) for start, finish in ended])
 
 
 def skip_expiry(records: list[dict]) -> dt.datetime | None:
@@ -675,6 +690,7 @@ def build_state(
     now: dt.datetime,
     records: list[dict] | None = None,
     observed: dict[str, dt.datetime] | None = None,
+    evidence_days: dict[str, list[dt.date]] | None = None,
 ) -> dict:
     """Everything the draw and every view need: intervals, balances, weights, the pool.
 
@@ -692,8 +708,9 @@ def build_state(
     ``records`` and ``observed`` default to the journal on disk and a live round
     trip to every backend. Reading the journal from disk also writes the start of
     any pursuit it has never zeroed, through :func:`record_first_sightings`;
-    handed-in records never write.
-    :mod:`doit.forecast` supplies both instead, which is what lets a simulated
+    handed-in records never write. ``evidence_days`` goes with ``observed``: the
+    days each app reported, which the live round trip would otherwise supply.
+    :mod:`doit.forecast` supplies all three instead, which is what lets a simulated
     day run this function rather than a second copy of the model — a copy is the
     only way the forecast could come to disagree with the draw it claims to
     predict. Injecting them is also what keeps a thirty-day simulation from
@@ -717,7 +734,7 @@ def build_state(
     # own CLI stops being offered without anyone retyping it here.
     observations = {} if observed is not None else evidence.refresh(active, CACHE_DIR, now)
     seen = evidence.observed(observations) if observed is None else observed
-    seen_days = evidence.occurrences(observations)
+    seen_days = evidence.occurrences(observations) if observed is None else (evidence_days or {})
     last_done = evidence.merged(latest_occurrence(records, journal.Event.DONE), seen)
     elapsed = days_since(last_done, list(active), now)
 
@@ -1231,7 +1248,10 @@ def standing_line(state: dict) -> str:
     The trailer is the command that shows the rest, never a count of it. A
     remainder is a number to read and nothing to do.
     """
-    owing = sorted((name for name in state['active'] if owes(state, name)), key=lambda name: due_in_days(state, name) or 0.0)
+    passed = set(state['suppressed'])
+    owing = sorted(
+        (name for name in state['active'] if name not in passed and owes(state, name)), key=lambda name: due_in_days(state, name) or 0.0
+    )
     if not owing:
         return ''
     named = owing[:STANDING_NAMES]

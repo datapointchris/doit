@@ -1040,6 +1040,67 @@ def test_an_app_day_pays_a_day_of_a_weekly_goal_rather_than_the_week():
     assert [amount for _, amount in paid] == [pytest.approx(120.0 / 7)] * 4
 
 
+def test_an_app_day_on_a_timed_pursuit_pays_a_typical_sitting():
+    """The median of what was typed for it, so a journal written once a week is
+    not read as a seventh of a session."""
+    typed = [done('read', 40.0, minutes) for minutes in (10, 20, 30)]
+
+    paid = pursuits.credits(typed, [(NOW - dt.timedelta(days=1)).date()], NOW, NOW - dt.timedelta(days=28), 120.0)
+
+    assert [amount for _, amount in paid] == [20.0]
+
+
+def test_an_app_day_stays_counted_once_after_its_typed_entry_leaves_the_window():
+    """Credited again once the entry aged out, a pursuit came due later than the
+    date the screen had promised."""
+    typed = done('chore', 30.0)
+    origin = NOW - dt.timedelta(days=30.0) + dt.timedelta(hours=1)
+
+    assert pursuits.credits([typed], [(NOW - dt.timedelta(days=30.0)).date()], NOW, origin, None) == []
+
+
+def test_a_resume_ends_the_skip_it_cuts_short(tmp_path, monkeypatch):
+    """A mistyped year-long skip, resumed a day later, takes one day off the
+    clock rather than the whole year."""
+    records = [zeroed('chore', 30.0), skipped('chore', 20.0, 365.0), skipped('chore', 19.0, 0.0)]
+
+    state = balance_state(tmp_path, monkeypatch, records)
+
+    assert state['balance']['chore'] == pytest.approx(27.0)
+    assert 'chore' not in state['suppressed']
+
+
+def test_a_running_skip_holds_the_due_date_until_it_ends(tmp_path, monkeypatch):
+    """Projected as if it ended now, a skip still running read as due in days
+    when nothing would be asked for until it was over."""
+    records = [zeroed(name, 1.5) for name in WINDOW_NAMES] + [skipped(name, 1.0, 11.0) for name in WINDOW_NAMES]
+    today = window_state(tmp_path, monkeypatch, records, 0.0)
+
+    for name in WINDOW_NAMES:
+        due = pursuits.due_in_days(today, name)
+        assert due > 10.0, name
+        assert not pursuits.owes(window_state(tmp_path, monkeypatch, records, due - 0.01), name), name
+        assert pursuits.owes(window_state(tmp_path, monkeypatch, records, due + 0.01), name), name
+
+
+def test_handed_in_evidence_days_pay_as_live_ones_do(tmp_path, monkeypatch):
+    """The forecast hands its days in, and dropping them read every pursuit paid
+    through its app as owing on the first simulated day."""
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BALANCE_REGISTER))
+    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
+    days = [(NOW - dt.timedelta(days=ago)).date() for ago in range(1, 4)]
+
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW, records=[zeroed('chore', 3.0)], observed={}, evidence_days={'chore': days})
+
+    assert state['done']['chore'] == 3.0
+
+
+def test_a_skipped_pursuit_is_not_called_behind(tmp_path, monkeypatch):
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 0.0), skipped('chore', 0.0, 14.0)])
+
+    assert pursuits.standing_line(state) == ''
+
+
 def test_a_long_cadence_an_app_pays_still_looks_back_one_interval():
     """Capped at the app's memory, a 100-day cadence would look back 90 days, ask
     for less than one checkoff, and never come due."""
