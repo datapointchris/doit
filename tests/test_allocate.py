@@ -99,6 +99,13 @@ def test_a_window_that_fills_before_the_pace_reaches_a_checkoff_waits_for_a_depa
     assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=3.0, departures=[(10.0, 1.0)]) == 10.0
 
 
+def test_a_skipped_span_leaving_the_window_is_asked_for_again():
+    # The window's start reaches the skip on day two and passes it on day nine,
+    # asking for a week's pace across those seven days.
+    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=0.0, departures=[], returning=[(2.0, 9.0)]) == 9.0
+    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=0.0, departures=[(4.0, 0.5)], returning=[(2.0, 9.0)]) == 5.5
+
+
 def test_an_overdue_window_says_how_late_rather_than_projecting():
     assert allocate.projected_days_until_due(2.0, 7.0, 1.0, fills_in=0.0, departures=[(1.0, 1.0)]) == -7.0
 

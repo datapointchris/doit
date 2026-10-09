@@ -111,6 +111,10 @@ CACHE_MINUTES = int(os.environ.get('DOIT_CACHE_MINUTES') or 15)
 
 DRAW_SIZE = 5
 
+# The note on a reset doit wrote itself the first time it read a pursuit, which
+# tells it apart from one someone ran.
+FIRST_SEEN = 'first seen'
+
 # How many names the one-line standing summary spells out before counting the
 # rest. It is a glance rather than a report, and a line that wraps is one nobody
 # reads to the end.
@@ -444,8 +448,28 @@ def record_first_sightings(active: dict, records: list[dict], intervals: dict[st
             continue
         interval = intervals[name]
         opened = now if math.isinf(interval) else now - dt.timedelta(days=interval)
-        written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': opened.isoformat(), 'note': 'first seen'}, now=now))
+        written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': opened.isoformat(), 'note': FIRST_SEEN}, now=now))
     return written
+
+
+def zero_resets(records: list[dict]) -> dict[str, dt.datetime]:
+    """Each pursuit's zero point as the journal states it.
+
+    The newest reset someone ran wins. A first sighting stands only where there is
+    no such reset, and then the earliest one does. A machine behind on sync
+    writes its own sighting on its first read, later than one already merged, and
+    taking the newer would drop every payment made between the two.
+    """
+    ran = latest_occurrence([record for record in records if record.get('note') != FIRST_SEEN], journal.Event.RESET)
+    seen: dict[str, dt.datetime] = {}
+    for record in records:
+        if record.get('event') != journal.Event.RESET or record.get('note') != FIRST_SEEN:
+            continue
+        name = record.get('pursuit')
+        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        if name and when is not None and (name not in seen or when < seen[name]):
+            seen[name] = when
+    return {**seen, **ran}
 
 
 def standing_window(config: dict, interval: float) -> float:
@@ -455,11 +479,14 @@ def standing_window(config: dict, interval: float) -> float:
     is longer, so the window always holds more than one checkoff. A pursuit paid
     through an app is held to what that app remembers: billing over a span the
     credit side cannot answer for is a debt that grows by construction, on the
-    pursuit most reliably done.
+    pursuit most reliably done. Never below one interval, though. A window that
+    short never asks for a whole checkoff, so the pursuit would never come due.
     """
-    window = STANDING_WINDOW_DAYS if math.isinf(interval) else max(STANDING_WINDOW_DAYS, 2.0 * interval)
+    if math.isinf(interval):
+        return STANDING_WINDOW_DAYS
+    window = max(STANDING_WINDOW_DAYS, 2.0 * interval)
     if evidence.answerable(config):
-        window = min(window, float(evidence.OCCURRENCE_WINDOW_DAYS))
+        window = max(min(window, float(evidence.OCCURRENCE_WINDOW_DAYS)), interval)
     return window
 
 
@@ -493,14 +520,15 @@ def credits(
 
     An app day the journal already carries is one act reported by both records, so
     it counts once. An app answers in days rather than durations, so a day it
-    reports is one checkoff whatever happened inside it: one occurrence, or on a
-    timed pursuit a week's minutes. That is also what keeps a backend emitting a
-    row per task from outrunning one emitting a row per session.
+    reports pays one day whatever happened inside it: one occurrence, or on a
+    timed pursuit a seventh of the week's minutes. That is also what keeps a
+    backend emitting a row per task from outrunning one emitting a row per session.
 
     The moment beside each payment is when the start of the window passes it: the
     entry's own time, or the end of the day an app reported.
     """
     size = minutes or 1.0
+    app_day = minutes / WEEK_DAYS if minutes else 1.0
     paid = []
     typed_days = set()
     for record in records:
@@ -514,7 +542,7 @@ def credits(
     opened = origin.astimezone(now.tzinfo).date()
     for day in app_days:
         if day >= opened and day not in typed_days:
-            paid.append((dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tzinfo=now.tzinfo), size))
+            paid.append((dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tzinfo=now.tzinfo), app_day))
     return paid
 
 
@@ -549,37 +577,60 @@ def standing(
 
     The clock stops for the span a skip covers, so passing on something is never
     a way to owe more of it later. The due date is projected forward through the
-    window, as :func:`allocate.projected_days_until_due` describes.
+    window, as :func:`allocate.projected_days_until_due` describes: payments
+    leave it, and so do skipped days, after which the schedule asks for them.
     """
     interval, size = pace_of
     paid = credits(records, app_days, now, origin, minutes)
+    skips = skip_spans(records, now, origin)
     elapsed = (now - origin).total_seconds() / 86400.0
-    span = max(elapsed - skipped_days(records, now, origin), 0.0)
+    span = max(elapsed - sum((finish - start).total_seconds() / 86400.0 for start, finish in skips), 0.0)
     done = sum(amount for _, amount in paid)
     asked, owed = balance(span, interval, size, 0.0), balance(span, interval, size, done)
-    leaving = [((stamp - now).total_seconds() / 86400.0 + window, amount) for stamp, amount in paid]
-    return Standing(asked, done, owed, projected_days_until_due(owed, interval, size, max(window - elapsed, 0.0), leaving))
+
+    def leaves(moment: dt.datetime) -> float:
+        return (moment - now).total_seconds() / 86400.0 + window
+
+    due = projected_days_until_due(
+        owed,
+        interval,
+        size,
+        max(window - elapsed, 0.0),
+        [(leaves(stamp), amount) for stamp, amount in paid],
+        [(leaves(start), leaves(finish)) for start, finish in skips],
+    )
+    return Standing(asked, done, owed, due)
 
 
-def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
-    """Total days covered by a set of possibly overlapping spans.
+def merged_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.datetime, dt.datetime]]:
+    """A set of possibly overlapping spans as disjoint ones, in order.
 
     Renewing a skip before the last one expires is the ordinary case, and adding
     the two lengths would take the same fortnight off the clock twice.
     """
-    total = 0.0
-    reached: dt.datetime | None = None
+    merged: list[tuple[dt.datetime, dt.datetime]] = []
     for start, finish in sorted(spans):
-        begin = start if reached is None or start > reached else reached
-        if finish <= begin:
+        if finish <= start:
             continue
-        total += (finish - begin).total_seconds() / 86400.0
-        reached = finish
-    return total
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], finish))
+        else:
+            merged.append((start, finish))
+    return merged
+
+
+def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
+    """Total days covered by a set of possibly overlapping spans."""
+    return sum((finish - start).total_seconds() / 86400.0 for start, finish in merged_spans(spans))
 
 
 def skipped_days(records: list[dict], now: dt.datetime, origin: dt.datetime) -> float:
-    """Days inside the balance window that a skip took out of the schedule.
+    """Days inside the balance window that a skip took out of the schedule."""
+    return sum((finish - start).total_seconds() / 86400.0 for start, finish in skip_spans(records, now, origin))
+
+
+def skip_spans(records: list[dict], now: dt.datetime, origin: dt.datetime) -> list[tuple[dt.datetime, dt.datetime]]:
+    """The spans inside the balance window that a skip took out of the schedule.
 
     A pass is a decision not to do the thing, never a decision to owe it later, so
     the clock stops for as long as the skip runs. A skip carrying no expiry states
@@ -594,7 +645,7 @@ def skipped_days(records: list[dict], now: dt.datetime, origin: dt.datetime) -> 
         if start is None or finish is None:
             continue
         spans.append((max(start, origin), min(finish, now)))
-    return merged_span_days(spans)
+    return merged_spans(spans)
 
 
 def skip_expiry(records: list[dict]) -> dt.datetime | None:
@@ -674,7 +725,7 @@ def build_state(
     # on a day eight of them were completed inside `icb`, so a pursuit with a
     # backend has to count what that backend saw as well as what got retyped.
     mine = records_by_pursuit(records)
-    reset_at = latest_occurrence(records, journal.Event.RESET)
+    reset_at = zero_resets(records)
     windows = {name: standing_window(config, intervals[name]) for name, config in active.items()}
     origins = {name: zero_point(reset_at.get(name), now, intervals[name], windows[name]) for name in active}
     standings: dict[str, Standing] = {}
@@ -1241,7 +1292,7 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
     due = format_due(days) if days is not None else why_unpriced(state, name)
     weight = state['weights'].get(name)
     columns = {
-        'weight': '' if weight is None else f'{int(weight)}',
+        'weight': '' if weight is None else f'{weight:g}',
         'goal': goal_text(state['pursuits'].get(name) or {}),
         'tally': tally_text(state, name),
     }
@@ -1443,7 +1494,7 @@ def render_explain(state: dict, selection: dict) -> int:
         table.add_row(
             '[green]●[/]' if chosen else '',
             f'[yellow]{name}[/]' if name in passed else name,
-            f'{int(state["weights"][name])}',
+            f'{state["weights"][name]:g}',
             goal_text(state['active'][name]),
             format_elapsed(state['days_since'][name]),
             format_due(due_in_days(state, name)),
@@ -2033,7 +2084,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     cutoff = now - dt.timedelta(days=days)
     weekly = declared_minutes(pursuits)
     mine = records_by_pursuit(state['records'])
-    reset_at = latest_occurrence(state['records'], journal.Event.RESET)
+    reset_at = zero_resets(state['records'])
     counts = load_counts(journal_dir())
 
     rows = []

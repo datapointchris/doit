@@ -1030,6 +1030,46 @@ def test_a_tally_over_less_than_four_weeks_says_how_long(tmp_path, monkeypatch):
     assert pursuits.tally_text(state, 'chore') == '0 of 10 in 10d'
 
 
+def test_an_app_day_pays_a_day_of_a_weekly_goal_rather_than_the_week():
+    """An app answers in days. Crediting each one a week's minutes let four
+    ten-minute sessions pay off a month."""
+    days = [(NOW - dt.timedelta(days=ago)).date() for ago in (1, 2, 3, 4)]
+
+    paid = pursuits.credits([], days, NOW, NOW - dt.timedelta(days=28), 120.0)
+
+    assert [amount for _, amount in paid] == [pytest.approx(120.0 / 7)] * 4
+
+
+def test_a_long_cadence_an_app_pays_still_looks_back_one_interval():
+    """Capped at the app's memory, a 100-day cadence would look back 90 days, ask
+    for less than one checkoff, and never come due."""
+    backed = {'evidence': 'echo []', 'evidence_time': 'completed_at'}
+
+    assert pursuits.standing_window(backed, 60.0) == pursuits.evidence.OCCURRENCE_WINDOW_DAYS
+    assert pursuits.standing_window(backed, 100.0) == 100.0
+
+
+def test_a_reset_someone_ran_outranks_any_first_sighting():
+    ran = zeroed('chore', 20.0)
+    sightings = [{**zeroed('chore', days), 'note': pursuits.FIRST_SEEN} for days in (10.0, 5.0)]
+
+    assert pursuits.zero_resets([ran, *sightings])['chore'] == NOW - dt.timedelta(days=20.0)
+
+
+def test_the_earliest_first_sighting_stands_when_machines_both_write_one():
+    """A machine behind on sync writes its own on first read, later than the one
+    already merged. Taking the newer drops every payment between them."""
+    sightings = [{**zeroed('chore', days), 'note': pursuits.FIRST_SEEN} for days in (10.0, 5.0)]
+
+    assert pursuits.zero_resets(sightings)['chore'] == NOW - dt.timedelta(days=10.0)
+
+
+def test_a_fractional_weight_renders_as_written(tmp_path, monkeypatch):
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0)], register=BALANCE_REGISTER.replace('weight: 25', 'weight: 2.5', 1))
+
+    assert pursuits.offer('chore', state, {}).weight == '2.5'
+
+
 def test_a_counted_tally_asks_only_for_checkoffs_that_came_due(tmp_path, monkeypatch):
     """Seventeen days of a weekly pursuit is two checkoffs due, the first ten
     days ago, which is the date the row states beside it."""
@@ -1285,6 +1325,12 @@ WINDOW_HISTORIES = {
     + [done('daily', day) for day in (30.0, 20.0, 10.0, 5.0, 1.0)]
     + [done('weekly', day) for day in (35.0, 14.0, 3.0)]
     + [done('timed', day, 200) for day in (27.0, 15.0, 6.0)],
+    # A fortnight's skip still inside the window, which the schedule asks for
+    # again as the window's start passes it.
+    'skipped': [zeroed(name, 40.0) for name in WINDOW_NAMES]
+    + [skipped(name, 17.0, 14.0) for name in WINDOW_NAMES]
+    + [done(name, day) for name in ('daily', 'weekly') for day in (2.0, 1.0)]
+    + [done('timed', 1.0, 200)],
 }
 
 
@@ -1854,14 +1900,6 @@ def test_completed_since_ignores_everything_before_the_zero_point():
     records = [{'pursuit': 'chores', 'event': 'done', 'occurred_at': (now - dt.timedelta(days=d)).isoformat()} for d in (1, 9)]
 
     assert pursuits.completed_since(records, [], now, now - dt.timedelta(days=5), None) == 1.0
-
-
-def test_an_app_day_on_a_timed_pursuit_counts_one_whole_checkoff():
-    """An app answers in days rather than durations, so a day it reports is one
-    checkoff whatever happened inside it."""
-    now = dt.datetime.now().astimezone()
-
-    assert pursuits.completed_since([], [now.date()], now, now - dt.timedelta(days=1), 45.0) == 45.0
 
 
 def test_a_backed_pursuit_reads_the_days_its_app_reported(tmp_path, sandbox, monkeypatch):

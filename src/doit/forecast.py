@@ -243,8 +243,11 @@ def percentile(values: list[float], fraction: float) -> float:
 def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = REPLICATES) -> Reading:
     """Run every replicate and fold them into one reading."""
     directory = journal_dir()
-    records = journal.read_all(directory) if directory.exists() else []
+    # Read after the live state, which writes a first sighting for any pursuit the
+    # journal has never zeroed. Seeded without one, every simulated day would put
+    # that pursuit's start one interval back from the day itself.
     live = pursuits.build_state(register, now)
+    records = journal.read_all(directory) if directory.exists() else []
     active = live['active']
     cost = durations(active, records)
     horizon = max(HORIZONS)

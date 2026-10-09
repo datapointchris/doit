@@ -66,39 +66,56 @@ def days_until_due(owed: float, interval: float, size: float) -> float | None:
 
 
 def projected_days_until_due(
-    owed: float, interval: float, size: float, fills_in: float, departures: Iterable[tuple[float, float]]
+    owed: float,
+    interval: float,
+    size: float,
+    fills_in: float,
+    departures: Iterable[tuple[float, float]],
+    returning: Iterable[tuple[float, float]] = (),
 ) -> float | None:
     """Days until one checkoff is owed, for a balance kept over a sliding window.
 
-    Standing counts only what the window holds, so a balance grows two ways. Until
-    the window is full, the schedule asks for more every day, at one checkoff per
-    interval. Once it is full, what is asked for stays level and the balance grows
-    only as old payments leave the window. ``fills_in`` is the days until the window
-    is full, and ``departures`` is each payment as ``(days until it leaves, amount)``.
+    Standing counts only what the window holds, so a balance grows three ways.
+    Until the window is full, the schedule asks for more every day, at one
+    checkoff per interval. Once it is full, what is asked for stays level, except
+    while the window's start passes a skipped span, which the schedule asks for
+    again at the same rate. And it steps up as old payments leave. ``fills_in`` is
+    the days until the window is full, ``departures`` is each payment as ``(days
+    until it leaves, amount)``, and ``returning`` is each skipped span as ``(days
+    until the window's start reaches it, days until it has passed)``.
 
     Projected rather than read off the formula. A pursuit paid well ahead by a burst
     a fortnight ago comes due the day that burst leaves the window, which no
     rescaling of today's balance can say.
 
     Overdue keeps :func:`days_until_due`, which says how late: a whole checkoff
-    owed is due now, and each one past it is one interval later. A window whose
-    payments all leave without the balance reaching a checkoff — possible only
-    where skips took most of it out — is never due, and answers None.
+    owed is due now, and each one past it is one interval later. A window shorter
+    than one interval never asks for a whole checkoff, so it is never due and
+    answers None.
     """
     if interval <= 0 or math.isinf(interval) or size <= 0:
         return None
     if owed >= size:
         return days_until_due(owed, interval, size)
     rate = size / interval
-    reach = (size - owed) / rate
-    if reach <= fills_in:
-        return reach
-    owed += rate * fills_in
-    for days, amount in sorted(departures):
-        owed += amount
+    # Each moment the balance's growth changes: (day, step in owed, change in how many
+    # sources accrue). Filling is one source until fills_in, and each skipped span
+    # passing out of the window is one more while it does.
+    moments = [(fills_in, 0.0, -1)]
+    moments += [(days, amount, 0) for days, amount in departures]
+    for start, finish in returning:
+        moments += [(start, 0.0, 1), (finish, 0.0, -1)]
+    day, accruing = 0.0, 1
+    for when, step, change in sorted(moments, key=lambda moment: (moment[0], -moment[2])):
+        when = max(when, day)
+        if accruing > 0 and day + (size - owed) / (rate * accruing) <= when:
+            return day + (size - owed) / (rate * accruing)
+        owed += rate * accruing * (when - day)
+        day, accruing = when, accruing + change
+        owed += step
         if owed >= size:
-            return max(days, fills_in)
-    return None
+            return day
+    return day + (size - owed) / (rate * accruing) if accruing > 0 else None
 
 
 def candidates(weights: dict[str, float], ratios: dict[str, float], suppressed: Iterable[str]) -> dict[str, float]:
