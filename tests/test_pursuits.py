@@ -916,18 +916,42 @@ def unclipped(monkeypatch):
 
 @pytest.mark.parametrize('width', [60, 80, 140])
 def test_a_row_never_assembles_wider_than_the_line_it_was_given(width, unclipped, capsys):
-    """A choice takes what the name and the date leave, never more."""
-    pursuits.render_offers([a_row('read-library', '3w overdue', 'Difficult Conversations · Douglas Stone' * 3)], width)
+    """A choice takes what the standing columns leave, never more."""
+    long = 'Difficult Conversations · Douglas Stone' * 3
+    row = pursuits.Offer('read-library', '3w overdue', '', [long], False, weight='45', goal='45m a week', tally='1h 30m of 3h')
+    pursuits.render_offers([row], [], width)
 
     assert max(len(line) for line in capsys.readouterr().out.splitlines()) <= width
+
+
+def test_a_narrow_pane_gives_up_the_weight_before_the_date(unclipped, capsys):
+    """The name and how late it is are what the screen is read for, so the
+    columns explaining the date go first."""
+    row = pursuits.Offer(
+        'read-library', '3w overdue', '', ['Difficult Conversations'], False, weight='45', goal='45m a week', tally='1h 30m of 3h'
+    )
+    pursuits.render_offers([row], [], 60)
+
+    heading = capsys.readouterr().out.splitlines()[0].split()
+    assert 'pursuit' in heading and 'due' in heading
+    assert 'wt' not in heading
+
+
+def test_a_wide_pane_heads_every_column(unclipped, capsys):
+    row = pursuits.Offer(
+        'read-library', '3w overdue', '', ['Difficult Conversations'], False, weight='45', goal='45m a week', tally='1h 30m of 3h'
+    )
+    pursuits.render_offers([row], [], 140)
+
+    assert capsys.readouterr().out.splitlines()[0].split() == ['pursuit', 'wt', 'goal', 'last', '4w', 'due']
 
 
 def test_the_name_and_date_are_said_once_per_pursuit(unclipped, capsys):
     """Repeating them down a block reads as three pursuits rather than one with
     three things you could do."""
-    pursuits.render_offers([a_row('tasks', 'due in 2d', 'Face Mud · Home', 'Return hoodies · Purchase')], 140)
+    pursuits.render_offers([a_row('tasks', 'due in 2d', 'Face Mud · Home', 'Return hoodies · Purchase')], [], 140)
 
-    first, second = capsys.readouterr().out.splitlines()
+    _, first, second = capsys.readouterr().out.splitlines()
     assert 'tasks' in first and 'due in 2d' in first
     assert 'tasks' not in second and 'due in 2d' not in second
     assert first.index('Face Mud') == second.index('Return hoodies'), 'every choice starts in one column'
@@ -935,16 +959,74 @@ def test_the_name_and_date_are_said_once_per_pursuit(unclipped, capsys):
 
 def test_blocks_are_separated_once_any_pursuit_offers_several(unclipped, capsys):
     """Flush blocks run the last choice of one into the name of the next."""
-    pursuits.render_offers([a_row('study', 'due in 1d', 'A', 'B'), a_row('chore', 'due in 2d', 'C')], 140)
+    pursuits.render_offers([a_row('study', 'due in 1d', 'A', 'B'), a_row('chore', 'due in 2d', 'C')], [], 140)
 
-    assert capsys.readouterr().out.splitlines()[2] == ''
+    assert capsys.readouterr().out.splitlines()[3] == ''
 
 
 def test_single_choice_pursuits_stay_one_line_apiece(unclipped, capsys):
     """Spacing a screen of one-liners doubles its height for no grouping to show."""
-    pursuits.render_offers([a_row('socialize', '3d overdue', 'See or call someone'), a_row('chore', 'due in 2d', 'C')], 140)
+    pursuits.render_offers([a_row('socialize', '3d overdue', 'See or call someone'), a_row('chore', 'due in 2d', 'C')], [], 140)
 
     assert '' not in capsys.readouterr().out.splitlines()
+
+
+def test_what_the_draw_left_out_follows_what_it_offered(unclipped, capsys):
+    """Below a gap, so the rows with something to do stay one block."""
+    pursuits.render_offers([a_row('socialize', '3d overdue', 'See or call someone')], [a_row('paint', 'due in 5d')], 140)
+
+    _, offered, gap, rest = capsys.readouterr().out.splitlines()
+    assert offered.split()[0] == 'socialize'
+    assert gap == ''
+    assert rest.split() == ['paint', 'due', 'in', '5d']
+
+
+def test_next_gives_every_active_pursuit_a_row(sandbox, monkeypatch, capsys):
+    """A pursuit missing from the screen reads as one with nothing to say. Only
+    the drawn rows carry something to do, and every other row says where it stands."""
+    monkeypatch.setattr(pursuits, 'todays_context', list)
+    monkeypatch.setattr(render.console, '_width', 10_000)
+
+    assert pursuits.cmd_next(False, False, True) == 0
+
+    lines = capsys.readouterr().out.splitlines()
+    body = lines[next(index for index, line in enumerate(lines) if line.split()[:1] == ['pursuit']) + 1 :]
+    # A row names its pursuit in the first column. A choice under it starts blank.
+    names = [line.split()[0] for line in body if line[pursuits.GUTTER : pursuits.GUTTER + 1].strip()]
+    active = pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())['active']
+    assert sorted(names) == sorted(active)
+
+
+def test_a_pursuit_the_draw_left_out_has_nothing_to_do():
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+
+    row = pursuits.unoffered('chores', state)
+
+    assert row.choices == []
+    assert row.goal == 'every 7d'
+
+
+def test_a_skipped_pursuit_says_so_in_place_of_a_date(tmp_path, monkeypatch):
+    """Its clock is stopped, so any date would be one the skip is holding."""
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 10.0), skipped('chore', 0.0, 14.0)])
+
+    assert pursuits.unoffered('chore', state).due == 'skipped'
+
+
+def test_the_tally_sets_what_was_done_beside_what_was_asked(tmp_path, monkeypatch):
+    records = [zeroed('chore', 40.0), zeroed('read', 40.0), *(done('chore', 1.0) for _ in range(3)), done('read', 1.0, minutes=90)]
+    state = balance_state(tmp_path, monkeypatch, records)
+
+    assert pursuits.tally_text(state, 'chore') == '3 of 28'
+    assert pursuits.tally_text(state, 'read') == '1h 30m of 21h'
+
+
+def test_a_tally_over_less_than_four_weeks_says_how_long(tmp_path, monkeypatch):
+    """The heading says four weeks, so a pursuit asked for over fewer has to say
+    so on its own row or its numbers read as a month's."""
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 10.0), zeroed('read', 40.0)])
+
+    assert pursuits.tally_text(state, 'chore') == '0 of 10 in 10d'
 
 
 def test_a_failed_row_carries_what_the_backend_said_and_nothing_else():
@@ -1291,20 +1373,22 @@ def test_the_standing_line_names_what_is_behind_and_no_more(tmp_path, monkeypatc
     """
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 8.0)])
 
-    assert pursuits.standing_line(state, exclude=()) == 'behind · chore · read'
+    assert pursuits.standing_line(state) == 'behind · chore · read'
 
 
-def test_the_standing_line_leaves_out_what_is_already_on_screen(tmp_path, monkeypatch):
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 8.0)])
+def test_the_standing_line_names_the_longest_overdue_first(tmp_path, monkeypatch):
+    """By days late, the date every other screen states. Three checkoffs of a
+    daily chore is two days late, and under three of a weekly one is nearly two
+    weeks late."""
+    register = BALANCE_REGISTER + '\n  slow:\n    description: Once a week\n    weight: 10\n    cadence: 7d\n'
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 0.0), zeroed('slow', 20.0)], register=register)
 
-    # "also", because a narrowed count that drops the qualifier reads as the
-    # whole set — the four named here would be the register's only debts.
-    assert pursuits.standing_line(state, exclude=['chore']) == 'also behind · read'
+    assert pursuits.standing_line(state) == 'behind · slow · chore'
 
 
 def test_the_standing_line_is_silent_when_nothing_is_owed(tmp_path, monkeypatch):
     ahead = [zeroed('chore', 0.0), done('chore', 0.0), zeroed('read', 0.0), done('read', 0.0, minutes=60)]
-    assert pursuits.standing_line(balance_state(tmp_path, monkeypatch, ahead), exclude=()) == ''
+    assert pursuits.standing_line(balance_state(tmp_path, monkeypatch, ahead)) == ''
 
 
 def test_the_balance_spans_every_machines_journal(tmp_path, monkeypatch):
@@ -1338,7 +1422,7 @@ def test_the_standing_line_points_at_the_rest_rather_than_counting_it(tmp_path, 
     wide = 'pursuits:\n' + ''.join(f'  p{index}:\n    weight: 10\n    cadence: 1d\n' for index in range(6))
     state = balance_state(tmp_path, monkeypatch, [zeroed(f'p{index}', 3.0) for index in range(6)], register=wide)
 
-    line = pursuits.standing_line(state, exclude=())
+    line = pursuits.standing_line(state)
 
     assert len([part for part in line.split('·') if part.strip().startswith('p')]) == pursuits.STANDING_NAMES
     assert line.endswith('doit pursuits list'), 'a typeable command, never a remainder count'
@@ -1943,7 +2027,7 @@ def test_the_standing_line_needs_a_whole_checkoff_before_it_says_behind(tmp_path
     barely = balance_state(tmp_path, monkeypatch, [zeroed('chore', 0.2), zeroed('read', 0.02)])
 
     assert barely['balance']['chore'] > 0 and barely['balance']['read'] > 0
-    assert pursuits.standing_line(barely, exclude=()) == ''
+    assert pursuits.standing_line(barely) == ''
 
 
 def test_a_backdated_log_reports_the_standing_the_next_command_will(sandbox, monkeypatch, capsys):

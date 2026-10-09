@@ -136,6 +136,11 @@ GUTTER = 3
 # Below this a choice is an ellipsis and a letter, so the backstop clips instead.
 MIN_CHOICE_WIDTH = 12
 
+# What a choice keeps before `doit next` gives up a column for it. A title cut
+# at a dozen characters names nothing, and the standing columns are only there
+# to explain a date the row already states.
+READABLE_CHOICE_WIDTH = 30
+
 # A resolver is one network call to a product CLI. They run concurrently and only
 # for what was actually drawn, so this is the whole wait, not a per-pursuit one.
 RESOLVE_TIMEOUT_SECONDS = 5.0
@@ -519,8 +524,10 @@ def completed_since(records: list[dict], app_days: list[dt.date], now: dt.dateti
 
 
 class Standing(NamedTuple):
-    """One pursuit's balance over its window, and when it next comes due."""
+    """One pursuit's standing over its window: both sides of the balance, and when it next comes due."""
 
+    asked: float
+    done: float
     balance: float
     due: float | None
 
@@ -547,9 +554,11 @@ def standing(
     interval, size = pace_of
     paid = credits(records, app_days, now, origin, minutes)
     elapsed = (now - origin).total_seconds() / 86400.0
-    owed = balance(max(elapsed - skipped_days(records, now, origin), 0.0), interval, size, sum(amount for _, amount in paid))
+    span = max(elapsed - skipped_days(records, now, origin), 0.0)
+    done = sum(amount for _, amount in paid)
+    asked, owed = balance(span, interval, size, 0.0), balance(span, interval, size, done)
     leaving = [((stamp - now).total_seconds() / 86400.0 + window, amount) for stamp, amount in paid]
-    return Standing(owed, projected_days_until_due(owed, interval, size, max(window - elapsed, 0.0), leaving))
+    return Standing(asked, done, owed, projected_days_until_due(owed, interval, size, max(window - elapsed, 0.0), leaving))
 
 
 def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
@@ -668,17 +677,16 @@ def build_state(
     reset_at = latest_occurrence(records, journal.Event.RESET)
     windows = {name: standing_window(config, intervals[name]) for name, config in active.items()}
     origins = {name: zero_point(reset_at.get(name), now, intervals[name], windows[name]) for name in active}
-    balances: dict[str, float] = {}
-    dues: dict[str, float | None] = {}
+    standings: dict[str, Standing] = {}
     suppressed: set[str] = set()
     for name in active:
         own = mine.get(name, [])
-        found = standing(own, seen_days.get(name, []), now, origins[name], windows[name], paces[name], weekly_minutes.get(name))
-        balances[name], dues[name] = found
+        standings[name] = standing(own, seen_days.get(name, []), now, origins[name], windows[name], paces[name], weekly_minutes.get(name))
         expires = skip_expiry(own)
         if expires is not None and expires > now:
             suppressed.add(name)
 
+    balances = {name: found.balance for name, found in standings.items()}
     # Resolved here rather than at the renderer, so `--explain` and every journal
     # entry report the pool the draw actually samples.
     ratios = {name: balances[name] / sizes[name] for name in active}
@@ -699,7 +707,9 @@ def build_state(
         'intervals': intervals,
         'days_since': elapsed,
         'balance': balances,
-        'due': dues,
+        'asked': {name: found.asked for name, found in standings.items()},
+        'done': {name: found.done for name, found in standings.items()},
+        'due': {name: found.due for name, found in standings.items()},
         'checkoff_size': sizes,
         'weekly_minutes': weekly_minutes,
         'origins': origins,
@@ -1159,41 +1169,47 @@ def due_style(days: float | None) -> str:
     return 'yellow' if days is not None and days <= -1 else ''
 
 
-def standing_line(state: dict, exclude: Iterable[str]) -> str:
-    """The pursuits owing at least one checkoff, worst first, named and no more.
+def standing_line(state: dict) -> str:
+    """The pursuits owing at least one checkoff, latest first, named and no more.
 
     Names without amounts. Minutes and checkoffs do not add, so a list of them is
     a set of numbers in different units with no total — and this line answers
     which strands are slipping, which the names alone answer. How far behind each
     one is belongs on the row that has a column for it.
 
-    ``exclude`` takes no default, because the two callers want different answers.
-    The dashboard asks about the whole register; `doit next` asks about what it
-    did not already show, and says "also" so the narrowing travels with the list.
-    A default would answer for one of them wherever a third caller forgot it.
-
     The trailer is the command that shows the rest, never a count of it. A
     remainder is a number to read and nothing to do.
     """
-    skip = set(exclude)
-    owing = [
-        (name, state['balance'][name] / state['checkoff_size'][name]) for name in state['active'] if name not in skip and owes(state, name)
-    ]
+    owing = sorted((name for name in state['active'] if owes(state, name)), key=lambda name: due_in_days(state, name) or 0.0)
     if not owing:
         return ''
-    owing.sort(key=lambda row: -row[1])
-    named = [name for name, _ in owing[:STANDING_NAMES]]
-    lead = 'also behind' if skip else 'behind'
+    named = owing[:STANDING_NAMES]
     trailer = '  ·  doit pursuits list' if len(owing) > len(named) else ''
-    return f'{lead} · ' + ' · '.join(named) + trailer
+    return 'behind · ' + ' · '.join(named) + trailer
+
+
+def tally_text(state: dict, name: str) -> str:
+    """What a pursuit did of what its pace asked over its window, in its own unit.
+
+    The span is said wherever it is not the standard four weeks, which the column
+    heading names: a pursuit zeroed eighteen days ago has only been asked for
+    eighteen, and a cadence longer than a fortnight looks back two intervals.
+    """
+    if name not in state['asked']:
+        return ''
+    unit = 'minutes' if state['weekly_minutes'].get(name) else 'checkoffs'
+    text = f'{quantity_text(state["done"][name], unit)} of {quantity_text(state["asked"][name], unit)}'
+    days = round((state['now'] - state['origins'][name]).total_seconds() / 86400.0)
+    return text if days == round(STANDING_WINDOW_DAYS) else f'{text} in {days}d'
 
 
 class Offer(NamedTuple):
-    """One drawn pursuit: what it is called, when it is due, and what you could do.
+    """One pursuit's row on `doit next`: its standing, and what you could do.
 
     ``choices`` is a line apiece. A pursuit whose backend matched several rows is
     several things you could go and do, and naming one of them picks for you —
-    three books equally in progress have no next one.
+    three books equally in progress have no next one. A pursuit the draw did not
+    offer has none.
     """
 
     name: str
@@ -1201,10 +1217,13 @@ class Offer(NamedTuple):
     due_style: str
     choices: list[str]
     failed: bool
+    weight: str = ''
+    goal: str = ''
+    tally: str = ''
 
 
 def offer(name: str, state: dict, resolved: dict) -> Offer:
-    """What one drawn pursuit says: its name, when it is due, and what it could be.
+    """What one drawn pursuit says: its standing, and what it could be.
 
     Every read of the state is guarded, because the draw outlives the register by
     up to a quarter of an hour. Pausing a drawn pursuit, or an `until` that passes
@@ -1214,6 +1233,12 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
     config = state['active'].get(name, {})
     days = due_in_days(state, name)
     due = format_due(days) if days is not None else why_unpriced(state, name)
+    weight = state['weights'].get(name)
+    columns = {
+        'weight': '' if weight is None else f'{int(weight)}',
+        'goal': goal_text(state['pursuits'].get(name) or {}),
+        'tally': tally_text(state, name),
+    }
 
     detail = resolved.get(name) or {}
     failure = detail.get('error')
@@ -1221,46 +1246,94 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
         # What the backend said, never a verdict about the backend. A register
         # naming a verb the CLI dropped fails identically to one that is logged
         # out, and only the message it printed tells the two apart.
-        return Offer(name, due, due_style(days), [f'{detail.get("backend") or "resolve"}: {failure}'], True)
+        return Offer(name, due, due_style(days), [f'{detail.get("backend") or "resolve"}: {failure}'], True, **columns)
 
     # Title and place on one line rather than in two columns. A context column is
     # sized by the longest title anywhere on screen, so an eight-character title
     # beside a thirty-five-character one puts its place most of a pane away from
     # the thing it places.
     lines = [join_context([choice.get('label'), choice.get('context')]) for choice in detail.get('choices') or []]
-    return Offer(name, due, due_style(days), lines or [config.get('description') or ''], False)
+    return Offer(name, due, due_style(days), lines or [config.get('description') or ''], False, **columns)
 
 
-def render_offers(offers: list[Offer], width: int) -> None:
-    """A pursuit per block: name and due date once, then a line per choice.
+def unoffered(name: str, state: dict) -> Offer:
+    """A pursuit the draw left out: its standing, and nothing to do.
 
-    Name and due date come first at fixed widths, so a narrow pane eats the tail
-    of a choice rather than which pursuit the row is or how late it is. Both of
-    those are what the screen is read for.
+    A skipped pursuit says so in place of a date. Its clock is stopped, so the
+    date it would show is one the skip is holding rather than one coming.
     """
-    if not offers:
+    row = offer(name, state, {})._replace(choices=[])
+    if name in state['suppressed']:
+        return row._replace(due='skipped', due_style='')
+    return row
+
+
+# Each column of `doit next` before the item, as (heading, Offer field).
+OFFER_COLUMNS = (
+    ('pursuit', 'name'),
+    ('wt', 'weight'),
+    ('goal', 'goal'),
+    (f'last {span_text(STANDING_WINDOW_DAYS)}', 'tally'),
+    ('due', 'due'),
+)
+
+# Given up in this order where a pane cannot fit every column and still leave a
+# choice readable. The name and the date are what the screen is read for.
+NARROW_DROPS = ('weight', 'goal', 'tally')
+
+
+def render_offers(offered: list[Offer], rest: list[Offer], width: int) -> None:
+    """Every pursuit as a row: what the draw offered, then the rest, dimmed.
+
+    The standing columns come first at fixed widths, so a narrow pane eats the
+    tail of a choice rather than which pursuit the row is or how late it is.
+    Where a choice would be left unreadable, the weight goes first, then the
+    goal, then the tally, and the name and date stay.
+    """
+    rows = [*offered, *rest]
+    if not rows:
         return
-    names = max(len(row.name) for row in offers)
-    dues = max(len(row.due) for row in offers)
-    head = GUTTER + names + GUTTER + dues + GUTTER
-    body = max(width - head, MIN_CHOICE_WIDTH)
+    widths = {field: max(len(heading), *(len(getattr(row, field)) for row in rows)) for heading, field in OFFER_COLUMNS}
+    shown = [(heading, field) for heading, field in OFFER_COLUMNS]
+    for dropped in NARROW_DROPS:
+        if width - GUTTER - sum(widths[field] + GUTTER for _, field in shown) >= READABLE_CHOICE_WIDTH:
+            break
+        shown = [(heading, field) for heading, field in shown if field != dropped]
+    body = max(width - GUTTER - sum(widths[field] + GUTTER for _, field in shown), MIN_CHOICE_WIDTH)
+
+    def cell(text: str, field: str) -> str:
+        return text.rjust(widths[field]) if field == 'weight' else text.ljust(widths[field])
+
+    gutter = ' ' * GUTTER
+    console.print(Text(gutter + gutter.join(cell(title, field) for title, field in shown), style='bold'), no_wrap=True, overflow='ellipsis')
+
     # A pursuit offering several choices is a block, and blocks printed flush run
     # the last choice of one into the name of the next. The gap goes in whenever
     # any block is taller than a line, so one screen never mixes the two spacings.
-    spaced = any(len(row.choices) > 1 for row in offers)
-    for position, row in enumerate(offers):
+    spaced = any(len(row.choices) > 1 for row in offered)
+    for position, row in enumerate(offered):
         if spaced and position:
             console.print()
         for index, choice in enumerate(row.choices):
-            line = Text(' ' * GUTTER)
-            # The name and the date are the pursuit's, not each choice's, so they
-            # are said once. Repeating them down a block reads as three pursuits.
-            line.append(row.name.ljust(names) if index == 0 else ' ' * names, style='white')
-            line.append(' ' * GUTTER)
-            line.append(row.due.ljust(dues) if index == 0 else ' ' * dues, style=row.due_style)
-            line.append(' ' * GUTTER)
+            line = Text(gutter)
+            # The standing is the pursuit's, not each choice's, so it is said once.
+            # Repeating it down a block reads as three pursuits.
+            for _, field in shown:
+                text = cell(getattr(row, field), field) if index == 0 else ' ' * widths[field]
+                line.append(text, style=row.due_style if field == 'due' else 'white' if field == 'name' else '')
+                line.append(gutter)
             line.append(fitted(choice, body, style='red' if row.failed else 'green'))
             console.print(line, no_wrap=True, overflow='ellipsis')
+
+    if rest:
+        console.print()
+    for row in rest:
+        line = Text(gutter, style='dim')
+        for position, (_, field) in enumerate(shown):
+            if position:
+                line.append(gutter)
+            line.append(cell(getattr(row, field), field), style=row.due_style if field == 'due' else '')
+        console.print(line, no_wrap=True, overflow='ellipsis')
 
 
 def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
@@ -1313,14 +1386,11 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
         console.print(Text(f'{" " * GUTTER}{event}', style='magenta'), no_wrap=True, overflow='ellipsis')
 
     resolved = selection.get('resolved') or {}
-    # Rendered in the order the draw offered them, never re-sorted here.
+    # The offered rows keep the order the draw gave them, never re-sorted here.
+    # Every other pursuit follows, so the screen answers for the whole register.
+    rest = offered_order(state, [name for name in state['active'] if name not in names])
     console.print()
-    render_offers([offer(name, state, resolved) for name in names], width)
-
-    standing = standing_line(state, exclude=names)
-    if standing:
-        console.print()
-        console.print(Text(f'{" " * GUTTER}{standing}', style='yellow'), no_wrap=True, overflow='ellipsis')
+    render_offers([offer(name, state, resolved) for name in names], [unoffered(name, state) for name in rest], width)
     return 0
 
 
@@ -1331,6 +1401,8 @@ def explain_payload(state: dict) -> dict:
         'intervals': {name: round(value, 2) for name, value in state['intervals'].items() if not math.isinf(value)},
         'days_since': {name: None if value is None else round(value, 2) for name, value in state['days_since'].items()},
         'balance': {name: round(value, 2) for name, value in state['balance'].items()},
+        'asked': {name: round(value, 2) for name, value in state['asked'].items()},
+        'done': {name: round(value, 2) for name, value in state['done'].items()},
         # Projected from when each payment leaves the window, which the balance
         # beside it does not carry.
         'due': {name: None if value is None else round(value, 2) for name, value in state['due'].items()},

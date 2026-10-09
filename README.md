@@ -110,6 +110,12 @@ The offered list is one list: what is owed first, heaviest first and then latest
 was drawn, soonest due first. That one order is what the screen shows, what the forecast walks
 top-down, and what `rank_offered` counts in a journal entry.
 
+`doit next` is one table with a row for every active pursuit. Each row states the weight, the
+goal, what was done of what the goal asked over the last four weeks, and when it next comes due.
+The offered rows come first and carry what to do. Every other pursuit follows, dimmed, with its
+standing and nothing to do. A skipped one says `skipped` in place of a date. A narrow pane gives up
+the weight, then the goal, then the four-week tally, and keeps the name and the date.
+
 ## Sources are configuration
 
 `doit` knows nothing about which apps exist. `~/.config/doit/sources.yml` declares each source's id,
