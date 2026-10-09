@@ -7,18 +7,24 @@ second date to keep in sync and nothing to drift.
 """
 
 import datetime as dt
+import re
 
 CADENCE_UNITS = {'d': 1, 'w': 7, 'mo': 30, 'y': 365}
+CADENCE_TOKEN = re.compile(r'(?P<count>\d+)(?P<unit>d|w|mo|y)?')
 
 
 def parse_cadence(token: str) -> int:
-    """Days for a cadence token like 2w / 1mo / 10d / 1y (bare number = days)."""
-    token = str(token).strip()
-    num = ''.join(c for c in token if c.isdigit())
-    unit = ''.join(c for c in token if c.isalpha())
-    if not num:
+    """Days for a cadence token like 2w / 1mo / 10d / 1y (bare number = days), 0 for anything else.
+
+    The whole token has to match. Gathering its digits and letters separately
+    read `3.5d` as 35 days and `1w2d` as 12, and a wrong number of days is
+    indistinguishable from a right one everywhere downstream. Zero is what every
+    caller already refuses or reads as having no cadence.
+    """
+    found = CADENCE_TOKEN.fullmatch(str(token).strip())
+    if found is None:
         return 0
-    return int(num) * CADENCE_UNITS.get(unit, 1)
+    return int(found['count']) * CADENCE_UNITS[found['unit'] or 'd']
 
 
 def overdue_days(last: str | None, cadence: str, today: dt.date) -> int | None:
