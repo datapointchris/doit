@@ -53,12 +53,6 @@ class Event(StrEnum):
     RESET = 'reset'
 
 
-# Trailing window for the measured logging rate. Long enough that a quiet week
-# does not swing the implied intervals, short enough to follow a real change of
-# pace within a month.
-RATE_WINDOW_DAYS = 30
-
-
 def journal_path(directory: Path, machine: str) -> Path:
     """This machine's journal file. One writer per file is the whole sync story."""
     return directory / f'next-log-{machine}.jsonl'
@@ -168,7 +162,7 @@ def checkoff_equivalent(record: dict, size: float | None) -> float:
 
     ``None`` is a pursuit that declares no size, whose checkoff is the entry
     itself. A timed entry carrying no duration falls back to one whole checkoff,
-    which is what it claimed when it was typed.
+    since it states that the thing happened and nothing about how long.
     """
     if not size:
         return 1.0
@@ -176,37 +170,6 @@ def checkoff_equivalent(record: dict, size: float | None) -> float:
     if not isinstance(minutes, int | float) or isinstance(minutes, bool) or minutes <= 0:
         return 1.0
     return float(minutes) / size
-
-
-def rate_per_day(records: list[dict], now: dt.datetime, sizes: dict[str, float]) -> float | None:
-    """Measured checkoff-equivalents per day, or ``None`` when there is nothing to measure.
-
-    Equivalents rather than entries, because this one number divides every
-    pursuit's implied interval. An hour of reading typed as four fragments would
-    otherwise count four times what the same hour counts as one sitting, and every
-    interval in the register would halve on the strength of how the typing went.
-    A 20-minute read against a 45-minute checkoff contributes 0.44.
-
-    ``sizes`` maps each pursuit measured in time to its checkoff size in minutes.
-    Anything absent from it counts one per entry, which is what a pursuit
-    satisfied in occurrences means by a log.
-
-    The divisor is how long the journal has actually been running, capped at the
-    window — dividing a young journal's entries by a full 30 days would report a
-    pace far below the real one and stretch every implied interval to match.
-    """
-    within = []
-    for record in records:
-        if record.get('event') != Event.DONE:
-            continue
-        when = parse_time(record.get('occurred_at') or record.get('logged_at'))
-        if when is None or (now - when).days >= RATE_WINDOW_DAYS:
-            continue
-        within.append((when, checkoff_equivalent(record, sizes.get(str(record.get('pursuit'))))))
-    if not within:
-        return None
-    span_days = (now - min(when for when, _ in within)).total_seconds() / 86400.0
-    return sum(amount for _, amount in within) / max(min(span_days, float(RATE_WINDOW_DAYS)), 1.0)
 
 
 def load_counts(directory: Path) -> dict[str, int]:

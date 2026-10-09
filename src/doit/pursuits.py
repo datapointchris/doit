@@ -1,4 +1,4 @@
-"""What to do now, drawn from what you said matters. Invoked as `doit next`.
+"""What to do now, from the pace you declared and the order you said matters. Invoked as `doit next`.
 
 The one place in doit that holds an opinion, and the opinion is yours. Every other
 view is a renderer: `doit dashboard` shows independent lanes and deliberately
@@ -6,24 +6,23 @@ refuses to rank across them, because an ordering it invented over unlike things
 would be meaningless. This ranks across everything — legitimately, because it is
 not inventing the ordering. You declare it, as a weight per pursuit.
 
-A *pursuit* is a named strand of life you want to spend attention on:
-study-computer-science at 35, read-library at 30, visit-new-places at 70 for a
-year. Weights are relative magnitudes, never normalized — the implied share is
-displayed so a number that dominates more than you meant is visible.
+A *pursuit* is a named strand of life you want to spend attention on, and it
+declares two separate things. Its **pace** is how much of it you want: one
+occurrence every so many days (`cadence: 3d`), or so many minutes a week
+(`weekly_minutes: 240`). Its **weight** is how much it matters against the
+others: what is owed is shown heaviest first, and when less than a screen is
+owed the rest is drawn by weight. A weight never moves a pace, so whether a
+pursuit is getting enough is answered by its own two numbers alone.
 
-A pursuit is measured in **minutes** where it declares a checkoff size and in
-**occurrences** where it does not, and that declaration is the only thing
-separating the two kinds. Standing is one running balance in whichever unit
-applies: what the weight-derived schedule has asked for since the pursuit's zero
-point, less what has been done. Positive is owed. Nothing is capped in either
-direction, so a burst counts for what it was, a fortnight away is owed in full,
-and a balance too large to be true is the register saying its weight is wrong.
+Standing is one balance in the pursuit's own unit: what its pace asked for over
+the last four weeks, less what was done in them. The window opens no earlier
+than the pursuit's zero point. Positive is owed.
 
 That balance is never the number on screen. Two units on one screen cannot be read
 against each other, and a signed number carries its whole meaning in the one
 character a reader skips. Every view states standing as a date instead, built by
-`allocate.days_adrift` and `allocate.days_until_due`. The raw balance stays in
-`--json` and in every journal entry.
+`allocate.projected_days_until_due`. The raw balance stays in `--json` and in
+every journal entry.
 
 Three files, kept apart like the review register:
   - pursuits.yml    declarative config you hand-edit; only ever read here. Under
@@ -49,7 +48,9 @@ import json
 import math
 import os
 import random
+import re
 import shlex
+import statistics
 import subprocess
 from collections.abc import Callable
 from collections.abc import Iterable
@@ -65,19 +66,12 @@ from rich.text import Text
 
 from doit import evidence
 from doit import journal
-from doit.allocate import DEFAULT_CATCHUP_EXPONENT
-from doit.allocate import FALLBACK_LOGS_PER_DAY
-from doit.allocate import PERIOD_DAYS
+from doit.allocate import WEEK_DAYS
 from doit.allocate import balance
 from doit.allocate import candidates
-from doit.allocate import days_adrift
-from doit.allocate import days_until_due
 from doit.allocate import draw
-from doit.allocate import effective_weights
 from doit.allocate import first_draw_probabilities
-from doit.allocate import implied_intervals
-from doit.allocate import implied_shares
-from doit.allocate import period_amount
+from doit.allocate import projected_days_until_due
 from doit.cadence import parse_cadence
 from doit.journal import bump_counts
 from doit.journal import checkoff_equivalent
@@ -88,7 +82,6 @@ from doit.journal import journal_path
 from doit.journal import latest_occurrence
 from doit.journal import load_counts
 from doit.journal import new_id
-from doit.journal import rate_per_day
 from doit.paths import NamedPathMissing
 from doit.paths import env_path
 from doit.paths import journal_dir
@@ -119,15 +112,24 @@ CACHE_MINUTES = int(os.environ.get('DOIT_CACHE_MINUTES') or 15)
 
 DRAW_SIZE = 5
 
+# The note on a reset doit wrote itself the first time it read a pursuit, which
+# tells it apart from one someone ran.
+FIRST_SEEN = 'first seen'
+
 # How many names the one-line standing summary spells out before counting the
 # rest. It is a glance rather than a report, and a line that wraps is one nobody
 # reads to the end.
 STANDING_NAMES = 4
 
-# How many weeks of its own schedule a balance may drift before it is called out.
-# Two is far enough that a bad fortnight cannot explain it, which leaves the
-# stated weight as the thing to argue with.
-DEFAULT_WARN_WEEKS = 2.0
+# How far back standing looks. Four weeks holds a weekly goal four times over,
+# and is short enough that a burst or a lapse a season ago does not answer for
+# this week. Exact to the day is not the aim: a balance over a sliding window is
+# a reading of how the last month went, and it moves as the month moves.
+STANDING_WINDOW_DAYS = 28.0
+
+# A counted pursuit's pace is whole days and nothing else. A week or a month
+# reads naturally and invites `1w2d` and `3.5d`, which no reader checks twice.
+DAYS_CADENCE = re.compile(r'[1-9]\d*d')
 
 # How many of a resolve's rows a pursuit offers — enough to choose between, few
 # enough that five pursuits stay one screen.
@@ -138,6 +140,11 @@ GUTTER = 3
 
 # Below this a choice is an ellipsis and a letter, so the backstop clips instead.
 MIN_CHOICE_WIDTH = 12
+
+# What a choice keeps before `doit next` gives up a column for it. A title cut
+# at a dozen characters names nothing, and the standing columns are only there
+# to explain a date the row already states.
+READABLE_CHOICE_WIDTH = 30
 
 # A resolver is one network call to a product CLI. They run concurrently and only
 # for what was actually drawn, so this is the whole wait, not a per-pursuit one.
@@ -151,8 +158,6 @@ KNOWN_FIELDS = {
     'cadence',
     'until',
     'paused',
-    'catchup_exponent',
-    'warn_weeks',
     'resolve',
     'resolve_where',
     'items',
@@ -167,53 +172,45 @@ KNOWN_FIELDS = {
     'evidence_items',
     'evidence_where',
     'evidence_files',
-    'checkoff_minutes',
+    'weekly_minutes',
 }
 
 TEMPLATE = """\
-# Weighted pursuits, read by `doit next`. Hand-edit freely — this tool only reads.
+# Pursuits, read by `doit next`. Hand-edit freely — this tool only reads.
 #
-# A pursuit is a strand of life you want to spend attention on. Weights are
-# relative magnitudes, not percentages: 35/30/70 is fine and nothing has to add
-# up. `doit pursuits list` shows the share each weight actually implies.
+# A pursuit is a strand of life you want to spend attention on. It declares how
+# much of it you want — its pace — and how much it matters against the others —
+# its weight. The two never touch: a weight orders what is owed and picks what
+# fills the rest of the screen, and it never moves a pace.
 #
-#   weight       required; how much attention this deserves relative to the rest
 #   description  the thing itself, in a few plain words. It is the row's title
 #                wherever nothing resolves, so it names what you would do
-#   checkoff_minutes  optional; the size of one checkoff, in minutes. Declaring
-#                it is what makes a pursuit measured in time rather than in
-#                occurrences. `doit log --minutes` is the other quantity — what
-#                one sitting actually took, measured against this
-#   cadence      optional hard schedule (2w / 1mo); a checkoff owed pins it above
-#                the draw
+#   weight       required; how much this matters against the rest. What is owed
+#                is shown heaviest first, and when less than a screen is owed the
+#                rest is drawn by weight. Relative magnitudes, so nothing adds up
+#
+# Every pursuit declares exactly one pace:
+#
+#   cadence         one occurrence every so many days, in whole days: 3d, 9d
+#   weekly_minutes  this many minutes a week, which makes the pursuit measured in
+#                   time: `doit log` asks how long each sitting took
+#
 #   until        optional end date; after it the pursuit pauses and says so
 #   paused       optional; keeps it in the file but out of the draw. A pause has
 #                no timestamp, so pair unpausing with `doit pursuits reset` — the
 #                schedule kept asking while nothing was reading the answer
-#   catchup_exponent  optional; how sharply urgency climbs once a checkoff is
-#                owed. Superlinear above 1, so the 1.5 default lets something well
-#                behind outrun a heavier pursuit that is current
-#   warn_weeks   optional; how far this one may drift before it is called out,
-#                overriding the register-wide `balance.warn_weeks` below
 #   resolve      optional command answering "specifically what?" — see below
 #   on_log       optional command run after logging, e.g. completing the task
 #
-# A cadence replaces the interval the weight implies rather than sitting beside
-# it, so declaring one shorter than that interval multiplies how urgent the
-# pursuit gets, and one longer divides it. `doit pursuits list` names both.
-#
-# Standing is one running balance per pursuit: what the schedule has asked for
-# since its zero point, less what has been done. It is kept in minutes where
-# `checkoff_minutes:` is declared and in whole checkoffs where it is not, and it
-# is shown as the one answer both units give — when this next comes due. Nothing
-# is capped, so a burst counts for what it was and partial time always rolls over:
-# a 20-minute read against a 45-minute checkoff pays 20 minutes off.
-# `doit pursuits reset <pursuit>` moves the zero point to now, which is what to do
-# after a long pause; with no name it moves every one.
-#
-# A balance further from current than `warn_weeks` of that pursuit's own schedule
-# is reported by `doit next`. It is evidence the stated weight is wrong, since
-# nothing else in the model bends to absorb it.
+# Standing is one balance per pursuit: what its pace asked for over the last four
+# weeks, less what was done in them — occurrences for a cadence, minutes for
+# weekly_minutes. It is shown as the one answer both units give: when this next
+# comes due. Partial time always rolls over, so a 20-minute sitting against 45
+# minutes a week pays 20 minutes off, and a burst carries a pursuit until it is
+# four weeks old. The window opens no earlier than the pursuit's zero point,
+# written the first time doit reads it; `doit pursuits reset <pursuit>` moves it
+# to now, which is what to do after a long pause, and with no name it moves
+# every one.
 #
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
@@ -260,7 +257,7 @@ pursuits:
   chores:
     description: The next thing on the task list
     weight: 25
-    cadence: 1w
+    cadence: 3d
     resolve: icb tasks list --limit 3 --json
     label: name
     id: id
@@ -273,7 +270,7 @@ pursuits:
   read-library:
     description: A book already on the shelf
     weight: 30
-    checkoff_minutes: 30
+    weekly_minutes: 120
     resolve: icb books list --progress reading --json
     label: title
     context: author
@@ -281,16 +278,11 @@ pursuits:
   study-computer-science:
     description: The current section of the CS track
     weight: 35
-    checkoff_minutes: 45
+    weekly_minutes: 180
     resolve: learning overview --json
     items: in_progress_resources
     label: title
     detail: notes
-
-# How far any pursuit may drift from current before `doit next` says so, in weeks
-# of that pursuit's own schedule. A single pursuit overrides it with `warn_weeks`.
-balance:
-  warn_weeks: 2
 """
 
 
@@ -330,25 +322,24 @@ def load_pursuits(path: Path | None = None) -> dict:
             # The accepted set is named because this is the one error a register
             # written against an older schema hits, and every pursuits command
             # goes dark until the file is edited. A reader who can see
-            # `catchup_exponent` in the list can fix `alpha` without leaving the
+            # `weekly_minutes` in the list can fix `minutes` without leaving the
             # terminal; one told only what is wrong cannot.
             raise RegisterError(f'{name}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(KNOWN_FIELDS))}')
         weight = config.get('weight')
         if not isinstance(weight, int | float) or isinstance(weight, bool) or weight < 0:
             raise RegisterError(f'{name}: weight must be a non-negative number')
-        if config.get('cadence') and parse_cadence(config['cadence']) <= 0:
-            raise RegisterError(f'{name}: cadence must look like 10d / 2w / 1mo / 1y')
+        cadence = config.get('cadence')
+        minutes = config.get('weekly_minutes')
+        if cadence is not None and minutes is not None:
+            raise RegisterError(f'{name}: declare cadence or weekly_minutes, not both — a pace is one or the other')
+        if cadence is None and minutes is None:
+            raise RegisterError(f'{name}: needs a pace — cadence: 3d (once every 3 days) or weekly_minutes: 120')
+        if cadence is not None and not DAYS_CADENCE.fullmatch(str(cadence).strip()):
+            raise RegisterError(f'{name}: cadence is a whole number of days, like 3d or 9d')
+        if minutes is not None and (not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0):
+            raise RegisterError(f'{name}: weekly_minutes must be a positive whole number')
         if config.get('until') and not isinstance(config['until'], dt.date):
             raise RegisterError(f'{name}: until must be a date (YYYY-MM-DD)')
-        size = config.get('checkoff_minutes')
-        if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size <= 0):
-            raise RegisterError(f'{name}: checkoff_minutes must be a positive whole number')
-        exponent = config.get('catchup_exponent')
-        if exponent is not None and (not isinstance(exponent, int | float) or isinstance(exponent, bool) or exponent <= 0):
-            raise RegisterError(f'{name}: catchup_exponent must be a positive number')
-        weeks = config.get('warn_weeks')
-        if weeks is not None and (not isinstance(weeks, int | float) or isinstance(weeks, bool) or weeks <= 0):
-            raise RegisterError(f'{name}: warn_weeks must be a positive number')
         if config.get('on_log') and not config.get('resolve'):
             raise RegisterError(f'{name}: on_log needs resolve — there is no item to act on without it')
         if (config.get('context') or config.get('detail')) and not config.get('label'):
@@ -367,8 +358,8 @@ def register_block(key: str, known: set[str], path: Path | None) -> dict:
 
     An unknown key is refused here for the reason it is refused on a pursuit: a
     file that turns one typo away silently and refuses another teaches the reader
-    it is strict, and they stop proofreading the half that is not. `warn_weekz: 2`
-    reverting to a default nobody chose is the same silent misallocation a
+    it is strict, and they stop proofreading the half that is not. `budget_minute:
+    90` reverting to a default nobody chose is the same silent misallocation a
     misspelled `weight` would be.
     """
     path = register_path() if path is None else path
@@ -393,15 +384,6 @@ def load_settings(path: Path | None = None) -> dict:
     return settings
 
 
-def load_balance_settings(path: Path | None = None) -> dict:
-    """The register's `balance:` block — how far from current is worth reporting."""
-    settings = register_block('balance', {'warn_weeks'}, path)
-    weeks = settings.get('warn_weeks')
-    if weeks is not None and (not isinstance(weeks, int | float) or isinstance(weeks, bool) or weeks <= 0):
-        raise RegisterError(f'{REGISTER if path is None else path}: balance.warn_weeks must be a positive number')
-    return settings
-
-
 def term_ended(config: dict, today: dt.date) -> bool:
     """Whether a time-boxed pursuit is past its `until` date."""
     until = config.get('until')
@@ -416,14 +398,26 @@ def is_active(config: dict, today: dt.date) -> bool:
 
 
 def declared_minutes(register: dict) -> dict[str, float]:
-    """Every pursuit's checkoff size, over the whole register rather than the active set.
+    """Every timed pursuit's minutes a week, over the whole register rather than the active set.
 
-    A record keeps the size it was logged under whatever happens to the pursuit
-    afterwards. Scoping this to the active set instead lets pausing one timed
-    pursuit reclassify its entire history as one-checkoff-per-entry, and that
-    number is the single divisor every other pursuit's interval is derived from.
+    `drift` keeps a row for a pursuit paused mid-window, and its history was
+    logged in minutes. Scoping this to the active set would report that history
+    as a count of entries.
     """
-    return {name: float(config['checkoff_minutes']) for name, config in register.items() if config.get('checkoff_minutes')}
+    return {name: float(config['weekly_minutes']) for name, config in register.items() if config.get('weekly_minutes')}
+
+
+def pace(config: dict) -> tuple[float, float]:
+    """A pursuit's interval in days and the size of one checkoff, from the pace it declares.
+
+    A timed pursuit asks for its weekly minutes once a week. A counted one asks
+    for one occurrence per cadence. One declaring neither has no schedule, which
+    every view already renders as owing nothing.
+    """
+    minutes = config.get('weekly_minutes')
+    if minutes:
+        return WEEK_DAYS, float(minutes)
+    return float(parse_cadence(config.get('cadence') or '')) or math.inf, 1.0
 
 
 def records_by_pursuit(records: list[dict]) -> dict[str, list[dict]]:
@@ -439,96 +433,234 @@ def records_by_pursuit(records: list[dict]) -> dict[str, list[dict]]:
     return found
 
 
-def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, window: float | None) -> dt.datetime:
-    """When a pursuit's balance starts counting.
+def record_first_sightings(active: dict, records: list[dict], intervals: dict[str, float], now: dt.datetime) -> list[dict]:
+    """Write a reset for every active pursuit the journal has never zeroed, and return them.
 
-    An explicit ``doit pursuits reset`` sets it. Without one the origin is a
-    single interval back, which opens a pursuit exactly one checkoff behind and
-    keeps it there until something is logged: the pursuit was declared because it
-    is wanted, and doit cannot know when it was added.
+    Without a recorded start the origin is derived from now, moves with the
+    clock, and asks for exactly one checkoff on every run — a pursuit that reads
+    `due today` forever. The first build to read a pursuit is the earliest moment
+    doit can know it exists, so the start is pinned then, one interval back: a
+    pursuit was declared because it is wanted, so it opens one checkoff owed.
+    """
+    zeroed = {record.get('pursuit') for record in records if record.get('event') == journal.Event.RESET}
+    written = []
+    for name in active:
+        if name in zeroed:
+            continue
+        interval = intervals[name]
+        opened = now if math.isinf(interval) else now - dt.timedelta(days=interval)
+        written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': opened.isoformat(), 'note': FIRST_SEEN}, now=now))
+    return written
+
+
+def zero_resets(records: list[dict]) -> dict[str, dt.datetime]:
+    """Each pursuit's zero point as the journal states it.
+
+    The newest reset someone ran wins. A first sighting stands only where there is
+    no such reset, and then the earliest one does. A machine behind on sync
+    writes its own sighting on its first read, later than one already merged, and
+    taking the newer would drop every payment made between the two.
+    """
+    ran = latest_occurrence([record for record in records if record.get('note') != FIRST_SEEN], journal.Event.RESET)
+    seen: dict[str, dt.datetime] = {}
+    for record in records:
+        if record.get('event') != journal.Event.RESET or record.get('note') != FIRST_SEEN:
+            continue
+        name = record.get('pursuit')
+        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        if name and when is not None and (name not in seen or when < seen[name]):
+            seen[name] = when
+    return {**seen, **ran}
+
+
+def standing_window(config: dict, interval: float) -> float:
+    """How many days back a pursuit's standing looks.
+
+    :data:`STANDING_WINDOW_DAYS`, or two of the pursuit's own intervals where that
+    is longer, so the window always holds more than one checkoff. A pursuit paid
+    through an app is held to what that app remembers: billing over a span the
+    credit side cannot answer for is a debt that grows by construction, on the
+    pursuit most reliably done. Never below one interval, though. A window that
+    short never asks for a whole checkoff, so the pursuit would never come due.
+    """
+    if math.isinf(interval):
+        return STANDING_WINDOW_DAYS
+    window = max(STANDING_WINDOW_DAYS, 2.0 * interval)
+    if evidence.answerable(config):
+        window = max(min(window, float(evidence.OCCURRENCE_WINDOW_DAYS)), interval)
+    return window
+
+
+def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, window: float) -> dt.datetime:
+    """When a pursuit's balance starts counting: its last reset, or ``window`` days ago if later.
+
+    A reset sets it, either `doit pursuits reset` or the one
+    :func:`record_first_sightings` writes. Records handed in without one — a
+    forecast replaying a journal, a test — fall back to a single interval back,
+    which is one checkoff owed at every moment it is asked.
 
     Nothing about a payment may move this. Deriving the origin from the oldest
     thing on record does exactly that, and in the wrong direction — a backdated
     log drags the origin behind itself, so the schedule bills for the whole span
     it opened up and the entry credits one checkoff against it. Recording that
     you did the thing then increases what you owe.
-
-    ``window`` bounds how far back the demand side may run for a pursuit whose
-    payments come from a source that only remembers so far. Billing over a span
-    the credit side cannot answer for is a debt that grows by construction, on
-    the pursuit most reliably done.
     """
     opened = reset if reset is not None else now - dt.timedelta(days=0.0 if math.isinf(interval) else interval)
-    if window is None:
-        return opened
     return max(opened, now - dt.timedelta(days=window))
 
 
-def completed_since(records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None) -> float:
-    """Everything done since ``origin``, in the pursuit's own unit.
+def credits(
+    records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None
+) -> list[tuple[dt.datetime, float]]:
+    """Every payment since ``origin``, in the pursuit's own unit, with the moment it stops counting.
 
-    A typed entry contributes the duration it carries where a checkoff size is
-    declared, and one whole checkoff where none is — so an hour typed as four
-    fragments and an hour typed once pay the same amount off the balance, and no
-    fragment can strand.
+    A typed entry contributes the duration it carries on a timed pursuit, and one
+    whole checkoff on a counted one — so an hour typed as four fragments and an
+    hour typed once pay the same amount off the balance, and no fragment can
+    strand.
 
-    An app day the journal already carries is one act reported by both records, so
-    it counts once. An app answers in days rather than durations, so a day it
-    reports is one checkoff whatever happened inside it. That is also what keeps a
-    backend emitting a row per task from outrunning one emitting a row per session.
+    An app day the journal carries is one act reported by both records, so it
+    counts once, even after the typed entry has left the window. An app answers in
+    days rather than durations, so a day it reports pays one sitting whatever
+    happened inside it: one occurrence, or on a timed pursuit the median of the
+    durations typed for it, or a seventh of the week's minutes where none was.
+    That is also what keeps a backend emitting a row per task from outrunning one
+    emitting a row per session.
+
+    The moment beside each payment is when the start of the window passes it: the
+    entry's own time, or the end of the day an app reported.
     """
     size = minutes or 1.0
-    total = 0.0
-    typed_days = set()
-    for record in records:
-        if record.get('event') != journal.Event.DONE:
-            continue
+    typed = [record for record in records if record.get('event') == journal.Event.DONE]
+    typed_days = {journal.local_day(record, now) for record in typed}
+    sittings = [float(record['duration_minutes']) for record in typed if record.get('duration_minutes')]
+    app_day = (statistics.median(sittings) if sittings else minutes / WEEK_DAYS) if minutes else 1.0
+    paid = []
+    for record in typed:
         when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
         if when is None or when < origin:
             continue
-        typed_days.add(journal.local_day(record, now))
-        total += checkoff_equivalent(record, minutes) * size
+        paid.append((when, checkoff_equivalent(record, minutes) * size))
     opened = origin.astimezone(now.tzinfo).date()
     for day in app_days:
         if day >= opened and day not in typed_days:
-            total += size
-    return total
+            paid.append((dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tzinfo=now.tzinfo), app_day))
+    return paid
 
 
-def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
-    """Total days covered by a set of possibly overlapping spans.
+def completed_since(records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None) -> float:
+    """Everything done since ``origin``, in the pursuit's own unit. See :func:`credits`."""
+    return sum(amount for _, amount in credits(records, app_days, now, origin, minutes))
+
+
+class Standing(NamedTuple):
+    """One pursuit's standing over its window: both sides of the balance, and when it next comes due."""
+
+    asked: float
+    done: float
+    balance: float
+    due: float | None
+
+
+def standing(
+    records: list[dict],
+    app_days: list[dt.date],
+    now: dt.datetime,
+    origin: dt.datetime,
+    window: float,
+    pace_of: tuple[float, float],
+    minutes: float | None,
+) -> Standing:
+    """What the pace asked for since ``origin`` less what was paid, and the day it next comes due.
+
+    The one place standing is computed. :func:`build_state` calls it for every
+    pursuit and :func:`restated_balance` calls it again with a new entry added,
+    so the line a log prints is the line the next command shows.
+
+    The clock stops for the span a skip covers, so passing on something is never
+    a way to owe more of it later. The due date is projected forward through the
+    window, as :func:`allocate.projected_days_until_due` describes: payments
+    leave it, a skip still running holds the clock until it ends, and skipped
+    days leave it too, after which the schedule asks for them.
+    """
+    interval, size = pace_of
+    paid = credits(records, app_days, now, origin, minutes)
+    periods = skip_periods(records, origin)
+    elapsed = (now - origin).total_seconds() / 86400.0
+    skipped = sum((min(finish, now) - start).total_seconds() / 86400.0 for start, finish in periods if start < now)
+    span = max(elapsed - skipped, 0.0)
+    done = sum(amount for _, amount in paid)
+    asked, owed = balance(span, interval, size, 0.0), balance(span, interval, size, done)
+
+    def ahead(moment: dt.datetime) -> float:
+        return (moment - now).total_seconds() / 86400.0
+
+    due = projected_days_until_due(
+        owed,
+        interval,
+        size,
+        max(window - elapsed, 0.0),
+        [(ahead(stamp) + window, amount) for stamp, amount in paid],
+        [(ahead(start) + window, ahead(finish) + window) for start, finish in periods],
+        [(max(ahead(start), 0.0), ahead(finish)) for start, finish in periods if finish > now],
+    )
+    return Standing(asked, done, owed, due)
+
+
+def merged_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.datetime, dt.datetime]]:
+    """A set of possibly overlapping spans as disjoint ones, in order.
 
     Renewing a skip before the last one expires is the ordinary case, and adding
     the two lengths would take the same fortnight off the clock twice.
     """
-    total = 0.0
-    reached: dt.datetime | None = None
+    merged: list[tuple[dt.datetime, dt.datetime]] = []
     for start, finish in sorted(spans):
-        begin = start if reached is None or start > reached else reached
-        if finish <= begin:
+        if finish <= start:
             continue
-        total += (finish - begin).total_seconds() / 86400.0
-        reached = finish
-    return total
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], finish))
+        else:
+            merged.append((start, finish))
+    return merged
+
+
+def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
+    """Total days covered by a set of possibly overlapping spans."""
+    return sum((finish - start).total_seconds() / 86400.0 for start, finish in merged_spans(spans))
 
 
 def skipped_days(records: list[dict], now: dt.datetime, origin: dt.datetime) -> float:
-    """Days inside the balance window that a skip took out of the schedule.
+    """Days inside the balance window that a skip took out of the schedule."""
+    return sum((finish - start).total_seconds() / 86400.0 for start, finish in skip_spans(records, now, origin))
+
+
+def skip_spans(records: list[dict], now: dt.datetime, origin: dt.datetime) -> list[tuple[dt.datetime, dt.datetime]]:
+    """The spans inside the balance window, up to now, that a skip took out of the schedule."""
+    return merged_spans([(start, min(finish, now)) for start, finish in skip_periods(records, origin)])
+
+
+def skip_periods(records: list[dict], origin: dt.datetime) -> list[tuple[dt.datetime, dt.datetime]]:
+    """Every span from ``origin`` on that a skip takes out of the schedule, merged.
 
     A pass is a decision not to do the thing, never a decision to owe it later, so
-    the clock stops for as long as the skip runs. A skip carrying no expiry states
-    nothing about a span and takes nothing out.
+    the clock stops for as long as the skip runs. A later skip ends an earlier one
+    where it starts, the way :func:`skip_expiry` reads them, so a resume is a skip
+    that stops the one before it. A skip carrying no expiry states nothing about
+    a span and takes nothing out.
     """
-    spans = []
+    stated = []
     for record in records:
         if record.get('event') != journal.Event.SKIP:
             continue
         start = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
         finish = journal.parse_time(record.get('expires_at'))
-        if start is None or finish is None:
-            continue
-        spans.append((max(start, origin), min(finish, now)))
-    return merged_span_days(spans)
+        if start is not None and finish is not None:
+            stated.append((start, finish))
+    stated.sort()
+    ended = [
+        (start, min(finish, stated[index + 1][0]) if index + 1 < len(stated) else finish) for index, (start, finish) in enumerate(stated)
+    ]
+    return merged_spans([(max(start, origin), finish) for start, finish in ended])
 
 
 def skip_expiry(records: list[dict]) -> dt.datetime | None:
@@ -558,64 +690,51 @@ def build_state(
     now: dt.datetime,
     records: list[dict] | None = None,
     observed: dict[str, dt.datetime] | None = None,
-    balance_settings: dict | None = None,
+    evidence_days: dict[str, list[dt.date]] | None = None,
 ) -> dict:
-    """Everything the draw and every view need: rates, intervals, urgency, weights.
+    """Everything the draw and every view need: intervals, balances, weights, the pool.
 
     Assembled in one place and passed around, because the same numbers are what
     gets drawn on, what gets displayed by `--explain`, and what gets recorded into
     the journal as the state at the moment of a log. Recomputing them per view is
-    how those three drift apart. The draw pool and every pursuit's warning band
-    are here for that reason and not because the draw needs them assembled: a
-    renderer that reaches past this to the register reads a file a simulated day
-    was never running against.
+    how those three drift apart. The draw pool is here for that reason and not
+    because the draw needs it assembled: a renderer that reaches past this to the
+    register reads a file a simulated day was never running against.
 
-    ``records``, ``observed`` and ``balance_settings`` default to the journal on
-    disk, a live round trip to every backend, and the register's `balance:` block.
-    :mod:`doit.forecast` supplies all three instead, which is what lets a
-    simulated day run this function rather than a second copy of the model — a
-    copy is the only way the forecast could come to disagree with the draw it
-    claims to predict. Injecting them is also what keeps a thirty-day simulation
-    from making thirty evidence calls and thirty file reads per replicate.
+    Every interval and size comes from the pursuit's own declared pace, and
+    nothing here reads one pursuit's numbers to set another's. Logging a long
+    week of one thing moves that one balance and no other.
+
+    ``records`` and ``observed`` default to the journal on disk and a live round
+    trip to every backend. Reading the journal from disk also writes the start of
+    any pursuit it has never zeroed, through :func:`record_first_sightings`;
+    handed-in records never write. ``evidence_days`` goes with ``observed``: the
+    days each app reported, which the live round trip would otherwise supply.
+    :mod:`doit.forecast` supplies all three instead, which is what lets a simulated
+    day run this function rather than a second copy of the model — a copy is the
+    only way the forecast could come to disagree with the draw it claims to
+    predict. Injecting them is also what keeps a thirty-day simulation from
+    making thirty evidence calls and thirty file reads per replicate.
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
     weights = {name: float(config['weight']) for name, config in active.items()}
-    # Declaring `checkoff_minutes:` is the only thing that makes a pursuit measured in
-    # time, and the register is what says so. Scoped to the whole file rather
-    # than to the active set, because the rate below walks every record in the
-    # journal: a paused pursuit's history has to keep the size it was logged
-    # under, or pausing one timed pursuit reclassifies its whole past as
-    # one-checkoff-per-entry and moves the divisor every other interval reads.
-    checkoff_minutes = declared_minutes(pursuits)
-    sizes = {name: checkoff_minutes.get(name, 1.0) for name in active}
+    weekly_minutes = declared_minutes(pursuits)
+    paces = {name: pace(config) for name, config in active.items()}
+    intervals = {name: interval for name, (interval, _) in paces.items()}
+    sizes = {name: size for name, (_, size) in paces.items()}
 
+    directory = journal_dir() if records is None else None
     if records is None:
-        directory = journal_dir()
-        records = journal.read_all(directory) if directory.exists() else []
-    if balance_settings is None:
-        balance_settings = load_balance_settings()
-    register_warn_weeks = float(balance_settings.get('warn_weeks') or DEFAULT_WARN_WEEKS)
-    measured_rate = rate_per_day(records, now, checkoff_minutes)
-    logs_per_day = measured_rate if measured_rate is not None else FALLBACK_LOGS_PER_DAY
-
-    shares = implied_shares(weights)
-    implied = implied_intervals(weights, logs_per_day)
-    intervals = dict(implied)
-    # An explicit cadence is a statement about the world, not about relative
-    # attention, so it wins over the interval the weight implies. Both are kept
-    # because urgency divides by the one that won: declaring a cadence shorter
-    # than the implied interval multiplies how urgent the pursuit gets by the
-    # ratio between them, and a register cannot be read without seeing that.
-    for name, config in active.items():
-        if config.get('cadence'):
-            intervals[name] = float(parse_cadence(config['cadence']))
+        records = journal.read_all(directory) if directory and directory.exists() else []
+    if directory is not None and directory.exists():
+        records = [*records, *record_first_sightings(active, records, intervals, now)]
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
     observations = {} if observed is not None else evidence.refresh(active, CACHE_DIR, now)
     seen = evidence.observed(observations) if observed is None else observed
-    seen_days = evidence.occurrences(observations)
+    seen_days = evidence.occurrences(observations) if observed is None else (evidence_days or {})
     last_done = evidence.merged(latest_occurrence(records, journal.Event.DONE), seen)
     elapsed = days_since(last_done, list(active), now)
 
@@ -623,42 +742,29 @@ def build_state(
     # on a day eight of them were completed inside `icb`, so a pursuit with a
     # backend has to count what that backend saw as well as what got retyped.
     mine = records_by_pursuit(records)
-    reset_at = latest_occurrence(records, journal.Event.RESET)
-    origins: dict[str, dt.datetime] = {}
-    balances: dict[str, float] = {}
+    reset_at = zero_resets(records)
+    windows = {name: standing_window(config, intervals[name]) for name, config in active.items()}
+    origins = {name: zero_point(reset_at.get(name), now, intervals[name], windows[name]) for name in active}
+    standings: dict[str, Standing] = {}
     suppressed: set[str] = set()
-    for name, config in active.items():
+    for name in active:
         own = mine.get(name, [])
-        app_days = seen_days.get(name, [])
-        # An app remembers a bounded number of days, so a pursuit paid through
-        # one is only billable over the span that source can answer for.
-        window = float(evidence.OCCURRENCE_WINDOW_DAYS) if evidence.answerable(config) else None
-        origin = zero_point(reset_at.get(name), now, intervals[name], window)
-        origins[name] = origin
-        done = completed_since(own, app_days, now, origin, checkoff_minutes.get(name))
-        # The clock stops for the span a skip covers, so passing on something is
-        # never a way to owe more of it later.
-        span = max((now - origin).total_seconds() / 86400.0 - skipped_days(own, now, origin), 0.0)
-        balances[name] = balance(span, intervals[name], sizes[name], done)
-        standing = skip_expiry(own)
-        if standing is not None and standing > now:
+        standings[name] = standing(own, seen_days.get(name, []), now, origins[name], windows[name], paces[name], weekly_minutes.get(name))
+        expires = skip_expiry(own)
+        if expires is not None and expires > now:
             suppressed.add(name)
 
-    exponents = {name: float(config.get('catchup_exponent', DEFAULT_CATCHUP_EXPONENT)) for name, config in active.items()}
-    effective = effective_weights(weights, balances, sizes, exponents, suppressed)
+    balances = {name: found.balance for name, found in standings.items()}
     # Resolved here rather than at the renderer, so `--explain` and every journal
-    # entry report the pool the draw actually samples. Deriving the odds from
-    # `effective` while sampling something else put five chosen rows on screen at
-    # 0.0% each, under a legend calling that number the chance of being drawn.
+    # entry report the pool the draw actually samples.
     ratios = {name: balances[name] / sizes[name] for name in active}
-    pool = candidates(effective, weights, ratios, suppressed, DRAW_SIZE)
+    pool = candidates(weights, ratios, suppressed)
     # Over every active pursuit rather than over the pool's own members, because
     # a row absent from the pool has a real answer — zero — and every view here
     # walks the active set. Reporting only the members leaves the others unpriced
     # on a table that has a column for it.
     odds = first_draw_probabilities(pool)
     probability = {name: odds.get(name, 0.0) for name in active}
-    bands = {name: float(config.get('warn_weeks') or register_warn_weeks) for name, config in active.items()}
 
     return {
         'now': now,
@@ -666,21 +772,19 @@ def build_state(
         'pursuits': pursuits,
         'active': active,
         'weights': weights,
-        'shares': shares,
         'intervals': intervals,
-        'implied_intervals': implied,
         'days_since': elapsed,
         'balance': balances,
+        'asked': {name: found.asked for name, found in standings.items()},
+        'done': {name: found.done for name, found in standings.items()},
+        'due': {name: found.due for name, found in standings.items()},
         'checkoff_size': sizes,
-        'checkoff_minutes': checkoff_minutes,
+        'weekly_minutes': weekly_minutes,
         'origins': origins,
+        'windows': windows,
         'suppressed': sorted(suppressed),
-        'warn_weeks': bands,
-        'effective': effective,
         'pool': pool,
         'probability': probability,
-        'logs_per_day': logs_per_day,
-        'measured_rate': measured_rate,
         'last_done': {name: when.isoformat() for name, when in last_done.items()},
         'records': records,
         'observed': seen,
@@ -691,56 +795,71 @@ def build_state(
     }
 
 
+def owes(state: dict, name: str) -> bool:
+    """Whether a pursuit owes at least one whole checkoff.
+
+    A whole checkoff rather than any positive balance, because a balance climbs
+    continuously from zero and every pursuit passes through the fraction just
+    above it after every checkoff.
+    """
+    found = priced(state, name)
+    return found is not None and found[0] >= found[2]
+
+
 def pinned(state: dict) -> list[str]:
-    """Pursuits with a hard cadence owing at least one checkoff, furthest behind first.
+    """Every pursuit owing a checkoff, in the order :func:`offered_order` gives them.
 
-    Pinned rather than sampled on purpose. A weighted draw makes an overdue thing
-    likely, and likely is not good enough for the case this tool exists for — the
-    chore that has been at the top of the task list for a year does not need better
-    odds, it needs to stop being optional.
+    Shown outright rather than sampled, and every one of them rather than a
+    screenful. A weighted draw makes an overdue thing likely, and likely is not
+    good enough for the case this tool exists for — the chore that has been at
+    the top of the task list for a year does not need better odds, it needs to
+    stop being optional. Capping the list at a screen would hide exactly the rows
+    furthest behind on a light pursuit.
 
-    A standing skip reaches a pin, where the sampled half is answered by a zero
-    weight. A skip names the span it covers, so honoring it in both halves is
-    what makes it a decision rather than a reroll.
+    A standing skip reaches a pin as it reaches the pool. A skip names the span
+    it covers, so honoring it in both halves is what makes it a decision rather
+    than a reroll.
     """
     passed = set(state['suppressed'])
-    owing = []
-    for name, config in state['active'].items():
-        if not config.get('cadence') or name in passed:
-            continue
-        ratio = state['balance'][name] / state['checkoff_size'][name]
-        if ratio >= 1.0:
-            owing.append((name, ratio))
-    owing.sort(key=lambda row: -row[1])
-    return [name for name, _ in owing]
+    return offered_order(state, [name for name in state['active'] if name not in passed and owes(state, name)])
 
 
 def offered_order(state: dict, names: Iterable[str]) -> list[str]:
-    """``names`` furthest past due first, with anything unpriced last.
+    """``names`` with what is owed first, heaviest first, then the rest soonest due.
+
+    Weight decides among owed rows because that is the one thing a weight says:
+    which of two things you would rather catch up on. Lateness breaks a tie
+    between equal weights. What is not owed is ordered by when it next comes due,
+    with anything unpriced last.
 
     The one place the offered list is ordered. Every consumer reads the list this
     produced — the screen, the forecast walking it top-down, and the rank recorded
     against a log — so a second sort anywhere else would be a second answer to the
     question of what was offered first.
     """
-    return sorted(names, key=lambda name: (due_in_days(state, name) is None, due_in_days(state, name) or 0.0))
+
+    def key(name: str) -> tuple:
+        due = due_in_days(state, name)
+        if owes(state, name):
+            return (0, -state['weights'].get(name, 0.0), due)
+        return (1, due is None, due or 0.0)
+
+    return sorted(names, key=key)
 
 
 def compute_draw(state: dict, seed: int | None = None) -> dict:
-    """Draw the pins plus enough sampled pursuits to fill the screen.
+    """Show everything owed, and draw enough of the rest by weight to fill the screen.
 
-    One ordered list, furthest past due first, with the pins among it rather than
-    above it. Pinning takes a declared cadence, so a pin is a statement that the
-    pursuit has a schedule and not that it is the most urgent thing on offer — a
-    weighted pursuit three days behind outranks a scheduled one due this morning.
+    One ordered list: the owed rows heaviest first, then what was drawn, soonest
+    due first. Nothing owed is left to chance, and nothing drawn outranks
+    something owed.
 
-    `pinned` rides along as provenance: which of the offered names got there by
-    cadence rather than by sampling. Nothing reads it for order.
+    `pinned` rides along as provenance: which of the offered names were owed
+    rather than drawn. Nothing reads it for order.
     """
     pins = pinned(state)
-    sampled = {name: weight for name, weight in state['pool'].items() if name not in pins}
     rng = random.Random(seed) if seed is not None else random.Random()
-    drawn = draw(sampled, max(DRAW_SIZE - len(pins), 0), rng)
+    drawn = draw(state['pool'], max(DRAW_SIZE - len(pins), 0), rng)
     return {
         'draw_id': new_id(state['now']),
         'created_at': state['now'].isoformat(),
@@ -1035,42 +1154,28 @@ def format_elapsed(days: float | None) -> str:
     return f'{span_text(days)} ago'
 
 
-def format_every(interval: float | None) -> str:
-    """How often a pursuit comes up, as the schedule would state it."""
-    if interval is None or math.isinf(interval) or interval <= 0:
-        return '—'
-    return f'every {span_text(interval)}'
+def minutes_text(minutes: float) -> str:
+    """Minutes as a person says them: `45m`, `20h`, `1h 30m`."""
+    hours, rest = divmod(round(minutes), 60)
+    if not hours:
+        return f'{rest}m'
+    return f'{hours}h {rest}m' if rest else f'{hours}h'
 
 
-def schedule_text(state: dict, config: dict, name: str) -> str:
-    """How often this comes up, and whether that is declared or derived.
+def goal_text(config: dict) -> str:
+    """The pace a pursuit declares, as the register states it.
 
-    The cadence is read from the register entry rather than from
-    ``state['intervals']``, which holds the implied interval wherever no cadence
-    is declared and holds nothing at all for a pursuit the active set drops. A
-    paused pursuit declaring `cadence: 1mo` still declares it, and this is the one
-    screen whose job is to show what the register says.
-
-    A declared cadence replaces the interval the weight implies rather than
-    sitting beside it, so the two can say very different things — and when they
-    do, the weight on the row is not the attention the pursuit gets. Both numbers
-    are printed in the same unit, so the gap needs no arithmetic to see.
-
-    The second half is silent inside a tenth. A ratio that close is the measured
-    logging rate wobbling rather than a decision anyone made.
+    Read from the register entry rather than from the state, which holds nothing
+    for a pursuit the active set drops. A paused pursuit declaring `cadence: 9d`
+    still declares it, and the list is the one screen whose job is to show what
+    the register says. Days are printed as days, because `9d` is what was
+    written and `1w` would be a rounding of it.
     """
-    implied = state['implied_intervals'].get(name)
-    cadence = config.get('cadence')
-    if not cadence:
-        return '—' if implied is None or math.isinf(implied) else f'every {span_text(implied)} from its weight'
-    declared = float(parse_cadence(cadence))
-    every = format_every(declared)
-    if not declared or not implied or math.isinf(implied):
-        return every
-    ratio = implied / declared
-    if 0.9 <= ratio <= 1.1:
-        return every
-    return f'{every}, weight says {span_text(implied)}'
+    minutes = config.get('weekly_minutes')
+    if minutes:
+        return f'{minutes_text(minutes)} a week'
+    days = parse_cadence(config.get('cadence') or '')
+    return f'every {days}d' if days else '—'
 
 
 def priced(state: dict, name: str) -> tuple[float, float, float] | None:
@@ -1089,15 +1194,8 @@ def priced(state: dict, name: str) -> tuple[float, float, float] | None:
 
 
 def due_in_days(state: dict, name: str) -> float | None:
-    """:func:`allocate.days_until_due` for a pursuit the state knows about."""
-    found = priced(state, name)
-    return None if found is None else days_until_due(*found)
-
-
-def drift_days(state: dict, name: str) -> float | None:
-    """:func:`allocate.days_adrift` for a pursuit the state knows about."""
-    found = priced(state, name)
-    return None if found is None else days_adrift(*found)
+    """Days until a pursuit next comes due, as :func:`standing` projected it; None where it has no schedule."""
+    return state['due'].get(name)
 
 
 def format_due(days: float | None) -> str:
@@ -1139,114 +1237,56 @@ def due_style(days: float | None) -> str:
     return 'yellow' if days is not None and days <= -1 else ''
 
 
-def warn_threshold(state: dict, name: str) -> float:
-    """How far this pursuit may drift from current before it is worth reporting.
-
-    Weeks of the pursuit's own schedule rather than a flat amount, so a strand
-    asking for three hours a week and one asking for a chore a fortnight are held
-    to the same standard in units neither of them shares.
-
-    Floored at one checkoff, because weeks and checkoffs are different units and
-    the band falls below one whenever the interval is longer than the band is.
-    At `cadence: 1mo` and two weeks the arithmetic gives 0.47 of a chore, so a
-    single chore coming due would be reported as a weight that is not true — on
-    the same screen that pins it as due, with doing it as neither offered remedy.
-    """
-    size = state['checkoff_size'][name]
-    band = state['warn_weeks'][name] * period_amount(state['intervals'][name], size, PERIOD_DAYS)
-    return max(band, size)
-
-
-def out_of_band(state: dict) -> list[tuple[str, float, float]]:
-    """Every pursuit further from current than its own threshold, furthest first.
-
-    A balance this large is a claim about the weight rather than about the week.
-    The register is asking for an amount that is not being lived, in one direction
-    or the other, and editing it is what settles that.
-    """
-    found = []
-    for name in state['active']:
-        threshold = warn_threshold(state, name)
-        owed = state['balance'][name]
-        if threshold > 0 and abs(owed) > threshold:
-            found.append((name, owed, abs(owed) / threshold))
-    found.sort(key=lambda row: -row[2])
-    return found
-
-
-def render_out_of_band(state: dict) -> None:
-    """Name the pursuits whose weight the living disagrees with, and by how much.
-
-    Printed where the draw is, because that is the moment the register is being
-    acted on. A pursuit far ahead is reported alongside one far behind: both say
-    the weight is wrong, and only one of them ever feels like it.
-
-    Said as the goal a weight stands for, never as the weight. A weight is a
-    number from inside the model, and a reader shown one has to learn the model
-    before the line means anything.
-
-    The gap is `days_adrift` and not `due_in_days`. A due date is one interval
-    further on, which is the right number for "when next", and understates a debt
-    by a whole interval when the question is "how far from what you asked for".
-    """
-    drifted = out_of_band(state)
-    if not drifted:
-        return
-    console.print(Text('Off your goals', style='yellow'))
-    names = max(len(name) for name, _, _ in drifted)
-    for name, _, _ in drifted:
-        days = drift_days(state, name)
-        side = 'behind goal' if days is None or days > 0 else 'ahead of goal'
-        gap = '' if days is None else f' by {span_text(days)}'
-        line = Text(' ' * GUTTER)
-        line.append(name.ljust(names), style='yellow')
-        line.append(f'{" " * GUTTER}{side}{gap}')
-        console.print(line, no_wrap=True, overflow='ellipsis')
-    console.print(f'{" " * GUTTER}Change a goal with [cyan]doit pursuits edit[/]')
-
-
-def standing_line(state: dict, exclude: Iterable[str]) -> str:
-    """The pursuits owing at least one checkoff, worst first, named and no more.
-
-    A whole checkoff rather than any positive balance, because a balance climbs
-    continuously from zero and every pursuit passes through the fraction just
-    above it after every checkoff. Reporting those says "behind" beside a number
-    that renders as zero, and names nothing anyone can act on.
+def standing_line(state: dict) -> str:
+    """The pursuits owing at least one checkoff, latest first, named and no more.
 
     Names without amounts. Minutes and checkoffs do not add, so a list of them is
     a set of numbers in different units with no total — and this line answers
     which strands are slipping, which the names alone answer. How far behind each
     one is belongs on the row that has a column for it.
 
-    ``exclude`` takes no default, because the two callers want different answers.
-    The dashboard asks about the whole register; `doit next` asks about what it
-    did not already show, and says "also" so the narrowing travels with the list.
-    A default would answer for one of them wherever a third caller forgot it.
-
     The trailer is the command that shows the rest, never a count of it. A
     remainder is a number to read and nothing to do.
     """
-    skip = set(exclude)
-    owing = [
-        (name, state['balance'][name] / state['checkoff_size'][name])
-        for name in state['active']
-        if name not in skip and state['balance'][name] >= state['checkoff_size'][name]
-    ]
+    passed = set(state['suppressed'])
+    owing = sorted(
+        (name for name in state['active'] if name not in passed and owes(state, name)), key=lambda name: due_in_days(state, name) or 0.0
+    )
     if not owing:
         return ''
-    owing.sort(key=lambda row: -row[1])
-    named = [name for name, _ in owing[:STANDING_NAMES]]
-    lead = 'also behind' if skip else 'behind'
+    named = owing[:STANDING_NAMES]
     trailer = '  ·  doit pursuits list' if len(owing) > len(named) else ''
-    return f'{lead} · ' + ' · '.join(named) + trailer
+    return 'behind · ' + ' · '.join(named) + trailer
+
+
+def tally_text(state: dict, name: str) -> str:
+    """What a pursuit did of what its pace asked over its window, in its own unit.
+
+    The span is said wherever it is not the standard four weeks, which the column
+    heading names: a pursuit zeroed eighteen days ago has only been asked for
+    eighteen, and a cadence longer than a fortnight looks back two intervals.
+
+    A counted pursuit is asked for the checkoffs that have come due, a whole
+    number, so the count agrees with the date beside it.
+    """
+    if name not in state['asked']:
+        return ''
+    done, asked = state['done'][name], state['asked'][name]
+    if state['weekly_minutes'].get(name):
+        text = f'{minutes_text(done)} of {minutes_text(asked)}'
+    else:
+        text = f'{round(done)} of {math.floor(asked + 1e-9)}'
+    days = round((state['now'] - state['origins'][name]).total_seconds() / 86400.0)
+    return text if days == round(STANDING_WINDOW_DAYS) else f'{text} in {days}d'
 
 
 class Offer(NamedTuple):
-    """One drawn pursuit: what it is called, when it is due, and what you could do.
+    """One pursuit's row on `doit next`: its standing, and what you could do.
 
     ``choices`` is a line apiece. A pursuit whose backend matched several rows is
     several things you could go and do, and naming one of them picks for you —
-    three books equally in progress have no next one.
+    three books equally in progress have no next one. A pursuit the draw did not
+    offer has none.
     """
 
     name: str
@@ -1254,10 +1294,13 @@ class Offer(NamedTuple):
     due_style: str
     choices: list[str]
     failed: bool
+    weight: str = ''
+    goal: str = ''
+    tally: str = ''
 
 
 def offer(name: str, state: dict, resolved: dict) -> Offer:
-    """What one drawn pursuit says: its name, when it is due, and what it could be.
+    """What one drawn pursuit says: its standing, and what it could be.
 
     Every read of the state is guarded, because the draw outlives the register by
     up to a quarter of an hour. Pausing a drawn pursuit, or an `until` that passes
@@ -1267,6 +1310,12 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
     config = state['active'].get(name, {})
     days = due_in_days(state, name)
     due = format_due(days) if days is not None else why_unpriced(state, name)
+    weight = state['weights'].get(name)
+    columns = {
+        'weight': '' if weight is None else f'{weight:g}',
+        'goal': goal_text(state['pursuits'].get(name) or {}),
+        'tally': tally_text(state, name),
+    }
 
     detail = resolved.get(name) or {}
     failure = detail.get('error')
@@ -1274,46 +1323,95 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
         # What the backend said, never a verdict about the backend. A register
         # naming a verb the CLI dropped fails identically to one that is logged
         # out, and only the message it printed tells the two apart.
-        return Offer(name, due, due_style(days), [f'{detail.get("backend") or "resolve"}: {failure}'], True)
+        return Offer(name, due, due_style(days), [f'{detail.get("backend") or "resolve"}: {failure}'], True, **columns)
 
     # Title and place on one line rather than in two columns. A context column is
     # sized by the longest title anywhere on screen, so an eight-character title
     # beside a thirty-five-character one puts its place most of a pane away from
     # the thing it places.
     lines = [join_context([choice.get('label'), choice.get('context')]) for choice in detail.get('choices') or []]
-    return Offer(name, due, due_style(days), lines or [config.get('description') or ''], False)
+    return Offer(name, due, due_style(days), lines or [config.get('description') or ''], False, **columns)
 
 
-def render_offers(offers: list[Offer], width: int) -> None:
-    """A pursuit per block: name and due date once, then a line per choice.
+def unoffered(name: str, state: dict) -> Offer:
+    """A pursuit the draw left out: its standing, and nothing to do.
 
-    Name and due date come first at fixed widths, so a narrow pane eats the tail
-    of a choice rather than which pursuit the row is or how late it is. Both of
-    those are what the screen is read for.
+    A skipped pursuit says so in place of a date. Its clock is stopped, so the
+    date it would show is one the skip is holding rather than one coming.
     """
-    if not offers:
+    row = offer(name, state, {})._replace(choices=[])
+    if name in state['suppressed']:
+        return row._replace(due='skipped', due_style='')
+    return row
+
+
+# Each column of `doit next` before the item, as (heading, Offer field).
+OFFER_COLUMNS = (
+    ('pursuit', 'name'),
+    ('wt', 'weight'),
+    ('goal', 'goal'),
+    (f'last {span_text(STANDING_WINDOW_DAYS)}', 'tally'),
+    ('due', 'due'),
+)
+
+# Given up in this order where a pane cannot fit every column and still leave a
+# choice readable. The name and the date are what the screen is read for.
+NARROW_DROPS = ('weight', 'goal', 'tally')
+
+
+def render_offers(offered: list[Offer], rest: list[Offer], width: int) -> None:
+    """Every pursuit as a row: what the draw offered, then the rest, dimmed.
+
+    The standing columns come first at fixed widths, so a narrow pane eats the
+    tail of a choice rather than which pursuit the row is or how late it is.
+    Where a choice would be left unreadable, the weight goes first, then the
+    goal, then the tally, and the name and date stay.
+    """
+    rows = [*offered, *rest]
+    if not rows:
         return
-    names = max(len(row.name) for row in offers)
-    dues = max(len(row.due) for row in offers)
-    head = GUTTER + names + GUTTER + dues + GUTTER
-    body = max(width - head, MIN_CHOICE_WIDTH)
+    widths = {field: max(len(heading), *(len(getattr(row, field)) for row in rows)) for heading, field in OFFER_COLUMNS}
+    shown = [(heading, field) for heading, field in OFFER_COLUMNS]
+    for dropped in NARROW_DROPS:
+        if width - GUTTER - sum(widths[field] + GUTTER for _, field in shown) >= READABLE_CHOICE_WIDTH:
+            break
+        shown = [(heading, field) for heading, field in shown if field != dropped]
+    body = max(width - GUTTER - sum(widths[field] + GUTTER for _, field in shown), MIN_CHOICE_WIDTH)
+
+    def cell(text: str, field: str) -> str:
+        return text.rjust(widths[field]) if field == 'weight' else text.ljust(widths[field])
+
+    gutter = ' ' * GUTTER
+    heading = gutter + gutter.join(cell(title, field) for title, field in shown) + gutter + 'item'
+    console.print(Text(heading, style='bold'), no_wrap=True, overflow='ellipsis')
+
     # A pursuit offering several choices is a block, and blocks printed flush run
     # the last choice of one into the name of the next. The gap goes in whenever
     # any block is taller than a line, so one screen never mixes the two spacings.
-    spaced = any(len(row.choices) > 1 for row in offers)
-    for position, row in enumerate(offers):
+    spaced = any(len(row.choices) > 1 for row in offered)
+    for position, row in enumerate(offered):
         if spaced and position:
             console.print()
         for index, choice in enumerate(row.choices):
-            line = Text(' ' * GUTTER)
-            # The name and the date are the pursuit's, not each choice's, so they
-            # are said once. Repeating them down a block reads as three pursuits.
-            line.append(row.name.ljust(names) if index == 0 else ' ' * names, style='white')
-            line.append(' ' * GUTTER)
-            line.append(row.due.ljust(dues) if index == 0 else ' ' * dues, style=row.due_style)
-            line.append(' ' * GUTTER)
+            line = Text(gutter)
+            # The standing is the pursuit's, not each choice's, so it is said once.
+            # Repeating it down a block reads as three pursuits.
+            for _, field in shown:
+                text = cell(getattr(row, field), field) if index == 0 else ' ' * widths[field]
+                line.append(text, style=row.due_style if field == 'due' else 'white' if field == 'name' else '')
+                line.append(gutter)
             line.append(fitted(choice, body, style='red' if row.failed else 'green'))
             console.print(line, no_wrap=True, overflow='ellipsis')
+
+    if rest:
+        console.print()
+    for row in rest:
+        line = Text(gutter, style='dim')
+        for position, (_, field) in enumerate(shown):
+            if position:
+                line.append(gutter)
+            line.append(cell(getattr(row, field), field), style=row.due_style if field == 'due' else '')
+        console.print(line, no_wrap=True, overflow='ellipsis')
 
 
 def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
@@ -1366,42 +1464,32 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
         console.print(Text(f'{" " * GUTTER}{event}', style='magenta'), no_wrap=True, overflow='ellipsis')
 
     resolved = selection.get('resolved') or {}
-    # Rendered in the order the draw offered them, never re-sorted here. Pin
-    # membership does not rank, because pinning takes a declared cadence and a
-    # weighted pursuit can be further behind than any scheduled one.
+    # The offered rows keep the order the draw gave them, never re-sorted here.
+    # Every other pursuit follows, so the screen answers for the whole register.
+    rest = offered_order(state, [name for name in state['active'] if name not in names])
     console.print()
-    render_offers([offer(name, state, resolved) for name in names], width)
-
-    standing = standing_line(state, exclude=names)
-    drifted = out_of_band(state)
-    if standing or drifted:
-        console.print()
-    if standing:
-        console.print(Text(f'{" " * GUTTER}{standing}', style='yellow'), no_wrap=True, overflow='ellipsis')
-    if standing and drifted:
-        console.print()
-    render_out_of_band(state)
+    render_offers([offer(name, state, resolved) for name in names], [unoffered(name, state) for name in rest], width)
     return 0
 
 
 def explain_payload(state: dict) -> dict:
     """The full numeric state, the same shape recorded into every journal entry."""
     return {
-        'logs_per_day': round(state['logs_per_day'], 3),
-        'measured_rate': None if state['measured_rate'] is None else round(state['measured_rate'], 3),
         'weights': state['weights'],
-        'shares': {name: round(value, 4) for name, value in state['shares'].items()},
         'intervals': {name: round(value, 2) for name, value in state['intervals'].items() if not math.isinf(value)},
         'days_since': {name: None if value is None else round(value, 2) for name, value in state['days_since'].items()},
         'balance': {name: round(value, 2) for name, value in state['balance'].items()},
-        'checkoff_minutes': state['checkoff_minutes'],
+        'asked': {name: round(value, 2) for name, value in state['asked'].items()},
+        'done': {name: round(value, 2) for name, value in state['done'].items()},
+        # Projected from when each payment leaves the window, which the balance
+        # beside it does not carry.
+        'due': {name: None if value is None else round(value, 2) for name, value in state['due'].items()},
+        'weekly_minutes': state['weekly_minutes'],
         # Recorded beside the balance because a balance is only interpretable
         # against the moment it started counting from, and a later reset moves
         # that moment with nothing else in the entry saying so.
         'zero_points': {name: when.isoformat() for name, when in state['origins'].items()},
-        'warn_bands': {name: round(warn_threshold(state, name), 2) for name in state['active']},
         'suppressed': state['suppressed'],
-        'effective': {name: round(value, 3) for name, value in state['effective'].items()},
         'pool': {name: round(value, 3) for name, value in state['pool'].items()},
         'probability': {name: round(value, 4) for name, value in state['probability'].items()},
         'paused': [name for name, config in state['pursuits'].items() if config.get('paused')],
@@ -1410,36 +1498,31 @@ def explain_payload(state: dict) -> dict:
 
 
 def render_explain(state: dict, selection: dict) -> int:
-    rate = 'assumed' if state['measured_rate'] is None else 'measured'
     console.rule('[cyan]Why these', align='left')
-    console.print(f'{state["logs_per_day"]:.2f} logs/day ({rate}) · draw {selection["draw_id"][:8]}\n')
+    console.print(f'draw {selection["draw_id"][:8]}\n')
 
     table = Table(box=None, pad_edge=False)
     table.add_column('')
     table.add_column('pursuit')
-    for heading in ('wt', 'share', 'every', 'last', 'due', 'urgency', 'pick'):
+    for heading in ('wt', 'goal', 'last', 'due', 'pick'):
         table.add_column(heading, justify='right')
 
     passed = set(state['suppressed'])
-    for name in sorted(state['active'], key=lambda key: -state['effective'][key]):
-        interval = state['intervals'][name]
-        every = '—' if math.isinf(interval) else f'{interval:.1f}d'
-        urgency_value = state['effective'][name] / state['weights'][name] if state['weights'][name] else 0
+    pins = set(selection.get('pinned') or [])
+    for name in offered_order(state, state['active']):
         chosen = name in selection['offered']
         table.add_row(
             '[green]●[/]' if chosen else '',
             f'[yellow]{name}[/]' if name in passed else name,
-            f'{int(state["weights"][name])}',
-            f'{state["shares"][name] * 100:.1f}%',
-            every,
+            f'{state["weights"][name]:g}',
+            goal_text(state['active'][name]),
             format_elapsed(state['days_since'][name]),
             format_due(due_in_days(state, name)),
-            f'{urgency_value:.2f}',
-            f'{state["probability"][name] * 100:.1f}%',
+            'owed' if name in pins else f'{state["probability"][name] * 100:.1f}%',
         )
     console.print(table)
-    console.print(f'\n  pick is the chance of being drawn [bold]first[/]; the draw takes {DRAW_SIZE} without replacement.')
-    console.print('  urgency is what the balance multiplies the weight by · [yellow]yellow[/] is skipped')
+    console.print(f'\n  every owed row is shown, heaviest first · the rest is drawn by weight to fill {DRAW_SIZE} rows')
+    console.print('  pick is the chance of being drawn [bold]first[/] · [yellow]yellow[/] is skipped')
     console.print('  [cyan]doit next --json[/] carries the raw balance every column here is derived from')
     return 0
 
@@ -1639,15 +1722,16 @@ def restated_balance(state: dict, name: str, entry: dict) -> str:
     """
     if name not in state['balance']:
         return ''
-    minutes = state['checkoff_minutes'].get(name)
     own = [*records_by_pursuit(state['records']).get(name, []), entry]
-    origin = state['origins'][name]
-    now = state['now']
-    done = completed_since(own, state['evidence_days'].get(name, []), now, origin, minutes)
-    span = max((now - origin).total_seconds() / 86400.0 - skipped_days(own, now, origin), 0.0)
-    size = state['checkoff_size'][name]
-    owed = balance(span, state['intervals'][name], size, done)
-    days = days_until_due(owed, state['intervals'][name], size)
+    days = standing(
+        own,
+        state['evidence_days'].get(name, []),
+        state['now'],
+        state['origins'][name],
+        state['windows'][name],
+        (state['intervals'][name], state['checkoff_size'][name]),
+        state['weekly_minutes'].get(name),
+    ).due
     return '' if days is None else f' · {format_due(days)}'
 
 
@@ -1682,10 +1766,10 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
             if not matched:
                 error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
                 return 1
-        # Declaring a checkoff size is the only thing that makes a pursuit
-        # measured in time, so the register decides this and nothing here keeps a
-        # list of which kind each one is. `--minutes` is the measurement against it.
-        timed = bool(pursuits[matched].get('checkoff_minutes'))
+        # Declaring weekly minutes is the only thing that makes a pursuit measured
+        # in time, so the register decides this and nothing here keeps a list of
+        # which kind each one is. `--minutes` is the measurement against it.
+        timed = bool(pursuits[matched].get('weekly_minutes'))
         if minutes is not None and not timed:
             raise typer.BadParameter(f'{matched} is counted in completions, so --minutes has nothing to measure')
         if not words and can_prompt():
@@ -1853,9 +1937,8 @@ def skip_span(duration: str | None, interval: float | None) -> int:
     """How many days a pass covers.
 
     One interval when nothing is asked for, so a bare skip still means "not this
-    time" rather than committing to a length nobody chose. A pursuit whose weight
-    implies no interval gets a day, which is the shortest a pass can be and still
-    be one.
+    time" rather than committing to a length nobody chose. A pursuit with no
+    interval gets a day, which is the shortest a pass can be and still be one.
     """
     if duration:
         span = parse_cadence(duration)
@@ -1939,15 +2022,13 @@ def cmd_list(as_json: bool) -> int:
     console.rule('[cyan]Pursuits', align='left')
     ordered = sorted(pursuits.items(), key=lambda row: -row[1].get('weight', 0))
     names = max(len(name) for name in pursuits)
-    schedules = max(len(schedule_text(state, config, name)) for name, config in ordered)
+    goals = max(len(goal_text(config)) for _, config in ordered)
     lasts = max(len(format_elapsed(state['days_since'].get(name))) for name, _ in ordered)
     for name, config in ordered:
-        share = state['shares'].get(name)
         line = Text('  ')
         line.append(name.ljust(names), style='white')
         line.append(f'  {int(config.get("weight", 0)):>3}')
-        line.append(f'  {f"{share * 100:.1f}%" if share else "—":>6}')
-        line.append(f'  {schedule_text(state, config, name).ljust(schedules)}')
+        line.append(f'  {goal_text(config).ljust(goals)}')
         line.append(f'  last {format_elapsed(state["days_since"].get(name)).ljust(lasts)}')
         days = due_in_days(state, name)
         line.append('  ')
@@ -1959,7 +2040,7 @@ def cmd_list(as_json: bool) -> int:
         elif name in state['suppressed']:
             line.append('  skipped', style='yellow')
         console.print(line, no_wrap=True, overflow='ellipsis')
-    console.print('\n  share is the attention each weight implies · [cyan]doit pursuits edit[/]')
+    console.print('\n  weight orders what is owed and draws the rest · [cyan]doit pursuits edit[/]')
     render_orphaned_counters(pursuits)
     return 0
 
@@ -2004,34 +2085,51 @@ def render_orphaned_counters(register: dict) -> None:
 
 
 def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
-    """Every pursuit worth a row, with what it did over the window in its own unit.
+    """Every pursuit worth a row: what its goal asked for over the window, and what got done.
+
+    Both sides run from the later of the window's start and the pursuit's last
+    recorded reset, and a skipped span asks for nothing. A pursuit begun inside
+    the window is not asked for the weeks before it existed.
+
+    A recorded reset and not the balance's zero point, which falls back to one
+    interval before now where the journal holds none. That fallback answers what
+    is owed this moment; as the start of a report it would shrink a 90-day
+    window to a single interval.
 
     A pursuit paused or retired mid-window keeps a row while it still has activity
-    in one, and reports no stated share rather than 0% — which would read as a
-    claim it never made.
+    in one. It asks for nothing rather than for zero, because a paused pursuit
+    makes no claim to have missed.
     """
     now = state['now']
     cutoff = now - dt.timedelta(days=days)
-    sizes = declared_minutes(pursuits)
+    weekly = declared_minutes(pursuits)
     mine = records_by_pursuit(state['records'])
+    reset_at = zero_resets(state['records'])
     counts = load_counts(journal_dir())
 
     rows = []
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
         own = mine.get(name, [])
         seen = state['evidence_days'].get(name, [])
-        amount = completed_since(own, seen, now, cutoff, sizes.get(name))
-        logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, cutoff))
+        start = max(cutoff, reset_at.get(name, cutoff))
+        done = completed_since(own, seen, now, start, weekly.get(name))
+        logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, start))
         passes = sum(1 for record in own if record.get('event') == journal.Event.SKIP and in_window(record, cutoff))
-        if name not in state['active'] and not amount and not passes:
+        if name not in state['active'] and not done and not passes:
             continue
+        asked = None
+        if name in state['active']:
+            span = max((now - start).total_seconds() / 86400.0 - skipped_days(own, now, start), 0.0)
+            asked = balance(span, state['intervals'][name], state['checkoff_size'][name], 0.0)
         rows.append(
             {
                 'pursuit': name,
-                'unit': 'minutes' if name in sizes else 'checkoffs',
-                'checkoff_minutes': sizes.get(name),
+                'unit': 'minutes' if name in weekly else 'checkoffs',
+                'goal': goal_text(pursuits[name]),
                 'weight': state['weights'].get(name),
-                'amount': round(amount, 1),
+                'since': start.isoformat(),
+                'asked': None if asked is None else round(asked, 1),
+                'done': round(done, 1),
                 'logs': logs,
                 'balance': None if name not in state['balance'] else round(state['balance'][name], 1),
                 'due_days': None if (due := due_in_days(state, name)) is None else round(due, 1),
@@ -2039,19 +2137,12 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
                 'skips': passes,
             }
         )
-
-    # Both shares are taken over the same population. Reading `said` off the
-    # register-wide weights while `did` runs inside one unit compares two
-    # denominators: a register lived exactly to plan then flags a pursuit alone
-    # in its unit at 100%, because it is the whole of its own half.
-    for unit in ('minutes', 'checkoffs'):
-        group = [row for row in rows if row['unit'] == unit]
-        did_total = sum(row['amount'] for row in group)
-        said_total = sum(row['weight'] or 0.0 for row in group)
-        for row in group:
-            row['realized_share'] = round(row['amount'] / did_total * 100, 1) if did_total else 0.0
-            row['stated_share'] = round((row['weight'] or 0.0) / said_total * 100, 1) if said_total and row['weight'] else None
     return rows
+
+
+def quantity_text(amount: float, unit: str) -> str:
+    """An amount in a pursuit's own unit: hours and minutes, or a count of checkoffs."""
+    return minutes_text(amount) if unit == 'minutes' else f'{round(amount, 1):g}'
 
 
 def in_window(record: dict, cutoff: dt.datetime) -> bool:
@@ -2065,28 +2156,23 @@ def in_window(record: dict, cutoff: dt.datetime) -> bool:
     return when is not None and when >= cutoff
 
 
-def render_drift_group(rows: list[dict], unit: str, heading: str, amount_column: str) -> None:
-    """One unit's table, with the share each pursuit took of that unit alone."""
-    group = [row for row in rows if row['unit'] == unit]
-    if not group:
-        return
-    console.print(f'\n[cyan]{heading}[/]')
+def render_drift(rows: list[dict]) -> None:
+    """One row per pursuit, asked and done side by side in the pursuit's own unit.
+
+    Each row is read against its own goal and never against another row, so
+    minutes and counts can share one table without a total that adds them.
+    """
     table = Table(box=None, pad_edge=False)
     table.add_column('pursuit')
-    for column in ('said', 'did', amount_column, 'due', 'offered', 'passed'):
+    for column in ('goal', 'since', 'asked', 'done', 'due', 'offered', 'passed'):
         table.add_column(column, justify='right')
-    for row in group:
-        stated = row['stated_share']
-        did = f'{row["realized_share"]:.0f}%'
-        # A paused pursuit has no claim to have missed, so its share is reported
-        # without a verdict rather than colored against one it never stated.
-        if stated is not None:
-            did = f'[green]{did}[/]' if abs(row['realized_share'] - stated) < 10 else f'[yellow]{did}[/]'
+    for row in rows:
         table.add_row(
             row['pursuit'],
-            '—' if stated is None else f'{stated:.0f}%',
-            did,
-            f'{row["amount"]:.0f}' if unit == 'minutes' else f'{row["amount"]:.1f}',
+            row['goal'],
+            f'{dt.datetime.fromisoformat(row["since"]):%d %b}',
+            '—' if row['asked'] is None else quantity_text(row['asked'], row['unit']),
+            quantity_text(row['done'], row['unit']),
             format_due(row['due_days']),
             str(row['offered']),
             str(row['skips']),
@@ -2095,19 +2181,13 @@ def render_drift_group(rows: list[dict], unit: str, heading: str, amount_column:
 
 
 def cmd_drift(days: int, as_json: bool) -> int:
-    """Stated weight against what actually happened, in each pursuit's own unit.
+    """What each goal asked for over the window against what got done.
 
-    The report the whole thing is for. It never adjusts a weight — revealed and
-    stated preference are different signals and blending them would destroy the
-    only honest comparison available. Offered counts sit next to realized share
-    because they separate the two failures that look identical from the outside: a
-    pursuit that never comes up, and one that comes up and gets ignored.
-
-    Minutes and completions do not add, so there is no register-wide `did` and
-    none is invented. A pursuit measured in time is compared against the other
-    timed ones and a counted one against the other counted ones, because that is
-    the only denominator either of them has. `said` spans both, since a weight is
-    a share of attention rather than of any unit.
+    The report the whole thing is for. It never adjusts a goal — what you said
+    and what you did are different signals, and blending them would destroy the
+    only honest comparison available. Offered counts sit beside them because they
+    separate the two failures that look identical from the outside: a pursuit
+    that never comes up, and one that comes up and gets ignored.
     """
     pursuits = load_pursuits()
     if not pursuits:
@@ -2122,14 +2202,11 @@ def cmd_drift(days: int, as_json: bool) -> int:
         return 0
 
     console.rule(f'[cyan]Drift · last {days} days', align='left')
-    if not any(row['amount'] for row in rows):
+    if not any(row['done'] for row in rows):
         console.print('Nothing recorded in the window yet — drift needs history before it can say anything.\n')
         return 0
 
-    render_drift_group(rows, 'minutes', 'Measured in time', 'min')
-    render_drift_group(rows, 'checkoffs', 'Counted in completions', 'done')
-    console.print('\n  said and did are both shares of their own unit · the two units do not add')
-    console.print('  due is where each stands right now · weights are never auto-adjusted')
+    render_drift(rows)
     if days > evidence.OCCURRENCE_WINDOW_DAYS:
         console.print(f'  [yellow]Apps keep {evidence.OCCURRENCE_WINDOW_DAYS} days of dates, so days before that are typed logs alone.[/]')
     console.print()
@@ -2137,7 +2214,7 @@ def cmd_drift(days: int, as_json: bool) -> int:
 
 
 def cmd_dormant() -> int:
-    """Pursuits gone quiet for far longer than their own weight implies."""
+    """Pursuits gone quiet for more than three of their own intervals."""
     pursuits = load_pursuits()
     state = build_state(pursuits, dt.datetime.now().astimezone())
     stale = []
@@ -2152,10 +2229,10 @@ def cmd_dormant() -> int:
     if not stale:
         console.print('Nothing is running cold.\n')
         return 0
-    for name, elapsed, interval in sorted(stale, key=lambda row: -(row[1] or 1e9)):
+    for name, elapsed, _ in sorted(stale, key=lambda row: -(row[1] or 1e9)):
         line = Text('  ')
         line.append(name, style='white')
-        line.append(f'  {format_elapsed(elapsed)} · implies every {interval:.0f}d')
+        line.append(f'  {format_elapsed(elapsed)} · goal {goal_text(state["active"][name])}')
         console.print(line)
     console.print('\n  Cold measures the gap since the last one; the balance measures what is owed.\n')
     return 0
@@ -2300,14 +2377,14 @@ def skip_command(
     run(lambda: cmd_skip(pursuit, duration))
 
 
-app = typer.Typer(name='pursuits', no_args_is_help=True, help='The weights the draw runs on.')
+app = typer.Typer(name='pursuits', no_args_is_help=True, help='What `doit next` draws from: each pursuit, its goal and its weight.')
 
 
 @app.command('list')
 def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
-    """Every pursuit, its weight and implied share."""
+    """Every pursuit, its weight, goal and when it is next due."""
     run(lambda: cmd_list(as_json))
 
 
@@ -2316,13 +2393,13 @@ def drift_command(
     days: Annotated[int, typer.Option('--days', help='How far back to measure.')] = 90,
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
-    """Stated weight against what you actually did."""
+    """What each goal asked for against what you did."""
     run(lambda: cmd_drift(days, as_json))
 
 
 @app.command('dormant')
 def dormant_command() -> None:
-    """Pursuits gone colder than their weight implies."""
+    """Pursuits gone quiet for more than three of their own intervals."""
     run(cmd_dormant)
 
 

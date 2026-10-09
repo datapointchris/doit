@@ -2,10 +2,9 @@
 
 Scheduling comes in two halves and doit uses both. :mod:`doit.cadence` is the
 deterministic one: a declared interval, a derived due date, an item that is due
-or it isn't — what review and labs run on. :mod:`doit.allocate` is the weighted
-one: a stated share of attention, an interval implied by that share, and a draw
-rather than a ranking — what the draw runs on. A pursuit can use both, and does:
-an explicit cadence pins it when overdue instead of leaving it to chance.
+or it isn't — what review and labs run on. :mod:`doit.allocate` is what
+`doit next` runs on: a running balance against a declared pace, and a weight
+that orders what is owed and draws what fills the rest of the screen.
 """
 
 from importlib.metadata import PackageNotFoundError

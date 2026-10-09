@@ -3,6 +3,8 @@ by review and labs."""
 
 import datetime as dt
 
+import pytest
+
 from doit import cadence
 
 
@@ -22,9 +24,9 @@ def test_parse_cadence_empty_is_zero():
     assert cadence.parse_cadence('   ') == 0
 
 
-def test_parse_cadence_unknown_unit_defaults_to_days():
-    # get(unit, 1): an unrecognized unit multiplies by 1 (days) rather than crash.
-    assert cadence.parse_cadence('3x') == 3
+@pytest.mark.parametrize('token', ['3x', '3.5d', '1w2d', 'd', '-2d', '2 w'])
+def test_a_token_that_is_not_one_count_and_one_unit_is_zero(token):
+    assert cadence.parse_cadence(token) == 0
 
 
 def test_overdue_days_never_done_is_none():

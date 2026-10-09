@@ -9,7 +9,7 @@ next, what is due to revisit, what to practice, and the reference for actually d
 ## What it does
 
 ```bash
-doit next             # what to do now, drawn from weights you declared
+doit next             # what to do now, from the goals and weights you declared
 doit dashboard        # every lane, unranked — what is outstanding across everything
 doit today            # what today has had, and what it still wants
 doit review due       # what is due to revisit, on a cadence
@@ -20,7 +20,7 @@ doit tools show <n>   # what one tool is, and what to type
 doit kit unused       # what you own, can run, and never reach for
 doit kit remind       # resurface one of them, a lens at a time
 doit log              # record what actually happened
-doit forecast run     # what the weights would have you do over the next month
+doit forecast run     # what the register would have you do over the next month
 doit forecast trend   # what earlier forecasts predicted, against what got logged
 ```
 
@@ -32,7 +32,8 @@ time and never hit a cryptic error.
 `doit next` and `doit dashboard` are separate systems, and they meet only on the dashboard.
 
 - **`doit next`** ranks across everything, because you declared the ordering as a weight per
-  pursuit. It hands you five things and expects one back through `doit log`.
+  pursuit. It shows everything behind its goal and fills the rest of five rows by weight, and
+  expects one back through `doit log`.
 - **`doit dashboard`** ranks across nothing. Each lane is ordered by whichever app owns it, three
   rows deep, and no lane is comparable to the one beside it.
 - **`doit today`** admits only what a day can finish. An outstanding count can only climb, so a
@@ -59,29 +60,35 @@ becomes the local ISO date, so a backend filters its own rows rather than shippi
 filtered here. Nothing is required. With the block absent, `doit today` prints the records above
 and says nothing about the rest.
 
-## A pursuit is measured in minutes or in occurrences
+## A pursuit declares its goal, and its weight only orders
 
-A pursuit that declares `checkoff_minutes:` is measured in time and one that does not is measured in
-completions. That declaration is the whole of the distinction: `doit log` asks a timed pursuit how
-long it took and never asks a counted one.
+Every pursuit declares one pace. `cadence: 3d` asks for one occurrence every three days, in whole
+days only, so twice a week is `3d` or `4d`. `weekly_minutes: 240` asks for four hours a week and
+makes the pursuit measured in time: `doit log` asks a timed pursuit how long it took and never asks
+a counted one. `weekly_minutes:` is what a week asks for; `doit log --minutes` is how long one
+sitting took.
 
-The two are different quantities and have different names. `checkoff_minutes:` is how much of a
-pursuit counts as one checkoff; `doit log --minutes` is how long one sitting actually took, measured
-against it.
+A weight never moves a pace. It orders what is owed, heaviest first, and when less than a screen is
+owed it draws the rest. So whether a pursuit is getting enough is answered by its own goal alone,
+whatever the rest of the register weighs or however much else got logged that week.
 
-Standing is one running balance in whichever unit applies — what the weight-derived schedule has
-asked for since the pursuit's zero point, less what has been done. Nothing is capped in either
-direction, so three chores in one evening count as three, twenty minutes of reading pays twenty
-minutes off a longer checkoff, and a fortnight away is owed in full. A balance further from current
-than two weeks of that pursuit's own schedule is reported as a weight that does not match how you
-live — nothing in the model bends to absorb such a drift, so the weight is what it is evidence
-about. The band never falls below one whole checkoff, because a pursuit that is simply due is not a
-pursuit whose weight is wrong.
+Standing is one balance in whichever unit applies: what the goal asked for over the last four
+weeks, less what was done in them. The four weeks slide. Standing is a reading of how the last
+month went, not an account kept to the day. Three chores in one evening count as three, and twenty
+minutes of reading pays twenty minutes off a week's goal. A burst carries a pursuit until it is four
+weeks old, and four weeks away is owed in full. A cadence longer than a fortnight looks back two of
+its own intervals instead. A pursuit paid through an app looks back no further than the app
+remembers.
+
+The window opens no earlier than the pursuit's zero point. That is written the first time doit
+reads a pursuit, one interval back, so a new pursuit opens one checkoff owed and goes overdue as
+time passes.
 
 That balance is never the number on screen. Every view states standing as a date — `3d overdue`,
-`due today`, `due in 2w` — and a weight far off how you live as `behind goal by 3w`. The two differ
-by an interval, and `doit.allocate` holds both conversions and says why each is the one its caller
-wants. `doit next --json` carries the raw balance.
+`due today`, `due in 2w` — and `doit.allocate` holds the conversion. The date is projected: a
+pursuit paid ahead comes due the day enough of that payment leaves the window. `doit next --json`
+carries the raw balance, and `doit pursuits drift` sets what each goal asked for beside what got
+done.
 
 A pursuit whose resolver matches several rows offers the first three, stacked under its name. One
 choice is a decision the register made; several are a choice you make, so `doit log` asks which one
@@ -94,14 +101,20 @@ moves the zero point to now, which is what to reach for after a long pause or a 
 with no name it moves every one, after confirming. The journal is append-only either way — both are
 markers written into it, never a rewrite of what happened.
 
-The draw always offers a full screen. What is owed fills it first and what is current fills the
-rest, so a register with nothing outstanding still says what there is rather than going blank — and
-a pursuit you are a whole checkoff ahead on stays out of it.
+Every pursuit owing a whole checkoff is shown, however many there are. When fewer than five are
+owed, the rest of the screen is drawn by weight from what is current, so a register with nothing
+outstanding still says what there is rather than going blank — and a pursuit you are a whole
+checkoff ahead on stays out of it.
 
-The offered list is one list ordered by how far past due each row is, pins among it rather than
-above it. Pinning takes a declared cadence, so pin membership says a pursuit has a schedule and not
-that it is the most urgent thing on offer. That one order is what the screen shows, what the
-forecast walks top-down, and what `rank_offered` counts in a journal entry.
+The offered list is one list: what is owed first, heaviest first and then latest first, then what
+was drawn, soonest due first. That one order is what the screen shows, what the forecast walks
+top-down, and what `rank_offered` counts in a journal entry.
+
+`doit next` is one table with a row for every active pursuit. Each row states the weight, the
+goal, what was done of what the goal asked over the last four weeks, and when it next comes due.
+The offered rows come first and carry what to do. Every other pursuit follows, dimmed, with its
+standing and nothing to do. A skipped one says `skipped` in place of a date. A narrow pane gives up
+the weight, then the goal, then the four-week tally, and keeps the name and the date.
 
 ## Sources are configuration
 
