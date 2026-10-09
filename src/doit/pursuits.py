@@ -1194,11 +1194,17 @@ def tally_text(state: dict, name: str) -> str:
     The span is said wherever it is not the standard four weeks, which the column
     heading names: a pursuit zeroed eighteen days ago has only been asked for
     eighteen, and a cadence longer than a fortnight looks back two intervals.
+
+    A counted pursuit is asked for the checkoffs that have come due, a whole
+    number, so the count agrees with the date beside it.
     """
     if name not in state['asked']:
         return ''
-    unit = 'minutes' if state['weekly_minutes'].get(name) else 'checkoffs'
-    text = f'{quantity_text(state["done"][name], unit)} of {quantity_text(state["asked"][name], unit)}'
+    done, asked = state['done'][name], state['asked'][name]
+    if state['weekly_minutes'].get(name):
+        text = f'{minutes_text(done)} of {minutes_text(asked)}'
+    else:
+        text = f'{round(done)} of {math.floor(asked + 1e-9)}'
     days = round((state['now'] - state['origins'][name]).total_seconds() / 86400.0)
     return text if days == round(STANDING_WINDOW_DAYS) else f'{text} in {days}d'
 
@@ -1305,7 +1311,8 @@ def render_offers(offered: list[Offer], rest: list[Offer], width: int) -> None:
         return text.rjust(widths[field]) if field == 'weight' else text.ljust(widths[field])
 
     gutter = ' ' * GUTTER
-    console.print(Text(gutter + gutter.join(cell(title, field) for title, field in shown), style='bold'), no_wrap=True, overflow='ellipsis')
+    heading = gutter + gutter.join(cell(title, field) for title, field in shown) + gutter + 'item'
+    console.print(Text(heading, style='bold'), no_wrap=True, overflow='ellipsis')
 
     # A pursuit offering several choices is a block, and blocks printed flush run
     # the last choice of one into the name of the next. The gap goes in whenever

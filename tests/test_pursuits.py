@@ -944,7 +944,7 @@ def test_a_wide_pane_heads_every_column(unclipped, capsys):
     )
     pursuits.render_offers([row], [], 140)
 
-    assert capsys.readouterr().out.splitlines()[0].split() == ['pursuit', 'wt', 'goal', 'last', '4w', 'due']
+    assert capsys.readouterr().out.splitlines()[0].split() == ['pursuit', 'wt', 'goal', 'last', '4w', 'due', 'item']
 
 
 def test_the_name_and_date_are_said_once_per_pursuit(unclipped, capsys):
@@ -1028,6 +1028,16 @@ def test_a_tally_over_less_than_four_weeks_says_how_long(tmp_path, monkeypatch):
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 10.0), zeroed('read', 40.0)])
 
     assert pursuits.tally_text(state, 'chore') == '0 of 10 in 10d'
+
+
+def test_a_counted_tally_asks_only_for_checkoffs_that_came_due(tmp_path, monkeypatch):
+    """Seventeen days of a weekly pursuit is two checkoffs due, the first ten
+    days ago, which is the date the row states beside it."""
+    weekly = BALANCE_REGISTER.replace('cadence: 1d', 'cadence: 7d')
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 17.0), zeroed('read', 40.0)], register=weekly)
+
+    assert pursuits.tally_text(state, 'chore') == '0 of 2 in 17d'
+    assert pursuits.format_due(pursuits.due_in_days(state, 'chore')) == '10d overdue'
 
 
 def test_a_failed_row_carries_what_the_backend_said_and_nothing_else():
