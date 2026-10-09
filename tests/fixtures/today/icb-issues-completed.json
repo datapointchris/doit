@@ -1,0 +1,32 @@
+[
+  {
+    "id": "01a0c53f-e5df-7308-bf37-45e17aee0101",
+    "number": 889,
+    "title": "the log stream has had no client since the old app was removed",
+    "type": "bug",
+    "status": "completed",
+    "repo": "ichrisbirch",
+    "closed_ts": "2026-07-24T14:02:11.000000Z",
+    "updated_ts": "2026-07-24T14:02:11.000000Z"
+  },
+  {
+    "id": "01a0c53f-e5df-7308-bf37-45e17aee0102",
+    "number": 861,
+    "title": "toolchains asks PATH for rustc",
+    "type": "task",
+    "status": "completed",
+    "repo": "toolchains",
+    "closed_ts": "2026-07-24T09:15:00.000000Z",
+    "updated_ts": "2026-07-24T09:15:00.000000Z"
+  },
+  {
+    "id": "01a0c53f-e5df-7308-bf37-45e17aee0103",
+    "number": 840,
+    "title": "a runner keeps the previous job's environment",
+    "type": "bug",
+    "status": "completed",
+    "repo": "homelab",
+    "closed_ts": "2026-07-23T18:40:00.000000Z",
+    "updated_ts": "2026-07-24T11:00:00.000000Z"
+  }
+]

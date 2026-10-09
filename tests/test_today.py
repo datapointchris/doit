@@ -164,6 +164,17 @@ def test_project_items_are_listed_by_when_they_were_completed_not_touched():
     ]
 
 
+def test_issues_are_listed_by_when_they_closed_not_when_they_were_touched():
+    """The third row closed yesterday and was edited today, so `updated_ts` would list three."""
+    [lane] = adapter_for('icb-issues')(ok('icb-issues', fixture('icb-issues-completed')))
+
+    assert lane.name == 'issues'
+    assert [cell.text for cell in lane.grid] == [
+        'toolchains asks PATH for rustc',
+        'the log stream has had no client since the old app was removed',
+    ]
+
+
 def test_a_completion_carries_the_hour_it_happened_in_local_time():
     [lane] = adapter_for('icb-projects')(ok('icb-projects', fixture('icb-projects-completed')))
 

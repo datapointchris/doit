@@ -211,6 +211,7 @@ def flat_adapter(source_id: str, name: str, title: str, label_field: str, date_f
 FLAT_COMPLETIONS = (
     ('tasks', 'TASKS', 'icb-tasks', 'name', 'complete_date', 'icb tasks list --status completed'),
     ('projects', 'PROJECTS', 'icb-projects', 'title', 'completed_at', 'icb projects items list --status completed'),
+    ('issues', 'ISSUES', 'icb-issues', 'title', 'closed_ts', 'icb issues list --status completed'),
     ('articles', 'ARTICLES', 'icb-articles', 'title', 'last_read_date', 'icb articles list'),
     ('books', 'BOOKS', 'icb-books', 'title', 'read_finish_date', 'icb books list'),
     ('learning', 'LEARNING', 'learning-completed', 'title', 'completed_at', 'learning completed list --all'),
