@@ -35,14 +35,28 @@ from rich.text import Text
 
 from doit.paths import library_dir
 from doit.paths import library_source
+from doit.paths import machine_name
 from doit.paths import xdg_state_home
 from doit.render import console
 from doit.render import error_console
 
 CONTENT_DIR = Path(os.environ.get('DOIT_CONTENT_DIR') or library_dir())
 
-# State, not config: this is one machine's record of its own last pull.
-SYNC_LOG = Path(os.environ.get('DOIT_CONTENT_SYNC_LOG') or xdg_state_home() / 'doit' / 'content-sync.log')
+
+def default_sync_log() -> Path:
+    """Where this machine records its own last pull, named for the machine.
+
+    State, not config, and the state directory is shared between machines by a
+    sync layer that cannot merge. One shared name had every machine writing the
+    same file, so the sync layer kept one machine's write and set the others
+    aside as conflict copies nobody reads. The lock beside it derives from this
+    name, so it is per machine too: one machine's pull in flight no longer
+    blocks every other machine's.
+    """
+    return xdg_state_home() / 'doit' / f'content-sync-{machine_name()}.log'
+
+
+SYNC_LOG = Path(os.environ.get('DOIT_CONTENT_SYNC_LOG') or default_sync_log())
 SYNC_LOCK = SYNC_LOG.with_name(SYNC_LOG.name + '.lock')
 
 # Long enough that no real pull is mistaken for a dead one, short enough that a
