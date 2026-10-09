@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from doit import allocate
 from doit import dashboard
 from doit import evidence
 from doit import journal
@@ -451,6 +452,7 @@ def pursuit_state(balances, touched=()):
         'balance': dict(balances),
         'checkoff_size': dict.fromkeys(balances, 1.0),
         'intervals': dict.fromkeys(balances, 3.0),
+        'due': {name: allocate.days_until_due(owed, 3.0, 1.0) for name, owed in balances.items()},
         'evidence_days': evidence.occurrences({'pursuits': {name: {'dates': [TODAY.isoformat()]} for name in touched}}),
         'observed': {},
         'records': [],
@@ -531,6 +533,7 @@ def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
     """
     state = pursuit_state(balances={'chore': 1.0, 'undated': 1.0})
     del state['intervals']['undated']
+    state['due']['undated'] = None
 
     lane = today.pursuits_due(state)
 

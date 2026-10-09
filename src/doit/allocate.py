@@ -7,10 +7,10 @@ the half `doit next` runs on, and it has two jobs that never touch.
 **Standing is a running balance, in the pursuit's own unit.** Every pursuit
 declares its pace — one occurrence every so many days, or so many minutes a
 week — and the schedule asks for one checkoff per interval: one occurrence, or
-one week's minutes. What has been asked for less what has been done is the
-balance. The pace is declared rather than derived, so nothing else in the
-register can move it: a pursuit's goal says the same thing whatever the other
-pursuits weigh and however much got logged last week.
+one week's minutes. What has been asked for over a recent window less what was
+done in it is the balance. The pace is declared rather than derived, so nothing
+else in the register can move it: a pursuit's goal says the same thing whatever
+the other pursuits weigh and however much got logged last week.
 
 **Weight decides order and nothing else.** Whatever is owed is shown, heaviest
 first. Whatever room is left on the screen is drawn, not ranked: a ranked list
@@ -63,6 +63,42 @@ def days_until_due(owed: float, interval: float, size: float) -> float | None:
     if interval <= 0 or math.isinf(interval) or size <= 0:
         return None
     return interval - owed / size * interval
+
+
+def projected_days_until_due(
+    owed: float, interval: float, size: float, fills_in: float, departures: Iterable[tuple[float, float]]
+) -> float | None:
+    """Days until one checkoff is owed, for a balance kept over a sliding window.
+
+    Standing counts only what the window holds, so a balance grows two ways. Until
+    the window is full, the schedule asks for more every day, at one checkoff per
+    interval. Once it is full, what is asked for stays level and the balance grows
+    only as old payments leave the window. ``fills_in`` is the days until the window
+    is full, and ``departures`` is each payment as ``(days until it leaves, amount)``.
+
+    Projected rather than read off the formula. A pursuit paid well ahead by a burst
+    a fortnight ago comes due the day that burst leaves the window, which no
+    rescaling of today's balance can say.
+
+    Overdue keeps :func:`days_until_due`, which says how late: a whole checkoff
+    owed is due now, and each one past it is one interval later. A window whose
+    payments all leave without the balance reaching a checkoff — possible only
+    where skips took most of it out — is never due, and answers None.
+    """
+    if interval <= 0 or math.isinf(interval) or size <= 0:
+        return None
+    if owed >= size:
+        return days_until_due(owed, interval, size)
+    rate = size / interval
+    reach = (size - owed) / rate
+    if reach <= fills_in:
+        return reach
+    owed += rate * fills_in
+    for days, amount in sorted(departures):
+        owed += amount
+        if owed >= size:
+            return max(days, fills_in)
+    return None
 
 
 def candidates(weights: dict[str, float], ratios: dict[str, float], suppressed: Iterable[str]) -> dict[str, float]:

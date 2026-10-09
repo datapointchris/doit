@@ -79,6 +79,34 @@ def test_a_pursuit_with_no_schedule_is_due_at_no_time():
     assert allocate.days_until_due(1.0, 3.0, 0.0) is None
 
 
+def test_a_window_still_filling_comes_due_at_the_pace():
+    # Nothing has to leave a window that is not full yet; the schedule asks for
+    # more every day, exactly as an unbounded balance would.
+    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=28.0, departures=[]) == 7.0
+    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=28.0, departures=[]) == allocate.days_until_due(0.0, 7.0, 1.0)
+
+
+def test_a_full_window_comes_due_when_enough_payment_leaves_it():
+    # What is asked for is level once the window is full, so only a payment
+    # leaving can bring a checkoff due.
+    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=0.0, departures=[(13.0, 1.0), (6.0, 1.0)]) == 6.0
+    assert allocate.projected_days_until_due(0.5, 7.0, 1.0, fills_in=0.0, departures=[(3.0, 0.25), (9.0, 0.5)]) == 9.0
+
+
+def test_a_window_that_fills_before_the_pace_reaches_a_checkoff_waits_for_a_departure():
+    # Three days of growth is 3/7 of a checkoff, and the rest arrives when the
+    # payment leaves on day ten.
+    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=3.0, departures=[(10.0, 1.0)]) == 10.0
+
+
+def test_an_overdue_window_says_how_late_rather_than_projecting():
+    assert allocate.projected_days_until_due(2.0, 7.0, 1.0, fills_in=0.0, departures=[(1.0, 1.0)]) == -7.0
+
+
+def test_a_window_whose_payments_all_leave_short_of_a_checkoff_is_never_due():
+    assert allocate.projected_days_until_due(0.2, 7.0, 1.0, fills_in=0.0, departures=[(4.0, 0.3)]) is None
+
+
 def test_the_pool_holds_nothing_owed():
     # Anything a whole checkoff behind is shown outright, so sampling it as well
     # would spend a row of the screen on it twice.

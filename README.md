@@ -72,16 +72,23 @@ A weight never moves a pace. It orders what is owed, heaviest first, and when le
 owed it draws the rest. So whether a pursuit is getting enough is answered by its own goal alone,
 whatever the rest of the register weighs or however much else got logged that week.
 
-Standing is one running balance in whichever unit applies — what the goal has asked for since the
-pursuit's zero point, less what has been done. Nothing is capped in either direction, so three
-chores in one evening count as three, twenty minutes of reading pays twenty minutes off a week's
-goal, and a fortnight away is owed in full. The zero point is written the first time doit reads a
-pursuit, one interval back, so a new pursuit opens one checkoff owed and goes overdue as time
-passes.
+Standing is one balance in whichever unit applies: what the goal asked for over the last four
+weeks, less what was done in them. The four weeks slide. Standing is a reading of how the last
+month went, not an account kept to the day. Three chores in one evening count as three, and twenty
+minutes of reading pays twenty minutes off a week's goal. A burst carries a pursuit until it is four
+weeks old, and four weeks away is owed in full. A cadence longer than a fortnight looks back two of
+its own intervals instead. A pursuit paid through an app looks back no further than the app
+remembers.
+
+The window opens no earlier than the pursuit's zero point. That is written the first time doit
+reads a pursuit, one interval back, so a new pursuit opens one checkoff owed and goes overdue as
+time passes.
 
 That balance is never the number on screen. Every view states standing as a date — `3d overdue`,
-`due today`, `due in 2w` — and `doit.allocate` holds the conversion. `doit next --json` carries the
-raw balance, and `doit pursuits drift` sets what each goal asked for beside what got done.
+`due today`, `due in 2w` — and `doit.allocate` holds the conversion. The date is projected: a
+pursuit paid ahead comes due the day enough of that payment leaves the window. `doit next --json`
+carries the raw balance, and `doit pursuits drift` sets what each goal asked for beside what got
+done.
 
 A pursuit whose resolver matches several rows offers the first three, stacked under its name. One
 choice is a decision the register made; several are a choice you make, so `doit log` asks which one

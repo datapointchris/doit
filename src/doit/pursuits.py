@@ -14,14 +14,15 @@ others: what is owed is shown heaviest first, and when less than a screen is
 owed the rest is drawn by weight. A weight never moves a pace, so whether a
 pursuit is getting enough is answered by its own two numbers alone.
 
-Standing is one running balance in the pursuit's own unit: what its pace has
-asked for since its zero point, less what has been done. Positive is owed.
+Standing is one balance in the pursuit's own unit: what its pace asked for over
+the last four weeks, less what was done in them. The window opens no earlier
+than the pursuit's zero point. Positive is owed.
 
 That balance is never the number on screen. Two units on one screen cannot be read
 against each other, and a signed number carries its whole meaning in the one
 character a reader skips. Every view states standing as a date instead, built by
-`allocate.days_until_due`. The raw balance stays in `--json` and in every journal
-entry.
+`allocate.projected_days_until_due`. The raw balance stays in `--json` and in
+every journal entry.
 
 Three files, kept apart like the review register:
   - pursuits.yml    declarative config you hand-edit; only ever read here. Under
@@ -67,9 +68,9 @@ from doit import journal
 from doit.allocate import WEEK_DAYS
 from doit.allocate import balance
 from doit.allocate import candidates
-from doit.allocate import days_until_due
 from doit.allocate import draw
 from doit.allocate import first_draw_probabilities
+from doit.allocate import projected_days_until_due
 from doit.cadence import parse_cadence
 from doit.journal import bump_counts
 from doit.journal import checkoff_equivalent
@@ -114,6 +115,12 @@ DRAW_SIZE = 5
 # rest. It is a glance rather than a report, and a line that wraps is one nobody
 # reads to the end.
 STANDING_NAMES = 4
+
+# How far back standing looks. Four weeks holds a weekly goal four times over,
+# and is short enough that a burst or a lapse a season ago does not answer for
+# this week. Exact to the day is not the aim: a balance over a sliding window is
+# a reading of how the last month went, and it moves as the month moves.
+STANDING_WINDOW_DAYS = 28.0
 
 # A counted pursuit's pace is whole days and nothing else. A week or a month
 # reads naturally and invites `1w2d` and `3.5d`, which no reader checks twice.
@@ -185,13 +192,15 @@ TEMPLATE = """\
 #   resolve      optional command answering "specifically what?" — see below
 #   on_log       optional command run after logging, e.g. completing the task
 #
-# Standing is one running balance per pursuit: what its pace has asked for since
-# its zero point, less what has been done — occurrences for a cadence, minutes
-# for weekly_minutes. It is shown as the one answer both units give: when this
-# next comes due. Partial time always rolls over, so a 20-minute sitting against
-# 45 minutes a week pays 20 minutes off. A pursuit's zero point is written the
-# first time doit reads it; `doit pursuits reset <pursuit>` moves it to now,
-# which is what to do after a long pause, and with no name it moves every one.
+# Standing is one balance per pursuit: what its pace asked for over the last four
+# weeks, less what was done in them — occurrences for a cadence, minutes for
+# weekly_minutes. It is shown as the one answer both units give: when this next
+# comes due. Partial time always rolls over, so a 20-minute sitting against 45
+# minutes a week pays 20 minutes off, and a burst carries a pursuit until it is
+# four weeks old. The window opens no earlier than the pursuit's zero point,
+# written the first time doit reads it; `doit pursuits reset <pursuit>` moves it
+# to now, which is what to do after a long pause, and with no name it moves
+# every one.
 #
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
@@ -434,8 +443,23 @@ def record_first_sightings(active: dict, records: list[dict], intervals: dict[st
     return written
 
 
-def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, window: float | None) -> dt.datetime:
-    """When a pursuit's balance starts counting.
+def standing_window(config: dict, interval: float) -> float:
+    """How many days back a pursuit's standing looks.
+
+    :data:`STANDING_WINDOW_DAYS`, or two of the pursuit's own intervals where that
+    is longer, so the window always holds more than one checkoff. A pursuit paid
+    through an app is held to what that app remembers: billing over a span the
+    credit side cannot answer for is a debt that grows by construction, on the
+    pursuit most reliably done.
+    """
+    window = STANDING_WINDOW_DAYS if math.isinf(interval) else max(STANDING_WINDOW_DAYS, 2.0 * interval)
+    if evidence.answerable(config):
+        window = min(window, float(evidence.OCCURRENCE_WINDOW_DAYS))
+    return window
+
+
+def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, window: float) -> dt.datetime:
+    """When a pursuit's balance starts counting: its last reset, or ``window`` days ago if later.
 
     A reset sets it, either `doit pursuits reset` or the one
     :func:`record_first_sightings` writes. Records handed in without one — a
@@ -447,20 +471,15 @@ def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, win
     log drags the origin behind itself, so the schedule bills for the whole span
     it opened up and the entry credits one checkoff against it. Recording that
     you did the thing then increases what you owe.
-
-    ``window`` bounds how far back the demand side may run for a pursuit whose
-    payments come from a source that only remembers so far. Billing over a span
-    the credit side cannot answer for is a debt that grows by construction, on
-    the pursuit most reliably done.
     """
     opened = reset if reset is not None else now - dt.timedelta(days=0.0 if math.isinf(interval) else interval)
-    if window is None:
-        return opened
     return max(opened, now - dt.timedelta(days=window))
 
 
-def completed_since(records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None) -> float:
-    """Everything done since ``origin``, in the pursuit's own unit.
+def credits(
+    records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None
+) -> list[tuple[dt.datetime, float]]:
+    """Every payment since ``origin``, in the pursuit's own unit, with the moment it stops counting.
 
     A typed entry contributes the duration it carries on a timed pursuit, and one
     whole checkoff on a counted one — so an hour typed as four fragments and an
@@ -472,9 +491,12 @@ def completed_since(records: list[dict], app_days: list[dt.date], now: dt.dateti
     reports is one checkoff whatever happened inside it: one occurrence, or on a
     timed pursuit a week's minutes. That is also what keeps a backend emitting a
     row per task from outrunning one emitting a row per session.
+
+    The moment beside each payment is when the start of the window passes it: the
+    entry's own time, or the end of the day an app reported.
     """
     size = minutes or 1.0
-    total = 0.0
+    paid = []
     typed_days = set()
     for record in records:
         if record.get('event') != journal.Event.DONE:
@@ -483,12 +505,51 @@ def completed_since(records: list[dict], app_days: list[dt.date], now: dt.dateti
         if when is None or when < origin:
             continue
         typed_days.add(journal.local_day(record, now))
-        total += checkoff_equivalent(record, minutes) * size
+        paid.append((when, checkoff_equivalent(record, minutes) * size))
     opened = origin.astimezone(now.tzinfo).date()
     for day in app_days:
         if day >= opened and day not in typed_days:
-            total += size
-    return total
+            paid.append((dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tzinfo=now.tzinfo), size))
+    return paid
+
+
+def completed_since(records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None) -> float:
+    """Everything done since ``origin``, in the pursuit's own unit. See :func:`credits`."""
+    return sum(amount for _, amount in credits(records, app_days, now, origin, minutes))
+
+
+class Standing(NamedTuple):
+    """One pursuit's balance over its window, and when it next comes due."""
+
+    balance: float
+    due: float | None
+
+
+def standing(
+    records: list[dict],
+    app_days: list[dt.date],
+    now: dt.datetime,
+    origin: dt.datetime,
+    window: float,
+    pace_of: tuple[float, float],
+    minutes: float | None,
+) -> Standing:
+    """What the pace asked for since ``origin`` less what was paid, and the day it next comes due.
+
+    The one place standing is computed. :func:`build_state` calls it for every
+    pursuit and :func:`restated_balance` calls it again with a new entry added,
+    so the line a log prints is the line the next command shows.
+
+    The clock stops for the span a skip covers, so passing on something is never
+    a way to owe more of it later. The due date is projected forward through the
+    window, as :func:`allocate.projected_days_until_due` describes.
+    """
+    interval, size = pace_of
+    paid = credits(records, app_days, now, origin, minutes)
+    elapsed = (now - origin).total_seconds() / 86400.0
+    owed = balance(max(elapsed - skipped_days(records, now, origin), 0.0), interval, size, sum(amount for _, amount in paid))
+    leaving = [((stamp - now).total_seconds() / 86400.0 + window, amount) for stamp, amount in paid]
+    return Standing(owed, projected_days_until_due(owed, interval, size, max(window - elapsed, 0.0), leaving))
 
 
 def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
@@ -605,24 +666,17 @@ def build_state(
     # backend has to count what that backend saw as well as what got retyped.
     mine = records_by_pursuit(records)
     reset_at = latest_occurrence(records, journal.Event.RESET)
-    origins: dict[str, dt.datetime] = {}
+    windows = {name: standing_window(config, intervals[name]) for name, config in active.items()}
+    origins = {name: zero_point(reset_at.get(name), now, intervals[name], windows[name]) for name in active}
     balances: dict[str, float] = {}
+    dues: dict[str, float | None] = {}
     suppressed: set[str] = set()
-    for name, config in active.items():
+    for name in active:
         own = mine.get(name, [])
-        app_days = seen_days.get(name, [])
-        # An app remembers a bounded number of days, so a pursuit paid through
-        # one is only billable over the span that source can answer for.
-        window = float(evidence.OCCURRENCE_WINDOW_DAYS) if evidence.answerable(config) else None
-        origin = zero_point(reset_at.get(name), now, intervals[name], window)
-        origins[name] = origin
-        done = completed_since(own, app_days, now, origin, weekly_minutes.get(name))
-        # The clock stops for the span a skip covers, so passing on something is
-        # never a way to owe more of it later.
-        span = max((now - origin).total_seconds() / 86400.0 - skipped_days(own, now, origin), 0.0)
-        balances[name] = balance(span, intervals[name], sizes[name], done)
-        standing = skip_expiry(own)
-        if standing is not None and standing > now:
+        found = standing(own, seen_days.get(name, []), now, origins[name], windows[name], paces[name], weekly_minutes.get(name))
+        balances[name], dues[name] = found
+        expires = skip_expiry(own)
+        if expires is not None and expires > now:
             suppressed.add(name)
 
     # Resolved here rather than at the renderer, so `--explain` and every journal
@@ -645,9 +699,11 @@ def build_state(
         'intervals': intervals,
         'days_since': elapsed,
         'balance': balances,
+        'due': dues,
         'checkoff_size': sizes,
         'weekly_minutes': weekly_minutes,
         'origins': origins,
+        'windows': windows,
         'suppressed': sorted(suppressed),
         'pool': pool,
         'probability': probability,
@@ -1060,9 +1116,8 @@ def priced(state: dict, name: str) -> tuple[float, float, float] | None:
 
 
 def due_in_days(state: dict, name: str) -> float | None:
-    """:func:`allocate.days_until_due` for a pursuit the state knows about."""
-    found = priced(state, name)
-    return None if found is None else days_until_due(*found)
+    """Days until a pursuit next comes due, as :func:`standing` projected it; None where it has no schedule."""
+    return state['due'].get(name)
 
 
 def format_due(days: float | None) -> str:
@@ -1276,6 +1331,9 @@ def explain_payload(state: dict) -> dict:
         'intervals': {name: round(value, 2) for name, value in state['intervals'].items() if not math.isinf(value)},
         'days_since': {name: None if value is None else round(value, 2) for name, value in state['days_since'].items()},
         'balance': {name: round(value, 2) for name, value in state['balance'].items()},
+        # Projected from when each payment leaves the window, which the balance
+        # beside it does not carry.
+        'due': {name: None if value is None else round(value, 2) for name, value in state['due'].items()},
         'weekly_minutes': state['weekly_minutes'],
         # Recorded beside the balance because a balance is only interpretable
         # against the moment it started counting from, and a later reset moves
@@ -1514,15 +1572,16 @@ def restated_balance(state: dict, name: str, entry: dict) -> str:
     """
     if name not in state['balance']:
         return ''
-    minutes = state['weekly_minutes'].get(name)
     own = [*records_by_pursuit(state['records']).get(name, []), entry]
-    origin = state['origins'][name]
-    now = state['now']
-    done = completed_since(own, state['evidence_days'].get(name, []), now, origin, minutes)
-    span = max((now - origin).total_seconds() / 86400.0 - skipped_days(own, now, origin), 0.0)
-    size = state['checkoff_size'][name]
-    owed = balance(span, state['intervals'][name], size, done)
-    days = days_until_due(owed, state['intervals'][name], size)
+    days = standing(
+        own,
+        state['evidence_days'].get(name, []),
+        state['now'],
+        state['origins'][name],
+        state['windows'][name],
+        (state['intervals'][name], state['checkoff_size'][name]),
+        state['weekly_minutes'].get(name),
+    ).due
     return '' if days is None else f' · {format_due(days)}'
 
 

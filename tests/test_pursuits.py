@@ -11,6 +11,7 @@ froze the path at import and needed env vars set before the module loaded.
 """
 
 import datetime as dt
+import itertools
 import json
 import math
 import re
@@ -1119,8 +1120,9 @@ def test_a_first_sighting_is_written_once_and_never_over_a_reset(tmp_path, monke
 
 def test_an_evidence_backed_pursuit_is_billed_only_over_what_its_app_remembers(tmp_path, sandbox, monkeypatch):
     """The credit side is a 90-day cache. Billing over a longer span accrues a
-    debt by construction, on the pursuit most reliably done."""
-    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER))
+    debt by construction, on the pursuit most reliably done. Two intervals of a
+    60-day cadence would look back 120 days, past what the app can answer for."""
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER.replace('cadence: 3d', 'cadence: 60d')))
     window = pursuits.evidence.OCCURRENCE_WINDOW_DAYS
     now = dt.datetime.now().astimezone()
     write_records(sandbox / 'state', [{'pursuit': 'backed', 'event': 'reset', 'occurred_at': (now - dt.timedelta(days=400)).isoformat()}])
@@ -1130,6 +1132,112 @@ def test_an_evidence_backed_pursuit_is_billed_only_over_what_its_app_remembers(t
 
     assert (now - state['origins']['backed']).days == window
     assert state['balance']['backed'] < 0, 'done every day it can be asked about is ahead, not 300 checkoffs behind'
+
+
+def test_a_pursuit_without_an_app_looks_back_four_weeks_however_long_ago_it_was_zeroed(tmp_path, monkeypatch):
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 200.0)])
+
+    assert (NOW - state['origins']['chore']).days == pursuits.STANDING_WINDOW_DAYS
+    assert state['balance']['chore'] == 28.0, 'four weeks of a daily chore, and not two hundred days'
+
+
+def test_a_payment_older_than_the_window_stops_counting(tmp_path, monkeypatch):
+    """Forty chores six weeks ago bought nothing for the last four."""
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 60.0)] + [done('chore', 40.0) for _ in range(40)])
+
+    assert state['balance']['chore'] == 28.0
+
+
+def test_a_burst_carries_a_pursuit_until_it_leaves_the_window(tmp_path, monkeypatch):
+    """Four of a weekly pursuit in one evening is the window's whole ask, so it
+    is next due the day those four stop counting rather than a week from now."""
+    weekly = BALANCE_REGISTER.replace('cadence: 1d', 'cadence: 7d')
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 60.0)] + [done('chore', 3.0) for _ in range(4)], register=weekly)
+
+    assert state['balance']['chore'] == pytest.approx(0.0)
+    assert pursuits.due_in_days(state, 'chore') == pytest.approx(25.0)
+
+
+WINDOW_REGISTER = """
+pursuits:
+  daily:
+    description: Done most days
+    weight: 25
+    cadence: 1d
+  weekly:
+    description: Done about once a week
+    weight: 25
+    cadence: 7d
+  timed:
+    description: Five hours a week
+    weight: 25
+    weekly_minutes: 300
+"""
+
+WINDOW_NAMES = ('daily', 'weekly', 'timed')
+
+# Each history carries a reset for every pursuit, as the journal does once
+# `record_first_sightings` has run.
+WINDOW_HISTORIES = {
+    'fresh': [zeroed(name, 0.0) for name in WINDOW_NAMES],
+    'filling': [zeroed(name, 10.0) for name in WINDOW_NAMES]
+    + [done('daily', day + 0.5) for day in range(10)]
+    + [done('weekly', 5.0), done('timed', 4.0, 250), done('timed', 1.0, 180)],
+    'ahead': [zeroed(name, 40.0) for name in WINDOW_NAMES]
+    + [done('daily', 1.0) for _ in range(30)]
+    + [done('weekly', 2.0) for _ in range(6)]
+    + [done('timed', day, 500) for day in (1.0, 2.0, 3.0)],
+    'behind': [zeroed(name, 40.0) for name in WINDOW_NAMES],
+    'mixed': [zeroed(name, 50.0) for name in WINDOW_NAMES]
+    + [done('daily', day) for day in (30.0, 20.0, 10.0, 5.0, 1.0)]
+    + [done('weekly', day) for day in (35.0, 14.0, 3.0)]
+    + [done('timed', day, 200) for day in (27.0, 15.0, 6.0)],
+}
+
+
+def window_state(tmp_path, monkeypatch, records: list[dict], days_on: float) -> dict:
+    """State ``days_on`` after NOW with nothing further logged, without touching a journal."""
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, WINDOW_REGISTER))
+    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
+    return pursuits.build_state(pursuits.load_pursuits(), NOW + dt.timedelta(days=days_on), records=records, observed={})
+
+
+@pytest.mark.parametrize('history', WINDOW_HISTORIES)
+def test_a_due_date_only_comes_closer_while_nothing_is_logged(tmp_path, monkeypatch, history):
+    """Time passing can only bring a pursuit due. A due date that recedes on a
+    quiet day is a schedule forgiving what nobody did."""
+    dues = [window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], day) for day in range(40)]
+
+    for name in WINDOW_NAMES:
+        series = [pursuits.due_in_days(state, name) for state in dues]
+        assert None not in series
+        assert all(later <= earlier + 1e-9 for earlier, later in itertools.pairwise(series)), name
+
+
+@pytest.mark.parametrize('history', WINDOW_HISTORIES)
+def test_a_projected_due_date_is_the_moment_the_pursuit_comes_to_owe(tmp_path, monkeypatch, history):
+    """The date on screen is a promise about a later run: nothing owed before it,
+    a whole checkoff owed just after it."""
+    today = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], 0.0)
+
+    for name in WINDOW_NAMES:
+        due = pursuits.due_in_days(today, name)
+        if due is None or due <= 0.01:
+            continue
+        assert not pursuits.owes(window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], due - 0.01), name), name
+        assert pursuits.owes(window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], due + 0.01), name), name
+
+
+@pytest.mark.parametrize('history', WINDOW_HISTORIES)
+def test_a_pursuit_left_alone_ends_a_full_window_overdue(tmp_path, monkeypatch, history):
+    """Once every payment has left the window, nothing done in it is the whole
+    window owed. A pursuit that reads `due today` forever fails here."""
+    state = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], 0.0)
+    for name in WINDOW_NAMES:
+        window, interval = state['windows'][name], state['intervals'][name]
+        later = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], window + interval + 1.0)
+
+        assert pursuits.due_in_days(later, name) <= -(window - interval) + 0.01, name
 
 
 def test_a_pursuit_with_no_record_anywhere_opens_one_checkoff_behind(tmp_path, monkeypatch):
@@ -1942,6 +2050,15 @@ def test_the_explain_payload_carries_the_zero_point_each_balance_counts_from(san
 
     assert set(payload['zero_points']) == set(state['active'])
     assert set(payload['pool']) <= set(state['active'])
+
+
+def test_the_explain_payload_carries_the_projected_due_date(sandbox):
+    """A projection reads when each payment leaves the window, so the balance
+    recorded beside it cannot be turned back into the date on screen."""
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    payload = pursuits.explain_payload(state)
+
+    assert payload['due'] == {name: round(state['due'][name], 2) for name in state['active']}
 
 
 def test_drift_reads_an_unparsable_timestamp_one_way(sandbox, capsys):
