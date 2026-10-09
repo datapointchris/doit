@@ -346,3 +346,14 @@ def test_a_help_screen_does_not_pull(synced):
     assert content.autosync(argv=['doit', 'workflows', 'show', '-h']) is False
 
     assert content.autosync(argv=['doit', 'next']) is True
+
+
+def test_each_machine_records_its_pull_under_its_own_name(monkeypatch):
+    """The state directory is synced between machines and the sync cannot merge,
+    so one shared name had every machine writing one file and the losers set
+    aside as conflict copies. The lock derives from the log, so it splits too."""
+    monkeypatch.setattr(content, 'machine_name', lambda: 'testbox')
+    assert content.default_sync_log().name == 'content-sync-testbox.log'
+
+    monkeypatch.setattr(content, 'machine_name', lambda: 'otherbox')
+    assert content.default_sync_log().name == 'content-sync-otherbox.log'
