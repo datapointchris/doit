@@ -203,6 +203,17 @@ def test_a_reading_taken_before_goals_were_recorded_still_renders(capsys):
     assert row and '—' in row[0]
 
 
+def test_an_estimate_names_its_source_in_full(capsys):
+    """Cut to four letters, `default` printed as `defa`."""
+    taken = reading(NOW, {'30': {'chores': {'occasions': 2.0, 'minutes': 50.0}}, '7': {}})
+    taken = forecast.Reading(**{**taken.__dict__, 'durations': {'chores': {'minutes': 45.0, 'source': 'default', 'samples': 0}}})
+
+    forecast.emit(taken)
+
+    row = next(line for line in capsys.readouterr().out.splitlines() if 'chores' in line)
+    assert row.split()[-2:] == ['45m', 'default']
+
+
 def test_a_reading_round_trips_through_the_store(tmp_path):
     stored = reading(NOW, {'7': {'chores': {'occasions': 1.0, 'minutes': 25.0}}})
     path = forecast.reading_path(tmp_path, 'testbox')

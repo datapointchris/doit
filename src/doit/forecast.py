@@ -448,7 +448,7 @@ def emit(reading: Reading) -> None:
         row.append(f'{month[name]["minutes"] / 60:>6.1f}  ')
         row.append(f'{reading.goals.get(name, "—"):<{goals}} ')
         row.append(f'{"—" if met is None else f"{met:.0f}%":>8}  ', style='yellow' if met is not None and met < 90 else '')
-        row.append(f'{int(estimate.get("minutes", 0))}m {estimate.get("source", "")[:4]}', style='dim')
+        row.append(f'{int(estimate.get("minutes", 0))}m {estimate.get("source", "")}', style='dim')
         console.print(row)
 
     console.print(f'\n  {reading.unspent_minutes_per_day:.0f} min/day left unspent · {reading.replicates} runs')
