@@ -294,7 +294,7 @@ def test_a_logged_pursuit_leaves_the_draw_record_intact(sandbox, monkeypatch):
     assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
     assert pursuits.cmd_log('read-library', [], None, 30, assume_yes=True, no_write=False) == 0
 
-    second = journal.read_all(sandbox / 'state')[1]
+    second = [record for record in journal.read_all(sandbox / 'state') if record['event'] == 'done'][1]
     assert second['pursuit'] == 'read-library'
     assert second['draw_id'] == 'abc'
     assert second['was_offered'] is True
@@ -1071,6 +1071,26 @@ def test_a_pursuit_with_no_reset_is_billed_for_one_interval(tmp_path, monkeypatc
     assert old['balance']['chore'] == 1.0, 'a century of history does not open a century of debt'
 
 
+def test_a_pursuit_the_journal_never_zeroed_goes_overdue_as_time_passes(tmp_path, monkeypatch):
+    """A start derived from now moves with the clock, so the pursuit owed exactly
+    one checkoff on every run and read `due today` forever."""
+    balance_state(tmp_path, monkeypatch, [])
+    records = journal.read_all(tmp_path / 'state')
+
+    later = pursuits.build_state(pursuits.load_pursuits(), NOW + dt.timedelta(days=3), records=records, observed={})
+
+    assert later['balance']['chore'] == pytest.approx(4.0), 'one owed when first seen, and a day more for each of three'
+    assert pursuits.due_in_days(later, 'chore') == pytest.approx(-3.0)
+
+
+def test_a_first_sighting_is_written_once_and_never_over_a_reset(tmp_path, monkeypatch):
+    balance_state(tmp_path, monkeypatch, [zeroed('chore', 2.0)])
+    pursuits.build_state(pursuits.load_pursuits(), NOW + dt.timedelta(days=1))
+
+    sightings = [record['pursuit'] for record in journal.read_all(tmp_path / 'state') if record.get('note') == 'first seen']
+    assert sightings == ['read']
+
+
 def test_an_evidence_backed_pursuit_is_billed_only_over_what_its_app_remembers(tmp_path, sandbox, monkeypatch):
     """The credit side is a 90-day cache. Billing over a longer span accrues a
     debt by construction, on the pursuit most reliably done."""
@@ -1473,7 +1493,7 @@ def test_a_reset_writes_a_zero_point_without_touching_what_happened(sandbox, mon
 
     assert pursuits.cmd_reset('chores', assume_yes=False) == 0
 
-    records = journal.read_all(sandbox / 'state')
+    records = [record for record in journal.read_all(sandbox / 'state') if record.get('note') != 'first seen']
     assert [record['event'] for record in records] == ['done', 'reset']
     assert records[1]['pursuit'] == 'chores'
 

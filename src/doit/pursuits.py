@@ -439,13 +439,33 @@ def records_by_pursuit(records: list[dict]) -> dict[str, list[dict]]:
     return found
 
 
+def record_first_sightings(active: dict, records: list[dict], intervals: dict[str, float], now: dt.datetime) -> list[dict]:
+    """Write a reset for every active pursuit the journal has never zeroed, and return them.
+
+    Without a recorded start the origin is derived from now, moves with the
+    clock, and asks for exactly one checkoff on every run — a pursuit that reads
+    `due today` forever. The first build to read a pursuit is the earliest moment
+    doit can know it exists, so the start is pinned then, one interval back: a
+    pursuit was declared because it is wanted, so it opens one checkoff owed.
+    """
+    zeroed = {record.get('pursuit') for record in records if record.get('event') == journal.Event.RESET}
+    written = []
+    for name in active:
+        if name in zeroed:
+            continue
+        interval = intervals[name]
+        opened = now if math.isinf(interval) else now - dt.timedelta(days=interval)
+        written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': opened.isoformat(), 'note': 'first seen'}, now=now))
+    return written
+
+
 def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, window: float | None) -> dt.datetime:
     """When a pursuit's balance starts counting.
 
-    An explicit ``doit pursuits reset`` sets it. Without one the origin is a
-    single interval back, which opens a pursuit exactly one checkoff behind and
-    keeps it there until something is logged: the pursuit was declared because it
-    is wanted, and doit cannot know when it was added.
+    A reset sets it, either `doit pursuits reset` or the one
+    :func:`record_first_sightings` writes. Records handed in without one — a
+    forecast replaying a journal, a test — fall back to a single interval back,
+    which is one checkoff owed at every moment it is asked.
 
     Nothing about a payment may move this. Deriving the origin from the oldest
     thing on record does exactly that, and in the wrong direction — a backdated
@@ -572,6 +592,9 @@ def build_state(
 
     ``records``, ``observed`` and ``balance_settings`` default to the journal on
     disk, a live round trip to every backend, and the register's `balance:` block.
+    Reading the journal from disk also writes the start of any pursuit it has
+    never zeroed, through :func:`record_first_sightings`; handed-in records never
+    write.
     :mod:`doit.forecast` supplies all three instead, which is what lets a
     simulated day run this function rather than a second copy of the model — a
     copy is the only way the forecast could come to disagree with the draw it
@@ -590,9 +613,9 @@ def build_state(
     checkoff_minutes = declared_minutes(pursuits)
     sizes = {name: checkoff_minutes.get(name, 1.0) for name in active}
 
+    directory = journal_dir() if records is None else None
     if records is None:
-        directory = journal_dir()
-        records = journal.read_all(directory) if directory.exists() else []
+        records = journal.read_all(directory) if directory and directory.exists() else []
     if balance_settings is None:
         balance_settings = load_balance_settings()
     register_warn_weeks = float(balance_settings.get('warn_weeks') or DEFAULT_WARN_WEEKS)
@@ -610,6 +633,8 @@ def build_state(
     for name, config in active.items():
         if config.get('cadence'):
             intervals[name] = float(parse_cadence(config['cadence']))
+    if directory is not None and directory.exists():
+        records = [*records, *record_first_sightings(active, records, intervals, now)]
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
