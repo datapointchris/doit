@@ -1030,24 +1030,23 @@ def test_a_tally_over_less_than_four_weeks_says_how_long(tmp_path, monkeypatch):
     assert pursuits.tally_text(state, 'chore') == '0 of 10 in 10d'
 
 
-def test_an_app_day_pays_a_day_of_a_weekly_goal_rather_than_the_week():
-    """An app answers in days. Crediting each one a week's minutes let four
-    ten-minute sessions pay off a month."""
-    days = [(NOW - dt.timedelta(days=ago)).date() for ago in (1, 2, 3, 4)]
+@pytest.mark.parametrize('source', ['evidence_files: ~/notes/journal', 'evidence: echo []\n    evidence_time: completed_at'])
+def test_a_pursuit_measured_in_minutes_refuses_an_app_source(tmp_path, monkeypatch, source):
+    """An app says which day, never how long. Crediting a day some guessed
+    number of minutes paid a week's journal from one file saved twice."""
+    body = f'pursuits:\n  journal:\n    description: x\n    weight: 10\n    weekly_minutes: 60\n    {source}\n'
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, body))
 
-    paid = pursuits.credits([], days, NOW, NOW - dt.timedelta(days=28), 120.0)
+    with pytest.raises(pursuits.RegisterError, match='journal: weekly_minutes is paid by `doit log --minutes` only'):
+        pursuits.load_pursuits()
 
-    assert [amount for _, amount in paid] == [pytest.approx(120.0 / 7)] * 4
 
+def test_an_app_day_pays_one_occurrence():
+    days = [(NOW - dt.timedelta(days=ago)).date() for ago in (1, 2)]
 
-def test_an_app_day_on_a_timed_pursuit_pays_a_typical_sitting():
-    """The median of what was typed for it, so a journal written once a week is
-    not read as a seventh of a session."""
-    typed = [done('read', 40.0, minutes) for minutes in (10, 20, 30)]
+    paid = pursuits.credits([], days, NOW, NOW - dt.timedelta(days=28), None)
 
-    paid = pursuits.credits(typed, [(NOW - dt.timedelta(days=1)).date()], NOW, NOW - dt.timedelta(days=28), 120.0)
-
-    assert [amount for _, amount in paid] == [20.0]
+    assert [amount for _, amount in paid] == [1.0, 1.0]
 
 
 def test_an_app_day_stays_counted_once_after_its_typed_entry_leaves_the_window():

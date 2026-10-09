@@ -50,7 +50,6 @@ import os
 import random
 import re
 import shlex
-import statistics
 import subprocess
 from collections.abc import Callable
 from collections.abc import Iterable
@@ -252,6 +251,10 @@ TEMPLATE = """\
 #   evidence_where  optional field: value pairs selecting the rows that count
 #   evidence_files  a directory instead of a command, for a practice whose
 #                   output is files — the newest one is when it last happened
+#
+# Evidence counts occurrences, so only a cadence takes it. An app says which day
+# something happened and never how long, so a weekly_minutes pursuit is paid by
+# `doit log --minutes` alone.
 
 pursuits:
   chores:
@@ -338,6 +341,8 @@ def load_pursuits(path: Path | None = None) -> dict:
             raise RegisterError(f'{name}: cadence is a whole number of days, like 3d or 9d')
         if minutes is not None and (not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0):
             raise RegisterError(f'{name}: weekly_minutes must be a positive whole number')
+        if minutes is not None and (config.get('evidence') or config.get('evidence_files')):
+            raise RegisterError(f'{name}: weekly_minutes is paid by `doit log --minutes` only — an app reports days, never how long')
         if config.get('until') and not isinstance(config['until'], dt.date):
             raise RegisterError(f'{name}: until must be a date (YYYY-MM-DD)')
         if config.get('on_log') and not config.get('resolve'):
@@ -519,13 +524,12 @@ def credits(
     hour typed once pay the same amount off the balance, and no fragment can
     strand.
 
-    An app day the journal carries is one act reported by both records, so it
-    counts once, even after the typed entry has left the window. An app answers in
-    days rather than durations, so a day it reports pays one sitting whatever
-    happened inside it: one occurrence, or on a timed pursuit the median of the
-    durations typed for it, or a seventh of the week's minutes where none was.
-    That is also what keeps a backend emitting a row per task from outrunning one
-    emitting a row per session.
+    A day an app reports is one occurrence whatever happened inside it, which is
+    what keeps a backend emitting a row per task from outrunning one emitting a
+    row per session. An app day the journal carries is one act reported by both
+    records, so it counts once, even after the typed entry has left the window. A
+    timed pursuit takes no app days: an app says which day, never how long, and
+    the loader refuses one that declares evidence.
 
     The moment beside each payment is when the start of the window passes it: the
     entry's own time, or the end of the day an app reported.
@@ -533,8 +537,6 @@ def credits(
     size = minutes or 1.0
     typed = [record for record in records if record.get('event') == journal.Event.DONE]
     typed_days = {journal.local_day(record, now) for record in typed}
-    sittings = [float(record['duration_minutes']) for record in typed if record.get('duration_minutes')]
-    app_day = (statistics.median(sittings) if sittings else minutes / WEEK_DAYS) if minutes else 1.0
     paid = []
     for record in typed:
         when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
@@ -544,7 +546,7 @@ def credits(
     opened = origin.astimezone(now.tzinfo).date()
     for day in app_days:
         if day >= opened and day not in typed_days:
-            paid.append((dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tzinfo=now.tzinfo), app_day))
+            paid.append((dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tzinfo=now.tzinfo), 1.0))
     return paid
 
 

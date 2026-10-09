@@ -66,7 +66,9 @@ Every pursuit declares one pace. `cadence: 3d` asks for one occurrence every thr
 days only, so twice a week is `3d` or `4d`. `weekly_minutes: 240` asks for four hours a week and
 makes the pursuit measured in time: `doit log` asks a timed pursuit how long it took and never asks
 a counted one. `weekly_minutes:` is what a week asks for; `doit log --minutes` is how long one
-sitting took.
+sitting took. A timed pursuit is paid only by what is logged that way. An app reports which day
+something happened and never how long, so the register refuses `evidence` or `evidence_files` on a
+pursuit measured in minutes.
 
 A weight never moves a pace. It orders what is owed, heaviest first, and when less than a screen is
 owed it draws the rest. So whether a pursuit is getting enough is answered by its own goal alone,
