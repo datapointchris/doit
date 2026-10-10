@@ -12,13 +12,12 @@ from importlib.metadata import version as installed_version
 
 
 def _tool_version() -> str:
-    """This build's version, or 'unknown' from a source checkout.
+    """This build's version, or 'unknown' from a checkout that was never installed.
 
-    Read from the installed distribution rather than a constant here, so
-    semantic-release owns the one copy in `pyproject.toml` and this cannot drift
-    behind it. A checkout that was never installed has no metadata and says so
-    rather than inventing a number: release.md is explicit that a version string
-    can never be used to tell a release from a dev build.
+    Read from the installed distribution, whose build took the version from the
+    release tag, so no copy here can drift behind it. An install past the tag
+    reports the distance, as in `5.0.0-post.3+<commit>`. That string never tells
+    a release from a dev build; `git tag --points-at HEAD` does.
     """
     try:
         return installed_version('doit')
