@@ -98,6 +98,19 @@ def declared(pursuits: dict) -> dict[str, dict]:
     return {name: config for name, config in pursuits.items() if answerable(config)}
 
 
+ANSWER_FIELDS = ('evidence', 'evidence_files', 'evidence_items', 'evidence_time', 'evidence_where')
+
+
+def declaration(config: dict) -> str:
+    """What a pursuit asks its app, as one string an answer can be stamped with.
+
+    An answer read under another declaration answers a different question,
+    however recently it was read, so a cached one is only reused while this
+    matches.
+    """
+    return json.dumps({field: config.get(field) for field in ANSWER_FIELDS}, sort_keys=True, default=str)
+
+
 def matching(rows: list, where: dict | None) -> list:
     """Rows whose named fields all equal what the filter asks for.
 
@@ -280,7 +293,11 @@ def refresh(
     for name in dropped:
         del entries[name]
 
-    due = {name: config for name, config in candidates.items() if force or stale(entries.get(name), now, ttl)}
+    due = {
+        name: config
+        for name, config in candidates.items()
+        if force or stale(entries.get(name), now, ttl) or (entries.get(name) or {}).get('declaration') != declaration(config)
+    }
     if not due and not dropped:
         return payload
 
@@ -289,9 +306,12 @@ def refresh(
             answers = list(pool.map(lambda pair: read_one(pair[0], pair[1], now), due.items()))
         for name, entry in answers:
             previous = entries.get(name) or {}
-            if 'error' in entry and previous.get('last'):
+            entry['declaration'] = declaration(due[name])
+            # One cached before answers carried their declaration counts as the same.
+            same = previous.get('declaration') in (None, entry['declaration'])
+            if same and 'error' in entry and previous.get('last'):
                 entry['last'] = previous['last']
-            if 'error' in entry and previous.get('dates'):
+            if same and 'error' in entry and previous.get('dates'):
                 entry['dates'] = previous['dates']
             entries[name] = entry
 

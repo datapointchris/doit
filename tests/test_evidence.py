@@ -12,6 +12,7 @@ import json
 import os
 import shlex
 import sys
+from pathlib import Path
 
 from doit import evidence
 
@@ -27,6 +28,22 @@ def emitting(document) -> str:
 def failing(message: str = 'not logged in') -> str:
     code = f'import sys; sys.stderr.write({message!r}); sys.exit(1)'
     return f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}'
+
+
+def backend(answer: Path) -> str:
+    """A command printing what `answer` holds, or failing with what follows `FAIL `.
+
+    One command whose reply changes, so an app can go down while the pursuit
+    declares exactly what it did when the app last answered.
+    """
+    code = (
+        'import pathlib, sys\n'
+        'said = pathlib.Path(sys.argv[1]).read_text()\n'
+        "if said.startswith('FAIL '):\n"
+        '    sys.exit(said[5:])\n'
+        'sys.stdout.write(said)\n'
+    )
+    return f'{shlex.quote(sys.executable)} -c {shlex.quote(code)} {shlex.quote(str(answer))}'
 
 
 def test_an_app_that_saw_it_counts_as_done_with_nothing_typed(tmp_path):
@@ -101,11 +118,13 @@ def test_nested_rows_and_a_lone_object_both_read():
 def test_a_failed_read_keeps_the_previous_answer_and_says_why(tmp_path):
     """A logged-out CLI degrades that pursuit to its journal, not to a wrong zero."""
     yesterday = (NOW - dt.timedelta(days=1)).isoformat()
-    working = {'train': {'weight': 25, 'evidence': emitting([{'at': yesterday}]), 'evidence_time': 'at'}}
-    evidence.refresh(working, tmp_path, NOW)
+    answer = tmp_path / 'answer.json'
+    answer.write_text(json.dumps([{'at': yesterday}]))
+    pursuits = {'train': {'weight': 25, 'evidence': backend(answer), 'evidence_time': 'at'}}
+    evidence.refresh(pursuits, tmp_path, NOW)
 
-    broken = {'train': {'weight': 25, 'evidence': failing(), 'evidence_time': 'at'}}
-    payload = evidence.refresh(broken, tmp_path, NOW, force=True)
+    answer.write_text('FAIL not logged in')
+    payload = evidence.refresh(pursuits, tmp_path, NOW, force=True)
 
     assert evidence.observed(payload)['train'] == dt.datetime.fromisoformat(yesterday)
     assert 'not logged in' in evidence.problems(payload)['train']
@@ -119,22 +138,61 @@ def test_output_that_is_not_json_is_an_error_rather_than_a_crash(tmp_path):
 
 
 def test_a_fresh_answer_is_not_asked_for_again(tmp_path):
-    pursuits = {'tasks': {'weight': 25, 'evidence': emitting([{'at': NOW.isoformat()}]), 'evidence_time': 'at'}}
+    answer = tmp_path / 'answer.json'
+    answer.write_text(json.dumps([{'at': NOW.isoformat()}]))
+    pursuits = {'tasks': {'weight': 25, 'evidence': backend(answer), 'evidence_time': 'at'}}
     evidence.refresh(pursuits, tmp_path, NOW)
 
-    pursuits['tasks']['evidence'] = failing('should not run')
+    answer.write_text('FAIL should not run')
     payload = evidence.refresh(pursuits, tmp_path, NOW + dt.timedelta(seconds=60))
     assert evidence.problems(payload) == {}, 'inside the TTL the app is left alone'
 
 
 def test_an_aged_out_answer_is_asked_for_again(tmp_path):
-    pursuits = {'tasks': {'weight': 25, 'evidence': emitting([{'at': NOW.isoformat()}]), 'evidence_time': 'at'}}
+    answer = tmp_path / 'answer.json'
+    answer.write_text(json.dumps([{'at': NOW.isoformat()}]))
+    pursuits = {'tasks': {'weight': 25, 'evidence': backend(answer), 'evidence_time': 'at'}}
     evidence.refresh(pursuits, tmp_path, NOW)
 
-    pursuits['tasks']['evidence'] = failing('asked again')
+    answer.write_text('FAIL asked again')
     later = NOW + dt.timedelta(seconds=evidence.REFRESH_TTL_SECONDS + 1)
     payload = evidence.refresh(pursuits, tmp_path, later)
     assert 'asked again' in evidence.problems(payload)['tasks']
+
+
+def test_an_edited_declaration_is_asked_again_inside_the_ttl(tmp_path):
+    """Narrowing a pursuit's evidence to one kind of closer kept the unfiltered
+    answer, `last today`, until the cache aged out half an hour later."""
+    pursuits = {'build': {'evidence': emitting([{'closed_ts': NOW.isoformat()}]), 'evidence_time': 'closed_ts'}}
+    evidence.refresh(pursuits, tmp_path, NOW)
+
+    pursuits['build']['evidence'] = emitting([])
+    payload = evidence.refresh(pursuits, tmp_path, NOW + dt.timedelta(seconds=60))
+
+    assert evidence.observed(payload) == {}
+
+
+def test_a_failed_read_keeps_no_answer_to_an_edited_declaration(tmp_path):
+    """The cached answer was to a different question, so failing to ask the new one leaves none."""
+    pursuits = {'build': {'evidence': emitting([{'closed_ts': NOW.isoformat()}]), 'evidence_time': 'closed_ts'}}
+    evidence.refresh(pursuits, tmp_path, NOW)
+
+    pursuits['build']['evidence'] = failing()
+    payload = evidence.refresh(pursuits, tmp_path, NOW + dt.timedelta(seconds=60))
+
+    assert evidence.observed(payload) == {}
+    assert 'not logged in' in evidence.problems(payload)['build']
+
+
+def test_an_answer_cached_with_no_declaration_survives_a_failed_read(tmp_path):
+    """A cache written before answers carried their declaration degrades rather than empties."""
+    yesterday = (NOW - dt.timedelta(days=1)).isoformat()
+    cached = {'checked_at': NOW.isoformat(), 'last': yesterday, 'dates': [yesterday[:10]]}
+    evidence.save(tmp_path, {'schema_version': evidence.SCHEMA_VERSION, 'pursuits': {'train': cached}})
+
+    payload = evidence.refresh({'train': {'evidence': failing(), 'evidence_time': 'at'}}, tmp_path, NOW + dt.timedelta(seconds=60))
+
+    assert evidence.observed(payload)['train'] == dt.datetime.fromisoformat(yesterday)
 
 
 def test_dropping_evidence_from_a_pursuit_drops_its_answer(tmp_path):
@@ -221,11 +279,13 @@ def test_the_row_filter_bounds_the_days_as_well_as_the_last_one(tmp_path):
 def test_a_failed_read_keeps_the_previous_days(tmp_path):
     """The same policy as `last`: an unreachable backend degrades, it does not empty."""
     rows = [{'at': (NOW - dt.timedelta(days=1)).isoformat()}, {'at': (NOW - dt.timedelta(days=4)).isoformat()}]
-    working = {'train': {'weight': 25, 'evidence': emitting(rows), 'evidence_time': 'at'}}
-    evidence.refresh(working, tmp_path, NOW)
+    answer = tmp_path / 'answer.json'
+    answer.write_text(json.dumps(rows))
+    pursuits = {'train': {'weight': 25, 'evidence': backend(answer), 'evidence_time': 'at'}}
+    evidence.refresh(pursuits, tmp_path, NOW)
 
-    broken = {'train': {'weight': 25, 'evidence': failing(), 'evidence_time': 'at'}}
-    payload = evidence.refresh(broken, tmp_path, NOW, force=True)
+    answer.write_text('FAIL not logged in')
+    payload = evidence.refresh(pursuits, tmp_path, NOW, force=True)
 
     assert evidence.occurrences(payload)['train'] == [
         (NOW - dt.timedelta(days=4)).date(),
