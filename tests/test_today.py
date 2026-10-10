@@ -504,6 +504,17 @@ def test_each_entry_typed_today_is_its_own_row_with_its_minutes():
     assert [cell.text for cell in today.pursuits_done(state, TODAY).grid] == ['read · 45 min', 'chore', 'read · 30 min']
 
 
+def test_a_tracked_pursuit_is_done_and_never_due():
+    """It asks for nothing, so it never owes, and what it got done still counts toward the day."""
+    state = pursuit_state(balances={'chore': 0.0}, touched=['build'])
+    state['tracked'] = {'build': {'description': 'Engineering'}}
+    state['observed'] = {'build': NOW - dt.timedelta(hours=2)}
+    state['records'] = [done_record('chore', NOW), done_record('build', NOW - dt.timedelta(hours=1), duration_minutes=40)]
+
+    assert [cell.text for cell in today.pursuits_done(state, TODAY).grid] == ['build · 40 min', 'chore']
+    assert today.pursuits_due(state).rows == []
+
+
 def test_a_pursuit_no_longer_in_the_register_is_not_listed():
     """A journal is history and the register is now. Commenting one out takes
     it off today."""

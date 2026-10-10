@@ -14,6 +14,10 @@ others: what is owed is shown heaviest first, and when less than a screen is
 owed the rest is drawn by weight. A weight never moves a pace, so whether a
 pursuit is getting enough is answered by its own two numbers alone.
 
+A pursuit declaring neither is *tracked*. It asks for nothing, so it is never
+due and never drawn, and it takes no weight. Its logs and evidence are still
+read, so `doit today` and `drift` show where the time went.
+
 Standing is one balance in the pursuit's own unit: what its pace asked for over
 the last four weeks, less what was done in them. The window opens no earlier
 than the pursuit's zero point. Positive is owed.
@@ -184,15 +188,22 @@ TEMPLATE = """\
 #
 #   description  the thing itself, in a few plain words. It is the row's title
 #                for a pursuit with no resolve, so it names what you would do
-#   weight       required; how much this matters against the rest. What is owed
-#                is shown heaviest first, and when less than a screen is owed the
-#                rest is drawn by weight. Relative magnitudes, so nothing adds up
+#   weight       how much this matters against the rest, required with a pace.
+#                What is owed is shown heaviest first, and when less than a
+#                screen is owed the rest is drawn by weight. Relative
+#                magnitudes, so nothing adds up
 #
-# Every pursuit declares exactly one pace:
+# A pursuit declares at most one pace:
 #
 #   cadence         one occurrence every so many days, in whole days: 3d, 9d
 #   weekly_minutes  this many minutes a week, which makes the pursuit measured in
 #                   time: `doit log` asks how long each sitting took
+#
+# One declaring neither is tracked. It is never due and never drawn, so it takes
+# no weight. It is still logged, read from its evidence, and counted in `doit
+# today` and `drift`. That suits something you already do plenty of and want to
+# see the time of. `doit log --minutes` records how long a sitting took when you
+# give it, and nothing asks.
 #
 #   until        optional end date; after it the pursuit pauses and says so
 #   paused       optional; keeps it in the file but out of the draw. A pause has
@@ -256,9 +267,9 @@ TEMPLATE = """\
 #   evidence_files  a directory instead of a command, for a practice whose
 #                   output is files — the newest one is when it last happened
 #
-# Evidence counts occurrences, so only a cadence takes it. An app says which day
-# something happened and never how long, so a weekly_minutes pursuit is paid by
-# `doit log --minutes` alone.
+# Evidence counts occurrences, so a cadence takes it and so does a tracked
+# pursuit. An app says which day something happened and never how long, so a
+# weekly_minutes pursuit is paid by `doit log --minutes` alone.
 
 pursuits:
   chores:
@@ -332,15 +343,20 @@ def load_pursuits(path: Path | None = None) -> dict:
             # `weekly_minutes` in the list can fix `minutes` without leaving the
             # terminal; one told only what is wrong cannot.
             raise RegisterError(f'{name}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(KNOWN_FIELDS))}')
-        weight = config.get('weight')
-        if not isinstance(weight, int | float) or isinstance(weight, bool) or weight < 0:
-            raise RegisterError(f'{name}: weight must be a non-negative number')
         cadence = config.get('cadence')
         minutes = config.get('weekly_minutes')
         if cadence is not None and minutes is not None:
             raise RegisterError(f'{name}: declare cadence or weekly_minutes, not both — a pace is one or the other')
-        if cadence is None and minutes is None:
-            raise RegisterError(f'{name}: needs a pace — cadence: 3d (once every 3 days) or weekly_minutes: 120')
+        weight = config.get('weight')
+        if not paced(config) and weight is not None:
+            # A weight with no pace is the one shape a forgotten pace leaves, and
+            # reading it as tracked would drop the pursuit from the draw unannounced.
+            raise RegisterError(
+                f'{name}: with no pace this is tracked and never drawn, so it takes no weight. '
+                'Add a pace (cadence: 3d or weekly_minutes: 120), or remove the weight'
+            )
+        if paced(config) and (not isinstance(weight, int | float) or isinstance(weight, bool) or weight < 0):
+            raise RegisterError(f'{name}: weight must be a non-negative number')
         if cadence is not None and not DAYS_CADENCE.fullmatch(str(cadence).strip()):
             raise RegisterError(f'{name}: cadence is a whole number of days, like 3d or 9d')
         if minutes is not None and (not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0):
@@ -404,6 +420,16 @@ def term_ended(config: dict, today: dt.date) -> bool:
 def is_active(config: dict, today: dt.date) -> bool:
     """Paused, term-ended, and zero-weight pursuits stay in the file but out of the draw."""
     return not config.get('paused') and not term_ended(config, today) and config.get('weight', 0) > 0
+
+
+def paced(config: dict) -> bool:
+    """Whether a pursuit declares a pace. One that does not is tracked."""
+    return config.get('cadence') is not None or config.get('weekly_minutes') is not None
+
+
+def is_tracked(config: dict, today: dt.date) -> bool:
+    """A pursuit with no pace, unpaused and in its term: read and shown as done, never due or drawn."""
+    return not paced(config) and not config.get('paused') and not term_ended(config, today)
 
 
 def declared_minutes(register: dict) -> dict[str, float]:
@@ -709,7 +735,9 @@ def build_state(
 
     Every interval and size comes from the pursuit's own declared pace, and
     nothing here reads one pursuit's numbers to set another's. Logging a long
-    week of one thing moves that one balance and no other.
+    week of one thing moves that one balance and no other. A tracked pursuit
+    declares no pace, so its app is asked and its last occurrence found, and it
+    gets no interval, balance or place in the pool.
 
     ``records`` and ``observed`` default to the journal on disk and a live round
     trip to every backend. Reading the journal from disk also writes the start of
@@ -724,6 +752,7 @@ def build_state(
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
+    tracked = {name: config for name, config in pursuits.items() if name not in active and is_tracked(config, today)}
     weights = {name: float(config['weight']) for name, config in active.items()}
     weekly_minutes = declared_minutes(pursuits)
     paces = {name: pace(config) for name, config in active.items()}
@@ -738,11 +767,11 @@ def build_state(
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
-    observations = {} if observed is not None else evidence.refresh(active, CACHE_DIR, now)
+    observations = {} if observed is not None else evidence.refresh({**active, **tracked}, CACHE_DIR, now)
     seen = evidence.observed(observations) if observed is None else observed
     seen_days = evidence.occurrences(observations) if observed is None else (evidence_days or {})
     last_done = evidence.merged(latest_occurrence(records, journal.Event.DONE), seen)
-    elapsed = days_since(last_done, list(active), now)
+    elapsed = days_since(last_done, [*active, *tracked], now)
 
     # Both records feed the balance. A journal-only reading made `tasks` overdue
     # on a day eight of them were completed inside `icb`, so a pursuit with a
@@ -777,6 +806,9 @@ def build_state(
         'today': today,
         'pursuits': pursuits,
         'active': active,
+        # Read for what got done and never priced, so no view that ranks or
+        # dates walks them.
+        'tracked': tracked,
         'weights': weights,
         'intervals': intervals,
         'days_since': elapsed,
@@ -1189,6 +1221,8 @@ def goal_text(config: dict) -> str:
     the register says. Days are printed as days, because `9d` is what was
     written and `1w` would be a rounding of it.
     """
+    if not paced(config):
+        return 'tracked'
     minutes = config.get('weekly_minutes')
     if minutes:
         return f'{minutes_text(minutes)} a week'
@@ -1235,7 +1269,7 @@ def format_due(days: float | None) -> str:
 def why_unpriced(state: dict, name: str) -> str:
     """Why a drawn pursuit has no due date, in the words the column would show.
 
-    Four different facts otherwise arrive as one dash. The one worth telling
+    Five different facts otherwise arrive as one dash. The one worth telling
     apart is a name the register no longer holds: the draw outlives the register
     by up to a quarter of an hour, so a row can name something edited away, and
     a dash renders it identically to a pursuit that is simply unscheduled.
@@ -1247,6 +1281,8 @@ def why_unpriced(state: dict, name: str) -> str:
         return 'paused'
     if term_ended(config, state['today']):
         return 'term ended'
+    if not paced(config):
+        return 'tracked'
     return 'no schedule'
 
 
@@ -1331,7 +1367,7 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
     weight = state['weights'].get(name)
     columns = {
         'weight': '' if weight is None else f'{weight:g}',
-        'goal': goal_text(state['pursuits'].get(name) or {}),
+        'goal': goal_text(state['pursuits'][name]) if name in state['pursuits'] else '—',
         'tally': tally_text(state, name),
     }
 
@@ -1446,7 +1482,7 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
     now = dt.datetime.now().astimezone()
     state = build_state(pursuits, now)
     if not state['active']:
-        console.print('Every pursuit is paused or past its term.')
+        console.print('Nothing to draw: every pursuit is paused, past its term, or tracked.')
         return 1
 
     cached = None if reroll else load_cached_draw(now)
@@ -1516,6 +1552,7 @@ def explain_payload(state: dict) -> dict:
         'probability': {name: round(value, 4) for name, value in state['probability'].items()},
         'paused': [name for name, config in state['pursuits'].items() if config.get('paused')],
         'term_ended': [name for name, config in state['pursuits'].items() if term_ended(config, state['today'])],
+        'tracked': sorted(state['tracked']),
     }
 
 
@@ -1790,9 +1827,11 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
                 return 1
         # Declaring weekly minutes is the only thing that makes a pursuit measured
         # in time, so the register decides this and nothing here keeps a list of
-        # which kind each one is. `--minutes` is the measurement against it.
+        # which kind each one is. `--minutes` is the measurement against it. A
+        # tracked pursuit is measured against nothing, so it keeps what it is
+        # given and asks for none.
         timed = bool(pursuits[matched].get('weekly_minutes'))
-        if minutes is not None and not timed:
+        if minutes is not None and not timed and paced(pursuits[matched]):
             raise typer.BadParameter(f'{matched} is counted in completions, so --minutes has nothing to measure')
         if not words and can_prompt():
             answer = ask('  note, or Enter to skip: ')
@@ -2050,12 +2089,13 @@ def cmd_list(as_json: bool) -> int:
     for name, config in ordered:
         line = Text('  ')
         line.append(name.ljust(names), style='white')
-        line.append(f'  {int(config.get("weight", 0)):>3}')
+        line.append(f'  {int(config.get("weight", 0)):>3}' if paced(config) else '     ')
         line.append(f'  {goal_text(config).ljust(goals)}')
         line.append(f'  last {format_elapsed(state["days_since"].get(name)).ljust(lasts)}')
-        days = due_in_days(state, name)
-        line.append('  ')
-        line.append(format_due(days), style=due_style(days))
+        if paced(config):
+            days = due_in_days(state, name)
+            line.append('  ')
+            line.append(format_due(days), style=due_style(days))
         if config.get('paused'):
             line.append('  paused', style='yellow')
         elif term_ended(config, state['today']):
@@ -2063,7 +2103,8 @@ def cmd_list(as_json: bool) -> int:
         elif name in state['suppressed']:
             line.append('  skipped', style='yellow')
         console.print(line, no_wrap=True, overflow='ellipsis')
-    console.print('\n  weight orders what is owed and draws the rest · [cyan]doit pursuits edit[/]')
+    tracking = ' · tracked is logged and never due' if not all(paced(config) for config in pursuits.values()) else ''
+    console.print(f'\n  weight orders what is owed and draws the rest{tracking} · [cyan]doit pursuits edit[/]')
     render_orphaned_counters(pursuits)
     return 0
 
@@ -2122,10 +2163,15 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     A pursuit paused or retired mid-window keeps a row while it still has activity
     in one. It asks for nothing rather than for zero, because a paused pursuit
     makes no claim to have missed.
+
+    A tracked pursuit keeps a row whatever it did, because showing what got done
+    is all it is for. It asks for nothing, and beside its count it carries the
+    minutes its logs recorded.
     """
     now = state['now']
     cutoff = now - dt.timedelta(days=days)
     weekly = declared_minutes(pursuits)
+    tracked = state.get('tracked') or {}
     mine = records_by_pursuit(state['records'])
     reset_at = zero_resets(state['records'])
     counts = load_counts(journal_dir())
@@ -2138,7 +2184,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
         done = completed_since(own, seen, now, start, weekly.get(name))
         logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, start))
         passes = sum(1 for record in own if record.get('event') == journal.Event.SKIP and in_window(record, cutoff))
-        if name not in state['active'] and not done and not passes:
+        if name not in state['active'] and name not in tracked and not done and not passes:
             continue
         asked = None
         if name in state['active']:
@@ -2153,6 +2199,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
                 'since': start.isoformat(),
                 'asked': None if asked is None else round(asked, 1),
                 'done': round(done, 1),
+                'minutes': round(logged_minutes(own, start)) if name in tracked else None,
                 'logs': logs,
                 'balance': None if name not in state['balance'] else round(state['balance'][name], 1),
                 'due_days': None if (due := due_in_days(state, name)) is None else round(due, 1),
@@ -2161,6 +2208,18 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
             }
         )
     return rows
+
+
+def logged_minutes(records: list[dict], start: dt.datetime) -> float:
+    """The minutes typed entries since ``start`` recorded. An entry giving none adds none."""
+    total = 0.0
+    for record in records:
+        minutes = record.get('duration_minutes')
+        if record.get('event') != journal.Event.DONE or not in_window(record, start):
+            continue
+        if isinstance(minutes, int | float) and not isinstance(minutes, bool) and minutes > 0:
+            total += minutes
+    return total
 
 
 def quantity_text(amount: float, unit: str) -> str:
@@ -2195,7 +2254,7 @@ def render_drift(rows: list[dict]) -> None:
             row['goal'],
             f'{dt.datetime.fromisoformat(row["since"]):%d %b}',
             '—' if row['asked'] is None else quantity_text(row['asked'], row['unit']),
-            quantity_text(row['done'], row['unit']),
+            quantity_text(row['done'], row['unit']) + (f' · {minutes_text(row["minutes"])}' if row.get('minutes') else ''),
             format_due(row['due_days']),
             str(row['offered']),
             str(row['skips']),
@@ -2273,24 +2332,26 @@ def cmd_evidence(as_json: bool = False) -> int:
     if not pursuits:
         return 1
     now = dt.datetime.now().astimezone()
-    active = {name: config for name, config in pursuits.items() if is_active(config, now.date())}
-    observations = evidence.refresh(active, CACHE_DIR, now, force=True)
+    # The set build_state asks. A refresh drops the answer of any pursuit it is
+    # not handed, so asking fewer here would empty a tracked pursuit's evidence.
+    watched = {name: config for name, config in pursuits.items() if is_active(config, now.date()) or is_tracked(config, now.date())}
+    observations = evidence.refresh(watched, CACHE_DIR, now, force=True)
     seen = evidence.observed(observations)
     failed = evidence.problems(observations)
-    declared = evidence.declared(active)
+    declared = evidence.declared(watched)
 
     if as_json:
         console.print_json(
             data={
                 'observed': {name: when.isoformat() for name, when in seen.items()},
                 'errors': failed,
-                'undeclared': sorted(set(active) - set(declared)),
+                'undeclared': sorted(set(watched) - set(declared)),
             }
         )
         return 0
 
     console.rule('[cyan]Evidence', align='left')
-    for name in sorted(active, key=lambda key: -active[key].get('weight', 0)):
+    for name in sorted(watched, key=lambda key: -watched[key].get('weight', 0)):
         line = Text('  ')
         line.append(f'{name:<9}', style='white')
         if name not in declared:
