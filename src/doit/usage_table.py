@@ -26,7 +26,7 @@ Syncthing resolves conflicts per file, so one writer per file leaves it nothing
 to resolve.
 """
 
-import dataclasses
+import dataclasses as dc
 import datetime as dt
 import json
 import os
@@ -135,7 +135,7 @@ def to_document(table: UsageTable) -> dict:
             host.host: {
                 'through': host.through,
                 'commands': host.commands,
-                'rows': [dataclasses.asdict(row) for row in host.rows],
+                'rows': [dc.asdict(row) for row in host.rows],
             }
             for host in table.hosts
         },

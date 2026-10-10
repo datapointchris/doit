@@ -49,7 +49,7 @@ per machine, because Syncthing resolves conflicts per file, so two machines
 appending to one file lose a tail.
 """
 
-import dataclasses
+import dataclasses as dc
 import datetime as dt
 import json
 import os
@@ -260,7 +260,7 @@ def row_payload(row: usage.Row, today: dt.date) -> dict[str, object]:
     ``derived`` and is dropped here, and a field that disappears raises a
     ``KeyError`` instead of silently narrowing the payload.
     """
-    derived = dict(dataclasses.asdict(row))
+    derived = dict(dc.asdict(row))
     derived['days_since'] = row.days_since(today)
     return {name: derived[name] for name in PAYLOAD_FIELDS}
 
@@ -466,7 +466,7 @@ def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> Reply:
         raise DigestFailed(Failure.NO_RESULT, repr(result.stdout.strip()[:80]))
     if not reply.text.strip():
         raise DigestFailed(Failure.EMPTY, reply=reply)
-    return dataclasses.replace(reply, text=reply.text.strip())
+    return dc.replace(reply, text=reply.text.strip())
 
 
 def digest_path(directory: Path, machine: str) -> Path:
@@ -481,7 +481,7 @@ def append(path: Path, digest: Digest) -> Digest:
     be reconstructed, so the file has to survive a crash mid-write and a machine
     that syncs late.
     """
-    record = {'schema_version': SCHEMA_VERSION, **dataclasses.asdict(digest)}
+    record = {'schema_version': SCHEMA_VERSION, **dc.asdict(digest)}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a', encoding='utf-8') as handle:
         handle.write(json.dumps(record) + '\n')
@@ -705,7 +705,7 @@ def result_record(outcome: RunOutcome) -> dict[str, object]:
     if outcome.reply is not None:
         if outcome.reply.session_id:
             record['session_id'] = outcome.reply.session_id
-        record['usage'] = dataclasses.asdict(outcome.reply.usage)
+        record['usage'] = dc.asdict(outcome.reply.usage)
     return record
 
 
@@ -762,7 +762,7 @@ def cmd_export(directory: Path | None = None) -> int:
 
 def emit(digest: Digest) -> None:
     """The stored record as JSON on stdout, which is the only thing that goes there."""
-    print(json.dumps(dataclasses.asdict(digest), indent=2))
+    print(json.dumps(dc.asdict(digest), indent=2))
 
 
 def report_no_match(handle: str, kept: list[Digest]) -> int:
@@ -815,7 +815,7 @@ def cmd_list(as_json: bool, directory: Path) -> int:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings and hand a consumer
         # a parse error instead of data.
-        print(json.dumps([dataclasses.asdict(digest) for digest in kept], indent=2))
+        print(json.dumps([dc.asdict(digest) for digest in kept], indent=2))
         return 0
     if not kept:
         console.print('No reading stored yet.')

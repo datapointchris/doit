@@ -13,7 +13,7 @@ reading that was taken but could not be stored, and what a scheduled run hands
 its scheduler.
 """
 
-import dataclasses
+import dataclasses as dc
 import datetime as dt
 import json
 import os
@@ -160,7 +160,7 @@ def test_a_recorded_command_line_cannot_reach_the_prompt():
 def test_a_field_added_to_a_row_upstream_does_not_join_the_payload():
     """The allowlist filters a serialized row, so a new field is dropped rather than sent."""
 
-    @dataclasses.dataclass(frozen=True)
+    @dc.dataclass(frozen=True)
     class RowWithNewField(usage.Row):
         leaked: str = SECRET
 

@@ -50,7 +50,7 @@ a recompute cannot rebuild one, because it would read a register and a journal
 that have since moved. One append-only file per machine, one writer each.
 """
 
-import dataclasses
+import dataclasses as dc
 import datetime as dt
 import json
 import statistics
@@ -276,7 +276,7 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
                 counts[name].append(per_run_count[name])
                 minutes[name].append(per_run_minutes[name])
         horizons[str(days)] = {
-            name: dataclasses.asdict(
+            name: dc.asdict(
                 Prediction(
                     round(statistics.mean(counts[name]), 2),
                     round(statistics.mean(minutes[name]), 1),
@@ -297,7 +297,7 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
         replicates=replicates,
         weights=dict(live['weights']),
         goals={name: pursuits.goal_text(config) for name, config in active.items()},
-        durations={name: dataclasses.asdict(value) for name, value in cost.items()},
+        durations={name: dc.asdict(value) for name, value in cost.items()},
         horizons=horizons,
         unspent_minutes_per_day=round(budget - spent_per_day, 1),
     )
@@ -309,7 +309,7 @@ def reading_path(directory: Path, machine: str) -> Path:
 
 
 def append(path: Path, reading: Reading) -> Reading:
-    record = {'schema_version': SCHEMA_VERSION, **dataclasses.asdict(reading)}
+    record = {'schema_version': SCHEMA_VERSION, **dc.asdict(reading)}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('a', encoding='utf-8') as handle:
         handle.write(json.dumps(record) + '\n')
@@ -333,7 +333,7 @@ def read_all(directory: Path) -> list[Reading]:
                 record = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            names = {entry.name for entry in dataclasses.fields(Reading)}
+            names = {entry.name for entry in dc.fields(Reading)}
             fields = {name: value for name, value in record.items() if name in names}
             if fields.get('generated'):
                 stored.append(Reading(**fields))
@@ -499,7 +499,7 @@ def cmd_run(as_json: bool, budget: int | None, directory: Path) -> int:
         error_console.print(f'Forecast taken but not stored at {directory} — {failure}')
         stored = False
     if as_json:
-        print(json.dumps(dataclasses.asdict(reading), indent=2))
+        print(json.dumps(dc.asdict(reading), indent=2))
     else:
         emit(reading)
     return 0 if stored else 1
@@ -513,7 +513,7 @@ def cmd_show(handle: str, as_json: bool, directory: Path) -> int:
         error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
         return 1
     if as_json:
-        print(json.dumps(dataclasses.asdict(reading), indent=2))
+        print(json.dumps(dc.asdict(reading), indent=2))
     else:
         emit(reading)
     return 0
@@ -526,7 +526,7 @@ def cmd_list(as_json: bool, directory: Path) -> int:
         error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
         return 1
     if as_json:
-        print(json.dumps([dataclasses.asdict(reading) for reading in stored], indent=2))
+        print(json.dumps([dc.asdict(reading) for reading in stored], indent=2))
         return 0
     console.rule('[cyan]Forecasts', align='left')
     for reading in stored:
@@ -551,7 +551,7 @@ def cmd_trend(days: int, as_json: bool, directory: Path) -> int:
     now = dt.datetime.now().astimezone()
     verdicts = grade(stored, records, now, days)
     if as_json:
-        print(json.dumps({'days': days, 'verdicts': [dataclasses.asdict(v) for v in verdicts]}, indent=2))
+        print(json.dumps({'days': days, 'verdicts': [dc.asdict(v) for v in verdicts]}, indent=2))
         return 0
     emit_trend(verdicts, days, len(matured(stored, now, days)))
     return 0
