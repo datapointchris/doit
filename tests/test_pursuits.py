@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 
 import pytest
+from test_evidence import emitting
 from typer.testing import CliRunner
 
 from doit import journal
@@ -196,18 +197,32 @@ def test_a_pursuit_with_no_pace_is_tracked_and_never_drawn(tmp_path, sandbox, mo
     assert round(state['days_since']['build']) == 2
 
 
-def test_a_tracked_pursuits_app_is_asked_by_every_refresh(tmp_path, sandbox, monkeypatch):
-    """A refresh drops the cached answer of any pursuit it is not handed, so a
-    command asking fewer would empty the one record a tracked pursuit leans on."""
-    register = 'pursuits:\n  build:\n    evidence: tracker list --json\n    evidence_time: closed_ts\n'
+def test_a_tracked_pursuits_app_is_read_and_its_day_counted(tmp_path, sandbox, monkeypatch, capsys):
+    """Narrowing the evidence view's set back to the drawn pursuits reported
+    `build` as undeclared, and a refresh handed fewer drops its cached answer."""
+    yesterday = (dt.datetime.now().astimezone() - dt.timedelta(days=1)).isoformat()
+    command = json.dumps(emitting([{'closed_ts': yesterday}]))
+    register = f'pursuits:\n  build:\n    evidence: {command}\n    evidence_time: closed_ts\n'
     monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
-    asked = []
-    monkeypatch.setattr(pursuits.evidence, 'refresh', lambda watched, *_, **__: asked.append(sorted(watched)) or {'pursuits': {}})
 
-    pursuits.build_state(pursuits.load_pursuits(), NOW)
-    pursuits.cmd_evidence(as_json=True)
+    assert pursuits.cmd_evidence(as_json=True) == 0
+    answered = json.loads(capsys.readouterr().out)
 
-    assert asked == [['build'], ['build']]
+    assert 'build' in answered['observed']
+    assert 'build' not in answered['undeclared']
+    assert drift_rows(capsys)['build']['done'] == 1
+
+
+def test_the_evidence_view_keeps_a_long_name_apart_from_its_status(tmp_path, sandbox, monkeypatch, capsys):
+    """`socialize` printed as `socializeno backend — logged by hand`."""
+    register = 'pursuits:\n  socialize:\n    weight: 5\n    cadence: 7d\n  journaling:\n    description: Writing\n'
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
+
+    assert pursuits.cmd_evidence() == 0
+
+    printed = capsys.readouterr().out
+    assert re.search(r'\bsocialize {2,}no backend', printed)
+    assert re.search(r'\bjournaling {2,}no backend', printed)
 
 
 def test_a_pursuit_declaring_both_paces_is_refused(tmp_path):

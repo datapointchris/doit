@@ -432,6 +432,16 @@ def is_tracked(config: dict, today: dt.date) -> bool:
     return not paced(config) and not config.get('paused') and not term_ended(config, today)
 
 
+def watched(pursuits: dict, today: dt.date) -> dict:
+    """Every pursuit whose app is asked and whose done is shown: the active ones and the tracked ones.
+
+    Decided here and nowhere else. `evidence.refresh` deletes the cached answer
+    of any pursuit it is not handed, so a second copy of this set that drifted
+    would empty a pursuit's evidence.
+    """
+    return {name: config for name, config in pursuits.items() if is_active(config, today) or is_tracked(config, today)}
+
+
 def declared_minutes(register: dict) -> dict[str, float]:
     """Every timed pursuit's minutes a week, over the whole register rather than the active set.
 
@@ -752,7 +762,8 @@ def build_state(
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
-    tracked = {name: config for name, config in pursuits.items() if name not in active and is_tracked(config, today)}
+    watching = watched(pursuits, today)
+    tracked = {name: config for name, config in watching.items() if name not in active}
     weights = {name: float(config['weight']) for name, config in active.items()}
     weekly_minutes = declared_minutes(pursuits)
     paces = {name: pace(config) for name, config in active.items()}
@@ -767,11 +778,11 @@ def build_state(
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
-    observations = {} if observed is not None else evidence.refresh({**active, **tracked}, CACHE_DIR, now)
+    observations = {} if observed is not None else evidence.refresh(watching, CACHE_DIR, now)
     seen = evidence.observed(observations) if observed is None else observed
     seen_days = evidence.occurrences(observations) if observed is None else (evidence_days or {})
     last_done = evidence.merged(latest_occurrence(records, journal.Event.DONE), seen)
-    elapsed = days_since(last_done, [*active, *tracked], now)
+    elapsed = days_since(last_done, list(watching), now)
 
     # Both records feed the balance. A journal-only reading made `tasks` overdue
     # on a day eight of them were completed inside `icb`, so a pursuit with a
@@ -809,6 +820,7 @@ def build_state(
         # Read for what got done and never priced, so no view that ranks or
         # dates walks them.
         'tracked': tracked,
+        'watched': watching,
         'weights': weights,
         'intervals': intervals,
         'days_since': elapsed,
@@ -2171,7 +2183,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     now = state['now']
     cutoff = now - dt.timedelta(days=days)
     weekly = declared_minutes(pursuits)
-    tracked = state.get('tracked') or {}
+    tracked = state['tracked']
     mine = records_by_pursuit(state['records'])
     reset_at = zero_resets(state['records'])
     counts = load_counts(journal_dir())
@@ -2184,7 +2196,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
         done = completed_since(own, seen, now, start, weekly.get(name))
         logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, start))
         passes = sum(1 for record in own if record.get('event') == journal.Event.SKIP and in_window(record, cutoff))
-        if name not in state['active'] and name not in tracked and not done and not passes:
+        if name not in state['watched'] and not done and not passes:
             continue
         asked = None
         if name in state['active']:
@@ -2332,28 +2344,27 @@ def cmd_evidence(as_json: bool = False) -> int:
     if not pursuits:
         return 1
     now = dt.datetime.now().astimezone()
-    # The set build_state asks. A refresh drops the answer of any pursuit it is
-    # not handed, so asking fewer here would empty a tracked pursuit's evidence.
-    watched = {name: config for name, config in pursuits.items() if is_active(config, now.date()) or is_tracked(config, now.date())}
-    observations = evidence.refresh(watched, CACHE_DIR, now, force=True)
+    watching = watched(pursuits, now.date())
+    observations = evidence.refresh(watching, CACHE_DIR, now, force=True)
     seen = evidence.observed(observations)
     failed = evidence.problems(observations)
-    declared = evidence.declared(watched)
+    declared = evidence.declared(watching)
 
     if as_json:
         console.print_json(
             data={
                 'observed': {name: when.isoformat() for name, when in seen.items()},
                 'errors': failed,
-                'undeclared': sorted(set(watched) - set(declared)),
+                'undeclared': sorted(set(watching) - set(declared)),
             }
         )
         return 0
 
     console.rule('[cyan]Evidence', align='left')
-    for name in sorted(watched, key=lambda key: -watched[key].get('weight', 0)):
+    width = max((len(name) for name in watching), default=0)
+    for name in sorted(watching, key=lambda key: -watching[key].get('weight', 0)):
         line = Text('  ')
-        line.append(f'{name:<9}', style='white')
+        line.append(f'{name:<{width}}  ', style='white')
         if name not in declared:
             line.append('no backend — logged by hand', style='yellow')
         elif name in failed:

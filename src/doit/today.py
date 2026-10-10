@@ -444,7 +444,7 @@ def pursuits_done(state: dict, today: dt.date) -> Lane:
     the register is now, so commenting one out or pausing it takes it off today.
     """
     now = state['now']
-    current = {**state['active'], **(state.get('tracked') or {})}
+    current = state['watched']
     cells = []
     typed = set()
     for record in state.get('records') or []:
