@@ -439,16 +439,20 @@ def test_a_register_that_cannot_be_read_is_reported_where_it_is_owed(monkeypatch
 # --- the pursuits ------------------------------------------------------------
 
 
-def pursuit_state(balances, touched=()):
+def pursuit_state(balances, touched=(), tracked=()):
     """A minimal `build_state` shaped dict, for the readers that walk one.
 
     The evidence days come from `evidence.occurrences`, the function
     `build_state` folds them with, so they are the type the real state carries.
     """
+    active = {name: {'description': f'do {name}'} for name in balances}
+    following = {name: {'description': f'track {name}'} for name in tracked}
     return {
         'now': NOW,
         'today': TODAY,
-        'active': {name: {'description': f'do {name}'} for name in balances},
+        'active': active,
+        'tracked': following,
+        'watched': {**active, **following},
         'balance': dict(balances),
         'checkoff_size': dict.fromkeys(balances, 1.0),
         'intervals': dict.fromkeys(balances, 3.0),
@@ -502,6 +506,16 @@ def test_each_entry_typed_today_is_its_own_row_with_its_minutes():
     ]
 
     assert [cell.text for cell in today.pursuits_done(state, TODAY).grid] == ['read · 45 min', 'chore', 'read · 30 min']
+
+
+def test_a_tracked_pursuit_is_done_and_never_due():
+    """It asks for nothing, so it never owes, and what it got done still counts toward the day."""
+    state = pursuit_state(balances={'chore': 0.0}, touched=['build'], tracked=['build'])
+    state['observed'] = {'build': NOW - dt.timedelta(hours=2)}
+    state['records'] = [done_record('chore', NOW), done_record('build', NOW - dt.timedelta(hours=1), duration_minutes=40)]
+
+    assert [cell.text for cell in today.pursuits_done(state, TODAY).grid] == ['build · 40 min', 'chore']
+    assert today.pursuits_due(state).rows == []
 
 
 def test_a_pursuit_no_longer_in_the_register_is_not_listed():

@@ -62,7 +62,7 @@ and says nothing about the rest.
 
 ## A pursuit declares its goal, and its weight only orders
 
-Every pursuit declares one pace. `cadence: 3d` asks for one occurrence every three days, in whole
+A pursuit declares at most one pace. `cadence: 3d` asks for one occurrence every three days, in whole
 days only, so twice a week is `3d` or `4d`. `weekly_minutes: 240` asks for four hours a week and
 makes the pursuit measured in time: `doit log` asks a timed pursuit how long it took and never asks
 a counted one. `weekly_minutes:` is what a week asks for; `doit log --minutes` is how long one
@@ -73,6 +73,12 @@ pursuit measured in minutes.
 A weight never moves a pace. It orders what is owed, heaviest first, and when less than a screen is
 owed it draws the rest. So whether a pursuit is getting enough is answered by its own goal alone,
 whatever the rest of the register weighs or however much else got logged that week.
+
+A pursuit declaring no pace is tracked. It asks for nothing, so it is never due, never drawn and
+takes no weight. Its logs and its app's evidence are still read, so `doit today` lists it as done
+and `doit pursuits drift` counts it. That is for something already done plenty of, whose time you
+still want to see. `doit log --minutes` records how long a sitting took when given and is never
+asked for. A weight with no pace is refused, because a forgotten pace leaves exactly that shape.
 
 Standing is one balance in whichever unit applies: what the goal asked for over the last four
 weeks, less what was done in them. The four weeks slide. Standing is a reading of how the last

@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 
 import pytest
+from test_evidence import emitting
 from typer.testing import CliRunner
 
 from doit import journal
@@ -123,8 +124,8 @@ def test_a_counter_matching_the_register_is_not_orphaned(sandbox):
     assert pursuits.orphaned_offer_counts(pursuits.load_pursuits()) == []
 
 
-def test_a_missing_weight_is_refused(tmp_path):
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    description: no weight\n')
+def test_a_paced_pursuit_with_no_weight_is_refused(tmp_path):
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    description: no weight\n    cadence: 3d\n')
     with pytest.raises(pursuits.RegisterError, match='weight'):
         pursuits.load_pursuits(path)
 
@@ -169,12 +170,72 @@ def test_a_cadence_that_is_not_whole_days_is_refused(tmp_path, token):
         pursuits.load_pursuits(path)
 
 
-def test_a_pursuit_declaring_no_pace_is_refused(tmp_path):
-    # With no pace there is nothing to fall behind on, so the pursuit would never
-    # be owed and never be shown ahead of anything — a weight with nothing to order.
+def test_a_weight_with_no_pace_is_refused(tmp_path):
+    # A forgotten pace leaves exactly this shape. Read as tracked, the pursuit
+    # would leave the draw with nobody told.
     path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n')
-    with pytest.raises(pursuits.RegisterError, match='needs a pace'):
+    with pytest.raises(pursuits.RegisterError, match='takes no weight'):
         pursuits.load_pursuits(path)
+
+
+def tracked_register(tmp_path, monkeypatch) -> None:
+    """`build` declares no pace, beside a paced pursuit the draw can offer."""
+    register = 'pursuits:\n  build:\n    description: Engineering\n  chores:\n    weight: 25\n    cadence: 3d\n'
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
+
+
+def test_a_pursuit_with_no_pace_is_tracked_and_never_drawn(tmp_path, sandbox, monkeypatch):
+    tracked_register(tmp_path, monkeypatch)
+    log_done(sandbox / 'state', 'build', 2)
+
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+
+    assert list(state['tracked']) == ['build']
+    assert 'build' not in state['active']
+    assert 'build' not in state['pool']
+    assert 'build' not in pursuits.compute_draw(state, seed=1)['offered']
+    assert round(state['days_since']['build']) == 2
+
+
+def test_a_tracked_pursuits_app_is_read_and_its_day_counted(tmp_path, sandbox, monkeypatch, capsys):
+    """Narrowing the evidence view's set back to the drawn pursuits reported
+    `build` as undeclared, and a refresh handed fewer drops its cached answer."""
+    yesterday = (dt.datetime.now().astimezone() - dt.timedelta(days=1)).isoformat()
+    command = json.dumps(emitting([{'closed_ts': yesterday}]))
+    register = f'pursuits:\n  build:\n    evidence: {command}\n    evidence_time: closed_ts\n'
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
+
+    assert pursuits.cmd_evidence(as_json=True) == 0
+    answered = json.loads(capsys.readouterr().out)
+
+    assert 'build' in answered['observed']
+    assert 'build' not in answered['undeclared']
+    assert drift_rows(capsys)['build']['done'] == 1
+
+
+def test_the_evidence_view_keeps_a_long_name_apart_from_its_status(tmp_path, sandbox, monkeypatch, capsys):
+    """`socialize` printed as `socializeno backend — logged by hand`."""
+    register = 'pursuits:\n  socialize:\n    weight: 5\n    cadence: 7d\n  journaling:\n    description: Writing\n'
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
+
+    assert pursuits.cmd_evidence() == 0
+
+    printed = capsys.readouterr().out
+    assert re.search(r'\bsocialize {2,}no backend', printed)
+    assert re.search(r'\bjournaling {2,}no backend', printed)
+
+
+def test_skipping_a_tracked_pursuit_is_refused_and_passes_nothing(tmp_path, sandbox, monkeypatch, capsys):
+    """`doit --no-input skip` on a pursuit with no pace exited 0 and wrote a SKIP,
+    and drift then read it as `passed 1` against a draw it never had."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    tracked_register(tmp_path, monkeypatch)
+    log_done(sandbox / 'state', 'build', 2)
+
+    assert pursuits.cmd_skip('build', None) == 1
+    assert pursuits.cmd_resume('build') == 1
+
+    assert drift_rows(capsys)['build']['skips'] == 0
 
 
 def test_a_pursuit_declaring_both_paces_is_refused(tmp_path):
@@ -1671,7 +1732,7 @@ def test_the_due_text_says_which_side_of_the_schedule_it_is_on():
         ({'weekly_minutes': 45}, '45m a week'),
         ({'weekly_minutes': 90}, '1h 30m a week'),
         ({'weekly_minutes': 1200}, '20h a week'),
-        ({}, '—'),
+        ({}, 'tracked'),
     ],
 )
 def test_the_goal_is_stated_as_the_register_writes_it(config, expected):
@@ -1732,6 +1793,19 @@ def test_minutes_on_a_counted_pursuit_is_a_usage_error(sandbox, monkeypatch):
 
     assert ran.exit_code == 2
     assert journal.read_all(sandbox / 'state') == []
+
+
+def test_a_tracked_pursuit_keeps_the_minutes_it_is_given_and_asks_for_none(tmp_path, sandbox, monkeypatch):
+    """Nothing is measured against them, so they are kept where given and never asked for."""
+    tracked_register(tmp_path, monkeypatch)
+    asked = answers(monkeypatch, '', '')
+
+    assert pursuits.cmd_log('build', [], None, 90, assume_yes=True, no_write=True) == 0
+    assert pursuits.cmd_log('build', [], None, None, assume_yes=True, no_write=True) == 0
+
+    assert not [prompt for prompt in asked if 'minutes' in prompt]
+    logged = [record['duration_minutes'] for record in journal.read_all(sandbox / 'state') if record.get('pursuit') == 'build']
+    assert logged == [90, None]
 
 
 def test_a_timed_pursuit_with_nobody_to_ask_is_a_usage_error(sandbox, monkeypatch):
@@ -2179,22 +2253,27 @@ def test_a_row_the_register_dropped_renders_rather_than_crashing(sandbox, monkey
     assert row.due == 'paused', 'a row outside the active set cannot be priced and still has to render'
 
 
-def test_an_unpriced_row_says_which_of_the_four_reasons_it_is():
-    """One dash for four facts leaves the one worth seeing invisible: a drawn row
-    the register no longer holds reads exactly like one that is simply unscheduled."""
+def test_an_unpriced_row_says_which_reason_it_is():
+    """One dash for several facts leaves the one worth seeing invisible: a drawn row
+    the register no longer holds reads exactly like one that is simply unscheduled.
+
+    A drawn `socialize` set to `weight: 0` read `no schedule` while its register
+    still said `cadence: 7d`."""
     state = {
         'today': NOW.date(),
         'pursuits': {
             'stopped': {'paused': True},
             'expired': {'until': NOW.date() - dt.timedelta(days=1)},
-            'weightless': {'weight': 0},
+            'logged-only': {'description': 'no pace'},
+            'weightless': {'weight': 0, 'cadence': '7d'},
         },
     }
 
     assert pursuits.why_unpriced(state, 'edited-away') == 'not in register'
     assert pursuits.why_unpriced(state, 'stopped') == 'paused'
     assert pursuits.why_unpriced(state, 'expired') == 'term ended'
-    assert pursuits.why_unpriced(state, 'weightless') == 'no schedule'
+    assert pursuits.why_unpriced(state, 'logged-only') == 'tracked'
+    assert pursuits.why_unpriced(state, 'weightless') == 'weight 0'
 
 
 def test_the_standing_line_needs_a_whole_checkoff_before_it_says_behind(tmp_path, monkeypatch):
@@ -2234,6 +2313,25 @@ def test_resume_ends_a_standing_skip(sandbox, monkeypatch):
     assert pursuits.cmd_resume('chores') == 0
 
     assert pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())['suppressed'] == []
+
+
+def test_a_resume_is_not_counted_as_a_second_pass(sandbox, monkeypatch, capsys):
+    """One skip and one resume read as `passed 2` in drift."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('chores', '2w') == 0
+    assert pursuits.cmd_resume('chores') == 0
+    capsys.readouterr()
+
+    assert drift_rows(capsys)['chores']['skips'] == 1
+
+
+def test_resuming_a_pursuit_with_no_skip_writes_nothing(sandbox, monkeypatch):
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    log_done(sandbox / 'state', 'chores', 1)
+
+    assert pursuits.cmd_resume('chores') == 0
+
+    assert [record for record in journal.read_all(sandbox / 'state') if record['event'] == journal.Event.SKIP] == []
 
 
 def test_a_later_skip_shortens_an_earlier_one(sandbox, monkeypatch):
@@ -2331,12 +2429,43 @@ def test_drift_reads_an_unparsable_timestamp_one_way(sandbox, capsys):
     assert row is None or (row['logs'], row['done']) == (0, 0.0)
 
 
-def test_the_register_names_a_weekly_goal_and_the_log_names_a_measurement():
+def test_a_register_naming_minutes_is_pointed_at_weekly_minutes(tmp_path):
     """Two different quantities, so they do not share a word. `weekly_minutes:`
     is what a week asks for; `--minutes` is what one sitting took."""
-    assert 'weekly_minutes' in pursuits.KNOWN_FIELDS
-    assert 'minutes' not in pursuits.KNOWN_FIELDS
-    assert '`doit log` asks how long' in pursuits.TEMPLATE, 'the template says which is which'
+    path = write_register(tmp_path, 'pursuits:\n  read:\n    weight: 5\n    minutes: 120\n')
+
+    with pytest.raises(pursuits.RegisterError, match=r'unknown field\(s\) minutes\b.*weekly_minutes'):
+        pursuits.load_pursuits(path)
+
+
+def test_a_tracked_pursuit_has_a_drift_row_against_no_goal(tmp_path, sandbox, monkeypatch, capsys):
+    """Showing where the time went is all a tracked pursuit is for, so it keeps a
+    row with nothing done, and its done column carries the minutes its logs gave."""
+    tracked_register(tmp_path, monkeypatch)
+    log_days_ago(sandbox / 'state', 'build', 1, minutes=90)
+    log_days_ago(sandbox / 'state', 'build', 2)
+
+    row = drift_rows(capsys)['build']
+
+    assert (row['goal'], row['asked'], row['done'], row['minutes'], row['due_days']) == ('tracked', None, 2.0, 90, None)
+
+
+def test_a_tracked_pursuit_with_nothing_done_still_has_a_drift_row(tmp_path, sandbox, monkeypatch, capsys):
+    tracked_register(tmp_path, monkeypatch)
+    log_days_ago(sandbox / 'state', 'chores', 1)
+
+    assert drift_rows(capsys)['build']['done'] == 0.0
+
+
+def test_the_list_gives_a_tracked_pursuit_no_weight_and_no_due_date(tmp_path, sandbox, monkeypatch):
+    tracked_register(tmp_path, monkeypatch)
+
+    ran = runner.invoke(cli_app, ['pursuits', 'list'])
+
+    line = next(line for line in ran.output.splitlines() if line.strip().startswith('build'))
+    assert 'tracked' in line
+    assert 'due' not in line
+    assert not re.search(r'\d', line.split('last')[0]), 'a weight was printed'
 
 
 def test_a_paused_timed_pursuit_keeps_its_unit_in_drift(tmp_path, sandbox, monkeypatch, capsys):

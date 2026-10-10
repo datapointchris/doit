@@ -440,22 +440,22 @@ def pursuits_done(state: dict, today: dt.date) -> Lane:
     appears only there, so it is added once, at the last time its app saw it.
     One also typed today is already listed, and its evidence adds nothing.
 
-    Only pursuits still in the register. A journal is history and the register
-    is now, so commenting one out takes it off today.
+    Only pursuits the register still draws or tracks. A journal is history and
+    the register is now, so commenting one out or pausing it takes it off today.
     """
     now = state['now']
-    active = state['active']
+    current = state['watched']
     cells = []
     typed = set()
     for record in state.get('records') or []:
         name = str(record.get('pursuit') or '')
-        if record.get('event') != journal.Event.DONE or name not in active or journal.local_day(record, now) != today:
+        if record.get('event') != journal.Event.DONE or name not in current or journal.local_day(record, now) != today:
             continue
         typed.add(name)
         cells.append(GridCell(journal_entry(record), True, done_at=instant_text(record.get('occurred_at') or record.get('logged_at'), now)))
     observed = state.get('observed') or {}
     for name, days in (state.get('evidence_days') or {}).items():
-        if name in typed or name not in active or today not in days:
+        if name in typed or name not in current or today not in days:
             continue
         seen = local_instant(observed.get(name), now)
         when = seen.isoformat(timespec='seconds') if seen is not None and seen.date() == today else ''
