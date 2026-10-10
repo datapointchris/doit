@@ -1,9 +1,9 @@
 """doit's shared console, its column arithmetic, and its startup-nudge renderers.
 
 A nudge is an interrupt you did not ask for, so it trades every browse-time field
-(description, tags, cadence, last-done) for one line per item, and every line is
-clipped to the terminal rather than wrapped. A wrapped row is two rows, which is
-how the nudge grew the first time.
+(description, tags, cadence, last-done) for one line per item. A wrapped row is
+two rows, which is how the nudge grew the first time, so every nudge line stays
+within the terminal.
 
 Two layers do the clipping. A view that wants columns sizes them here, against
 the terminal width, and `fitted` truncates each value to the width it was given.
@@ -11,8 +11,10 @@ the terminal width, and `fitted` truncates each value to the width it was given.
 `overflow='ellipsis'` as the backstop. Rich measures printable width at both
 layers, so styling cannot shift a later column.
 
-A handle, the command a row says to type, is the one value never clipped.
-`handle_column` keeps it whole, and one that does not fit goes under its row.
+A handle, the command a row says to type, is the one value never clipped. In a
+view with columns, `handle_column` keeps it whole, and one that does not fit
+goes under its row. A nudge row drops its status to fit one, and leaves off a
+command that still does not fit.
 
 Lines carrying content from a register, a Lab or a command are built as `Text`
 rather than markup strings — `Text.append` does not parse `[...]`, so a bracket
@@ -194,17 +196,21 @@ def nudge_width(names: list[str]) -> int:
 
 
 def nudge_row(name: str, status: str, command: str, width: int) -> None:
-    """Print one due item as a single line, clipping rather than wrapping.
+    """Print one due item as a single line, never wrapped.
 
-    Only the command is at risk of being clipped — the name and status come
-    first, so a narrow pane eats the trailing command rather than the identity of
-    the row.
+    A clipped command fails when typed, so the command is printed whole or not
+    at all. The status gives way to it first: a row whose line cannot hold all
+    three drops the status. A command too wide for the line even then is left
+    off, and the row keeps its name and status. The browse view prints it whole.
     """
     line = Text('  ')
     line.append(name.ljust(width), style='yellow')
-    if command:
+    handle = f'↳ {command}' if command else ''
+    if handle and 2 + width + STATUS_WIDTH + len(handle) <= console.width:
         line.append(status.ljust(STATUS_WIDTH))
-        line.append(f'↳ {command}', style='cyan')
+        line.append(handle, style='cyan')
+    elif handle and 2 + width + len(handle) <= console.width:
+        line.append(handle, style='cyan')
     else:
         line.append(status)
     console.print(line, no_wrap=True, overflow='ellipsis')
