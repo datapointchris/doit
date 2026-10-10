@@ -2438,6 +2438,22 @@ def test_a_register_naming_minutes_is_pointed_at_weekly_minutes(tmp_path):
         pursuits.load_pursuits(path)
 
 
+def test_dormant_names_where_what_each_owes_is_read_and_aligns_its_rows(tmp_path, sandbox, monkeypatch, capsys):
+    """`dormant` named paint, project and tasks and pointed nowhere, while the
+    dashboard named four other pursuits as behind. Its rows also ran `paint  never`
+    and `project  never` at different offsets."""
+    register = 'pursuits:\n  paint:\n    weight: 25\n    cadence: 7d\n  project:\n    weight: 25\n    cadence: 7d\n'
+    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
+
+    assert pursuits.cmd_dormant() == 0
+
+    printed = capsys.readouterr().out
+    rows = [line for line in printed.splitlines() if 'never' in line]
+    assert len(rows) == 2
+    assert len({row.index('never') for row in rows}) == 1
+    assert 'doit pursuits list' in printed
+
+
 def test_a_tracked_pursuit_has_a_drift_row_against_no_goal(tmp_path, sandbox, monkeypatch, capsys):
     """Showing where the time went is all a tracked pursuit is for, so it keeps a
     row with nothing done, and its done column carries the minutes its logs gave."""

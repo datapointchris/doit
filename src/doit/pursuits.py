@@ -2349,12 +2349,14 @@ def cmd_dormant() -> int:
     if not stale:
         console.print('Nothing is running cold.\n')
         return 0
+    width = max(len(name) for name, _, _ in stale)
     for name, elapsed, _ in sorted(stale, key=lambda row: -(row[1] or 1e9)):
         line = Text('  ')
-        line.append(name, style='white')
+        line.append(f'{name:<{width}}', style='white')
         line.append(f'  {format_elapsed(elapsed)} · goal {goal_text(state["active"][name])}')
         console.print(line)
-    console.print('\n  Cold measures the gap since the last one; the balance measures what is owed.\n')
+    console.print('\n  Cold is the time since the last one.')
+    console.print('  [cyan]doit pursuits list[/] shows it beside what each owes.\n')
     return 0
 
 
