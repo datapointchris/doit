@@ -133,6 +133,25 @@ def test_no_match_and_esc_are_still_a_pick_of_nothing(tmp_path, monkeypatch, cap
     assert capsys.readouterr().err == ''
 
 
+def test_kit_list_through_a_pipe_keeps_every_row_whole(monkeypatch):
+    """Piped, 263 of 413 rows ended in `…` at 80 columns, so `doit kit list | rg`
+    missed the tags at the end of a row that `doit find` would have matched."""
+    entry = index.Entry(
+        source='tool',
+        name='ripgrep',
+        invocation='rg [pattern] [path]',
+        description='Ultra-fast recursive grep that respects gitignore by default',
+        tags=('search', 'gitignore-aware'),
+    )
+    monkeypatch.setattr(index, 'build_index', lambda sources=None: [entry])
+
+    result = runner.invoke(cli_app, ['kit', 'list'])
+
+    assert result.exit_code == 0
+    assert len(entry.display()) > 80
+    assert result.output == entry.display() + '\n'
+
+
 def test_launching_without_a_picker_fails_the_same_way(monkeypatch, capsys):
     """`launch` reads one index of its own, so it does not inherit the guard."""
     monkeypatch.setattr(index, 'index_tools', lambda: [])

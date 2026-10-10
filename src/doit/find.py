@@ -410,7 +410,12 @@ def preview_command(source: Annotated[str, typer.Argument()], name: Annotated[st
 def index_list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
-    """Every indexed row, as the picker sees it."""
+    """Every indexed row, as the picker sees it.
+
+    A terminal gets one line per row, cut to its width so the list scans. A
+    pipe gets every row whole, because fzf matches the whole line, and the tags
+    at its end are the first thing a cut drops.
+    """
     entries = index.build_index()
     if as_json:
         print(
@@ -419,6 +424,10 @@ def index_list_command(
                 indent=2,
             )
         )
+        raise typer.Exit(0)
+    if not console.is_terminal:
+        for entry in entries:
+            print(entry.display())
         raise typer.Exit(0)
     for entry in entries:
         console.print(Text(entry.display()), no_wrap=True, overflow='ellipsis')
