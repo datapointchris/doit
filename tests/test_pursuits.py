@@ -361,9 +361,7 @@ def test_a_cached_failure_is_asked_again_without_disturbing_the_draw(sandbox, tm
     assert pursuits.load_cached_draw(NOW)['resolved']['chores']['choices'][0]['label'] == 'Trim Dingo Nails'
 
 
-def test_a_retry_that_finds_nothing_drops_the_stale_error(sandbox, tmp_path):
-    # resolve_all omits a pursuit that resolved to nothing, so the failed entry has
-    # to go before the merge or the dead message outlives the backend it came from.
+def test_a_retry_that_finds_nothing_replaces_the_stale_error(sandbox, tmp_path):
     payload = tmp_path / 'empty.json'
     payload.write_text('[]')
     selection = {
@@ -376,7 +374,7 @@ def test_a_retry_that_finds_nothing_drops_the_stale_error(sandbox, tmp_path):
 
     pursuits.retry_failed_resolves(selection, {'chores': {'resolve': f'cat {payload}', 'label': 'name'}})
 
-    assert 'chores' not in selection['resolved']
+    assert selection['resolved']['chores'] == {'pursuit': 'chores', 'candidates': 0, 'backend': 'cat', 'choices': []}
 
 
 def test_a_cached_draw_that_resolved_cleanly_is_not_asked_again(sandbox):
@@ -594,10 +592,25 @@ def test_resolve_one_reports_json_that_is_not_json():
     assert 'JSON' in resolved['error']
 
 
-def test_resolve_one_returns_none_for_an_empty_result(tmp_path):
+MATCHED_NOTHING = {'pursuit': 'p', 'candidates': 0, 'backend': 'cat', 'choices': []}
+
+
+def test_resolve_one_reports_an_empty_list_as_matching_nothing(tmp_path):
     payload = tmp_path / 'empty.json'
     payload.write_text('[]')
-    assert pursuits.resolve_one('p', {'resolve': f'cat {payload}', 'label': 'name'}) is None
+    assert pursuits.resolve_one('p', {'resolve': f'cat {payload}', 'label': 'name'}) == MATCHED_NOTHING
+
+
+def test_resolve_one_reports_null_as_matching_nothing(tmp_path):
+    payload = tmp_path / 'null.json'
+    payload.write_text('null')
+    assert pursuits.resolve_one('p', {'resolve': f'cat {payload}', 'label': 'name'}) == MATCHED_NOTHING
+
+
+def test_resolve_one_reports_no_plain_lines_as_matching_nothing(tmp_path):
+    payload = tmp_path / 'blank.txt'
+    payload.write_text('\n  \n')
+    assert pursuits.resolve_one('p', {'resolve': f'cat {payload}'}) == MATCHED_NOTHING
 
 
 def test_resolve_one_counts_the_rows_that_matched(tmp_path):
@@ -702,6 +715,29 @@ def test_logging_re_resolves_past_a_cached_failure(sandbox, tmp_path, monkeypatc
             'resolved': {'chores': {'pursuit': 'chores', 'error': 'exited 1', 'backend': 'icb'}},
         }
     )
+
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+    assert marker.read_text().strip() == '422'
+
+
+def test_logging_re_resolves_past_a_draw_that_matched_nothing(sandbox, tmp_path, monkeypatch):
+    """The item was made after the draw, so the cached empty result is stale."""
+    marker = tmp_path / 'completed.txt'
+    payload = tmp_path / 'row.json'
+    payload.write_text('[{"id": 422, "name": "Trim Dingo Nails"}]')
+    register = write_register(
+        tmp_path,
+        'pursuits:\n'
+        '  chores:\n'
+        '    weight: 25\n'
+        '    cadence: 3d\n'
+        f'    resolve: cat {payload}\n'
+        '    label: name\n'
+        '    id: id\n'
+        f'    on_log: sh -c "echo {{id}} > {marker}"\n',
+    )
+    monkeypatch.setattr(pursuits, 'REGISTER', register)
+    stand_a_draw(['chores'], resolved={'chores': pursuits.nothing_matched('chores', f'cat {payload}')})
 
     assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
     assert marker.read_text().strip() == '422'
@@ -897,10 +933,22 @@ def test_a_pursuit_offers_every_choice_its_backend_returned():
     assert row.choices == ['Difficult Conversations · Douglas Stone', 'Ego and Archetype']
 
 
-def test_a_pursuit_with_nothing_resolved_offers_its_description():
+def test_a_pursuit_with_no_resolve_offers_its_description():
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
 
     assert pursuits.offer('chores', state, {}).choices == [state['pursuits']['chores']['description']]
+
+
+def test_a_resolve_that_matched_nothing_is_flagged_beside_the_description():
+    """The description alone reads as the item, so a pursuit pointed at a project
+    kind that no longer held anything looked like a real thing to go and do."""
+    state = pursuits.build_state(pursuits.load_pursuits(), NOW)
+    resolved = {'chores': pursuits.nothing_matched('chores', 'tracker next --json')}
+
+    row = pursuits.offer('chores', state, resolved)
+
+    assert row.failed
+    assert row.choices == [f'tracker: matched nothing · {state["pursuits"]["chores"]["description"]}']
 
 
 def a_row(name: str, due: str, *choices: str) -> pursuits.Offer:
@@ -2064,10 +2112,13 @@ def test_resolve_where_keeps_only_the_rows_that_are_this_pursuit(tmp_path):
     assert resolved['choices'][0]['id'] == '474'
 
 
-def test_resolve_where_matching_nothing_resolves_to_nothing(tmp_path):
-    """Not an error: the pursuit is due and there is no prompt written down, which
-    is a true answer and the description is what shows instead."""
-    assert resolving(tmp_path, [{'name': 'Self Authoring', 'id': 344}], resolve_where={'name': 'Journal'}) is None
+def test_resolve_where_matching_nothing_is_reported_as_matching_nothing(tmp_path):
+    """The pursuit is due and no prompt is written down. The row shows the
+    description beside the flag, because nothing here can tell that apart from a
+    filter that drifted from the backend's field names."""
+    resolved = resolving(tmp_path, [{'name': 'Self Authoring', 'id': 344}], resolve_where={'name': 'Journal'})
+    assert resolved['candidates'] == 0
+    assert resolved['choices'] == []
 
 
 def test_resolve_without_a_where_takes_the_first_row_as_before(tmp_path):

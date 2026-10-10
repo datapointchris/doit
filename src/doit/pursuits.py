@@ -183,7 +183,7 @@ TEMPLATE = """\
 # fills the rest of the screen, and it never moves a pace.
 #
 #   description  the thing itself, in a few plain words. It is the row's title
-#                wherever nothing resolves, so it names what you would do
+#                for a pursuit with no resolve, so it names what you would do
 #   weight       required; how much this matters against the rest. What is owed
 #                is shown heaviest first, and when less than a screen is owed the
 #                rest is drawn by weight. Relative magnitudes, so nothing adds up
@@ -221,6 +221,10 @@ TEMPLATE = """\
 # `doit log` asks which one you did wherever `on_log` would act on it. Enter, or
 # nobody there to ask, names none — an hour of reading is not a claim about
 # which book. Narrow the command to one where you mean one.
+#
+# No rows is shown in red, as `<backend>: matched nothing` followed by the
+# description. Either the command has drifted from its backend or there is
+# nothing to do the pursuit on yet, and the row cannot tell which.
 #
 #   resolve_where  optional field: value pairs keeping only the rows that are
 #                  this pursuit. Narrow the command itself where the backend can;
@@ -990,7 +994,9 @@ def resolve_one(name: str, config: dict) -> dict | None:
     label_field = config.get('label')
     if not label_field:
         first = next((line for line in result.stdout.splitlines() if line.strip()), '')
-        return {'pursuit': name, 'candidates': 1, 'choices': [{'label': first.strip()}]} if first else None
+        if not first:
+            return nothing_matched(name, command)
+        return {'pursuit': name, 'candidates': 1, 'choices': [{'label': first.strip()}]}
 
     try:
         document = json.loads(result.stdout or 'null')
@@ -1003,14 +1009,14 @@ def resolve_one(name: str, config: dict) -> dict | None:
     if isinstance(rows, dict):
         rows = [rows]
     if not isinstance(rows, list) or not rows:
-        return None
+        return nothing_matched(name, command)
     # The counterpart to `evidence_where`, for the same reason: a backend with no
     # filter for the distinction you are drawing returns everything and only some
     # of it is the pursuit. Narrow the command first where the API can — this is
     # what is left when it cannot.
     rows = evidence.matching(rows, config.get('resolve_where'))
     if not rows:
-        return None
+        return nothing_matched(name, command)
     return {
         'pursuit': name,
         # How many rows the backend matched, not how many are shown. A resolve
@@ -1021,6 +1027,16 @@ def resolve_one(name: str, config: dict) -> dict | None:
         'backend': shlex.split(config['resolve'])[0],
         'choices': [one_choice(row, config, label_field) for row in rows[:CANDIDATE_ROWS]],
     }
+
+
+def nothing_matched(name: str, command: str) -> dict:
+    """A resolve that ran cleanly and matched no rows.
+
+    An entry rather than an absence, because an absent entry is what a pursuit
+    with no resolve has, and the row would then show the description as though it
+    were the item.
+    """
+    return {'pursuit': name, 'candidates': 0, 'backend': shlex.split(command)[0], 'choices': []}
 
 
 def one_choice(row, config: dict, label_field: str) -> dict:
@@ -1326,6 +1342,10 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
         # naming a verb the CLI dropped fails identically to one that is logged
         # out, and only the message it printed tells the two apart.
         return Offer(name, due, due_style(days), [f'{detail.get("backend") or "resolve"}: {failure}'], True, **columns)
+    if detail.get('candidates') == 0:
+        flag = f'{detail.get("backend") or "resolve"}: matched nothing'
+        # The flag leads, so a narrow pane clips the description rather than it.
+        return Offer(name, due, due_style(days), [join_context([flag, config.get('description')])], True, **columns)
 
     # Title and place on one line rather than in two columns. A context column is
     # sized by the longest title anywhere on screen, so an eight-character title
@@ -1798,8 +1818,9 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     # something different from what was offered.
     item = (cached.get('resolved') or {}).get(matched) or {}
     # A cached failure is truthy and carries no id, so it satisfies the guard below
-    # and the write-through to the owning CLI is skipped without saying so.
-    if item.get('error'):
+    # and the write-through to the owning CLI is skipped without saying so. A cached
+    # empty result is the same, and an item made since the draw is still found.
+    if item.get('error') or item.get('candidates') == 0:
         item = {}
     if not item and pursuits[matched].get('resolve'):
         item = resolve_one(matched, pursuits[matched]) or {}
