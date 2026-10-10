@@ -1,7 +1,7 @@
 """Search the federated index, then hand you off to whoever owns the answer.
 
-`doit find` is one motion: fuzzy-match a line, press Enter, get everything known
-about that subject assembled from every collection that has it. `doit show` is
+`doit find` is one motion: fuzzy-match a line, press Enter, get how to use that
+thing, assembled from every collection that has it. `doit show` is
 that same composite when you already know the name, and it is a command rather
 than a picker callback because knowing the name is the common case. `doit launch`
 is the other direction: your areas and your own tools, for when the question is
@@ -52,7 +52,7 @@ AREA = 'area'
 AREAS = [
     ('next', 'What to do now, drawn from your weighted pursuits'),
     ('dashboard', 'Everything outstanding across your apps, in lanes'),
-    ('find', 'Search across tools, cards, skills, funcs, aliases, git'),
+    ('find', 'Search everything you own, and open what you pick'),
     ('review due', 'What is due to revisit'),
     ('labs due', 'Hands-on practice that is due now'),
 ]
@@ -68,7 +68,7 @@ FZF_COMMON = [
 # The header is the only thing on screen naming which picker you are in, so it
 # is named here rather than quoted at the call site — two commands share one
 # picker, and a copy-paste header is the drift that makes them indistinguishable.
-FIND_HEADER = 'Enter opens everything known about it'
+FIND_HEADER = 'Enter shows how to use it'
 CHOOSE_HEADER = 'Enter puts it on your command line'
 LAUNCH_HEADER = 'Your areas and tools · Enter shows it'
 
@@ -204,7 +204,10 @@ def delegate(command: list[str]) -> bool:
 
 
 def cmd_show(subject: str) -> int:
-    """Everything known about one subject, from every collection that has it.
+    """How to use one tool or command, from every collection in the library that has it.
+
+    What a project is doing is not here. Its issues and roadmap belong to the
+    tools that track them, and doit reads no project's state.
 
     Assembled in a fixed order so the same subject reads the same way every
     time, and each section names the tool it came from — a composite that hides
@@ -359,7 +362,7 @@ def launch_command() -> None:
 
 
 def show_command(subject: Annotated[str, typer.Argument()]) -> None:
-    """Everything known about one subject, from every collection that has it."""
+    """How to use one tool or command, from every collection in the library that has it."""
     raise typer.Exit(cmd_show(subject))
 
 

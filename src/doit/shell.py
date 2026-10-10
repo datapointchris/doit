@@ -94,7 +94,7 @@ _doit() {{
     'find:Search everything you own, and open what you pick'
     'choose:Pick one thing and print what you would type to run it'
     'launch:Your areas and every tool you own'
-    'show:Everything known about one subject'
+    'show:How to use one tool or command'
     'pursuits:The weights the draw runs on'
     'review:What is due to revisit'
     'labs:Hands-on practice that is due now'
