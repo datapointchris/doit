@@ -10,6 +10,10 @@ its pick to the composite renderer and `choose` prints one line to stdout, and a
 on the command line verbatim.
 """
 
+import os
+import shlex
+from pathlib import Path
+
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -94,6 +98,39 @@ def test_a_missing_picker_is_a_failure_rather_than_a_cancelled_pick(monkeypatch,
     captured = capsys.readouterr()
     assert captured.out == ''
     assert 'fzf is not installed' in captured.err
+
+
+def fzf_exiting(directory: Path, code: int, said: str) -> None:
+    """Put an `fzf` on PATH that prints `said` to stderr and exits `code`, as the real one does without a terminal."""
+    stub = directory / 'fzf'
+    stub.write_text(f'#!/bin/sh\ncat > /dev/null\nprintf %s {shlex.quote(said)} >&2\nexit {code}\n')
+    stub.chmod(0o755)
+
+
+@pytest.mark.parametrize('command', [find.cmd_choose, find.cmd_find])
+def test_a_picker_that_cannot_run_is_a_failure_that_says_why(tmp_path, monkeypatch, capsys, command):
+    """`doit find < /dev/null` exited 0 with nothing on stdout or stderr: fzf
+    exited 2 with `inappropriate ioctl for device`, and the empty answer read as Esc."""
+    monkeypatch.setattr(index, 'build_index', lambda sources=None: list(ENTRIES))
+    fzf_exiting(tmp_path, 2, 'inappropriate ioctl for device')
+    monkeypatch.setenv('PATH', f'{tmp_path}{os.pathsep}{os.environ["PATH"]}')
+
+    assert command('', None) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    assert 'inappropriate ioctl for device' in captured.err
+    assert 'doit kit list --json' in captured.err
+
+
+@pytest.mark.parametrize('code', [1, 130])
+def test_no_match_and_esc_are_still_a_pick_of_nothing(tmp_path, monkeypatch, capsys, code):
+    monkeypatch.setattr(index, 'build_index', lambda sources=None: list(ENTRIES))
+    fzf_exiting(tmp_path, code, '')
+    monkeypatch.setenv('PATH', f'{tmp_path}{os.pathsep}{os.environ["PATH"]}')
+
+    assert find.cmd_find('', None) == 0
+    assert capsys.readouterr().err == ''
 
 
 def test_launching_without_a_picker_fails_the_same_way(monkeypatch, capsys):

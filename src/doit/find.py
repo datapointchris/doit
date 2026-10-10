@@ -57,6 +57,8 @@ AREAS = [
     ('labs due', 'Hands-on practice that is due now'),
 ]
 
+FZF_FAILED = 2
+
 FZF_COMMON = [
     '--delimiter=\t',
     '--with-nth=1',
@@ -74,18 +76,23 @@ LAUNCH_HEADER = 'Your areas and tools · Enter shows it'
 
 
 def run_fzf(lines: list[str], query: str, preview: str, header: str) -> str | None:
-    """Pick one line with fzf: the row, '' when the pick was canceled, None when fzf is missing.
+    """Pick one line with fzf: the row, '' when the pick was canceled, None when fzf is missing or failed.
 
     Canceling and having no picker are different answers and every caller has
     to tell them apart. `choose` is read back through `$(...)`, where exit status
     is the caller's only signal — a missing binary reported as success is an
     empty command line with no explanation of why.
 
-    A missing fzf is reported rather than raised: the index is still usable
-    through `--json`, and a stack trace would say less than one sentence does.
+    fzf exits 1 for no match and 130 for Esc, both a pick of nothing. It exits 2
+    when it cannot run at all, as with no terminal to draw on, and prints why to
+    the stderr captured here.
+
+    Either failure is reported rather than raised, beside the two commands that
+    answer without a terminal. A stack trace would say less than one sentence does.
     """
     if not shutil.which('fzf'):
         error_console.print('fzf is not installed on this machine.')
+        print_without_a_picker()
         return None
     command = [
         'fzf',
@@ -96,7 +103,16 @@ def run_fzf(lines: list[str], query: str, preview: str, header: str) -> str | No
         f'--header={header}',
     ]
     result = subprocess.run(command, input='\n'.join(lines), text=True, capture_output=True, check=False)
+    if result.returncode == FZF_FAILED:
+        said = result.stderr.strip().splitlines()
+        error_console.print(f'fzf could not run: {said[0] if said else f"exited {result.returncode}"}')
+        print_without_a_picker()
+        return None
     return result.stdout.strip()
+
+
+def print_without_a_picker() -> None:
+    error_console.print('Without a picker, [cyan]doit show <name>[/] shows one thing and [cyan]doit kit list --json[/] lists all of them.')
 
 
 def index_lines(entries: list[index.Entry]) -> list[str]:
