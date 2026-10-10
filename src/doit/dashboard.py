@@ -576,9 +576,8 @@ def build_training_lane(results: dict[str, sources.Result], today: dt.date) -> L
     is the thing you can go and do — the same reason the learning lane rows
     resources rather than track units.
 
-    What was already performed is deliberately absent. `meso sessions` answers
-    that, and it feeds the `train` pursuit's evidence instead: a dashboard lane
-    says what is outstanding, and a session is the opposite of outstanding.
+    What was already performed is deliberately absent. A dashboard lane says
+    what is outstanding, and a session is the opposite of outstanding.
     """
     result = results.get('meso')
     if result is None or not isinstance(result.payload, list):
