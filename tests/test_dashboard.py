@@ -12,6 +12,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from doit import dashboard
@@ -865,6 +866,71 @@ def test_a_row_with_a_command_shows_what_to_type(monkeypatch, capsys):
     dashboard.render_rows(rows, render.MAX_WIDTH)
 
     assert f'{dashboard.HANDLE_MARK} indy index' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('width', [80, render.MAX_WIDTH])
+def test_a_handle_is_printed_whole_at_any_width(monkeypatch, capsys, width):
+    monkeypatch.setenv('COLUMNS', str(width))
+    rows = [
+        dashboard.Row(
+            'ask',
+            'sessions keep re-reading the help of one tool or guessing its commands',
+            'recommends 1. Add a line to the agent instructions',
+            dashboard.Urgency.OVERDUE,
+            'inbox answer friction/precommit/a-hook-with-a-long-repo-scoped-name <n>',
+        ),
+        dashboard.Row('next', 'Tests read the workstation', 'a-repo · an initiative with a long name', handle='tracker show 837'),
+    ]
+
+    dashboard.render_rows(rows, width)
+
+    printed = capsys.readouterr().out
+    for row in rows:
+        assert f'{dashboard.HANDLE_MARK} {row.handle}' in printed
+    assert all(len(line) <= width for line in printed.splitlines())
+
+
+def test_a_label_wider_than_the_gutter_leaves_the_handle_on_the_line(monkeypatch, capsys):
+    """A PR row's label is its repo, which can be wider than the gutter. The
+    lane's gutter widens to it, so the handle stays on the line."""
+    monkeypatch.setenv('COLUMNS', '120')
+    rows = [
+        dashboard.Row('a-long-repo', 'feat(list): add a sectioned shopping list built for the phone, in a form', '0d', handle='prs'),
+        dashboard.Row('short', 'feat(cli): point a scan flag given at the root to the check verb', '0d', handle='prs'),
+    ]
+
+    dashboard.render_rows(rows, 120)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert all(line.endswith(f'{dashboard.HANDLE_MARK} prs') for line in lines)
+    assert len({line.index('feat') for line in lines}) == 1, 'the lane shares one gutter'
+
+
+@pytest.mark.parametrize(('width', 'handle'), [(60, 'tracker labs show a-lab'), (80, 'tracker labs show a-lab-with-a-long-id')])
+def test_a_handle_never_takes_a_short_note_from_its_lane(monkeypatch, capsys, width, handle):
+    """A handle sizes the column for every row in its lane, so one sitting
+    inline at the note's expense would cut the note on all of them. Each handle
+    here fits beside the text alone and not beside the text and the note."""
+    monkeypatch.setenv('COLUMNS', str(width))
+    rows = [
+        dashboard.Row('lab', 'Find files fast', 'never run', handle=handle),
+        dashboard.Row('lab', 'Search code', 'never run', handle=handle),
+    ]
+
+    dashboard.render_rows(rows, width)
+
+    printed = capsys.readouterr().out
+    assert printed.count('never run') == 2
+    assert printed.count(f'{dashboard.HANDLE_MARK} {handle}') == 2
+
+
+def test_a_trailer_too_wide_for_the_pane_keeps_each_command_on_one_line(monkeypatch, capsys):
+    monkeypatch.setenv('COLUMNS', '30')
+    hint = 'tracker items list --status open'
+
+    dashboard.render_trailer(dashboard.LaneView(name='items', title='ITEMS', hints=[hint, hint]))
+
+    assert capsys.readouterr().out.count(f'→ {hint}') == 2
 
 
 def test_a_narrow_terminal_spends_its_width_on_the_row_itself(monkeypatch, capsys):

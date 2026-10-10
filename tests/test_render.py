@@ -16,14 +16,23 @@ def test_nudge_width_sizes_from_the_longest_name():
     assert render.nudge_width([]) == 2, 'an empty roster is the gutter alone, not a max() error'
 
 
-def test_nudge_row_fits_the_terminal(monkeypatch, capsys):
+def test_a_nudge_row_drops_its_status_rather_than_clip_its_command(monkeypatch, capsys):
+    monkeypatch.setenv('COLUMNS', '80')
+    command = 'python ~/.config/hooks/a-report-with-a-long-name'
+    render.nudge_row('an-item', 'never done', command, render.nudge_width(['an-item', 'a-much-longer-item']))
+
+    out = capsys.readouterr().out.rstrip('\n')
+    assert len(out) <= 80
+    assert out.startswith('  an-item'), "the name is the row's identity and is never clipped"
+    assert out.endswith(f'↳ {command}')
+    assert 'never done' not in out
+
+
+def test_a_nudge_command_too_wide_for_the_line_is_left_off_rather_than_clipped(monkeypatch, capsys):
     monkeypatch.setenv('COLUMNS', '50')
     render.nudge_row('an-item', 'never done', 'x' * 200, render.nudge_width(['an-item']))
 
-    out = capsys.readouterr().out.rstrip('\n')
-    assert len(out) <= 50
-    assert out.startswith('  an-item'), "the name is the row's identity and is never clipped"
-    assert out.endswith('…')
+    assert capsys.readouterr().out.rstrip('\n') == '  an-item  never done'
 
 
 def test_nudge_row_columns_line_up_across_rows(monkeypatch, capsys):
@@ -89,6 +98,13 @@ def test_a_column_takes_what_it_needs_bounded_by_its_share():
     assert render.column_width(140, ['↳ indy index'], 0.3, 20) == 12, 'what it needs, when that is under the share'
     assert render.column_width(140, ['x' * 90], 0.3, 20) == 42, 'the share, when the content runs longer'
     assert render.column_width(40, ['x' * 90], 0.3, 20) == 20, 'never below the minimum, however narrow the line'
+
+
+def test_a_handle_below_its_row_moves_left_rather_than_wrap(capsys):
+    render.print_handle_below('x' * 70, 11, 80)
+    render.print_handle_below('y' * 20, 11, 80)
+
+    assert capsys.readouterr().out.splitlines() == [' ' * 10 + 'x' * 70, ' ' * 11 + 'y' * 20]
 
 
 def test_fitted_truncates_to_the_width_it_was_given():

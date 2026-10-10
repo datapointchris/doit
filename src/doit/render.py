@@ -1,15 +1,20 @@
 """doit's shared console, its column arithmetic, and its startup-nudge renderers.
 
 A nudge is an interrupt you did not ask for, so it trades every browse-time field
-(description, tags, cadence, last-done) for one line per item, and every line is
-clipped to the terminal rather than wrapped. A wrapped row is two rows, which is
-how the nudge grew the first time.
+(description, tags, cadence, last-done) for one line per item. A wrapped row is
+two rows, which is how the nudge grew the first time, so every nudge line stays
+within the terminal.
 
 Two layers do the clipping. A view that wants columns sizes them here, against
 the terminal width, and `fitted` truncates each value to the width it was given.
 `console.print` then clips the assembled line with `no_wrap` and
 `overflow='ellipsis'` as the backstop. Rich measures printable width at both
 layers, so styling cannot shift a later column.
+
+A handle, the command a row says to type, is the one value never clipped. In a
+view with columns, `handle_column` keeps it whole, and one that does not fit
+goes under its row. A nudge row drops its status to fit one, and leaves off a
+command that still does not fit.
 
 Lines carrying content from a register, a Lab or a command are built as `Text`
 rather than markup strings — `Text.append` does not parse `[...]`, so a bracket
@@ -139,6 +144,27 @@ def column_width(width: int, values: list[str], share: float, minimum: int) -> i
     return min(needed, max(minimum, int(width * share)))
 
 
+def handle_column(handles: list[str], room: int) -> int:
+    """How wide a column of handles is: the widest one that fits whole in `room`.
+
+    A handle is a command, and a clipped one fails when it is typed. So a handle
+    is never fitted to a column. One wider than the room sits alone on the line
+    under its row, and the column is sized to the handles that stay inline.
+    """
+    return max((len(handle) for handle in handles if len(handle) <= room), default=0)
+
+
+def print_handle_below(handle: str, indent: int, width: int, style: str = '') -> None:
+    """A handle too wide for its row, on a line of its own under the row's text.
+
+    It moves left of the text column when that keeps it on one line. One wider
+    than the terminal is soft-wrapped, so it still copies as one line.
+    """
+    line = Text(' ' * max(0, min(indent, width - len(handle))))
+    line.append(handle, style=style)
+    console.print(line, soft_wrap=True)
+
+
 def span_text(days: float) -> str:
     """A number of days in the coarsest unit that still says something.
 
@@ -170,17 +196,21 @@ def nudge_width(names: list[str]) -> int:
 
 
 def nudge_row(name: str, status: str, command: str, width: int) -> None:
-    """Print one due item as a single line, clipping rather than wrapping.
+    """Print one due item as a single line, never wrapped.
 
-    Only the command is at risk of being clipped — the name and status come
-    first, so a narrow pane eats the trailing command rather than the identity of
-    the row.
+    A clipped command fails when typed, so the command is printed whole or not
+    at all. The status gives way to it first: a row whose line cannot hold all
+    three drops the status. A command too wide for the line even then is left
+    off, and the row keeps its name and status. The browse view prints it whole.
     """
     line = Text('  ')
     line.append(name.ljust(width), style='yellow')
-    if command:
+    handle = f'↳ {command}' if command else ''
+    if handle and 2 + width + STATUS_WIDTH + len(handle) <= console.width:
         line.append(status.ljust(STATUS_WIDTH))
-        line.append(f'↳ {command}', style='cyan')
+        line.append(handle, style='cyan')
+    elif handle and 2 + width + len(handle) <= console.width:
+        line.append(handle, style='cyan')
     else:
         line.append(status)
     console.print(line, no_wrap=True, overflow='ellipsis')
