@@ -167,8 +167,8 @@ def plural(count: int, noun: str) -> str:
 def clean(text: str) -> str:
     """Collapse a stored string onto one line.
 
-    Scraped article titles arrive wrapped in the source page's newlines and
-    tabs, which would otherwise break the row's alignment and its clip width.
+    A backend can store text carrying newlines and tabs, such as a title scraped
+    from a page, and those would break the row's alignment and its clip width.
     """
     return ' '.join((text or '').split())
 
