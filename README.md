@@ -11,7 +11,7 @@ next, what is due to revisit, what to practice, and the reference for actually d
 ```bash
 doit next             # what to do now, from the goals and weights you declared
 doit dashboard        # every lane, unranked — what is outstanding across everything
-doit today            # what today has had, and what it still wants
+doit today            # what today still wants, and what it has had
 doit review due       # what is due to revisit, on a cadence
 doit labs due         # hands-on practice that is due
 doit workflows list   # the reference cards
@@ -38,9 +38,10 @@ time and never hit a cryptic error.
   rows deep, and no lane is comparable to the one beside it.
 - **`doit today`** admits only what a day can finish. An outstanding count can only climb, so a
   lane of hundreds of unread articles reads exactly like a lane of two overdue chores. Here the top
-  list names everything the day has had, grouped by where it was recorded and in the order it
-  happened. The list underneath is what is still owed, three to a group, then a row saying how many
-  more and what to type to see them.
+  list is what is still owed. Habits and pursuits show up to ten rows and every other group three,
+  then a row saying how many more and what to type to see them. Anything done today is off it, so
+  a pursuit logged this morning leaves however far behind it still is. The list underneath names
+  everything the day has had, grouped by where it was recorded and in the order it happened.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
 

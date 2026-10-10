@@ -1,4 +1,4 @@
-"""The day in two lists — what today has had, and what it still wants.
+"""The day in two lists — what it still wants, and what it has had.
 
 The third density, beside `doit dashboard` and `doit next`. The dashboard reads
 every lane and ranks across none of them; `next` draws one thing from the
@@ -6,14 +6,21 @@ weights. Neither says what the day has already had, because an outstanding
 count can only climb and a lane of hundreds of unread articles renders exactly
 like a lane of two overdue chores.
 
+**What is not done is said once, in the due list, and it prints first.** It is
+what the reader acts on, and the done list is the record beneath it. Each group
+holds what one record owes, in that record's own order. Habits and pursuits show
+their first ten. Each is a short list the day works through, so its rows are the
+day's plan rather than a backlog. Every other group shows three. The rest are
+one command away, on the row saying how many there are.
+
+**Anything done today is off the due list, even where its record still owes.**
+A pursuit logged this morning can still be weeks behind its pace. The day has
+had it, so it is listed as done and only as done.
+
 **What is done is named, not counted.** Each group is one record: the habits,
 the pursuits, review, Labs, then each completion source. Inside a group the
 entries run in the order they happened, with the hour wherever the record kept
 one. A count would leave the reader to recall what it stood for.
-
-**What is not done is said once, in the due list.** Each group there holds what
-one record owes, in that record's own order, and shows the first three. The
-rest are one command away, on the row saying how many there are.
 
 A group with nothing in it prints nothing. An empty heading spends a line on
 what its absence already says. A group that could not be read always prints,
@@ -87,6 +94,11 @@ DAY_SET_LANES = ('habits',)
 # Past three a group is a backlog. The row after them says how many more there
 # are and what to type to see them.
 DUE_PER_GROUP = 3
+
+# The groups whose rows are the day's plan rather than a backlog. Ten shows a
+# routine whole without letting it push every register off the screen.
+ROUTINE_GROUPS = (*DAY_SET_LANES, 'pursuits')
+DUE_PER_ROUTINE_GROUP = 10
 
 # A review slug or a Lab id is the longest label here and fits. A longer one is
 # clipped rather than pushing every description in its group off the line.
@@ -438,8 +450,8 @@ def journal_entry(record: dict) -> str:
     return name
 
 
-def pursuits_done(state: dict, today: dt.date) -> Lane:
-    """Every pursuit today moved, from either record.
+def moved_today(state: dict, today: dt.date) -> list[tuple[str, GridCell]]:
+    """Every entry for a pursuit today moved, from either record, beside its name.
 
     The journal answers what got typed, one entry per act at its own time. The
     evidence answers what the apps saw. A pursuit satisfied inside its own CLI
@@ -451,28 +463,40 @@ def pursuits_done(state: dict, today: dt.date) -> Lane:
     """
     now = state['now']
     current = state['watched']
-    cells = []
+    entries = []
     typed = set()
     for record in state.get('records') or []:
         name = str(record.get('pursuit') or '')
         if record.get('event') != journal.Event.DONE or name not in current or journal.local_day(record, now) != today:
             continue
         typed.add(name)
-        cells.append(GridCell(journal_entry(record), True, done_at=instant_text(record.get('occurred_at') or record.get('logged_at'), now)))
+        stamp = instant_text(record.get('occurred_at') or record.get('logged_at'), now)
+        entries.append((name, GridCell(journal_entry(record), True, done_at=stamp)))
     observed = state.get('observed') or {}
     for name, days in (state.get('evidence_days') or {}).items():
         if name in typed or name not in current or today not in days:
             continue
         seen = local_instant(observed.get(name), now)
         when = seen.isoformat(timespec='seconds') if seen is not None and seen.date() == today else ''
-        cells.append(GridCell(name, True, done_at=when))
-    return done_lane('pursuits', 'PURSUITS', cells, 'doit next --explain')
+        entries.append((name, GridCell(name, True, done_at=when)))
+    return entries
 
 
-def pursuits_due(state: dict) -> Lane:
-    """Each pursuit owing a checkoff, furthest behind first, with the command that logs it."""
+def pursuits_done(state: dict, today: dt.date) -> Lane:
+    return done_lane('pursuits', 'PURSUITS', [cell for _, cell in moved_today(state, today)], 'doit next --explain')
+
+
+def pursuits_due(state: dict, today: dt.date) -> Lane:
+    """Each pursuit owing a checkoff, furthest behind first, with the command that logs it.
+
+    A pursuit moved today is left off however far behind it still is. Doing it
+    checks it off for the day, so `pursuits_done` lists it and this does not.
+    """
+    moved = {name for name, _ in moved_today(state, today)}
     rows = []
     for name, due_in in owing(state):
+        if name in moved:
+            continue
         note = 'due today' if due_in is None or -1 < due_in <= 0 else f'{span_text(due_in)} overdue'
         described = state['active'][name].get('description', '')
         rows.append(Row(name, described, note, Urgency.OVERDUE, f'doit log {name}'))
@@ -495,7 +519,7 @@ def pursuit_lanes(now: dt.datetime, today: dt.date) -> tuple[list[Lane], list[La
         state = pursuits.build_state(register, now)
     except (pursuits.RegisterError, OSError, ValueError) as error:
         return [], [lanes.unavailable('pursuits', 'PURSUITS', str(error))]
-    return [pursuits_done(state, today)], [pursuits_due(state)]
+    return [pursuits_done(state, today)], [pursuits_due(state, today)]
 
 
 class Day(NamedTuple):
@@ -540,16 +564,16 @@ def has_something(lane: Lane) -> bool:
 def render(day: Day, today: dt.date) -> None:
     width = terminal_width()
     console.rule(f'[cyan]Today[/] · {today.strftime("%a %d %b")}', align='left')
-    done = [lane for lane in day.done if has_something(lane)]
     due = [lane for lane in day.due if has_something(lane)]
-    if done:
-        console.print('DONE', style=LIST_STYLE)
-        render_done(done, width)
+    done = [lane for lane in day.done if has_something(lane)]
     if due:
-        if done:
-            console.print()
         console.print('STILL DUE', style=LIST_STYLE)
         render_due(due, width)
+    if done:
+        if due:
+            console.print()
+        console.print('DONE', style=LIST_STYLE)
+        render_done(done, width)
 
 
 def group_heading(lane: Lane) -> Text:
@@ -593,7 +617,7 @@ def render_done(groups: list[Lane], width: int) -> None:
 
 def visible_rows(lane: Lane) -> list[Row]:
     """A group's first rows, then one saying how many more it holds and where."""
-    rows = lane.rows[:DUE_PER_GROUP]
+    rows = lane.rows[: DUE_PER_ROUTINE_GROUP if lane.name in ROUTINE_GROUPS else DUE_PER_GROUP]
     hidden = max(lane.total, len(lane.rows)) - len(rows)
     if hidden > 0:
         rows = [*rows, Row(f'{hidden} more', '', handle=' · '.join(lane.hints))]
@@ -676,5 +700,5 @@ def cmd_today(as_json: bool) -> int:
 def today_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output both lists as JSON to stdout.')] = False,
 ) -> None:
-    """What today has had, and what it still wants."""
+    """What today still wants, and what it has had."""
     raise typer.Exit(cmd_today(as_json))

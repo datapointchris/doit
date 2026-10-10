@@ -515,7 +515,7 @@ def test_a_tracked_pursuit_is_done_and_never_due():
     state['records'] = [done_record('chore', NOW), done_record('build', NOW - dt.timedelta(hours=1), duration_minutes=40)]
 
     assert [cell.text for cell in today.pursuits_done(state, TODAY).grid] == ['build · 40 min', 'chore']
-    assert today.pursuits_due(state).rows == []
+    assert today.pursuits_due(state, TODAY).rows == []
 
 
 def test_a_pursuit_no_longer_in_the_register_is_not_listed():
@@ -528,7 +528,7 @@ def test_a_pursuit_no_longer_in_the_register_is_not_listed():
 
 
 def test_the_pursuits_owed_run_furthest_behind_first_and_carry_a_handle():
-    lane = today.pursuits_due(pursuit_state(balances={'chore': 1.0, 'socialize': 4.0}))
+    lane = today.pursuits_due(pursuit_state(balances={'chore': 1.0, 'socialize': 4.0}), TODAY)
 
     assert [row.label for row in lane.rows] == ['socialize', 'chore']
     assert lane.rows[0].handle == 'doit log socialize'
@@ -536,7 +536,17 @@ def test_the_pursuits_owed_run_furthest_behind_first_and_carry_a_handle():
 
 def test_a_pursuit_that_is_current_is_not_owed():
     """`owing` carries why the threshold is a whole checkoff."""
-    assert today.pursuits_due(pursuit_state(balances={'chore': 0.4})).rows == []
+    assert today.pursuits_due(pursuit_state(balances={'chore': 0.4}), TODAY).rows == []
+
+
+def test_a_pursuit_done_today_is_off_the_due_list_while_it_still_owes():
+    """Logging it checks it off for the day, from either record. Yesterday's
+    log checks off nothing today."""
+    state = pursuit_state(balances={'chore': 4.0, 'read': 4.0, 'build': 4.0, 'study': 4.0}, touched=['read'])
+    state['records'] = [done_record('chore', NOW), done_record('study', NOW - dt.timedelta(days=1))]
+
+    assert [name for name, _ in today.owing(state)] == ['chore', 'read', 'build', 'study']
+    assert [row.label for row in today.pursuits_due(state, TODAY).rows] == ['build', 'study']
 
 
 def test_a_skipped_pursuit_is_not_listed_as_owed():
@@ -558,7 +568,7 @@ def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
     del state['intervals']['undated']
     state['due']['undated'] = None
 
-    lane = today.pursuits_due(state)
+    lane = today.pursuits_due(state, TODAY)
 
     assert [row.label for row in lane.rows] == ['chore', 'undated']
     assert lane.rows[1].note == 'due today'
@@ -600,6 +610,27 @@ def test_a_group_of_three_needs_no_more_row():
     lane = Lane(name='labs', title='LABS', rows=[Row(str(n), '') for n in range(3)], total=3, hints=['doit labs due'])
 
     assert len(today.visible_rows(lane)) == 3
+
+
+@pytest.mark.parametrize('name', today.ROUTINE_GROUPS)
+def test_a_routine_group_shows_ten_before_its_more_row(name):
+    lane = Lane(name=name, title=name.upper(), rows=[Row(str(n), '') for n in range(12)], total=12, hints=['h'])
+
+    rows = today.visible_rows(lane)
+
+    assert [row.label for row in rows] == [*map(str, range(10)), '2 more']
+
+
+def test_still_due_prints_above_done(capsys):
+    day = today.Day(
+        done=[today.done_lane('tasks', 'TASKS', [done('Pumice Stone')], '')],
+        due=[Lane(name='labs', title='LABS', rows=[Row('a-lab', 'Work through it')], total=1)],
+    )
+
+    today.render(day, TODAY)
+    lines = capsys.readouterr().out.splitlines()
+
+    assert lines.index('STILL DUE') < lines.index('DONE')
 
 
 def test_a_handle_too_wide_for_its_row_is_printed_whole_beneath_it(monkeypatch, capsys):
@@ -712,7 +743,7 @@ def no_backends(monkeypatch):
 
 
 def pursuits_answer(state):
-    return lambda now, today_: ([today.pursuits_done(state, TODAY)], [today.pursuits_due(state)])
+    return lambda now, today_: ([today.pursuits_done(state, TODAY)], [today.pursuits_due(state, TODAY)])
 
 
 def test_each_list_keeps_its_groups_in_one_order(no_backends, monkeypatch):

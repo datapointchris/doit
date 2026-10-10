@@ -44,7 +44,7 @@ across everything, **dashboard** reads every lane and ranks across none of them.
 only on the dashboard.
 
 **doit today** is the narrow one. It admits only what a day can finish: what the day
-has had, in the order it happened, above what it still owes.
+still owes, above what it has had in the order it happened.
 
 Reach for **doit review due** or **doit labs due** when MAINTENANCE is the line that caught
 your eye — the dashboard shows three of those rows and there are usually more.
