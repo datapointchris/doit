@@ -11,6 +11,9 @@ the terminal width, and `fitted` truncates each value to the width it was given.
 `overflow='ellipsis'` as the backstop. Rich measures printable width at both
 layers, so styling cannot shift a later column.
 
+A handle, the command a row says to type, is the one value never clipped.
+`handle_column` keeps it whole, and one that does not fit goes under its row.
+
 Lines carrying content from a register, a Lab or a command are built as `Text`
 rather than markup strings — `Text.append` does not parse `[...]`, so a bracket
 in a description cannot be swallowed as a style tag.
@@ -137,6 +140,27 @@ def column_width(width: int, values: list[str], share: float, minimum: int) -> i
     """
     needed = max((len(value) for value in values), default=0)
     return min(needed, max(minimum, int(width * share)))
+
+
+def handle_column(handles: list[str], room: int) -> int:
+    """How wide a column of handles is: the widest one that fits whole in `room`.
+
+    A handle is a command, and a clipped one fails when it is typed. So a handle
+    is never fitted to a column. One wider than the room sits alone on the line
+    under its row, and the column is sized to the handles that stay inline.
+    """
+    return max((len(handle) for handle in handles if len(handle) <= room), default=0)
+
+
+def print_handle_below(handle: str, indent: int, width: int, style: str = '') -> None:
+    """A handle too wide for its row, on a line of its own under the row's text.
+
+    It moves left of the text column when that keeps it on one line. One wider
+    than the terminal is soft-wrapped, so it still copies as one line.
+    """
+    line = Text(' ' * max(0, min(indent, width - len(handle))))
+    line.append(handle, style=style)
+    console.print(line, soft_wrap=True)
 
 
 def span_text(days: float) -> str:

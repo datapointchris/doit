@@ -58,7 +58,9 @@ from doit.render import column_width
 from doit.render import console
 from doit.render import first_sentence
 from doit.render import fitted
+from doit.render import handle_column
 from doit.render import join_context
+from doit.render import print_handle_below
 from doit.render import terminal_width
 
 NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'}
@@ -108,8 +110,9 @@ LABEL_WIDTH = 8
 # what is actually on screen first.
 NOTE_WIDTH_SHARE = 0.4
 NOTE_WIDTH_MIN = 22
-HANDLE_WIDTH_SHARE = 0.3
-HANDLE_WIDTH_MIN = 20
+# The share a row's own words keep before a handle may sit beside them. A handle
+# that would take more goes on the line under its row.
+TEXT_WIDTH_SHARE = 0.3
 TEXT_WIDTH_MIN = 20
 
 # Marks the handle as something to type rather than something to read. The same
@@ -1248,13 +1251,25 @@ def handle_text(row: Row) -> str:
 
 
 def render_rows(rows: list[Row], width: int) -> None:
-    handle_width = column_width(width, [handle_text(row) for row in rows], HANDLE_WIDTH_SHARE, HANDLE_WIDTH_MIN)
-    note_width = column_width(width, [row.note for row in rows], NOTE_WIDTH_SHARE, NOTE_WIDTH_MIN)
-    reserved = sum(size + 1 for size in (handle_width, note_width) if size)
-    text_width = max(TEXT_WIDTH_MIN, width - 3 - LABEL_WIDTH - reserved)
-    for row in rows:
+    """A lane's rows, as label, text, note and handle columns.
+
+    The text keeps its share of the line first. A handle sits inline when it fits
+    whole beside that, and under its row when it does not. The note takes what is
+    left, so it is the column that gives way on a narrow terminal. The gutter is
+    as wide as the lane's widest label, because a source's label is its own word
+    and a long one pushed the rest of its row past the edge.
+    """
+    label_width = max([LABEL_WIDTH, *(len(row.label) for row in rows)])
+    lead = 2 + label_width + 1
+    text_floor = max(TEXT_WIDTH_MIN, int(width * TEXT_WIDTH_SHARE))
+    handles = [handle_text(row) for row in rows]
+    handle_width = handle_column(handles, width - lead - text_floor - 1)
+    room = width - lead - (handle_width + 1 if handle_width else 0)
+    note_width = min(column_width(width, [row.note for row in rows], NOTE_WIDTH_SHARE, NOTE_WIDTH_MIN), max(0, room - text_floor - 1))
+    text_width = max(TEXT_WIDTH_MIN, room - (note_width + 1 if note_width else 0))
+    for row, handle in zip(rows, handles, strict=True):
         line = Text('  ')
-        line.append(row.label.ljust(LABEL_WIDTH), style='yellow')
+        line.append(row.label.ljust(label_width), style='yellow')
         line.append(' ')
         line.append(fitted(row.text, text_width, pad=True))
         # Note before handle, so a row reads what it is, how urgent it is, then
@@ -1270,15 +1285,16 @@ def render_rows(rows: list[Row], width: int) -> None:
             if style:
                 note.stylize(style)
             line.append(note)
-        if handle_width:
+        inline = bool(handle) and len(handle) <= handle_width
+        if inline:
             line.append(' ')
-            handle = fitted(handle_text(row), handle_width)
-            handle.stylize('cyan')
-            line.append(handle)
+            line.append(handle, style='cyan')
         # Padded up to the last column that has anything in it, then trimmed, so
         # a line ends where its content does rather than in trailing spaces.
         line.rstrip()
         console.print(line, no_wrap=True, overflow='ellipsis')
+        if handle and not inline:
+            print_handle_below(handle, lead, width, style='cyan')
 
 
 def render_grid(cells: list[GridCell], width: int) -> None:

@@ -12,6 +12,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from doit import dashboard
@@ -865,6 +866,47 @@ def test_a_row_with_a_command_shows_what_to_type(monkeypatch, capsys):
     dashboard.render_rows(rows, render.MAX_WIDTH)
 
     assert f'{dashboard.HANDLE_MARK} indy index' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('width', [80, render.MAX_WIDTH])
+def test_a_handle_is_printed_whole_at_any_width(monkeypatch, capsys, width):
+    """At 80 columns 19 of 36 handles ended in `…`. The note and the handle each
+    took a share, the text kept its floor, and the console clipped the overflow
+    off the end of the line, which is where the handle sits."""
+    monkeypatch.setenv('COLUMNS', str(width))
+    rows = [
+        dashboard.Row(
+            'ask',
+            'sessions keep re-reading the help of one tool or guessing its commands',
+            'recommends 1. Add a line to the agent instructions',
+            dashboard.Urgency.OVERDUE,
+            'inbox answer friction/precommit/a-hook-with-a-long-repo-scoped-name <n>',
+        ),
+        dashboard.Row('next', 'Tests read the workstation', 'a-repo · an initiative with a long name', handle='tracker show 837'),
+    ]
+
+    dashboard.render_rows(rows, width)
+
+    printed = capsys.readouterr().out
+    for row in rows:
+        assert f'{dashboard.HANDLE_MARK} {row.handle}' in printed
+    assert all(len(line) <= width for line in printed.splitlines())
+
+
+def test_a_label_wider_than_the_gutter_leaves_the_handle_on_the_line(monkeypatch, capsys):
+    """A PR row's label is its repo, and an 11-letter one ran past the 8-column
+    gutter far enough to push `↳ prs` off the end as `↳…`."""
+    monkeypatch.setenv('COLUMNS', '120')
+    rows = [
+        dashboard.Row('a-long-repo', 'feat(list): add a sectioned shopping list built for the phone, in a form', '0d', handle='prs'),
+        dashboard.Row('short', 'feat(cli): point a scan flag given at the root to the check verb', '0d', handle='prs'),
+    ]
+
+    dashboard.render_rows(rows, 120)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert all(line.endswith(f'{dashboard.HANDLE_MARK} prs') for line in lines)
+    assert len({line.index('feat') for line in lines}) == 1, 'the lane shares one gutter'
 
 
 def test_a_narrow_terminal_spends_its_width_on_the_row_itself(monkeypatch, capsys):

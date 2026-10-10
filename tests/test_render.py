@@ -91,6 +91,19 @@ def test_a_column_takes_what_it_needs_bounded_by_its_share():
     assert render.column_width(40, ['x' * 90], 0.3, 20) == 20, 'never below the minimum, however narrow the line'
 
 
+def test_a_handle_column_is_as_wide_as_the_widest_handle_that_fits_whole():
+    assert render.handle_column([], 40) == 0
+    assert render.handle_column(['↳ notes show 40', '↳ notes show 837'], 40) == 16
+    assert render.handle_column(['↳ notes show 40', '↳ ' + 'x' * 60], 40) == 15, 'one too wide sizes nothing'
+
+
+def test_a_handle_below_its_row_moves_left_rather_than_wrap(capsys):
+    render.print_handle_below('x' * 70, 11, 80)
+    render.print_handle_below('y' * 20, 11, 80)
+
+    assert capsys.readouterr().out.splitlines() == [' ' * 10 + 'x' * 70, ' ' * 11 + 'y' * 20]
+
+
 def test_fitted_truncates_to_the_width_it_was_given():
     assert render.fitted('abcdefgh', 4).plain == 'abc…'
     assert render.fitted('ab', 6, pad=True).plain == 'ab    '

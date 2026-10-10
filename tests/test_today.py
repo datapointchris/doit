@@ -602,6 +602,29 @@ def test_a_group_of_three_needs_no_more_row():
     assert len(today.visible_rows(lane)) == 3
 
 
+def test_a_handle_too_wide_for_its_row_is_printed_whole_beneath_it(monkeypatch, capsys):
+    """At 80 columns `python ~/.claude/hooks/se…` was what a review row said to
+    type. The handle column was capped at a share of the line and cut to fit it."""
+    monkeypatch.setenv('COLUMNS', '80')
+    wide = 'python ~/.config/hooks/a-report-with-a-long-name --since 7d'
+    lane = Lane(
+        name='review',
+        title='REVIEW',
+        rows=[
+            Row('a-review', 'Read the report', 'never run', Urgency.OVERDUE, wide),
+            Row('labs', 'Work through a Lab', 'never run', handle='doit labs choose'),
+        ],
+        total=2,
+    )
+
+    today.render_due([lane], 80)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1].rstrip().endswith('never run'), 'the row keeps its own line'
+    assert lines[2].strip() == f'↳ {wide}'
+    assert lines[3].endswith('↳ doit labs choose'), 'a handle that fits stays inline'
+
+
 def test_a_group_that_answered_with_nothing_prints_nothing_while_one_that_failed_does(capsys):
     day = today.Day(
         done=[Lane(name='articles', title='ARTICLES'), today.done_lane('tasks', 'TASKS', [done('Pumice Stone')], '')],

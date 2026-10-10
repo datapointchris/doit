@@ -64,6 +64,8 @@ from doit.render import column_width
 from doit.render import console
 from doit.render import error_console
 from doit.render import fitted
+from doit.render import handle_column
+from doit.render import print_handle_below
 from doit.render import span_text
 from doit.render import terminal_width
 
@@ -601,15 +603,18 @@ def render_due(groups: list[Lane], width: int) -> None:
     down the whole list. The label column is sized per group, so a group of long
     review slugs does not push a pursuit's description off the line.
 
-    Clipped rather than wrapped, because a wrapped row is two rows and this
-    screen is read at a glance.
+    The label, text and note are clipped rather than wrapped, because a wrapped
+    row is two rows and this screen is read at a glance. A handle is never
+    clipped, since a clipped command fails when typed. One that does not fit
+    beside the row's share of the line goes on the line under it.
     """
     shown = [(lane, visible_rows(lane)) for lane in groups]
     every = [row for _, rows in shown for row in rows]
     note_width = column_width(width, [row.note for row in every], 0.2, 10)
-    handle_width = column_width(width, [f'↳ {row.handle}' for row in every if row.handle], 0.35, 14)
-    gaps = (1 if note_width else 0) + (1 if handle_width else 0)
-    what_width = max(16, width - len(ITEM_INDENT) - note_width - handle_width - gaps)
+    note_gap = note_width + 1 if note_width else 0
+    what_floor = max(16, int(width * 0.3))
+    handle_width = handle_column([f'↳ {row.handle}' for row in every if row.handle], width - len(ITEM_INDENT) - what_floor - note_gap - 1)
+    what_width = max(16, width - len(ITEM_INDENT) - note_gap - (handle_width + 1 if handle_width else 0))
     for lane, rows in shown:
         console.print(group_heading(lane))
         if not lane.available:
@@ -626,11 +631,15 @@ def render_due(groups: list[Lane], width: int) -> None:
             if note_width:
                 line.append(' ')
                 line.append(fitted(row.note, note_width, pad=True, style=dashboard.NOTE_STYLES[row.urgency] or ''))
-            if handle_width and row.handle:
+            handle = f'↳ {row.handle}' if row.handle else ''
+            inline = bool(handle) and len(handle) <= handle_width
+            if inline:
                 line.append(' ')
-                line.append(fitted(f'↳ {row.handle}', handle_width))
+                line.append(handle)
             line.rstrip()
             console.print(line, no_wrap=True, overflow='ellipsis')
+            if handle and not inline:
+                print_handle_below(handle, len(ITEM_INDENT) + label_width + (1 if label_width else 0), width)
 
 
 def cmd_today(as_json: bool) -> int:
