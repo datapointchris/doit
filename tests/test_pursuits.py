@@ -2429,12 +2429,13 @@ def test_drift_reads_an_unparsable_timestamp_one_way(sandbox, capsys):
     assert row is None or (row['logs'], row['done']) == (0, 0.0)
 
 
-def test_the_register_names_a_weekly_goal_and_the_log_names_a_measurement():
+def test_a_register_naming_minutes_is_pointed_at_weekly_minutes(tmp_path):
     """Two different quantities, so they do not share a word. `weekly_minutes:`
     is what a week asks for; `--minutes` is what one sitting took."""
-    assert 'weekly_minutes' in pursuits.KNOWN_FIELDS
-    assert 'minutes' not in pursuits.KNOWN_FIELDS
-    assert '`doit log` asks how long' in pursuits.TEMPLATE, 'the template says which is which'
+    path = write_register(tmp_path, 'pursuits:\n  read:\n    weight: 5\n    minutes: 120\n')
+
+    with pytest.raises(pursuits.RegisterError, match=r'unknown field\(s\) minutes\b.*weekly_minutes'):
+        pursuits.load_pursuits(path)
 
 
 def test_a_tracked_pursuit_has_a_drift_row_against_no_goal(tmp_path, sandbox, monkeypatch, capsys):
