@@ -603,8 +603,6 @@ def test_a_group_of_three_needs_no_more_row():
 
 
 def test_a_handle_too_wide_for_its_row_is_printed_whole_beneath_it(monkeypatch, capsys):
-    """At 80 columns `python ~/.claude/hooks/se…` was what a review row said to
-    type. The handle column was capped at a share of the line and cut to fit it."""
     monkeypatch.setenv('COLUMNS', '80')
     wide = 'python ~/.config/hooks/a-report-with-a-long-name --since 7d'
     lane = Lane(
@@ -623,6 +621,21 @@ def test_a_handle_too_wide_for_its_row_is_printed_whole_beneath_it(monkeypatch, 
     assert lines[1].rstrip().endswith('never run'), 'the row keeps its own line'
     assert lines[2].strip() == f'↳ {wide}'
     assert lines[3].endswith('↳ doit labs choose'), 'a handle that fits stays inline'
+
+
+def test_a_long_label_leaves_the_text_its_floor_beside_an_inline_handle(monkeypatch, capsys):
+    monkeypatch.setenv('COLUMNS', '80')
+    text = 'Work through a Lab you are due on'
+    lane = Lane(
+        name='labs',
+        title='LABS',
+        rows=[Row('x' * today.DUE_LABEL_MAX, text, 'never run', Urgency.OVERDUE, 'doit labs show a-lab')],
+        total=1,
+    )
+
+    today.render_due([lane], 80)
+
+    assert text[: today.DUE_TEXT_MIN - 1] in capsys.readouterr().out
 
 
 def test_a_group_that_answered_with_nothing_prints_nothing_while_one_that_failed_does(capsys):

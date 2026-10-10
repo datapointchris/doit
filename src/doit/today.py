@@ -92,6 +92,10 @@ DUE_PER_GROUP = 3
 # clipped rather than pushing every description in its group off the line.
 DUE_LABEL_MAX = 20
 
+# What a row's text keeps after the widest label, before a handle may sit beside
+# it. A handle that would take more goes on the line under its row.
+DUE_TEXT_MIN = 16
+
 LIST_STYLE = 'cyan'
 GROUP_STYLE = 'bold blue'
 HOUR_STYLE = 'green'
@@ -605,16 +609,19 @@ def render_due(groups: list[Lane], width: int) -> None:
 
     The label, text and note are clipped rather than wrapped, because a wrapped
     row is two rows and this screen is read at a glance. A handle is never
-    clipped, since a clipped command fails when typed. One that does not fit
-    beside the row's share of the line goes on the line under it.
+    clipped, since a clipped command fails when typed. One that would leave a
+    row less than `DUE_TEXT_MIN` columns of text beside the widest label goes on
+    the line under its row.
     """
     shown = [(lane, visible_rows(lane)) for lane in groups]
     every = [row for _, rows in shown for row in rows]
     note_width = column_width(width, [row.note for row in every], 0.2, 10)
     note_gap = note_width + 1 if note_width else 0
-    what_floor = max(16, int(width * 0.3))
-    handle_width = handle_column([f'↳ {row.handle}' for row in every if row.handle], width - len(ITEM_INDENT) - what_floor - note_gap - 1)
-    what_width = max(16, width - len(ITEM_INDENT) - note_gap - (handle_width + 1 if handle_width else 0))
+    widest_label = min(DUE_LABEL_MAX, max((len(row.label) for row in every), default=0))
+    label_gap = widest_label + 1 if widest_label else 0
+    handle_room = width - len(ITEM_INDENT) - label_gap - DUE_TEXT_MIN - note_gap - 1
+    handle_width = handle_column([f'↳ {row.handle}' for row in every if row.handle], handle_room)
+    what_width = max(DUE_TEXT_MIN, width - len(ITEM_INDENT) - note_gap - (handle_width + 1 if handle_width else 0))
     for lane, rows in shown:
         console.print(group_heading(lane))
         if not lane.available:

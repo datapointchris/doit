@@ -103,15 +103,17 @@ LEARNING_IN_PROGRESS = 2
 
 LABEL_WIDTH = 8
 
-# A trailing column takes a share of the line rather than a fixed count. A flat
-# cap is wrong at both ends — too tight to name a repo and a project on a wide
-# terminal, and wide enough to crowd out the thing itself on a narrow one. Both
-# only ever bind when the content is genuinely long, because a column is sized to
-# what is actually on screen first.
+# A row's text and note are sized by share of the line rather than by a fixed
+# count, which would be too tight to name a repo and a project on a wide terminal
+# and would crowd out the thing itself on a narrow one.
+#
+# The text keeps 30% of the line, and never fewer than 20 columns. The note grows
+# to 40%, or to 22 columns where 40% is less, and only ever as wide as its widest
+# value. Beside an inline handle it keeps at least 12 columns. A handle that would
+# take the text or the note below those floors goes on the line under its row.
 NOTE_WIDTH_SHARE = 0.4
 NOTE_WIDTH_MIN = 22
-# The share a row's own words keep before a handle may sit beside them. A handle
-# that would take more goes on the line under its row.
+NOTE_WIDTH_FLOOR = 12
 TEXT_WIDTH_SHARE = 0.3
 TEXT_WIDTH_MIN = 20
 
@@ -1253,19 +1255,24 @@ def handle_text(row: Row) -> str:
 def render_rows(rows: list[Row], width: int) -> None:
     """A lane's rows, as label, text, note and handle columns.
 
-    The text keeps its share of the line first. A handle sits inline when it fits
-    whole beside that, and under its row when it does not. The note takes what is
-    left, so it is the column that gives way on a narrow terminal. The gutter is
-    as wide as the lane's widest label, because a source's label is its own word
-    and a long one pushed the rest of its row past the edge.
+    The text and the note keep their floors first. A handle sits inline when it
+    fits whole beside both, and under its row when it does not. Past the floors,
+    the note takes what is left. The gutter is as wide as the lane's widest
+    label, because a source's label is its own word, and a fixed gutter would
+    push a long one's row past the edge.
+
+    Every row in a lane shares one set of columns, so its notes line up. A row
+    whose handle went below keeps them too.
     """
     label_width = max([LABEL_WIDTH, *(len(row.label) for row in rows)])
     lead = 2 + label_width + 1
     text_floor = max(TEXT_WIDTH_MIN, int(width * TEXT_WIDTH_SHARE))
+    note_cap = column_width(width, [row.note for row in rows], NOTE_WIDTH_SHARE, NOTE_WIDTH_MIN)
+    note_floor = min(note_cap, NOTE_WIDTH_FLOOR)
     handles = [handle_text(row) for row in rows]
-    handle_width = handle_column(handles, width - lead - text_floor - 1)
+    handle_width = handle_column(handles, width - lead - text_floor - (note_floor + 1 if note_floor else 0) - 1)
     room = width - lead - (handle_width + 1 if handle_width else 0)
-    note_width = min(column_width(width, [row.note for row in rows], NOTE_WIDTH_SHARE, NOTE_WIDTH_MIN), max(0, room - text_floor - 1))
+    note_width = min(note_cap, max(0, room - text_floor - 1))
     text_width = max(TEXT_WIDTH_MIN, room - (note_width + 1 if note_width else 0))
     for row, handle in zip(rows, handles, strict=True):
         line = Text('  ')
@@ -1330,6 +1337,9 @@ def render_trailer(lane: LaneView) -> None:
     A remainder count told you a lane was truncated without telling you anything
     you could act on — the heading already states the lane's size, and the hint
     is what you would run to see the rest.
+
+    Soft-wrapped, so a pane too narrow for the line wraps it without putting a
+    newline inside a command.
     """
     if not lane.hints:
         return
@@ -1338,7 +1348,7 @@ def render_trailer(lane: LaneView) -> None:
         if index:
             line.append('   ')
         line.append(f'→ {hint}', style='blue')
-    console.print(line)
+    console.print(line, soft_wrap=True)
 
 
 def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
@@ -1371,7 +1381,8 @@ def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
         render_lanes(collected, dt.date.today(), row_cap)
         standing = pursuit_standing()
         if standing:
-            console.print(Text(f'  {standing}\n', style='yellow'))
+            # Soft-wrapped, because the line ends in a command to type.
+            console.print(Text(f'  {standing}\n', style='yellow'), soft_wrap=True)
     # A read-only glance always succeeds: degradation is shown per lane, and a
     # consumer of --json checks lanes[].status rather than the exit code.
     return 0

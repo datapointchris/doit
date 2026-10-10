@@ -870,9 +870,6 @@ def test_a_row_with_a_command_shows_what_to_type(monkeypatch, capsys):
 
 @pytest.mark.parametrize('width', [80, render.MAX_WIDTH])
 def test_a_handle_is_printed_whole_at_any_width(monkeypatch, capsys, width):
-    """At 80 columns 19 of 36 handles ended in `…`. The note and the handle each
-    took a share, the text kept its floor, and the console clipped the overflow
-    off the end of the line, which is where the handle sits."""
     monkeypatch.setenv('COLUMNS', str(width))
     rows = [
         dashboard.Row(
@@ -894,8 +891,8 @@ def test_a_handle_is_printed_whole_at_any_width(monkeypatch, capsys, width):
 
 
 def test_a_label_wider_than_the_gutter_leaves_the_handle_on_the_line(monkeypatch, capsys):
-    """A PR row's label is its repo, and an 11-letter one ran past the 8-column
-    gutter far enough to push `↳ prs` off the end as `↳…`."""
+    """A PR row's label is its repo, which can be wider than the gutter. The
+    lane's gutter widens to it, so the handle stays on the line."""
     monkeypatch.setenv('COLUMNS', '120')
     rows = [
         dashboard.Row('a-long-repo', 'feat(list): add a sectioned shopping list built for the phone, in a form', '0d', handle='prs'),
@@ -907,6 +904,33 @@ def test_a_label_wider_than_the_gutter_leaves_the_handle_on_the_line(monkeypatch
     lines = capsys.readouterr().out.splitlines()
     assert all(line.endswith(f'{dashboard.HANDLE_MARK} prs') for line in lines)
     assert len({line.index('feat') for line in lines}) == 1, 'the lane shares one gutter'
+
+
+@pytest.mark.parametrize(('width', 'handle'), [(60, 'tracker labs show a-lab'), (80, 'tracker labs show a-lab-with-a-long-id')])
+def test_a_handle_never_takes_a_short_note_from_its_lane(monkeypatch, capsys, width, handle):
+    """A handle sizes the column for every row in its lane, so one sitting
+    inline at the note's expense would cut the note on all of them. Each handle
+    here fits beside the text alone and not beside the text and the note."""
+    monkeypatch.setenv('COLUMNS', str(width))
+    rows = [
+        dashboard.Row('lab', 'Find files fast', 'never run', handle=handle),
+        dashboard.Row('lab', 'Search code', 'never run', handle=handle),
+    ]
+
+    dashboard.render_rows(rows, width)
+
+    printed = capsys.readouterr().out
+    assert printed.count('never run') == 2
+    assert printed.count(f'{dashboard.HANDLE_MARK} {handle}') == 2
+
+
+def test_a_trailer_too_wide_for_the_pane_keeps_each_command_on_one_line(monkeypatch, capsys):
+    monkeypatch.setenv('COLUMNS', '30')
+    hint = 'tracker items list --status open'
+
+    dashboard.render_trailer(dashboard.LaneView(name='items', title='ITEMS', hints=[hint, hint]))
+
+    assert capsys.readouterr().out.count(f'→ {hint}') == 2
 
 
 def test_a_narrow_terminal_spends_its_width_on_the_row_itself(monkeypatch, capsys):
