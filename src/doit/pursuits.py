@@ -1281,7 +1281,7 @@ def format_due(days: float | None) -> str:
 def why_unpriced(state: dict, name: str) -> str:
     """Why a drawn pursuit has no due date, in the words the column would show.
 
-    Five different facts otherwise arrive as one dash. The one worth telling
+    Several different facts otherwise arrive as one dash. The one worth telling
     apart is a name the register no longer holds: the draw outlives the register
     by up to a quarter of an hour, so a row can name something edited away, and
     a dash renders it identically to a pursuit that is simply unscheduled.
@@ -1295,7 +1295,7 @@ def why_unpriced(state: dict, name: str) -> str:
         return 'term ended'
     if not paced(config):
         return 'tracked'
-    return 'no schedule'
+    return 'weight 0'
 
 
 def due_style(days: float | None) -> str:

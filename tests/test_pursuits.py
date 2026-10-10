@@ -2253,9 +2253,12 @@ def test_a_row_the_register_dropped_renders_rather_than_crashing(sandbox, monkey
     assert row.due == 'paused', 'a row outside the active set cannot be priced and still has to render'
 
 
-def test_an_unpriced_row_says_which_of_the_five_reasons_it_is():
-    """One dash for five facts leaves the one worth seeing invisible: a drawn row
-    the register no longer holds reads exactly like one that is simply unscheduled."""
+def test_an_unpriced_row_says_which_reason_it_is():
+    """One dash for several facts leaves the one worth seeing invisible: a drawn row
+    the register no longer holds reads exactly like one that is simply unscheduled.
+
+    A drawn `socialize` set to `weight: 0` read `no schedule` while its register
+    still said `cadence: 7d`."""
     state = {
         'today': NOW.date(),
         'pursuits': {
@@ -2270,7 +2273,7 @@ def test_an_unpriced_row_says_which_of_the_five_reasons_it_is():
     assert pursuits.why_unpriced(state, 'stopped') == 'paused'
     assert pursuits.why_unpriced(state, 'expired') == 'term ended'
     assert pursuits.why_unpriced(state, 'logged-only') == 'tracked'
-    assert pursuits.why_unpriced(state, 'weightless') == 'no schedule'
+    assert pursuits.why_unpriced(state, 'weightless') == 'weight 0'
 
 
 def test_the_standing_line_needs_a_whole_checkoff_before_it_says_behind(tmp_path, monkeypatch):
