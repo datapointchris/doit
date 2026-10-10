@@ -225,6 +225,19 @@ def test_the_evidence_view_keeps_a_long_name_apart_from_its_status(tmp_path, san
     assert re.search(r'\bjournaling {2,}no backend', printed)
 
 
+def test_skipping_a_tracked_pursuit_is_refused_and_passes_nothing(tmp_path, sandbox, monkeypatch, capsys):
+    """`doit --no-input skip` on a pursuit with no pace exited 0 and wrote a SKIP,
+    and drift then read it as `passed 1` against a draw it never had."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    tracked_register(tmp_path, monkeypatch)
+    log_done(sandbox / 'state', 'build', 2)
+
+    assert pursuits.cmd_skip('build', None) == 1
+    assert pursuits.cmd_resume('build') == 1
+
+    assert drift_rows(capsys)['build']['skips'] == 0
+
+
 def test_a_pursuit_declaring_both_paces_is_refused(tmp_path):
     path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 7d\n    weekly_minutes: 60\n')
     with pytest.raises(pursuits.RegisterError, match='not both'):
@@ -2297,6 +2310,15 @@ def test_resume_ends_a_standing_skip(sandbox, monkeypatch):
     assert pursuits.cmd_resume('chores') == 0
 
     assert pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())['suppressed'] == []
+
+
+def test_resuming_a_pursuit_with_no_skip_writes_nothing(sandbox, monkeypatch):
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    log_done(sandbox / 'state', 'chores', 1)
+
+    assert pursuits.cmd_resume('chores') == 0
+
+    assert [record for record in journal.read_all(sandbox / 'state') if record['event'] == journal.Event.SKIP] == []
 
 
 def test_a_later_skip_shortens_an_earlier_one(sandbox, monkeypatch):

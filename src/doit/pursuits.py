@@ -1938,12 +1938,16 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
         return 1
     now = dt.datetime.now().astimezone()
     cached = load_cached_draw(now) or {}
+    state = build_state(pursuits, now)
     try:
         if name is None:
             if not can_prompt():
                 error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit skip <pursuit>[/]')
                 return 1
-            matched = prompt_for_pursuit(pursuits, cached.get('offered', []))
+            if not state['active']:
+                error_console.print('Nothing is in the draw to pass.')
+                return 1
+            matched = prompt_for_pursuit(state['active'], cached.get('offered', []))
         else:
             matched = match_pursuit(name, pursuits) or ''
             if not matched:
@@ -1953,8 +1957,11 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
         error_console.print('  Nothing skipped.')
         return 1
 
-    state = build_state(pursuits, now)
-    span = skip_span(duration, state['intervals'].get(matched))
+    # A SKIP for a pursuit outside the draw would still count as a pass in drift.
+    if matched not in state['active']:
+        error_console.print(f'{matched} is not in the draw ({why_unpriced(state, matched)}), so there is nothing to pass.')
+        return 1
+    span = skip_span(duration, state['intervals'][matched])
     expires = now + dt.timedelta(days=span)
     record_event(journal.Event.SKIP, matched, state, {'expires_at': expires.isoformat(), 'draw_id': cached.get('draw_id')})
     # The pass only means something against a new draw, and the span it covers is
@@ -1995,8 +2002,14 @@ def cmd_resume(name: str | None) -> int:
         if not matched:
             error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
             return 1
-        chosen = [matched]
         state = build_state(pursuits, now)
+        if matched not in state['active']:
+            error_console.print(f'{matched} is not in the draw ({why_unpriced(state, matched)}), so there is nothing to return it to.')
+            return 1
+        if matched not in state['suppressed']:
+            console.print(f'{matched} is not skipped, and is already in the draw.')
+            return 0
+        chosen = [matched]
 
     for pursuit in chosen:
         record_event(journal.Event.SKIP, pursuit, state, {'expires_at': now.isoformat()})
