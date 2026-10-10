@@ -2208,7 +2208,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
         start = max(cutoff, reset_at.get(name, cutoff))
         done = completed_since(own, seen, now, start, weekly.get(name))
         logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, start))
-        passes = sum(1 for record in own if record.get('event') == journal.Event.SKIP and in_window(record, cutoff))
+        passes = sum(1 for record in own if is_pass(record) and in_window(record, cutoff))
         if name not in state['watched'] and not done and not passes:
             continue
         asked = None
@@ -2233,6 +2233,19 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
             }
         )
     return rows
+
+
+def is_pass(record: dict) -> bool:
+    """Whether a record took its pursuit out of the draw for a while.
+
+    `resume` writes a SKIP that expires the moment it starts, which passes on
+    nothing, so only a SKIP running past its own time counts.
+    """
+    if record.get('event') != journal.Event.SKIP:
+        return False
+    started = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+    expires = journal.parse_time(record.get('expires_at'))
+    return started is not None and expires is not None and expires > started
 
 
 def logged_minutes(records: list[dict], start: dt.datetime) -> float:

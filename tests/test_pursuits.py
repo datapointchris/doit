@@ -2312,6 +2312,16 @@ def test_resume_ends_a_standing_skip(sandbox, monkeypatch):
     assert pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())['suppressed'] == []
 
 
+def test_a_resume_is_not_counted_as_a_second_pass(sandbox, monkeypatch, capsys):
+    """One skip and one resume read as `passed 2` in drift."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    assert pursuits.cmd_skip('chores', '2w') == 0
+    assert pursuits.cmd_resume('chores') == 0
+    capsys.readouterr()
+
+    assert drift_rows(capsys)['chores']['skips'] == 1
+
+
 def test_resuming_a_pursuit_with_no_skip_writes_nothing(sandbox, monkeypatch):
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
     log_done(sandbox / 'state', 'chores', 1)
