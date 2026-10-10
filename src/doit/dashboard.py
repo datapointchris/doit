@@ -601,7 +601,7 @@ def build_training_lane(results: dict[str, sources.Result], today: dt.date) -> L
                 Row(
                     label=str(workout.get('phase') or 'do'),
                     text=str(workout.get('workout_name') or ''),
-                    note=str(workout.get('frequency') or ''),
+                    note=performed_note(workout, today),
                     urgency=urgency,
                     handle=f'meso workouts show {workout.get("workout_id")}',
                 )
@@ -616,6 +616,22 @@ def build_training_lane(results: dict[str, sources.Result], today: dt.date) -> L
         total=len(rows),
         hints=['meso cycles list', 'meso sessions list'],
     )
+
+
+def performed_note(workout: dict, today: dt.date) -> str:
+    """When a prescribed workout was last done, ahead of how often it is asked for.
+
+    The day leads, so a narrow pane clips the frequency rather than the date. A
+    null `last_performed_on` is a workout never performed. A payload without the
+    field comes from an app release older than it, and keeps the frequency alone
+    rather than calling every workout `never`.
+    """
+    frequency = str(workout.get('frequency') or '')
+    if 'last_performed_on' not in workout:
+        return frequency
+    last = workout['last_performed_on']
+    when = pursuits.format_elapsed(days_away_from(last, today) if last else None)
+    return f'{when} · {frequency}' if frequency else when
 
 
 def meso_adapter(result: sources.Result) -> list[LaneView]:

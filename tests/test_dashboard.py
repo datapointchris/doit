@@ -976,6 +976,21 @@ def test_the_training_lane_rows_workouts_not_cycles():
     assert lane.rows[0].handle == 'meso workouts show 1'
 
 
+def test_a_training_row_leads_with_when_the_workout_was_last_done():
+    """The day goes first so a narrow pane clips the frequency instead. A payload
+    without the field keeps the frequency alone rather than reading `never`."""
+    cycle = {
+        'status': 'active',
+        'workouts': [
+            {'workout_id': 1, 'workout_name': 'Lower', 'frequency': '2×/week', 'last_performed_on': '2026-07-21'},
+            {'workout_id': 2, 'workout_name': 'Mobility', 'frequency': '4×/week', 'last_performed_on': None},
+            {'workout_id': 3, 'workout_name': 'Run', 'frequency': '3×/week'},
+        ],
+    }
+    lane = training_lane([cycle])
+    assert [row.note for row in lane.rows] == ['3d ago · 2×/week', 'never · 4×/week', '3×/week']
+
+
 def test_a_paused_cycle_contributes_nothing():
     lane = training_lane(MESO_CYCLES)
     assert lane.meta == '1 cycle active · 2 prescribed'
