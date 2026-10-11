@@ -28,6 +28,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from itertools import chain
 from pathlib import Path
 from typing import Annotated
 
@@ -215,7 +216,7 @@ def cmd_list(group: str | None, *, as_json: bool = False, full: bool = False) ->
         grouped = {group: grouped[group]}
 
     console.rule('[cyan]Skills', align='left')
-    width = max(len(skill.name) for rows in grouped.values() for skill in rows)
+    width = max(len(skill.name) for skill in chain.from_iterable(grouped.values()))
     for name in sorted(grouped):
         console.print()
         console.print(Text(name, style='yellow'))

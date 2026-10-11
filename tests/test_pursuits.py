@@ -98,9 +98,7 @@ def test_the_template_names_no_field_the_register_would_refuse():
     # The inverse, and the reason a typo here is worse than a missing line: the
     # header is copied when a pursuit is added, so a name that drifted out of
     # KNOWN_FIELDS would be pasted into a register that then refuses to load.
-    documented = {
-        word.strip('#').strip() for line in pursuits.TEMPLATE.splitlines() if line.startswith('#   ') for word in [line[4:].split(' ')[0]]
-    }
+    documented = {line[4:].split(' ')[0].strip('#').strip() for line in pursuits.TEMPLATE.splitlines() if line.startswith('#   ')}
     unknown = sorted(name for name in documented if name and name.islower() and name.isidentifier() and name not in pursuits.KNOWN_FIELDS)
 
     assert not unknown, f'named in the template but the loader would refuse it: {", ".join(unknown)}'
@@ -1498,7 +1496,7 @@ WINDOW_HISTORIES = {
     # again as the window's start passes it.
     'skipped': [zeroed(name, 40.0) for name in WINDOW_NAMES]
     + [skipped(name, 17.0, 14.0) for name in WINDOW_NAMES]
-    + [done(name, day) for name in ('daily', 'weekly') for day in (2.0, 1.0)]
+    + [done(name, day) for name, day in itertools.product(('daily', 'weekly'), (2.0, 1.0))]
     + [done('timed', 1.0, 200)],
 }
 

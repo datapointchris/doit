@@ -50,6 +50,7 @@ handles stay plain.
 import datetime as dt
 import json
 from collections.abc import Callable
+from itertools import chain
 from typing import Annotated
 from typing import NamedTuple
 
@@ -638,7 +639,7 @@ def render_due(groups: list[Lane], width: int) -> None:
     the line under its row.
     """
     shown = [(lane, visible_rows(lane)) for lane in groups]
-    every = [row for _, rows in shown for row in rows]
+    every = list(chain.from_iterable(rows for _, rows in shown))
     note_width = column_width(width, [row.note for row in every], 0.2, 10)
     note_gap = note_width + 1 if note_width else 0
     widest_label = min(DUE_LABEL_MAX, max((len(row.label) for row in every), default=0))

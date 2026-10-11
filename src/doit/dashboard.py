@@ -37,6 +37,7 @@ a coding session. Same plumbing, different audience.
 import datetime as dt
 import math
 from collections.abc import Callable
+from itertools import chain
 from typing import Annotated
 from urllib.parse import urlsplit
 
@@ -1156,7 +1157,7 @@ for adapter_id, adapter_fn, _lane_names in SHIPPED_ADAPTERS:
 # conforming source contributes lanes doit has never heard of, and a machine
 # whose sources.yml omits one of these is offered fewer. `--lane` is checked
 # against what actually came back rather than against this.
-LANE_NAMES = [lane for _, _, declared in SHIPPED_ADAPTERS for lane in declared] + list(LOCAL_LANES)
+LANE_NAMES = [*chain.from_iterable(declared for _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
 
 
 def read_local(read: Callable[[], object]) -> sources.Result:

@@ -23,6 +23,7 @@ wrapped, because a wrapped row is two rows.
 import json
 import os
 import shutil
+from itertools import chain
 from pathlib import Path
 from typing import Annotated
 
@@ -324,7 +325,7 @@ def cmd_list(category: str | None, as_json: bool) -> int:
         grouped = {category: grouped[category]}
 
     console.rule('[cyan]Tools', align='left')
-    width = max(len(name) for rows in grouped.values() for name, _ in rows)
+    width = max(len(name) for name, _ in chain.from_iterable(grouped.values()))
     for group in sorted(grouped):
         console.print()
         console.print(Text(group, style='yellow'))

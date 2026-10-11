@@ -60,6 +60,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
 from enum import StrEnum
+from itertools import chain
 from pathlib import Path
 from typing import Annotated
 
@@ -249,7 +250,7 @@ class Digest:
 
     def histories(self) -> dict[str, str]:
         """Every host the reading covers, in name order, with the last day its history held."""
-        return dict(sorted((host, through) for used in self.exports.values() for host, through in used.hosts.items()))
+        return dict(sorted(chain.from_iterable(used.hosts.items() for used in self.exports.values())))
 
 
 def row_payload(row: usage.Row, today: dt.date) -> dict[str, object]:
