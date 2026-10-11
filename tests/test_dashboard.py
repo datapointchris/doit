@@ -376,7 +376,7 @@ def test_learning_lane_names_resources_rather_than_positions():
     """A track's current unit is a position, not a thing you can open."""
     lane = lanes_by_name(all_results())['learning']
 
-    assert lane.meta == 'A Current Section · 6 of 42 done'
+    assert lane.meta == 'A Current Section · 7 of 42 done', 'a skipped item is done, as the source counts it'
     assert [(row.label, row.text) for row in lane.rows] == [
         ('start', 'What To Open On First Track'),
         ('open', 'A Resource In Progress'),

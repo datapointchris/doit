@@ -531,9 +531,7 @@ def build_learning_lane(results: dict[str, sources.Result], today: dt.date) -> L
     payload = result.payload
     section = payload.get('current_section') or {}
     progress = section.get('progress') or {}
-    completed = progress.get('completed_items', 0)
-    total_items = progress.get('total_items', 0)
-    meta = f'{section.get("name", "")} · {completed} of {total_items} done' if section else ''
+    meta = f'{section.get("name", "")} · {done_items(progress)} of {progress.get("total_items", 0)} done' if section else ''
 
     # Every row is a resource you could open right now, and the source chose each
     # one. The section supplies its focus, which already leaves out a resource the
@@ -664,9 +662,14 @@ def track_rows(focuses: list[dict], seen: set) -> list[Row]:
             continue
         seen.add(resource.get('id'))
         progress = focus.get('progress') or {}
-        note = f'{focus.get("display_name", "")} {progress.get("completed_items", 0)}/{progress.get("total_items", 0)}'
+        note = f'{focus.get("display_name", "")} {done_items(progress)}/{progress.get("total_items", 0)}'
         rows.append(resource_row('open' if focus.get('started') else 'start', resource, note))
     return rows
+
+
+def done_items(progress: dict) -> int:
+    """Items no longer waiting: completed, skipped or abandoned, the count the source's own views call done."""
+    return sum(progress.get(key, 0) for key in ('completed_items', 'skipped_items', 'abandoned_items'))
 
 
 def build_maintenance_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
