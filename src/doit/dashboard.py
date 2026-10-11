@@ -98,10 +98,6 @@ LANE_ROW_CAPS = {'tasks': 5, 'learning': 5}
 # v3 task rows carry no priority; a row's position in the list is its rank.
 ICB_SCHEMA_VERSION = 3
 
-# The status ids `learning` assigns; the names come from `learning statuses`.
-LEARNING_NOT_STARTED = 1
-LEARNING_IN_PROGRESS = 2
-
 LABEL_WIDTH = 8
 
 # A row's text and note are sized by share of the line rather than by a fixed
@@ -539,26 +535,24 @@ def build_learning_lane(results: dict[str, sources.Result], today: dt.date) -> L
     total_items = progress.get('total_items', 0)
     meta = f'{section.get("name", "")} · {completed} of {total_items} done' if section else ''
 
-    # Every row is a resource you could open right now. The section supplies its
-    # own next few; each track supplies exactly one, already chosen by `learning`
-    # — a unit name is a position in a curriculum, not something you can sit down
-    # and do.
+    # Every row is a resource you could open right now, and the source chose each
+    # one. The section supplies its focus, which already leaves out a resource the
+    # plan draws from another listing; each track supplies exactly one. A unit
+    # name is a position in a curriculum, not something you can sit down and do.
+    focus = payload.get('section_focus') or {}
     started = []
     unstarted = []
     seen = set()
-    for resource in payload.get('in_progress_resources') or []:
-        seen.add(resource.get('id'))
-        started.append(resource_row('open', resource))
-    for item in section.get('items') or []:
-        resource = item.get('resource') or {}
+    for resource in [*(payload.get('in_progress_resources') or []), *(focus.get('in_progress') or [])]:
         if resource.get('id') in seen:
             continue
-        if resource.get('status_id') == LEARNING_IN_PROGRESS:
-            seen.add(resource.get('id'))
-            started.append(resource_row('open', resource))
-        elif resource.get('status_id') == LEARNING_NOT_STARTED:
-            seen.add(resource.get('id'))
-            unstarted.append(resource_row('start', resource))
+        seen.add(resource.get('id'))
+        started.append(resource_row('open', resource))
+    for resource in focus.get('not_started') or []:
+        if resource.get('id') in seen:
+            continue
+        seen.add(resource.get('id'))
+        unstarted.append(resource_row('start', resource))
 
     # Interleaved, not appended: the tracks are the streams most easily crowded
     # out, and they are the reason the lane spans more than the current section.

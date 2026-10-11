@@ -9,8 +9,21 @@
       {"id": 2, "position": 2000, "resource": {"id": 901, "title": "The Next Resource", "status_id": 1}},
       {"id": 3, "position": 3000, "resource": {"id": 902, "title": "A Completed Resource", "status_id": 3}},
       {"id": 4, "position": 4000, "resource": {"id": 995, "title": "A Resource In Progress", "status_id": 2}},
-      {"id": 5, "position": 5000, "resource": {"id": 903, "title": "The One After Next", "status_id": 1}}
+      {"id": 5, "position": 5000, "resource": {"id": 904, "title": "Drawn For Another Stream", "status_id": 1}},
+      {"id": 6, "position": 6000, "resource": {"id": 903, "title": "The One After Next", "status_id": 1}}
     ]
+  },
+  "section_focus": {
+    "in_progress": [
+      {"id": 900, "title": "A Started Resource", "status_id": 2},
+      {"id": 995, "title": "A Resource In Progress", "status_id": 2}
+    ],
+    "in_progress_total": 2,
+    "not_started": [
+      {"id": 901, "title": "The Next Resource", "status_id": 1},
+      {"id": 903, "title": "The One After Next", "status_id": 1}
+    ],
+    "not_started_total": 2
   },
   "tracks": [
     {

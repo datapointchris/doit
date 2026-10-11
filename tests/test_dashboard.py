@@ -409,6 +409,14 @@ def test_learning_track_with_nothing_left_contributes_no_row():
     assert 'Fourth Track' not in ' '.join(row.note for row in lane.rows)
 
 
+def test_learning_section_rows_are_the_section_focus_and_not_its_raw_items():
+    """The section lists a resource another stream's plan draws first, and its
+    focus leaves that one out. Rows read from the raw items would offer it here."""
+    lane = lanes_by_name(all_results())['learning']
+
+    assert 'Drawn For Another Stream' not in [row.text for row in lane.rows]
+
+
 def test_learning_track_focus_is_not_repeated_from_the_section():
     """A track whose current unit is the section would otherwise list the same
     resource twice."""
