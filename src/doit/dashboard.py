@@ -391,6 +391,11 @@ def article_row(label: str, article: dict) -> Row:
 
 
 def build_projects_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
+    """The focus project and its items, as the overview picks them.
+
+    Projects are worked one at a time, so the meta names the focus once and the
+    rows are its queue. An overview with no `project` field names each row's own.
+    """
     payload, reason = icb_context(results, ('project_items',))
     if payload is None:
         return unavailable('projects', 'PROJECTS', reason)
@@ -400,13 +405,15 @@ def build_projects_lane(results: dict[str, sources.Result], today: dt.date) -> L
     blocked = section.get('blocked') or []
     next_total = section.get('next_total', len(next_items))
     blocked_total = section.get('blocked_total', len(blocked))
+    focus = section.get('project') or {}
 
-    rows = [project_item_row('next', item) for item in next_items]
-    rows += [project_item_row('blocked', item) for item in blocked]
+    rows = [project_item_row('next', item, focus) for item in next_items]
+    rows += [project_item_row('blocked', item, focus) for item in blocked]
+    counts = f'{next_total} next · {blocked_total} blocked'
     return LaneView(
         name='projects',
         title='PROJECTS',
-        meta=f'{next_total} next · {blocked_total} blocked',
+        meta=join_context([focus.get('name'), counts]),
         rows=rows,
         total=next_total + blocked_total,
         hints=['icb projects items list'],
@@ -414,16 +421,16 @@ def build_projects_lane(results: dict[str, sources.Result], today: dt.date) -> L
     )
 
 
-def project_item_row(label: str, item: dict) -> Row:
+def project_item_row(label: str, item: dict, focus: dict) -> Row:
     """The item, what it means, and where the work lands.
 
     The repo comes first because it is the one word that says where you would go
-    to do this; the projects follow because they say which effort it serves. An
-    item can sit in several projects, so all of them are named — picking a first
-    would be arbitrary. Either field can be absent: an errand has no repo, and an
-    older `icb` build omits membership entirely.
+    to do this; the projects follow because they say which effort it serves. The
+    focus project is named in the lane's meta, so a row names only the other
+    projects it also sits in. Either field can be absent: an errand has no repo,
+    and an older overview omits membership entirely.
     """
-    projects = [project.get('name', '') for project in item.get('projects') or []]
+    projects = [project.get('name', '') for project in item.get('projects') or [] if not focus or project.get('id') != focus.get('id')]
     where = join_context([item.get('repo'), *projects])
     return Row(
         label,

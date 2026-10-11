@@ -579,8 +579,19 @@ def test_upcoming_lane_uses_one_distance_format_and_names_the_day():
 def test_projects_lane_separates_next_from_blocked():
     lane = lanes_by_name(all_results())['projects']
 
-    assert lane.meta == '5 next · 1 blocked'
+    assert lane.meta == 'A Project · 5 next · 1 blocked', 'the focus project is named once, ahead of its counts'
     assert [row.label for row in lane.rows] == ['next', 'next', 'blocked']
+
+
+def test_projects_lane_from_an_overview_with_no_focus_project_keeps_the_bare_counts():
+    payload = fixture('icb-overview.json')
+    del payload['project_items']['project']
+    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+
+    lane = dashboard.build_projects_lane(results, TODAY)
+
+    assert lane.meta == '5 next · 1 blocked'
+    assert lane.rows[0].note == 'A Project', 'with no focus named, each row names its own projects'
 
 
 def test_projects_lane_carries_the_item_note_so_a_bare_title_says_something():
@@ -593,8 +604,8 @@ def test_projects_lane_carries_the_item_note_so_a_bare_title_says_something():
 def test_projects_lane_says_where_the_work_lands():
     lane = lanes_by_name(all_results())['projects']
 
-    assert lane.rows[0].note == 'A Project', 'an errand carries no repo'
-    assert lane.rows[1].note == 'somerepo · A Project · Another Project', 'picking one project would be arbitrary'
+    assert lane.rows[0].note == '', 'an errand in the focus project alone has nothing more to say'
+    assert lane.rows[1].note == 'somerepo · Another Project', 'the meta already names the focus project'
     assert lane.rows[2].note == 'somerepo', 'a repo with no membership still says where to go'
 
 

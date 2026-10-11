@@ -83,6 +83,10 @@
     "current_total": 4
   },
   "project_items": {
+    "project": {
+      "id": "p1",
+      "name": "A Project"
+    },
     "next": [
       {
         "id": "019f0000-0000-7000-8000-000000000001",
