@@ -1033,7 +1033,7 @@ def problem_where(problem: dict) -> str:
 
 
 def ask_note(ask: dict) -> str:
-    """The triage's recommended option, numbered from 1 as `fleet problems answer` takes it."""
+    """The triage's recommended option, numbered from 1 as `fleet inbox answer` takes it."""
     options = [option for option in ask.get('options') or [] if isinstance(option, dict)]
     chosen = ask.get('recommendation')
     if isinstance(chosen, int) and 1 <= chosen <= len(options):
@@ -1045,22 +1045,22 @@ def problem_row(problem: dict, today: dt.date) -> Row:
     """One problem nobody else is acting on.
 
     Running a privileged ask's command settles nothing until it is answered, and
-    a handle holds one command. So that handle is `fleet problems show`, which
+    a handle holds one command. So that handle is `fleet inbox show`, which
     prints the command and the answer line together.
 
     An escalation with no question is a fix PR waiting on review. The PR is only
     in the row's steps, and choosing which step is current is fleet's rule, not
-    doit's. `fleet problems show` prints it.
+    doit's. `fleet inbox show` prints it.
 
     A status this build does not know is labeled by name rather than by age, so
     it never passes for an untriaged row.
     """
     key = problem.get('key', '')
     status = problem_status(problem)
-    shown = f'fleet problems show {key}'
+    shown = f'fleet inbox show {key}'
     ask = problem.get('ask')
     if status == ESCALATED_STATUS and isinstance(ask, dict):
-        handle = shown if ask.get('command') else f'fleet problems answer {key} <n>'
+        handle = shown if ask.get('command') else f'fleet inbox answer {key} <n>'
         return Row('ask', clean(ask.get('question', '')), ask_note(ask), Urgency.OVERDUE, handle)
     if status == ESCALATED_STATUS:
         label = 'review'
@@ -1084,7 +1084,7 @@ def problems_heading(statuses: list[str]) -> str:
 def problems_adapter(result: sources.Result) -> list[LaneView]:
     """A problem inbox's open problems, as an alert lane.
 
-    Shaped for what `fleet problems list --json` emits, and named for the shape
+    Shaped for what `fleet inbox list --json` emits, and named for the shape
     rather than for that binary: doit ships to boxes outside the fleet, where
     nothing declares this source and the adapter is never reached. The lane is
     declared in `sources.yml` like any other, so a machine without the producer
@@ -1123,7 +1123,7 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
             rows=[problem_row(problem, today) for problem in listed],
             total=len(listed),
             in_flight=len(open_problems) - len(listed),
-            hints=['fleet problems list'] if open_problems else [],
+            hints=['fleet inbox list'] if open_problems else [],
             alert=True,
         )
     ]

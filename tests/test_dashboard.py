@@ -1120,7 +1120,7 @@ def test_the_problems_lane_is_an_alert_carrying_one_row_per_open_problem() -> No
     assert lane.alert is True
     assert [row.text for row in lane.rows] == ['hosts does not match the inventory']
     assert lane.rows[0].note == 'scheduler-lxc'
-    assert lane.rows[0].handle == 'fleet problems show hosts-drift'
+    assert lane.rows[0].handle == 'fleet inbox show hosts-drift'
 
 
 def test_an_archived_problem_is_not_a_row() -> None:
@@ -1149,7 +1149,7 @@ def test_an_escalated_problem_leads_with_its_question_and_the_command_that_answe
     assert [row.label for row in lane.rows] == ['ask', 'today']
     assert lane.rows[0].text == 'Restart the runner?'
     assert lane.rows[0].note == 'recommends 1. Restart it'
-    assert lane.rows[0].handle == 'fleet problems answer runner-down <n>'
+    assert lane.rows[0].handle == 'fleet inbox answer runner-down <n>'
 
 
 def test_a_privileged_ask_opens_the_problem_rather_than_running_one_option() -> None:
@@ -1157,7 +1157,7 @@ def test_a_privileged_ask_opens_the_problem_rather_than_running_one_option() -> 
 
     row = dashboard.problems_adapter(inbox(problem('hosts-drift', 'hosts drifted', status='escalated', ask=asked)))[0].rows[0]
 
-    assert row.handle == 'fleet problems show hosts-drift'
+    assert row.handle == 'fleet inbox show hosts-drift'
     assert row.note == '2 options', 'an ask recommending nothing still says there is a choice to read'
 
 
@@ -1165,7 +1165,7 @@ def test_an_escalation_without_a_question_is_a_pr_waiting_on_review() -> None:
     lane = dashboard.problems_adapter(inbox(problem('audit/incomplete-sweep', 'sweep incomplete', status='escalated')))[0]
 
     assert lane.rows[0].label == 'review'
-    assert lane.rows[0].handle == 'fleet problems show audit/incomplete-sweep'
+    assert lane.rows[0].handle == 'fleet inbox show audit/incomplete-sweep'
 
 
 def test_an_untriaged_problem_says_how_long_ago_it_last_fired() -> None:
