@@ -312,7 +312,7 @@ def test_the_interactive_read_cannot_take_the_terminal(monkeypatch):
     Under an fzf preview that leaves the foreground group pointing at a dead
     subprocess, and the picker is suspended by SIGTTIN on the next keystroke."""
     calls = {}
-    monkeypatch.setattr(index.subprocess, 'run', lambda command, **kwargs: calls.update(kwargs) or _Completed())
+    monkeypatch.setattr(index.subprocess, 'run', lambda command, **kwargs: calls.update(kwargs) or Completed())
     REAL_ZSH_BINDKEYS.cache_clear()
 
     REAL_ZSH_BINDKEYS(interactive=True)
@@ -321,7 +321,7 @@ def test_the_interactive_read_cannot_take_the_terminal(monkeypatch):
     assert calls['start_new_session'] is True
 
 
-class _Completed:
+class Completed:
     stdout = ''
 
 

@@ -729,7 +729,7 @@ def test_on_log_is_not_run_when_there_is_nobody_to_confirm_with(sandbox, tmp_pat
 
 def test_on_log_is_not_run_under_no_input_even_on_a_terminal(sandbox, tmp_path, monkeypatch):
     monkeypatch.setattr('sys.stdin.isatty', lambda: True)
-    monkeypatch.setattr(render, '_no_input', True)
+    monkeypatch.setattr(render, 'no_input', True)
     marker = tmp_path / 'ran.txt'
     config = {'resolve': 'echo x', 'on_log': f'touch {marker}'}
 
@@ -1755,7 +1755,7 @@ def answers(monkeypatch, *replies: str) -> list[str]:
         return queued.pop(0)
 
     monkeypatch.setattr(pursuits.console, 'input', fake_input)
-    monkeypatch.setattr(render, '_no_input', False)
+    monkeypatch.setattr(render, 'no_input', False)
     monkeypatch.setattr(pursuits, 'can_prompt', lambda: True)
     return asked
 

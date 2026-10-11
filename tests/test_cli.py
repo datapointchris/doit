@@ -144,4 +144,4 @@ def test_version_is_unknown_without_installed_metadata(monkeypatch):
 
     monkeypatch.setattr(doit, 'installed_version', missing)
 
-    assert doit._tool_version() == 'unknown'
+    assert doit.tool_version() == 'unknown'

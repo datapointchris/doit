@@ -133,7 +133,7 @@ def test_flash_refuses_a_run_with_nobody_to_answer_it(capsys):
 
 def test_no_input_refuses_flash_even_on_a_terminal(monkeypatch, capsys):
     monkeypatch.setattr('sys.stdin.isatty', lambda: True)
-    monkeypatch.setattr(render, '_no_input', True)
+    monkeypatch.setattr(render, 'no_input', True)
 
     assert labs.cmd_flash() == 1
     assert 'nobody to answer' in capsys.readouterr().err

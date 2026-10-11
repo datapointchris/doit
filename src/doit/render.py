@@ -40,12 +40,12 @@ error_console = Console(stderr=True, highlight=False)
 # Bound to the persistent --no-input flag by the root callback, which runs on
 # every invocation and rewrites it — so an in-process run never inherits the last
 # one's value.
-_no_input = False
+no_input = False
 
 
 def set_no_input(value: bool) -> None:
-    global _no_input
-    _no_input = value
+    global no_input
+    no_input = value
 
 
 def can_prompt() -> bool:
@@ -55,7 +55,7 @@ def can_prompt() -> bool:
     Lives beside the consoles because it answers the same question they do —
     who, if anyone, is on the other end. A prompt written to a stdin that never
     closes leaves the caller with no output and no exit code."""
-    return not _no_input and sys.stdin.isatty()
+    return not no_input and sys.stdin.isatty()
 
 
 # Wide enough for "overdue 999d", the longest status_label, plus a space.

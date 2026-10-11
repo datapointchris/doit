@@ -1150,7 +1150,7 @@ SHIPPED_ADAPTERS = (
     ('dotfiles', dotfiles_adapter, ('dotfiles',)),
 )
 
-for adapter_id, adapter_fn, _lane_names in SHIPPED_ADAPTERS:
+for adapter_id, adapter_fn, _ in SHIPPED_ADAPTERS:
     sources.register_adapter(adapter_id, adapter_fn)
 
 # Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
