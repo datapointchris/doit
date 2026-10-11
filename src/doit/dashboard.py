@@ -416,7 +416,7 @@ def build_projects_lane(results: dict[str, sources.Result], today: dt.date) -> L
         meta=join_context([focus.get('name'), counts]),
         rows=rows,
         total=next_total + blocked_total,
-        hints=['icb projects items list'],
+        hints=['icb projects next'],
         reason=reason,
     )
 
