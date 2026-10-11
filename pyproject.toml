@@ -15,9 +15,9 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-# The application floor, matching the PEP 723 headers the scripts carried in
-# dotfiles. menu-dashboard needs StrEnum (3.11), so 3.12 is already headroom.
-requires-python = ">=3.12"
+# An application, so it takes the current floor rather than a library's lower one.
+# The only caller is the person running it, and uv fetches a matching interpreter.
+requires-python = ">=3.13"
 
 # typer owns the command tree and rich renders everything, matching
 # syncer/indy/ypl/dectl. rich is declared rather than leaned on as typer's
