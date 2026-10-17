@@ -371,7 +371,8 @@ def registers(monkeypatch):
     def read(review_rows=(), lab_rows=()):
         monkeypatch.setattr(today.review, 'statuses', lambda: list(review_rows))
         monkeypatch.setattr(today.labs, 'statuses', lambda: list(lab_rows))
-        return today.maintenance_lanes(TODAY)
+        cleared, owed, _ = today.maintenance_lanes(TODAY)
+        return cleared, owed
 
     return read
 
@@ -430,7 +431,7 @@ def test_a_register_that_cannot_be_read_is_reported_where_it_is_owed(monkeypatch
     monkeypatch.setattr(today.review, 'statuses', refuses)
     monkeypatch.setattr(today.labs, 'statuses', list)
 
-    cleared, owed = today.maintenance_lanes(TODAY)
+    cleared, owed, _ = today.maintenance_lanes(TODAY)
 
     assert [lane.name for lane in cleared] == ['labs']
     assert [(lane.name, lane.available) for lane in owed] == [('review', False), ('labs', True)]
@@ -455,6 +456,7 @@ def pursuit_state(balances, touched=(), tracked=()):
         'watched': {**active, **following},
         'balance': dict(balances),
         'checkoff_size': dict.fromkeys(balances, 1.0),
+        'weekly_minutes': {},
         'intervals': dict.fromkeys(balances, 3.0),
         'due': {name: allocate.days_until_due(owed, 3.0, 1.0) for name, owed in balances.items()},
         'suppressed': [],
@@ -582,7 +584,7 @@ def test_a_register_that_will_not_load_costs_its_two_groups_rather_than_the_scre
 
     monkeypatch.setattr(today.pursuits, 'load_pursuits', refuses)
 
-    moved, owed = today.pursuit_lanes(NOW, TODAY)
+    moved, owed, _ = today.pursuit_lanes(NOW, TODAY)
 
     assert moved == []
     assert [(lane.name, lane.available) for lane in owed] == [('pursuits', False)]
@@ -591,7 +593,7 @@ def test_a_register_that_will_not_load_costs_its_two_groups_rather_than_the_scre
 def test_an_empty_register_contributes_nothing_and_is_not_an_error(monkeypatch):
     monkeypatch.setattr(today.pursuits, 'load_pursuits', dict)
 
-    assert today.pursuit_lanes(NOW, TODAY) == ([], [])
+    assert today.pursuit_lanes(NOW, TODAY) == ([], [], None)
 
 
 # --- the screen --------------------------------------------------------------
@@ -743,7 +745,7 @@ def no_backends(monkeypatch):
 
 
 def pursuits_answer(state):
-    return lambda now, today_: ([today.pursuits_done(state, TODAY)], [today.pursuits_due(state, TODAY)])
+    return lambda now, today_: ([today.pursuits_done(state, TODAY)], [today.pursuits_due(state, TODAY)], state)
 
 
 def test_each_list_keeps_its_groups_in_one_order(no_backends, monkeypatch):

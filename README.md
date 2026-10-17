@@ -42,6 +42,8 @@ time and never hit a cryptic error.
   then a row saying how many more and what to type to see them. Anything done today is off it, so
   a pursuit logged this morning leaves however far behind it still is. The list underneath names
   everything the day has had, grouped by where it was recorded and in the order it happened.
+  Above both, one line sets the minutes today has paid against what a day at pace asks, with the
+  habits beside it, and the lines under it say how much more a day would clear what is overdue.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
 
