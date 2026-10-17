@@ -1,46 +1,41 @@
-"""What a day at pace asks for, what today has paid of it, and what catching up adds.
+"""What today asks of each pursuit to hold its pace, and what is behind beyond that.
 
-Shown at the top of `doit today`. Every figure is minutes of effort, the one unit a
-timed pursuit, a counted one, a review item and a Lab share. A timed pursuit is
-already counted in minutes. A counted pursuit's checkoff is worth one sitting, as
-`forecast.durations` measures it from the journal, so its balance, today's minutes
-and the daily ask convert at one rate. Neither register records how long an item
-takes, so each one is `forecast.FALLBACK_MINUTES`, the figure forecast already
-assumes for a pursuit it cannot measure.
+Shown at the top of `doit today`. Each pursuit is counted in its own unit, and
+nothing converts one unit into the other: a timed pursuit in minutes, a counted
+one in checkoffs. So the line carries two figures side by side. A checkoff has
+no length, and any length given to it would be a guess shown as a measurement.
 
-**The daily is the pace, never the backlog.** It is what holding every pace costs
-a day, so a day that pays it leaves every balance where it was. What is overdue is
-said apart from it, as extra minutes a day over a few timescales. A ratio against
-the backlog reads as a target the day was set, the way `0 of N` Labs would.
+**Today is the pace, less any lead.** It is what the pace asks between midnight
+and the next one. A pursuit already ahead at midnight spends its lead first, so
+a pursuit far enough ahead asks nothing. A counted pursuit asks for the checkoffs
+whose turn falls today, so a two-day chore asks for one every other day rather
+than half of one each day.
 
-**Catching up is the backlog spread over days.** Standing counts from each
-pursuit's zero point, so a pace pays exactly what accrues and only the overdue
-part needs more. Overdue is the bar
-the due list uses: a pursuit owing more than one checkoff, a register item that is
-due. A pursuit ahead of its pace offsets nothing, because reading more does not
-paint.
+**Behind is what the pace asked before today and nothing has paid.** A pursuit
+ahead of its pace offsets nothing, because reading more does not paint. Whatever
+today paid beyond its own ask comes off what is behind. A timed pursuit's minutes
+count as behind from the first one, though the due list waits for a whole week
+of them before it calls the pursuit owed.
 
-A timescale is shown where its extra is at most `MOST_EXTRA` dailies, past which it
-is not a day anyone keeps, and at least `LEAST_EXTRA` of one, below which it adds
-nothing the shorter timescales did not. Where none qualifies, the longest is shown
-when all ask too much and the shortest when all ask too little, so a backlog is
-never left unsaid.
+**Catching up is what is behind, spread over days.** A timescale is shown where
+each unit's extra a day is at most `MOST_EXTRA` of that unit's day at pace, past
+which it is not a day anyone keeps. It must also be at least `LEAST_EXTRA` of
+one, below which it adds nothing a shorter timescale did not. Where none
+qualifies, the longest is shown when every one asks too much, and otherwise the
+shortest that does not, so a backlog is never left unsaid. Checkoffs a day are
+rounded up, because nobody can do a fraction of one.
 
-Habits are a checklist beside the number and never part of it. They are due every
-day as a set and carry no duration.
-
-Where a group a figure sums could not be read, every figure is absent rather than
-summed over the rest, because a sum missing a group reads as a lighter day.
+Habits, review items and Labs are checklists beside the figures. Each item is
+done or not, and its own record says when it is due.
 """
 
 import datetime as dt
 import math
 from dataclasses import dataclass
 from dataclasses import field
-from dataclasses import replace
 from typing import NamedTuple
 
-from doit import forecast
+from doit.pursuits import asked_since
 from doit.pursuits import completed_since
 from doit.pursuits import records_by_pursuit
 
@@ -49,56 +44,55 @@ MOST_EXTRA = 2.0
 LEAST_EXTRA = 0.1
 
 
-class Recurring(NamedTuple):
-    """One review item or scheduled Lab, as the daily and the backlog count it."""
+class PursuitDay(NamedTuple):
+    """One pursuit's day, in minutes when ``timed`` and in checkoffs otherwise."""
 
-    cadence_days: float
-    due: bool
-    done_today: bool
+    name: str
+    timed: bool
+    pace: float
+    need: float
+    done: float
+    behind: float
+
+
+class Unit(NamedTuple):
+    """The pursuits counted in one unit, summed. ``asked_of`` is how many ask something today."""
+
+    pace: float
+    need: float
+    done: float
+    behind: float
+    asked_of: int
+
+
+class Checklist(NamedTuple):
+    """A checklist beside the figures, or why it could not be read."""
+
+    name: str
+    done: int | None = None
+    total: int | None = None
+    unavailable: str = ''
 
 
 @dataclass(frozen=True)
 class CatchUp:
     days: int
     label: str
-    extra_per_day: float
+    minutes_per_day: float
+    checkoffs_per_day: int
     shown: bool
 
 
 @dataclass(frozen=True)
 class Quota:
-    """The day's figures, each None where ``unavailable`` names a group it sums."""
+    """The day's figures. Both units are None where no pursuits were read, and ``unavailable`` says why."""
 
-    daily: float | None = None
-    done: float | None = None
-    backlog: float | None = None
-    catch_up: list[CatchUp] | None = None
-    habits_done: int | None = None
-    habits_total: int | None = None
-    habits_unavailable: str = ''
-    unavailable: list[str] = field(default_factory=list)
-
-
-def to_dict(figures: Quota) -> dict:
-    """The `minutes` object of `doit today --json`, every timescale with whether it was shown."""
-    habits = None
-    if figures.habits_total is not None:
-        habits = {'done': figures.habits_done, 'total': figures.habits_total}
-    catch_up = None
-    if figures.catch_up is not None:
-        catch_up = [
-            {'days': entry.days, 'label': entry.label, 'extra_per_day': round(entry.extra_per_day, 1), 'shown': entry.shown}
-            for entry in figures.catch_up
-        ]
-    return {
-        'daily': None if figures.daily is None else round(figures.daily, 1),
-        'done': None if figures.done is None else round(figures.done, 1),
-        'backlog': None if figures.backlog is None else round(figures.backlog, 1),
-        'catch_up': catch_up,
-        'habits': habits,
-        'habits_unavailable': figures.habits_unavailable,
-        'unavailable': list(figures.unavailable),
-    }
+    minutes: Unit | None = None
+    checkoffs: Unit | None = None
+    pursuits: list[PursuitDay] = field(default_factory=list)
+    catch_up: list[CatchUp] = field(default_factory=list)
+    checklists: list[Checklist] = field(default_factory=list)
+    unavailable: str = ''
 
 
 def paced(state: dict) -> list[str]:
@@ -107,84 +101,122 @@ def paced(state: dict) -> list[str]:
     return [name for name in state['active'] if name not in passed and math.isfinite(state['intervals'].get(name, math.inf))]
 
 
-def minutes_per_unit(state: dict, names: list[str]) -> dict[str, float]:
-    """What one unit of each pursuit's balance is worth in minutes."""
-    sittings = forecast.durations({name: state['active'][name] for name in names}, state['records'])
-    return {name: 1.0 if state['weekly_minutes'].get(name) else sittings[name].minutes for name in names}
+def turns(asked: float) -> float:
+    """How many checkoffs' turns an ask has reached, clear of float error at each boundary."""
+    return float(math.floor(asked + 1e-9))
 
 
-class Figures(NamedTuple):
-    daily: float
-    done: float
-    backlog: float
-
-
-def pursuit_figures(state: dict) -> Figures:
-    """The pursuits' share of each figure, paid by the rules standing pays by."""
-    value = minutes_per_unit(state, paced(state))
+def pursuit_day(state: dict, name: str, own: list[dict]) -> PursuitDay:
+    """What today asks of one pursuit, what it paid toward that, and what stays behind."""
     now = state['now']
     midnight = dt.datetime.combine(state['today'], dt.time(), tzinfo=now.tzinfo)
-    mine = records_by_pursuit(state['records'])
-    paid_today = {
-        name: completed_since(mine.get(name, []), state['evidence_days'].get(name, []), now, midnight, state['weekly_minutes'].get(name))
-        for name in value
-    }
-    return Figures(
-        daily=sum(value[name] * state['checkoff_size'][name] / state['intervals'][name] for name in value),
-        done=sum(value[name] * paid_today[name] for name in value),
-        backlog=sum(value[name] * max(0.0, state['balance'][name] - state['checkoff_size'][name]) for name in value),
+    origin = state['origins'][name]
+    pace_of = (state['intervals'][name], state['checkoff_size'][name])
+    minutes = state['weekly_minutes'].get(name)
+    asked_by_midnight = asked_since(own, origin, midnight, pace_of) if midnight > origin else 0.0
+    asked_by_tonight = asked_since(own, origin, midnight + dt.timedelta(days=1), pace_of)
+    if not minutes:
+        asked_by_midnight, asked_by_tonight = turns(asked_by_midnight), turns(asked_by_tonight)
+    paid_today = completed_since(own, state['evidence_days'].get(name, []), now, max(origin, midnight), minutes)
+    owed_at_midnight = asked_by_midnight - (state['done'][name] - paid_today)
+    need = max(0.0, asked_by_tonight - asked_by_midnight + min(0.0, owed_at_midnight))
+    return PursuitDay(
+        name=name,
+        timed=bool(minutes),
+        pace=pace_of[1] / pace_of[0],
+        need=need,
+        done=min(paid_today, need),
+        behind=max(0.0, owed_at_midnight - max(0.0, paid_today - need)),
     )
 
 
-def register_figures(recurring: list[Recurring]) -> Figures:
-    """The review items' and scheduled Labs' share of each figure."""
-    minutes = forecast.FALLBACK_MINUTES
-    return Figures(
-        daily=sum(minutes / item.cadence_days for item in recurring if item.cadence_days > 0),
-        done=minutes * sum(1 for item in recurring if item.done_today),
-        backlog=minutes * sum(1 for item in recurring if item.due),
+def summed(days: list[PursuitDay]) -> Unit:
+    return Unit(
+        pace=sum(day.pace for day in days),
+        need=sum(day.need for day in days),
+        done=sum(day.done for day in days),
+        behind=sum(day.behind for day in days),
+        asked_of=sum(1 for day in days if day.need > 0),
     )
 
 
-def timescales(backlog: float, daily: float) -> list[CatchUp]:
-    """Each timescale's extra minutes a day, marked with whether it is worth showing."""
-    extras = [(days, label, backlog / days) for days, label in TIMESCALES]
-    if backlog <= 0:
-        return [CatchUp(days, label, extra, False) for days, label, extra in extras]
-    fits = [LEAST_EXTRA * daily <= extra <= MOST_EXTRA * daily for _, _, extra in extras]
-    if not any(fits):
-        pick = len(extras) - 1 if all(extra > MOST_EXTRA * daily for _, _, extra in extras) else 0
+def timescales(minutes: Unit, checkoffs: Unit) -> list[CatchUp]:
+    """Each timescale's extra a day in both units, marked with whether it is worth showing."""
+    extras = [(days, label, minutes.behind / days, checkoffs.behind / days) for days, label in TIMESCALES]
+
+    def ratios(extra_minutes: float, extra_checkoffs: float) -> list[float]:
+        pairs = ((extra_minutes, minutes.pace), (extra_checkoffs, checkoffs.pace))
+        return [extra / pace for extra, pace in pairs if extra > 0 and pace > 0]
+
+    measured = [ratios(extra_minutes, extra_checkoffs) for _, _, extra_minutes, extra_checkoffs in extras]
+    fits = [bool(found) and all(LEAST_EXTRA <= ratio <= MOST_EXTRA for ratio in found) for found in measured]
+    if any(measured) and not any(fits):
+        bearable = [index for index, found in enumerate(measured) if all(ratio <= MOST_EXTRA for ratio in found)]
+        pick = bearable[0] if bearable else len(extras) - 1
         fits = [index == pick for index in range(len(extras))]
-    return [CatchUp(days, label, extra, shown) for (days, label, extra), shown in zip(extras, fits, strict=True)]
+    return [
+        CatchUp(days, label, extra_minutes, math.ceil(extra_checkoffs - 1e-9), shown)
+        for (days, label, extra_minutes, extra_checkoffs), shown in zip(extras, fits, strict=True)
+    ]
 
 
-def build(
-    state: dict | None,
-    recurring: list[Recurring],
-    habits: tuple[int, int] | None = None,
-    habits_unavailable: str = '',
-    unavailable: list[str] | None = None,
-) -> Quota:
-    """The day's figures. ``state`` is None where the register declares no pursuits.
-
-    ``unavailable`` names the groups that could not be read, and any one of them
-    leaves every figure absent.
-    """
-    checklist = Quota(
-        habits_done=None if habits is None else habits[0],
-        habits_total=None if habits is None else habits[1],
-        habits_unavailable=habits_unavailable,
-        unavailable=list(unavailable or []),
+def build(state: dict | None, checklists: list[Checklist], unavailable: str = '') -> Quota:
+    """The day's figures. ``state`` is None where the register declares no pursuits or could not be read."""
+    if state is None:
+        return Quota(checklists=checklists, unavailable=unavailable)
+    mine = records_by_pursuit(state['records'])
+    days = [pursuit_day(state, name, mine.get(name, [])) for name in paced(state)]
+    minutes = summed([day for day in days if day.timed])
+    checkoffs = summed([day for day in days if not day.timed])
+    return Quota(
+        minutes=minutes,
+        checkoffs=checkoffs,
+        pursuits=days,
+        catch_up=timescales(minutes, checkoffs),
+        checklists=checklists,
     )
-    if checklist.unavailable:
-        return checklist
-    parts = [register_figures(recurring)] + ([] if state is None else [pursuit_figures(state)])
-    daily = sum(part.daily for part in parts)
-    backlog = sum(part.backlog for part in parts)
-    return replace(
-        checklist,
-        daily=daily,
-        done=sum(part.done for part in parts),
-        backlog=backlog,
-        catch_up=timescales(backlog, daily),
-    )
+
+
+def unit_dict(found: Unit | None) -> dict | None:
+    if found is None:
+        return None
+    return {
+        'pace': round(found.pace, 1),
+        'need': round(found.need, 1),
+        'done': round(found.done, 1),
+        'behind': round(found.behind, 1),
+        'asked_of': found.asked_of,
+    }
+
+
+def to_dict(figures: Quota) -> dict:
+    """The `quota` object of `doit today --json`, every timescale with whether it was shown."""
+    return {
+        'minutes': unit_dict(figures.minutes),
+        'checkoffs': unit_dict(figures.checkoffs),
+        'pursuits': [
+            {
+                'name': day.name,
+                'unit': 'minutes' if day.timed else 'checkoffs',
+                'pace': round(day.pace, 2),
+                'need': round(day.need, 1),
+                'done': round(day.done, 1),
+                'behind': round(day.behind, 1),
+            }
+            for day in figures.pursuits
+        ],
+        'catch_up': [
+            {
+                'days': entry.days,
+                'label': entry.label,
+                'minutes_per_day': round(entry.minutes_per_day, 1),
+                'checkoffs_per_day': entry.checkoffs_per_day,
+                'shown': entry.shown,
+            }
+            for entry in figures.catch_up
+        ],
+        'checklists': [
+            {'name': entry.name, 'done': entry.done, 'total': entry.total, 'unavailable': entry.unavailable} for entry in figures.checklists
+        ],
+        'unavailable': figures.unavailable,
+    }

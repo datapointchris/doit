@@ -371,8 +371,7 @@ def registers(monkeypatch):
     def read(review_rows=(), lab_rows=()):
         monkeypatch.setattr(today.review, 'statuses', lambda: list(review_rows))
         monkeypatch.setattr(today.labs, 'statuses', lambda: list(lab_rows))
-        cleared, owed, _ = today.maintenance_lanes(TODAY)
-        return cleared, owed
+        return today.maintenance_lanes(TODAY)
 
     return read
 
@@ -431,7 +430,7 @@ def test_a_register_that_cannot_be_read_is_reported_where_it_is_owed(monkeypatch
     monkeypatch.setattr(today.review, 'statuses', refuses)
     monkeypatch.setattr(today.labs, 'statuses', list)
 
-    cleared, owed, _ = today.maintenance_lanes(TODAY)
+    cleared, owed = today.maintenance_lanes(TODAY)
 
     assert [lane.name for lane in cleared] == ['labs']
     assert [(lane.name, lane.available) for lane in owed] == [('review', False), ('labs', True)]
@@ -459,6 +458,8 @@ def pursuit_state(balances, touched=(), tracked=()):
         'weekly_minutes': {},
         'intervals': dict.fromkeys(balances, 3.0),
         'due': {name: allocate.days_until_due(owed, 3.0, 1.0) for name, owed in balances.items()},
+        'origins': dict.fromkeys(balances, NOW - dt.timedelta(days=30)),
+        'done': dict.fromkeys(balances, 0.0),
         'suppressed': [],
         'evidence_days': evidence.occurrences({'pursuits': {name: {'dates': [TODAY.isoformat()]} for name in touched}}),
         'observed': {},

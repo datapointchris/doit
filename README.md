@@ -42,8 +42,10 @@ time and never hit a cryptic error.
   then a row saying how many more and what to type to see them. Anything done today is off it, so
   a pursuit logged this morning leaves however far behind it still is. The list underneath names
   everything the day has had, grouped by where it was recorded and in the order it happened.
-  Above both, one line sets the minutes today has paid against what a day at pace asks, with the
-  habits beside it, and the lines under it say how much more a day would clear what is overdue.
+  Above both, one line says what today asks to hold every pace: minutes across the timed pursuits
+  and checkoffs of the counted ones, each in its own unit and never converted into the other. The
+  next line counts the habits, review and Labs as checklists. Under them is what is behind beyond
+  today, and how much more a day, in each unit, would clear it over each timescale worth showing.
 - **`doit review due`** is one of those lanes at full depth. Reach for it when MAINTENANCE is the
   line that caught your eye — the dashboard shows three of its rows and there are usually more.
 

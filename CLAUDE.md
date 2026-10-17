@@ -40,6 +40,14 @@ full the day it ends. A build writes a `pace` record wherever the register disag
 newest one, and `asked_since` prices each span at the pace recorded over it. Reading the register
 in its place would look simpler and be wrong about every day before the last edit.
 
+**`doit today` counts a timed pursuit behind long before the due list does.** Its line counts
+every minute the pace asked before today and nothing paid. The due list calls a pursuit owed only
+once it is a whole checkoff behind, and a timed pursuit's checkoff is a week. So work can read
+hours behind there while `doit next` still says `due in 3d`. Both are right: one says how far
+behind, the other when it comes due. Converting a counted checkoff into minutes, or either unit
+into points, would let the two be summed. Both conversions were weighed and rejected, because a
+checkoff has no length and a point is a quantity nobody declared.
+
 **`doit.machine` calls `dotfiles` from code, not through `sources.yml`.** The registry is one flat
 file for the whole fleet, and everything it gets checked against is scoped to one box, so a row for
 another machine's tool has nowhere to be filed except rot. dotfiles holds the manifests, runs

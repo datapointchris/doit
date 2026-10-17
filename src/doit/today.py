@@ -6,12 +6,12 @@ weights. Neither says what the day has already had, because an outstanding
 count can only climb and a lane of hundreds of unread articles renders exactly
 like a lane of two overdue chores.
 
-**Above both lists, the day in minutes.** One line sets what today has paid
-against what a day at pace asks, with the habits beside it as a checklist. Under
-it, each timescale worth showing says how much more a day would clear what is
-overdue. `doit.quota` holds the arithmetic and why the daily is the pace rather
-than the backlog. The line needs the pursuits and both registers, so where one
-could not be read it names that group instead of a figure.
+**Above both lists, what today asks to hold the pace.** The timed pursuits'
+minutes and the counted pursuits' checkoffs, each in its own unit, with the
+habits, review and Labs as checklists under them. Then what is behind beyond
+today, and each timescale worth showing with how much more a day would clear it.
+`doit.quota` holds the arithmetic. Where the pursuits could not be read, the line
+names them instead of a figure.
 
 **What is not done is said once, in the due list, and it prints first.** It is
 what the reader acts on, and the done list is the record beneath it. Each group
@@ -346,18 +346,6 @@ def cleared_on(row: dict, today: dt.date) -> bool:
     return row.get('last') == today.isoformat()
 
 
-def recurring(rows: list[dict], is_due: Callable[[dict], bool], scheduled: Callable[[dict], bool], today: dt.date) -> list[quota.Recurring]:
-    """A register's items as the minutes line counts them: the ones on a schedule."""
-    found = []
-    for row in rows:
-        cadence = row.get('cadence_days')
-        if not scheduled(row) or not isinstance(cadence, int | float) or isinstance(cadence, bool):
-            continue
-        cleared = cleared_on(row, today)
-        found.append(quota.Recurring(float(cadence), not cleared and is_due(row), cleared))
-    return found
-
-
 def register_lanes(
     name: str,
     title: str,
@@ -399,8 +387,8 @@ def register_lanes(
     )
 
 
-def maintenance_lanes(today: dt.date) -> tuple[list[Lane], list[Lane], list[quota.Recurring]]:
-    """The two registers doit keeps itself, each split into done and owed, and their scheduled items.
+def maintenance_lanes(today: dt.date) -> tuple[list[Lane], list[Lane]]:
+    """The two registers doit keeps itself, each split into done and owed.
 
     Read as statuses rather than through the dashboard's `maintenance` lane,
     which interleaves them into one ranked excerpt and drops the done half.
@@ -409,20 +397,15 @@ def maintenance_lanes(today: dt.date) -> tuple[list[Lane], list[Lane], list[quot
     in its description or title, so that is the text. A review item's own
     `command` is its handle. A Lab has none, because it is a document you open,
     and the verb that opens it is doit's.
-
-    Every review item is on a schedule. A Lab is on one only where it says so,
-    so an on-demand Lab asks the day for nothing.
     """
     done: list[Lane] = []
     due: list[Lane] = []
-    items: list[quota.Recurring] = []
-    for name, title, read, is_due, scheduled, describe, act, hint in (
+    for name, title, read, is_due, describe, act, hint in (
         (
             'review',
             'REVIEW',
             review.statuses,
             lambda row: review.is_due(row.get('overdue')),
-            lambda row: True,
             lambda row: str(row.get('desc') or item_name(row)),
             lambda row: str(row.get('command') or ''),
             'doit review due',
@@ -432,22 +415,19 @@ def maintenance_lanes(today: dt.date) -> tuple[list[Lane], list[Lane], list[quot
             'LABS',
             labs.statuses,
             labs.is_due_row,
-            lambda row: bool(row.get('scheduled')),
             lambda row: str(row.get('title') or item_name(row)),
             lambda row: f'doit labs show {item_name(row)}',
             'doit labs due',
         ),
     ):
         try:
-            rows = read()
-            cleared, owed = register_lanes(name, title, rows, is_due, today, describe, act, hint)
+            cleared, owed = register_lanes(name, title, read(), is_due, today, describe, act, hint)
         except (OSError, ValueError) as error:
             due.append(lanes.unavailable(name, title, str(error)))
             continue
         done.append(cleared)
         due.append(owed)
-        items.extend(recurring(rows, is_due, scheduled, today))
-    return done, due, items
+    return done, due
 
 
 def owing(state: dict) -> list[tuple[str, float | None]]:
@@ -554,27 +534,35 @@ def pursuit_lanes(now: dt.datetime, today: dt.date) -> tuple[list[Lane], list[La
     return [pursuits_done(state, today)], [pursuits_due(state, today)], state
 
 
-# The groups the minutes line sums. Where one could not be read, the line says
-# so instead of a figure, because a sum missing a group reads as a lighter day.
-QUOTA_GROUPS = ('pursuits', 'review', 'labs')
+CHECKLIST_GROUPS = (*DAY_SET_LANES, 'review', 'labs')
 
 
-def day_quota(state: dict | None, items: list[quota.Recurring], due: list[Lane], sets_done: list[Lane]) -> quota.Quota:
-    """The minutes line, and the groups it could not read."""
-    failed = [lane.name for lane in due if lane.name in QUOTA_GROUPS and not lane.available]
-    habits = next((lane for lane in due if lane.name in DAY_SET_LANES), None)
-    if habits is None or not habits.available:
-        return quota.build(state, items, None, '' if habits is None else habits.reason, failed)
-    finished = sum(len(lane.grid) for lane in sets_done if lane.name == habits.name)
-    return quota.build(state, items, (finished, finished + len(habits.rows)), '', failed)
+def checklists(done: list[Lane], due: list[Lane]) -> list[quota.Checklist]:
+    """Each checklist group as done today of done today and still due, or why it could not be read."""
+    found = []
+    for lane in due:
+        if lane.name not in CHECKLIST_GROUPS:
+            continue
+        if not lane.available:
+            found.append(quota.Checklist(lane.name, unavailable=lane.reason))
+            continue
+        finished = sum(len(cleared.grid) for cleared in done if cleared.name == lane.name)
+        found.append(quota.Checklist(lane.name, finished, finished + len(lane.rows)))
+    return sorted(found, key=lambda entry: CHECKLIST_GROUPS.index(entry.name))
+
+
+def day_quota(state: dict | None, done: list[Lane], due: list[Lane]) -> quota.Quota:
+    """The figures above both lists, with the pursuits named as unavailable where their group could not be read."""
+    failed = next((lane.reason for lane in due if lane.name == 'pursuits' and not lane.available), '')
+    return quota.build(state, checklists(done, due), failed)
 
 
 class Day(NamedTuple):
-    """Today's two lists, each holding its groups in the order they print, and the minutes line."""
+    """Today's two lists, each holding its groups in the order they print, and the figures above them."""
 
     done: list[Lane]
     due: list[Lane]
-    minutes: quota.Quota | None = None
+    figures: quota.Quota | None = None
 
 
 def build(registry: sources.Registry, now: dt.datetime) -> Day:
@@ -596,13 +584,13 @@ def build(registry: sources.Registry, now: dt.datetime) -> Day:
 
     sets_done, sets_due = set_lanes(built, now)
     moved, owed, state = pursuit_lanes(now, today)
-    cleared, backlog, items = maintenance_lanes(today)
+    cleared, backlog = maintenance_lanes(today)
 
     done = sets_done + moved + cleared
     for source in completion_sources:
         done.extend(sources.lanes_from(source, results[source.id]))
     due = appointment_lanes(built) + owed + backlog + sets_due
-    return Day(done, due, day_quota(state, items, due, sets_done))
+    return Day(done, due, day_quota(state, done, due))
 
 
 def has_something(lane: Lane) -> bool:
@@ -612,8 +600,8 @@ def has_something(lane: Lane) -> bool:
 def render(day: Day, today: dt.date) -> None:
     width = terminal_width()
     console.rule(f'[cyan]Today[/] · {today.strftime("%a %d %b")}', align='left')
-    if day.minutes is not None:
-        render_minutes(day.minutes)
+    if day.figures is not None:
+        render_quota(day.figures)
     due = [lane for lane in day.due if has_something(lane)]
     done = [lane for lane in day.done if has_something(lane)]
     if due:
@@ -626,33 +614,78 @@ def render(day: Day, today: dt.date) -> None:
         render_done(done, width)
 
 
-def minutes_lines(figures: quota.Quota) -> list[Text]:
-    """The day's minutes against its daily, the habits left, and each catch-up worth showing.
+def checkoffs_text(count: float) -> str:
+    whole = round(count)
+    return f'{whole} checkoff' if whole == 1 else f'{whole} checkoffs'
 
-    The done figure is green once it reaches the daily, the color this screen
-    says done with. Nothing else is colored but a part that could not be read.
-    """
-    daily, done = figures.daily, figures.done
-    if daily is None or done is None:
-        return [Text(f'{GROUP_INDENT}minutes unavailable — {", ".join(figures.unavailable)} could not be read', style='red')]
-    if not daily and not done and figures.habits_total is None and not figures.habits_unavailable:
-        return []
+
+def joined(parts: list[Text]) -> Text:
     line = Text(GROUP_INDENT)
-    line.append(pursuits.minutes_text(done), style=HOUR_STYLE if daily and done >= daily else '')
-    line.append(f' done / {pursuits.minutes_text(daily)} daily')
-    if figures.habits_unavailable:
-        line.append(' · ')
-        line.append('habits unavailable', style='red')
-    elif figures.habits_total is not None:
-        line.append(f' · habits {figures.habits_done} of {figures.habits_total}')
-    shown = [entry for entry in figures.catch_up or [] if entry.shown]
-    return [line] + [
-        Text(f'{GROUP_INDENT}{pursuits.minutes_text(entry.extra_per_day)} more a day catches up in {entry.label}') for entry in shown
-    ]
+    for index, part in enumerate(parts):
+        if index:
+            line.append(' · ')
+        line.append_text(part)
+    return line
 
 
-def render_minutes(figures: quota.Quota) -> None:
-    for line in minutes_lines(figures):
+def today_parts(figures: quota.Quota) -> list[Text]:
+    """What today asks in each unit, green once today has paid it."""
+    if figures.unavailable:
+        return [Text('pursuits unavailable', style='red')]
+    parts = []
+    minutes, checkoffs = figures.minutes, figures.checkoffs
+    if minutes is not None and minutes.need > 0:
+        part = Text(pursuits.minutes_text(minutes.done), style=HOUR_STYLE if minutes.done >= minutes.need else '')
+        noun = 'pursuit' if minutes.asked_of == 1 else 'pursuits'
+        part.append(f' of {pursuits.minutes_text(minutes.need)} across {minutes.asked_of} {noun}')
+        parts.append(part)
+    if checkoffs is not None and checkoffs.need > 0:
+        part = Text(f'{round(checkoffs.done)}', style=HOUR_STYLE if checkoffs.done >= checkoffs.need else '')
+        part.append(f' of {checkoffs_text(checkoffs.need)}')
+        parts.append(part)
+    return parts
+
+
+def checklist_parts(figures: quota.Quota) -> list[Text]:
+    parts = []
+    for entry in figures.checklists:
+        if entry.unavailable:
+            parts.append(Text(f'{entry.name} unavailable', style='red'))
+        else:
+            parts.append(Text(f'{entry.name} {entry.done} of {entry.total}'))
+    return parts
+
+
+def behind_lines(figures: quota.Quota) -> list[Text]:
+    """What is behind beyond today in each unit, then each timescale worth showing."""
+    minutes, checkoffs = figures.minutes, figures.checkoffs
+    if minutes is None or checkoffs is None or not (minutes.behind or checkoffs.behind):
+        return []
+
+    def amounts(extra_minutes: float, extra_checkoffs: float) -> str:
+        said = [pursuits.minutes_text(extra_minutes)] if round(extra_minutes) else []
+        return ' and '.join(said + ([checkoffs_text(extra_checkoffs)] if extra_checkoffs else []))
+
+    lines = [Text(f'{GROUP_INDENT}{amounts(minutes.behind, checkoffs.behind)} behind')]
+    for entry in figures.catch_up:
+        if entry.shown:
+            extra = amounts(entry.minutes_per_day, entry.checkoffs_per_day)
+            lines.append(Text(f'{GROUP_INDENT}{extra} more a day catches up in {entry.label}'))
+    return lines
+
+
+def quota_lines(figures: quota.Quota) -> list[Text]:
+    """Today's ask, the checklists, what is behind, and each catch-up worth showing.
+
+    A figure is green once today has paid it, the color this screen says done
+    with. Nothing else is colored but a part that could not be read.
+    """
+    lines = [joined(parts) for parts in (today_parts(figures), checklist_parts(figures)) if parts]
+    return lines + behind_lines(figures)
+
+
+def render_quota(figures: quota.Quota) -> None:
+    for line in quota_lines(figures):
         console.print(line, no_wrap=True, overflow='ellipsis')
 
 
@@ -766,7 +799,7 @@ def cmd_today(as_json: bool) -> int:
             'generated_at': lanes.timestamp(now),
             'done': [lanes.lane_to_dict(lane) for lane in day.done],
             'due': [lanes.lane_to_dict(lane) for lane in day.due],
-            'minutes': None if day.minutes is None else quota.to_dict(day.minutes),
+            'quota': None if day.figures is None else quota.to_dict(day.figures),
         }
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
