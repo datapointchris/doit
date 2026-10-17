@@ -264,6 +264,9 @@ TEMPLATE = """\
 # Evidence counts occurrences, so a cadence takes it and so does a tracked
 # pursuit. An app says which day something happened and never how long, so a
 # weekly_minutes pursuit is paid by `doit log --minutes` alone.
+#
+# Standing counts back to the zero point, so the command has to answer that far
+# back. A `--limit` on it drops the oldest days, and each one dropped is owed.
 
 pursuits:
   chores:
@@ -276,7 +279,7 @@ pursuits:
     context: category
     view: icb tasks show {id}
     on_log: icb tasks complete {id}
-    evidence: icb tasks list --status completed --limit 100 --json
+    evidence: icb tasks list --status completed --json
     evidence_time: complete_date
 
   read-library:

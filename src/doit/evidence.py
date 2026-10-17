@@ -333,7 +333,7 @@ def observed(payload: dict) -> dict[str, dt.datetime]:
 def occurrences(payload: dict) -> dict[str, list[dt.date]]:
     """Pursuit to the distinct local dates its app reported something on.
 
-    An answer carrying no dates reads as an empty window rather than as damage,
+    An answer carrying no dates reads as no occurrences rather than as damage,
     and a date that will not parse is dropped rather than raising. The cache is
     derived, so anything missing from it costs a refresh and never an answer.
     """
