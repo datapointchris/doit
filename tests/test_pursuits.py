@@ -36,10 +36,8 @@ NOW = dt.datetime.fromisoformat('2026-08-04T12:00:00-04:00')
 
 @pytest.fixture(autouse=True)
 def register(monkeypatch):
-    """The committed fixture register, with no journal or cache behind it."""
+    """The committed fixture register."""
     monkeypatch.setattr(pursuits, 'REGISTER', FIXTURE_DIR / 'pursuits.yml')
-    monkeypatch.setattr(paths, 'JOURNAL_DIR', FIXTURE_DIR / 'does-not-exist-journal')
-    monkeypatch.setattr(pursuits, 'CACHE_DIR', FIXTURE_DIR / 'does-not-exist-cache')
 
 
 @pytest.fixture

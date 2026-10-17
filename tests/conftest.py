@@ -11,10 +11,14 @@ for the same reason. So does the machine manifest, which asks the real dotfiles
 what this box declares — left alone, whether a fixture row reads as rot or as
 another machine's would depend on who is running the suite.
 
+The pursuits register, journal and evidence cache are the one reach that writes.
+A live build journals first sightings and pace changes for whatever register it
+reads, so a test drawing the dashboard would append to this desk's real journal.
+
 Autouse and suite-wide rather than per-module: the reaches are `observe.HISTORY`,
-`index.zsh_bindkeys` and `machine.declaration`, and any test that ends up calling
-`review.statuses` or `build_index` inherits them whether or not its module knows
-those exist.
+`index.zsh_bindkeys`, `machine.declaration` and the pursuits paths, and any test
+that ends up calling `review.statuses`, `build_index` or `build_state` inherits
+them whether or not its module knows those exist.
 """
 
 import pytest
@@ -22,6 +26,8 @@ import pytest
 from doit import index
 from doit import machine
 from doit import observe
+from doit import paths
+from doit import pursuits
 
 
 @pytest.fixture(autouse=True)
@@ -76,3 +82,17 @@ def unknown_machine_manifest(monkeypatch):
     """
     machine.declaration.cache_clear()
     monkeypatch.setattr(machine, 'declaration', lambda: machine.UNKNOWN)
+
+
+@pytest.fixture(autouse=True)
+def empty_pursuits(monkeypatch, tmp_path):
+    """Read no register, and journal and cache into this test's own directory.
+
+    A missing register loads as empty, so nothing builds unless a test writes
+    one. A test that does gets a journal nobody else reads.
+    """
+    monkeypatch.setattr(pursuits, 'REGISTER', tmp_path / 'no-pursuits.yml')
+    monkeypatch.setattr(paths, 'JOURNAL_DIR', tmp_path / 'journal')
+    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
+    monkeypatch.setattr(pursuits, 'DRAW_CACHE', tmp_path / 'cache' / 'next-draw.json')
+    monkeypatch.setattr(pursuits, 'NAMES_CACHE', tmp_path / 'cache' / 'next-names.txt')
