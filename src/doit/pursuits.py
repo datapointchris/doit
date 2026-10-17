@@ -727,11 +727,6 @@ def merged_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.
     return merged
 
 
-def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
-    """Total days covered by a set of possibly overlapping spans."""
-    return sum((finish - start).total_seconds() / 86400.0 for start, finish in merged_spans(spans))
-
-
 def skip_spans(records: list[dict], now: dt.datetime, origin: dt.datetime) -> list[tuple[dt.datetime, dt.datetime]]:
     """The spans from ``origin`` up to now that a skip took out of the schedule."""
     return merged_spans([(start, min(finish, now)) for start, finish in skip_periods(records, origin)])
