@@ -241,19 +241,8 @@ def test_every_day_the_app_reported_survives_the_read(tmp_path):
     assert evidence.observed(payload)['build'] == NOW - dt.timedelta(hours=1), 'the latest answer is unchanged'
 
 
-def test_a_day_outside_the_window_is_not_kept(tmp_path):
-    """Bounded, so one pursuit cannot grow a cache for as long as its app has history."""
-    inside = NOW - dt.timedelta(days=evidence.OCCURRENCE_WINDOW_DAYS - 1)
-    outside = NOW - dt.timedelta(days=evidence.OCCURRENCE_WINDOW_DAYS)
-    rows = [{'at': inside.isoformat()}, {'at': outside.isoformat()}]
-    pursuits = {'build': {'weight': 35, 'evidence': emitting(rows), 'evidence_time': 'at'}}
-    payload = evidence.refresh(pursuits, tmp_path, NOW)
-
-    assert evidence.occurrences(payload)['build'] == [inside.date()]
-
-
-def test_a_day_the_backend_dated_ahead_of_now_is_outside_the_window():
-    """The window ends today, so a row stamped tomorrow is not in it."""
+def test_a_day_the_backend_dated_ahead_of_now_is_dropped():
+    """Nothing has happened tomorrow yet, so a row stamped then pays nothing."""
     assert evidence.dates_of([NOW + dt.timedelta(days=1)], NOW) == []
     assert evidence.dates_of([NOW], NOW) == [NOW.date().isoformat()]
 

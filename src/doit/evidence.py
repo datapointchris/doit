@@ -49,11 +49,6 @@ TIMEOUT_SECONDS = 8.0
 
 MAX_WORKERS = 6
 
-# How far back an answer keeps its dates. `doit pursuits drift` measures ninety
-# days, so it is the window a consumer would ask for, and bounding it is what
-# stops one pursuit's cache growing for as long as its app has history.
-OCCURRENCE_WINDOW_DAYS = 90
-
 
 def cache_path(directory: Path) -> Path:
     """Derived, per-machine, and reproducible, so it lives in cache rather than state."""
@@ -176,21 +171,26 @@ def latest_in(document, config: dict, now: dt.datetime) -> dt.datetime | None:
     return max(found) if found else None
 
 
-def dates_of(stamps: list[dt.datetime], now: dt.datetime, window: int = OCCURRENCE_WINDOW_DAYS) -> list[str]:
-    """The distinct local dates inside the window, oldest first.
+def dates_of(stamps: list[dt.datetime], now: dt.datetime) -> list[str]:
+    """The distinct local dates up to today, oldest first.
 
     Dates rather than a count of rows, because row counts are not commensurable
     across apps: a habits backend answers with hundreds and a books backend with
     one, so counting would call reading three hundred times rarer than habits. A
     date either carries evidence or does not, whichever app was asked.
 
+    Every date the app returns is kept, because standing counts back to a
+    pursuit's zero point however old it is. A date dropped here is a payment the
+    balance can no longer see, which is debt that grows by construction. Distinct
+    dates bound the cache at one entry per day of history.
+
     Local by the same reading `aware` gives an offset-less stamp, so one machine's
-    notion of a day is used throughout. The window ends today, so a stamp the
-    backend dated ahead of now is outside it.
+    notion of a day is used throughout. A stamp the backend dated ahead of today
+    is dropped.
     """
     today = now.date()
     days = {stamp.astimezone(now.tzinfo).date() for stamp in stamps}
-    return sorted(day.isoformat() for day in days if 0 <= (today - day).days < window)
+    return sorted(day.isoformat() for day in days if day <= today)
 
 
 def read_files(name: str, directory: str, now: dt.datetime) -> tuple[str, dict]:

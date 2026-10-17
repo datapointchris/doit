@@ -81,23 +81,19 @@ and `doit pursuits drift` counts it. That is for something already done plenty o
 still want to see. `doit log --minutes` records how long a sitting took when given and is never
 asked for. A weight with no pace is refused, because a forgotten pace leaves exactly that shape.
 
-Standing is one balance in whichever unit applies: what the goal asked for over the last four
-weeks, less what was done in them. The four weeks slide. Standing is a reading of how the last
-month went, not an account kept to the day. Three chores in one evening count as three, and twenty
-minutes of reading pays twenty minutes off a week's goal. A burst carries a pursuit until it is four
-weeks old, and four weeks away is owed in full. A cadence longer than a fortnight looks back two of
-its own intervals instead. A pursuit paid through an app looks back no further than the app
-remembers.
+Standing is one balance in whichever unit applies: what the goal asked for since the pursuit's
+zero point, less what was done since. Three chores in one evening count as three, and twenty
+minutes of reading pays twenty minutes off a week's goal. Nothing ages out. A month away is owed
+in full for as long as it goes unpaid, and a burst stays credited the same way. A reset is the one
+thing that forgives a debt.
 
-The window opens no earlier than the pursuit's zero point. That is written the first time doit
-reads a pursuit, one interval back, so a new pursuit opens one checkoff owed and goes overdue as
-time passes.
+The zero point is written the first time doit reads a pursuit, one interval back, so a new pursuit
+opens one checkoff owed and goes overdue as time passes.
 
 That balance is never the number on screen. Every view states standing as a date — `3d overdue`,
-`due today`, `due in 2w` — and `doit.allocate` holds the conversion. The date is projected: a
-pursuit paid ahead comes due the day enough of that payment leaves the window. `doit next --json`
-carries the raw balance, and `doit pursuits drift` sets what each goal asked for beside what got
-done.
+`due today`, `due in 2w` — and `doit.allocate` holds the conversion. A skip still running holds
+the date until it ends. `doit next --json` carries the raw balance, and `doit pursuits drift` sets
+what each goal asked for beside what got done.
 
 A pursuit whose resolver matches several rows offers the first three, stacked under its name. One
 choice is a decision the register made; several are a choice you make, so `doit log` asks which one
@@ -120,10 +116,10 @@ was drawn, soonest due first. That one order is what the screen shows, what the 
 top-down, and what `rank_offered` counts in a journal entry.
 
 `doit next` is one table with a row for every active pursuit. Each row states the weight, the
-goal, what was done of what the goal asked over the last four weeks, and when it next comes due.
-The offered rows come first and carry what to do. Every other pursuit follows, dimmed, with its
-standing and nothing to do. A skipped one says `skipped` in place of a date. A narrow pane gives up
-the weight, then the goal, then the four-week tally, and keeps the name and the date.
+goal, what was done of what the goal asked since its zero point and over how many days, and when
+it next comes due. The offered rows come first and carry what to do. Every other pursuit follows,
+dimmed, with its standing and nothing to do. A skipped one says `skipped` in place of a date. A
+narrow pane gives up the weight, then the goal, then the tally, and keeps the name and the date.
 
 ## Sources are configuration
 

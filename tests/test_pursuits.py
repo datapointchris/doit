@@ -1051,7 +1051,7 @@ def test_a_wide_pane_heads_every_column(unclipped, capsys):
     )
     pursuits.render_offers([row], [], 140)
 
-    assert capsys.readouterr().out.splitlines()[0].split() == ['pursuit', 'wt', 'goal', 'last', '4w', 'due', 'item']
+    assert capsys.readouterr().out.splitlines()[0].split() == ['pursuit', 'wt', 'goal', 'done', 'due', 'item']
 
 
 def test_the_name_and_date_are_said_once_per_pursuit(unclipped, capsys):
@@ -1125,16 +1125,8 @@ def test_the_tally_sets_what_was_done_beside_what_was_asked(tmp_path, monkeypatc
     records = [zeroed('chore', 40.0), zeroed('read', 40.0), *(done('chore', 1.0) for _ in range(3)), done('read', 1.0, minutes=90)]
     state = balance_state(tmp_path, monkeypatch, records)
 
-    assert pursuits.tally_text(state, 'chore') == '3 of 28'
-    assert pursuits.tally_text(state, 'read') == '1h 30m of 21h'
-
-
-def test_a_tally_over_less_than_four_weeks_says_how_long(tmp_path, monkeypatch):
-    """The heading says four weeks, so a pursuit asked for over fewer has to say
-    so on its own row or its numbers read as a month's."""
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 10.0), zeroed('read', 40.0)])
-
-    assert pursuits.tally_text(state, 'chore') == '0 of 10 in 10d'
+    assert pursuits.tally_text(state, 'chore') == '3 of 40 in 40d'
+    assert pursuits.tally_text(state, 'read') == '1h 30m of 30h in 40d'
 
 
 @pytest.mark.parametrize('source', ['evidence_files: ~/notes/journal', 'evidence: echo []\n    evidence_time: completed_at'])
@@ -1151,18 +1143,7 @@ def test_a_pursuit_measured_in_minutes_refuses_an_app_source(tmp_path, monkeypat
 def test_an_app_day_pays_one_occurrence():
     days = [(NOW - dt.timedelta(days=ago)).date() for ago in (1, 2)]
 
-    paid = pursuits.credits([], days, NOW, NOW - dt.timedelta(days=28), None)
-
-    assert [amount for _, amount in paid] == [1.0, 1.0]
-
-
-def test_an_app_day_stays_counted_once_after_its_typed_entry_leaves_the_window():
-    """Credited again once the entry aged out, a pursuit came due later than the
-    date the screen had promised."""
-    typed = done('chore', 30.0)
-    origin = NOW - dt.timedelta(days=30.0) + dt.timedelta(hours=1)
-
-    assert pursuits.credits([typed], [(NOW - dt.timedelta(days=30.0)).date()], NOW, origin, None) == []
+    assert pursuits.completed_since([], days, NOW, NOW - dt.timedelta(days=28), None) == 2.0
 
 
 def test_a_resume_ends_the_skip_it_cuts_short(tmp_path, monkeypatch):
@@ -1172,21 +1153,21 @@ def test_a_resume_ends_the_skip_it_cuts_short(tmp_path, monkeypatch):
 
     state = balance_state(tmp_path, monkeypatch, records)
 
-    assert state['balance']['chore'] == pytest.approx(27.0)
+    assert state['balance']['chore'] == pytest.approx(29.0)
     assert 'chore' not in state['suppressed']
 
 
 def test_a_running_skip_holds_the_due_date_until_it_ends(tmp_path, monkeypatch):
     """Projected as if it ended now, a skip still running read as due in days
     when nothing would be asked for until it was over."""
-    records = [zeroed(name, 1.5) for name in WINDOW_NAMES] + [skipped(name, 1.0, 11.0) for name in WINDOW_NAMES]
-    today = window_state(tmp_path, monkeypatch, records, 0.0)
+    records = [zeroed(name, 1.5) for name in HISTORY_NAMES] + [skipped(name, 1.0, 11.0) for name in HISTORY_NAMES]
+    today = history_state(tmp_path, monkeypatch, records, 0.0)
 
-    for name in WINDOW_NAMES:
+    for name in HISTORY_NAMES:
         due = pursuits.due_in_days(today, name)
         assert due > 10.0, name
-        assert not pursuits.owes(window_state(tmp_path, monkeypatch, records, due - 0.01), name), name
-        assert pursuits.owes(window_state(tmp_path, monkeypatch, records, due + 0.01), name), name
+        assert not pursuits.owes(history_state(tmp_path, monkeypatch, records, due - 0.01), name), name
+        assert pursuits.owes(history_state(tmp_path, monkeypatch, records, due + 0.01), name), name
 
 
 def test_handed_in_evidence_days_pay_as_live_ones_do(tmp_path, monkeypatch):
@@ -1205,15 +1186,6 @@ def test_a_skipped_pursuit_is_not_called_behind(tmp_path, monkeypatch):
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 3.0), zeroed('read', 0.0), skipped('chore', 0.0, 14.0)])
 
     assert pursuits.standing_line(state) == ''
-
-
-def test_a_long_cadence_an_app_pays_still_looks_back_one_interval():
-    """Capped at the app's memory, a 100-day cadence would look back 90 days, ask
-    for less than one checkoff, and never come due."""
-    backed = {'evidence': 'echo []', 'evidence_time': 'completed_at'}
-
-    assert pursuits.standing_window(backed, 60.0) == pursuits.evidence.OCCURRENCE_WINDOW_DAYS
-    assert pursuits.standing_window(backed, 100.0) == 100.0
 
 
 def test_a_reset_someone_ran_outranks_any_first_sighting():
@@ -1418,47 +1390,16 @@ def test_a_first_sighting_is_written_once_and_never_over_a_reset(tmp_path, monke
     assert sightings == ['read']
 
 
-def test_an_evidence_backed_pursuit_is_billed_only_over_what_its_app_remembers(tmp_path, sandbox, monkeypatch):
-    """The credit side is a 90-day cache. Billing over a longer span accrues a
-    debt by construction, on the pursuit most reliably done. Two intervals of a
-    60-day cadence would look back 120 days, past what the app can answer for."""
-    monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, BACKED_REGISTER.replace('cadence: 3d', 'cadence: 60d')))
-    window = pursuits.evidence.OCCURRENCE_WINDOW_DAYS
-    now = dt.datetime.now().astimezone()
-    write_records(sandbox / 'state', [{'pursuit': 'backed', 'event': 'reset', 'occurred_at': (now - dt.timedelta(days=400)).isoformat()}])
-    stub_evidence_days(monkeypatch, {'backed': [days_ago_iso(n) for n in range(window)]})
+def test_a_debt_stands_however_long_ago_the_pursuit_was_zeroed(tmp_path, monkeypatch):
+    """Nothing ages out, so two hundred days of a daily chore left undone is two
+    hundred owed, and forty done a month ago still pay forty of them."""
+    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 200.0)] + [done('chore', 30.0) for _ in range(40)])
 
-    state = pursuits.build_state(pursuits.load_pursuits(), now)
-
-    assert (now - state['origins']['backed']).days == window
-    assert state['balance']['backed'] < 0, 'done every day it can be asked about is ahead, not 300 checkoffs behind'
+    assert state['origins']['chore'] == NOW - dt.timedelta(days=200.0)
+    assert state['balance']['chore'] == pytest.approx(160.0)
 
 
-def test_a_pursuit_without_an_app_looks_back_four_weeks_however_long_ago_it_was_zeroed(tmp_path, monkeypatch):
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 200.0)])
-
-    assert (NOW - state['origins']['chore']).days == pursuits.STANDING_WINDOW_DAYS
-    assert state['balance']['chore'] == 28.0, 'four weeks of a daily chore, and not two hundred days'
-
-
-def test_a_payment_older_than_the_window_stops_counting(tmp_path, monkeypatch):
-    """Forty chores six weeks ago bought nothing for the last four."""
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 60.0)] + [done('chore', 40.0) for _ in range(40)])
-
-    assert state['balance']['chore'] == 28.0
-
-
-def test_a_burst_carries_a_pursuit_until_it_leaves_the_window(tmp_path, monkeypatch):
-    """Four of a weekly pursuit in one evening is the window's whole ask, so it
-    is next due the day those four stop counting rather than a week from now."""
-    weekly = BALANCE_REGISTER.replace('cadence: 1d', 'cadence: 7d')
-    state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 60.0)] + [done('chore', 3.0) for _ in range(4)], register=weekly)
-
-    assert state['balance']['chore'] == pytest.approx(0.0)
-    assert pursuits.due_in_days(state, 'chore') == pytest.approx(25.0)
-
-
-WINDOW_REGISTER = """
+HISTORY_REGISTER = """
 pursuits:
   daily:
     description: Done most days
@@ -1474,89 +1415,76 @@ pursuits:
     weekly_minutes: 300
 """
 
-WINDOW_NAMES = ('daily', 'weekly', 'timed')
+HISTORY_NAMES = ('daily', 'weekly', 'timed')
 
 # Each history carries a reset for every pursuit, as the journal does once
 # `record_first_sightings` has run.
-WINDOW_HISTORIES = {
-    'fresh': [zeroed(name, 0.0) for name in WINDOW_NAMES],
-    'filling': [zeroed(name, 10.0) for name in WINDOW_NAMES]
+HISTORIES = {
+    'fresh': [zeroed(name, 0.0) for name in HISTORY_NAMES],
+    'recent': [zeroed(name, 10.0) for name in HISTORY_NAMES]
     + [done('daily', day + 0.5) for day in range(10)]
     + [done('weekly', 5.0), done('timed', 4.0, 250), done('timed', 1.0, 180)],
-    'ahead': [zeroed(name, 40.0) for name in WINDOW_NAMES]
+    'ahead': [zeroed(name, 40.0) for name in HISTORY_NAMES]
     + [done('daily', 1.0) for _ in range(30)]
     + [done('weekly', 2.0) for _ in range(6)]
     + [done('timed', day, 500) for day in (1.0, 2.0, 3.0)],
-    'behind': [zeroed(name, 40.0) for name in WINDOW_NAMES],
-    'mixed': [zeroed(name, 50.0) for name in WINDOW_NAMES]
+    'behind': [zeroed(name, 40.0) for name in HISTORY_NAMES],
+    'mixed': [zeroed(name, 50.0) for name in HISTORY_NAMES]
     + [done('daily', day) for day in (30.0, 20.0, 10.0, 5.0, 1.0)]
     + [done('weekly', day) for day in (35.0, 14.0, 3.0)]
     + [done('timed', day, 200) for day in (27.0, 15.0, 6.0)],
-    # A fortnight's skip still inside the window, which the schedule asks for
-    # again as the window's start passes it.
-    'skipped': [zeroed(name, 40.0) for name in WINDOW_NAMES]
-    + [skipped(name, 17.0, 14.0) for name in WINDOW_NAMES]
+    # A fortnight's skip that has ended, whose days are never asked for.
+    'skipped': [zeroed(name, 40.0) for name in HISTORY_NAMES]
+    + [skipped(name, 17.0, 14.0) for name in HISTORY_NAMES]
     + [done(name, day) for name, day in itertools.product(('daily', 'weekly'), (2.0, 1.0))]
     + [done('timed', 1.0, 200)],
 }
 
 
-def window_state(tmp_path, monkeypatch, records: list[dict], days_on: float, register: str = WINDOW_REGISTER) -> dict:
+def history_state(tmp_path, monkeypatch, records: list[dict], days_on: float, register: str = HISTORY_REGISTER) -> dict:
     """State ``days_on`` after NOW with nothing further logged, without touching a journal."""
     monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, register))
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     return pursuits.build_state(pursuits.load_pursuits(), NOW + dt.timedelta(days=days_on), records=records, observed={})
 
 
-@pytest.mark.parametrize('history', WINDOW_HISTORIES)
+@pytest.mark.parametrize('history', HISTORIES)
 def test_a_due_date_only_comes_closer_while_nothing_is_logged(tmp_path, monkeypatch, history):
     """Time passing can only bring a pursuit due. A due date that recedes on a
     quiet day is a schedule forgiving what nobody did."""
-    dues = [window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], day) for day in range(40)]
+    dues = [history_state(tmp_path, monkeypatch, HISTORIES[history], day) for day in range(40)]
 
-    for name in WINDOW_NAMES:
+    for name in HISTORY_NAMES:
         series = [pursuits.due_in_days(state, name) for state in dues]
         assert None not in series
         assert all(later <= earlier + 1e-9 for earlier, later in itertools.pairwise(series)), name
 
 
-@pytest.mark.parametrize('history', WINDOW_HISTORIES)
+@pytest.mark.parametrize('history', HISTORIES)
 def test_a_projected_due_date_is_the_moment_the_pursuit_comes_to_owe(tmp_path, monkeypatch, history):
     """The date on screen is a promise about a later run: nothing owed before it,
     a whole checkoff owed just after it."""
-    today = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], 0.0)
+    today = history_state(tmp_path, monkeypatch, HISTORIES[history], 0.0)
 
-    for name in WINDOW_NAMES:
+    for name in HISTORY_NAMES:
         due = pursuits.due_in_days(today, name)
         if due is None or due <= 0.01:
             continue
-        assert not pursuits.owes(window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], due - 0.01), name), name
-        assert pursuits.owes(window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], due + 0.01), name), name
+        assert not pursuits.owes(history_state(tmp_path, monkeypatch, HISTORIES[history], due - 0.01), name), name
+        assert pursuits.owes(history_state(tmp_path, monkeypatch, HISTORIES[history], due + 0.01), name), name
 
 
-@pytest.mark.parametrize('history', WINDOW_HISTORIES)
-def test_a_pursuit_left_alone_ends_a_full_window_overdue(tmp_path, monkeypatch, history):
-    """Once every payment has left the window, nothing done in it is the whole
-    window owed. A pursuit that reads `due today` forever fails here."""
-    state = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], 0.0)
-    for name in WINDOW_NAMES:
-        window, interval = state['windows'][name], state['intervals'][name]
-        later = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], window + interval + 1.0)
-
-        assert pursuits.due_in_days(later, name) <= -(window - interval) + 0.01, name
-
-
-@pytest.mark.parametrize('history', WINDOW_HISTORIES)
-@pytest.mark.parametrize('name', WINDOW_NAMES)
+@pytest.mark.parametrize('history', HISTORIES)
+@pytest.mark.parametrize('name', HISTORY_NAMES)
 @pytest.mark.parametrize('weight', [1, 500])
 def test_no_weight_moves_any_pursuits_standing(tmp_path, monkeypatch, history, name, weight):
     """A weight orders what is owed and nothing else. Whether a pursuit is
     getting enough has to read the same whatever any pursuit weighs."""
-    reweighed = re.sub(rf'(  {name}:\n    description: [^\n]*\n    weight: )25', rf'\g<1>{weight}', WINDOW_REGISTER)
+    reweighed = re.sub(rf'(  {name}:\n    description: [^\n]*\n    weight: )25', rf'\g<1>{weight}', HISTORY_REGISTER)
     standing = ('intervals', 'checkoff_size', 'asked', 'done', 'balance', 'due')
 
-    before = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], 0.0)
-    after = window_state(tmp_path, monkeypatch, WINDOW_HISTORIES[history], 0.0, register=reweighed)
+    before = history_state(tmp_path, monkeypatch, HISTORIES[history], 0.0)
+    after = history_state(tmp_path, monkeypatch, HISTORIES[history], 0.0, register=reweighed)
 
     assert after['weights'][name] == weight
     assert {key: after[key] for key in standing} == {key: before[key] for key in standing}
