@@ -33,6 +33,13 @@ yours, so its own history would answer for the fleet and the run would still suc
 host once, from the table whose history for that host runs latest, and refuses before the request
 when a table will not read.
 
+**The journal records each pursuit's pace, though the register already declares it.** The
+register says only what is asked from now on. Standing counts back to the zero point, so a pace
+read off the register alone reprices every past day whenever it is edited, and bills a pause in
+full the day it ends. A build writes a `pace` record wherever the register disagrees with the
+newest one, and `asked_since` prices each span at the pace recorded over it. Reading the register
+in its place would look simpler and be wrong about every day before the last edit.
+
 **`doit.machine` calls `dotfiles` from code, not through `sources.yml`.** The registry is one flat
 file for the whole fleet, and everything it gets checked against is scoped to one box, so a row for
 another machine's tool has nowhere to be filed except rot. dotfiles holds the manifests, runs

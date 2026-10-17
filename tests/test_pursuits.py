@@ -1276,6 +1276,15 @@ def skipped(name: str, days_ago: float, span_days: float) -> dict:
     }
 
 
+def paced(name: str, days_ago: float, interval: float | None) -> dict:
+    """A counted pace taking effect ``days_ago``, or one asking nothing where ``interval`` is None."""
+    record: dict = {'pursuit': name, 'event': 'pace', 'occurred_at': (NOW - dt.timedelta(days=days_ago)).isoformat()}
+    record.update(
+        {'interval_days': interval, 'checkoff_size': None if interval is None else 1.0, 'timed': None if interval is None else False}
+    )
+    return record
+
+
 def balance_state(tmp_path, monkeypatch, records: list[dict], register: str = BALANCE_REGISTER) -> dict:
     register_path = tmp_path / 'pursuits.yml'
     register_path.write_text(register)
@@ -1389,6 +1398,46 @@ def test_a_debt_stands_however_long_ago_the_pursuit_was_zeroed(tmp_path, monkeyp
 
     assert state['origins']['chore'] == NOW - dt.timedelta(days=200.0)
     assert state['balance']['chore'] == pytest.approx(160.0)
+
+
+def test_an_edited_or_paused_pace_prices_only_the_days_it_was_in_force(tmp_path, monkeypatch):
+    """Ten days at 3d, ten paused, then ten daily owe 10/3 + 10. Read off today's
+    register alone, all thirty would be billed daily."""
+    records = [zeroed('chore', 30.0), paced('chore', 30.0, 3.0), paced('chore', 20.0, None), paced('chore', 10.0, 1.0)]
+
+    state = balance_state(tmp_path, monkeypatch, records)
+
+    assert state['balance']['chore'] == pytest.approx(10.0 / 3.0 + 10.0)
+
+
+def test_a_build_journals_a_pace_when_the_register_changes_and_only_then(tmp_path, monkeypatch):
+    """An edit, a pause and a move from occurrences to minutes each write once,
+    and the move also starts the balance again, since no unit carries across."""
+    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
+    balance_state(tmp_path, monkeypatch, [zeroed('chore', 5.0), zeroed('read', 5.0)])
+    pursuits.build_state(pursuits.load_pursuits(), NOW)
+    edited = BALANCE_REGISTER.replace('cadence: 1d', 'cadence: 2d').replace(
+        'weight: 25\n    weekly_minutes', 'weight: 25\n    paused: true\n    weekly_minutes'
+    )
+    write_register(tmp_path, edited)
+    pursuits.build_state(pursuits.load_pursuits(), NOW)
+    write_register(tmp_path, BALANCE_REGISTER.replace('cadence: 1d', 'weekly_minutes: 60'))
+    pursuits.build_state(pursuits.load_pursuits(), NOW)
+
+    written = [
+        (record['pursuit'], record['event'], record.get('interval_days'), record.get('checkoff_size'))
+        for record in journal.read_all(tmp_path / 'state')
+        if record['event'] == 'pace' or record.get('note') == pursuits.UNIT_CHANGED
+    ]
+    assert written == [
+        ('chore', 'pace', 1.0, 1.0),
+        ('read', 'pace', 7.0, 315.0),
+        ('chore', 'pace', 2.0, 1.0),
+        ('read', 'pace', None, None),
+        ('chore', 'reset', None, None),
+        ('chore', 'pace', 7.0, 60.0),
+        ('read', 'pace', 7.0, 315.0),
+    ]
 
 
 HISTORY_REGISTER = """
@@ -1815,7 +1864,7 @@ def test_a_reset_writes_a_zero_point_without_touching_what_happened(sandbox, mon
 
     assert pursuits.cmd_reset('chores', assume_yes=False) == 0
 
-    records = [record for record in journal.read_all(sandbox / 'state') if record.get('note') != 'first seen']
+    records = [record for record in journal.read_all(sandbox / 'state') if record.get('note') != 'first seen' and record['event'] != 'pace']
     assert [record['event'] for record in records] == ['done', 'reset']
     assert records[1]['pursuit'] == 'chores'
 

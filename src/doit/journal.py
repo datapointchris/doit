@@ -44,13 +44,18 @@ class Event(StrEnum):
 
     Roughly fifteen functions across three modules select on this field and none
     of them is a dispatch, so nothing mechanical finds them. Naming the members
-    here makes adding a fourth kind a search on one name rather than an audit
-    somebody has to remember to run.
+    here makes adding a kind a search on one name rather than an audit somebody
+    has to remember to run.
+
+    A PACE is written by doit rather than by anyone logging: the interval and
+    checkoff size the register declared from that moment, or nulls where it
+    asked for nothing.
     """
 
     DONE = 'done'
     SKIP = 'skip'
     RESET = 'reset'
+    PACE = 'pace'
 
 
 def journal_path(directory: Path, machine: str) -> Path:

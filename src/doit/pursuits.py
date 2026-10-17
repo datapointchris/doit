@@ -120,6 +120,10 @@ DRAW_SIZE = 5
 # tells it apart from one someone ran.
 FIRST_SEEN = 'first seen'
 
+# The note on a reset doit wrote because a pursuit moved between counting
+# occurrences and counting minutes, where no balance carries across.
+UNIT_CHANGED = 'unit changed'
+
 # How many names the one-line standing summary spells out before counting the
 # rest. It is a glance rather than a report, and a line that wraps is one nobody
 # reads to the end.
@@ -201,9 +205,8 @@ TEMPLATE = """\
 # give it, and nothing asks.
 #
 #   until        optional end date; after it the pursuit pauses and says so
-#   paused       optional; keeps it in the file but out of the draw. A pause has
-#                no timestamp, so pair unpausing with `doit pursuits reset` — the
-#                schedule kept asking while nothing was reading the answer
+#   paused       optional; keeps it in the file but out of the draw, and the days
+#                it spends paused ask for nothing
 #   resolve      optional command answering "specifically what?" — see below
 #   on_log       optional command run after logging, e.g. completing the task
 #
@@ -212,9 +215,11 @@ TEMPLATE = """\
 # weekly_minutes. It is shown as the one answer both units give: when this next
 # comes due. Partial time always rolls over, so a 20-minute sitting against 45
 # minutes a week pays 20 minutes off. Nothing ages out: a debt stands until it is
-# paid, and a burst stays credited. The zero point is written the first time doit
-# reads a pursuit; `doit pursuits reset <pursuit>` moves it to now, which is the
-# one way to forgive a debt, and with no name it moves every one.
+# paid, and a burst stays credited. A pace applies from the first time doit reads
+# it, so editing one never reprices the days before the edit. The zero point is
+# written the first time doit reads a pursuit; `doit pursuits reset <pursuit>`
+# moves it to now, which is the one way to forgive a debt, and with no name it
+# moves every one.
 #
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
@@ -495,6 +500,87 @@ def record_first_sightings(active: dict, records: list[dict], intervals: dict[st
     return written
 
 
+class Pace(NamedTuple):
+    """The interval and checkoff size a pace record set, and whether the pursuit counted minutes."""
+
+    interval: float
+    size: float
+    timed: bool
+
+
+def pace_of_record(record: dict) -> Pace | None:
+    """The pace one record set, or None where the register asked for nothing from then."""
+    interval, size = record.get('interval_days'), record.get('checkoff_size')
+    if isinstance(interval, bool) or isinstance(size, bool) or not isinstance(interval, int | float) or not isinstance(size, int | float):
+        return None
+    return Pace(float(interval), float(size), bool(record.get('timed')))
+
+
+def pace_records(records: list[dict]) -> list[tuple[dt.datetime, dict]]:
+    """Every pace record among ``records`` with the moment it took effect, oldest first."""
+    stamped = []
+    for record in records:
+        if record.get('event') != journal.Event.PACE:
+            continue
+        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        if when is not None:
+            stamped.append((when, record))
+    stamped.sort(key=lambda item: item[0])
+    return stamped
+
+
+def record_pace_changes(pursuits: dict, active: dict, records: list[dict], now: dt.datetime) -> list[dict]:
+    """Write the pace each pursuit asks for wherever the journal last recorded another, and return the records.
+
+    The register says only what is asked from now on, so a pace read off it alone
+    reprices every day back to the zero point whenever it is edited. Recording
+    each pace as doit first reads it keeps every span at the pace that was in
+    force over it. A pursuit outside the active set — paused, past its term,
+    weightless, tracked or gone from the register — is recorded as asking
+    nothing, which is what keeps a pause from being billed when it ends.
+
+    A change is written only where the register disagrees with the newest record
+    from any machine and with the newest this machine wrote. The second test is
+    what stops two machines whose registers differ from each writing their own
+    pace on every run: each has already said its piece. A machine reading a
+    register that has not synced yet still writes the old pace once, and the
+    hours until it catches up are priced at it.
+
+    Moving between counting occurrences and counting minutes also writes a reset.
+    A balance in one unit cannot carry into the other.
+    """
+    machine = machine_name()
+    newest: dict[str, Pace | None] = {}
+    mine: dict[str, Pace | None] = {}
+    counted: dict[str, Pace] = {}
+    for _, record in pace_records(records):
+        name, said = str(record.get('pursuit')), pace_of_record(record)
+        newest[name] = said
+        if record.get('machine') == machine:
+            mine[name] = said
+        if said is not None:
+            counted[name] = said
+    weekly = declared_minutes(pursuits)
+    written = []
+    for name in sorted(set(pursuits) | set(newest)):
+        current = None
+        if name in active:
+            interval, size = pace(active[name])
+            current = Pace(interval, size, name in weekly)
+        if name not in newest:
+            if current is None:
+                continue
+        elif current == newest[name] or (name in mine and current == mine[name]):
+            continue
+        if current is not None and name in counted and counted[name].timed != current.timed:
+            written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': now.isoformat(), 'note': UNIT_CHANGED}, now=now))
+        fields: dict[str, float | bool | None] = {'interval_days': None, 'checkoff_size': None, 'timed': None}
+        if current is not None:
+            fields = {'interval_days': current.interval, 'checkoff_size': current.size, 'timed': current.timed}
+        written.append(record_event(journal.Event.PACE, name, None, {'occurred_at': now.isoformat(), **fields}, now=now))
+    return written
+
+
 def zero_resets(records: list[dict]) -> dict[str, dt.datetime]:
     """Each pursuit's zero point as the journal states it.
 
@@ -588,17 +674,40 @@ def standing(
     """
     interval, size = pace_of
     periods = skip_periods(records, origin)
-    elapsed = (now - origin).total_seconds() / 86400.0
-    skipped = sum((min(finish, now) - start).total_seconds() / 86400.0 for start, finish in periods if start < now)
-    span = max(elapsed - skipped, 0.0)
     done = completed_since(records, app_days, now, origin, minutes)
-    asked, owed = balance(span, interval, size, 0.0), balance(span, interval, size, done)
+    asked = asked_since(records, origin, now, pace_of)
+    owed = asked - done
 
     def ahead(moment: dt.datetime) -> float:
         return (moment - now).total_seconds() / 86400.0
 
     holding = [(max(ahead(start), 0.0), ahead(finish)) for start, finish in periods if finish > now]
     return Standing(asked, done, owed, projected_days_until_due(owed, interval, size, holding))
+
+
+def asked_since(records: list[dict], origin: dt.datetime, now: dt.datetime, pace_of: tuple[float, float]) -> float:
+    """What the schedule asked for from ``origin`` to ``now``, each span at the pace in force over it.
+
+    The pace records say when each pace took effect, and the earliest one stands
+    back to ``origin``, since nothing records what came before it. Records handed
+    in with none, as a forecast replay or a test does, are priced at ``pace_of``
+    throughout. A span recorded as asking nothing asks nothing, and neither does
+    a day a skip took out of the schedule.
+    """
+    changes = [(when, pace_of_record(record)) for when, record in pace_records(records)]
+    if not changes:
+        changes = [(origin, Pace(pace_of[0], pace_of[1], False))]
+    starts = [origin] + [when for when, _ in changes[1:]]
+    ends = starts[1:] + [now]
+    skips = skip_spans(records, now, origin)
+    asked = 0.0
+    for start, end, (_, said) in zip(starts, ends, changes, strict=True):
+        start, end = max(start, origin), min(end, now)
+        if said is None or end <= start:
+            continue
+        held = sum(max((min(finish, end) - max(begin, start)).total_seconds(), 0.0) for begin, finish in skips) / 86400.0
+        asked += balance((end - start).total_seconds() / 86400.0 - held, said.interval, said.size, 0.0)
+    return asked
 
 
 def merged_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.datetime, dt.datetime]]:
@@ -621,11 +730,6 @@ def merged_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.
 def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
     """Total days covered by a set of possibly overlapping spans."""
     return sum((finish - start).total_seconds() / 86400.0 for start, finish in merged_spans(spans))
-
-
-def skipped_days(records: list[dict], now: dt.datetime, origin: dt.datetime) -> float:
-    """Days since ``origin`` that a skip took out of the schedule."""
-    return sum((finish - start).total_seconds() / 86400.0 for start, finish in skip_spans(records, now, origin))
 
 
 def skip_spans(records: list[dict], now: dt.datetime, origin: dt.datetime) -> list[tuple[dt.datetime, dt.datetime]]:
@@ -703,7 +807,8 @@ def build_state(
 
     ``records`` and ``observed`` default to the journal on disk and a live round
     trip to every backend. Reading the journal from disk also writes the start of
-    any pursuit it has never zeroed, through :func:`record_first_sightings`;
+    any pursuit it has never zeroed, through :func:`record_first_sightings`, and
+    any pace the journal has not recorded, through :func:`record_pace_changes`;
     handed-in records never write. ``evidence_days`` goes with ``observed``: the
     days each app reported, which the live round trip would otherwise supply.
     :mod:`doit.forecast` supplies all three instead, which is what lets a simulated
@@ -727,6 +832,7 @@ def build_state(
         records = journal.read_all(directory) if directory and directory.exists() else []
     if directory is not None and directory.exists():
         records = [*records, *record_first_sightings(active, records, intervals, now)]
+        records = [*records, *record_pace_changes(pursuits, active, records, now)]
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
@@ -2160,8 +2266,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
             continue
         asked = None
         if name in state['active']:
-            span = max((now - start).total_seconds() / 86400.0 - skipped_days(own, now, start), 0.0)
-            asked = balance(span, state['intervals'][name], state['checkoff_size'][name], 0.0)
+            asked = asked_since(own, start, now, (state['intervals'][name], state['checkoff_size'][name]))
         rows.append(
             {
                 'pursuit': name,

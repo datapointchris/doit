@@ -89,6 +89,12 @@ minutes of reading pays twenty minutes off a week's goal. Nothing ages out. A mo
 in full for as long as it goes unpaid, and a burst stays credited the same way. A reset is the one
 thing that forgives a debt.
 
+Each day is asked for at the pace in force that day. doit journals a pursuit's pace the first time
+it reads it, so editing one never reprices the days before the edit. A span the register took a
+pursuit out of — paused, past its `until`, or weighing nothing — asks for nothing. Moving a pursuit
+between a cadence and `weekly_minutes` starts its balance again, because a count and a number of
+minutes do not add.
+
 The zero point is written the first time doit reads a pursuit, one interval back, so a new pursuit
 opens one checkoff owed and goes overdue as time passes.
 
@@ -104,8 +110,8 @@ to ask.
 
 `doit skip <pursuit> --for 2w` takes one out of the draw until it expires, and it owes nothing
 meanwhile; `doit pursuits resume <pursuit>` ends the skip early. `doit pursuits reset <pursuit>`
-moves the zero point to now, which is what to reach for after a long pause or a change of target;
-with no name it moves every one, after confirming. The journal is append-only either way — both are
+moves the zero point to now, which forgives whatever it owed; with no name it moves every one,
+after confirming. The journal is append-only either way — both are
 markers written into it, never a rewrite of what happened.
 
 Every pursuit owing a whole checkoff is shown, however many there are. When fewer than five are
