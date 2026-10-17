@@ -11,10 +11,11 @@ assumes for a pursuit it cannot measure.
 **The daily is the pace, never the backlog.** It is what holding every pace costs
 a day, so a day that pays it leaves every balance where it was. What is overdue is
 said apart from it, as extra minutes a day over a few timescales. A ratio against
-the backlog reads as a target the day was set, the way `0 of 23` Labs would.
+the backlog reads as a target the day was set, the way `0 of N` Labs would.
 
-**Catching up is the backlog spread over days.** Standing has no window, so a pace
-pays exactly what accrues and only the overdue part needs more. Overdue is the bar
+**Catching up is the backlog spread over days.** Standing counts from each
+pursuit's zero point, so a pace pays exactly what accrues and only the overdue
+part needs more. Overdue is the bar
 the due list uses: a pursuit owing more than one checkoff, a register item that is
 due. A pursuit ahead of its pace offsets nothing, because reading more does not
 paint.
@@ -27,12 +28,16 @@ never left unsaid.
 
 Habits are a checklist beside the number and never part of it. They are due every
 day as a set and carry no duration.
+
+Where a group a figure sums could not be read, every figure is absent rather than
+summed over the rest, because a sum missing a group reads as a lighter day.
 """
 
 import datetime as dt
 import math
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from typing import NamedTuple
 
 from doit import forecast
@@ -62,14 +67,16 @@ class CatchUp:
 
 @dataclass(frozen=True)
 class Quota:
-    daily: float = 0.0
-    done: float = 0.0
-    backlog: float = 0.0
-    catch_up: list[CatchUp] = field(default_factory=list)
+    """The day's figures, each None where ``unavailable`` names a group it sums."""
+
+    daily: float | None = None
+    done: float | None = None
+    backlog: float | None = None
+    catch_up: list[CatchUp] | None = None
     habits_done: int | None = None
     habits_total: int | None = None
     habits_unavailable: str = ''
-    unavailable: str = ''
+    unavailable: list[str] = field(default_factory=list)
 
 
 def to_dict(figures: Quota) -> dict:
@@ -77,17 +84,20 @@ def to_dict(figures: Quota) -> dict:
     habits = None
     if figures.habits_total is not None:
         habits = {'done': figures.habits_done, 'total': figures.habits_total}
-    return {
-        'daily': round(figures.daily, 1),
-        'done': round(figures.done, 1),
-        'backlog': round(figures.backlog, 1),
-        'catch_up': [
+    catch_up = None
+    if figures.catch_up is not None:
+        catch_up = [
             {'days': entry.days, 'label': entry.label, 'extra_per_day': round(entry.extra_per_day, 1), 'shown': entry.shown}
             for entry in figures.catch_up
-        ],
+        ]
+    return {
+        'daily': None if figures.daily is None else round(figures.daily, 1),
+        'done': None if figures.done is None else round(figures.done, 1),
+        'backlog': None if figures.backlog is None else round(figures.backlog, 1),
+        'catch_up': catch_up,
         'habits': habits,
         'habits_unavailable': figures.habits_unavailable,
-        'unavailable': figures.unavailable,
+        'unavailable': list(figures.unavailable),
     }
 
 
@@ -153,17 +163,28 @@ def build(
     recurring: list[Recurring],
     habits: tuple[int, int] | None = None,
     habits_unavailable: str = '',
+    unavailable: list[str] | None = None,
 ) -> Quota:
-    """The day's figures. ``state`` is None where the register declares no pursuits."""
+    """The day's figures. ``state`` is None where the register declares no pursuits.
+
+    ``unavailable`` names the groups that could not be read, and any one of them
+    leaves every figure absent.
+    """
+    checklist = Quota(
+        habits_done=None if habits is None else habits[0],
+        habits_total=None if habits is None else habits[1],
+        habits_unavailable=habits_unavailable,
+        unavailable=list(unavailable or []),
+    )
+    if checklist.unavailable:
+        return checklist
     parts = [register_figures(recurring)] + ([] if state is None else [pursuit_figures(state)])
     daily = sum(part.daily for part in parts)
     backlog = sum(part.backlog for part in parts)
-    return Quota(
+    return replace(
+        checklist,
         daily=daily,
         done=sum(part.done for part in parts),
         backlog=backlog,
         catch_up=timescales(backlog, daily),
-        habits_done=None if habits is None else habits[0],
-        habits_total=None if habits is None else habits[1],
-        habits_unavailable=habits_unavailable,
     )

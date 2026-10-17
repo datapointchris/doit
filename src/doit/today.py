@@ -560,17 +560,13 @@ QUOTA_GROUPS = ('pursuits', 'review', 'labs')
 
 
 def day_quota(state: dict | None, items: list[quota.Recurring], due: list[Lane], sets_done: list[Lane]) -> quota.Quota:
-    """The minutes line, or why it cannot be given."""
-    failed = [lane for lane in due if lane.name in QUOTA_GROUPS and not lane.available]
-    if failed:
-        return quota.Quota(unavailable=', '.join(lane.name for lane in failed))
+    """The minutes line, and the groups it could not read."""
+    failed = [lane.name for lane in due if lane.name in QUOTA_GROUPS and not lane.available]
     habits = next((lane for lane in due if lane.name in DAY_SET_LANES), None)
-    if habits is None:
-        return quota.build(state, items)
-    if not habits.available:
-        return quota.build(state, items, habits_unavailable=habits.reason)
+    if habits is None or not habits.available:
+        return quota.build(state, items, None, '' if habits is None else habits.reason, failed)
     finished = sum(len(lane.grid) for lane in sets_done if lane.name == habits.name)
-    return quota.build(state, items, (finished, finished + len(habits.rows)))
+    return quota.build(state, items, (finished, finished + len(habits.rows)), '', failed)
 
 
 class Day(NamedTuple):
@@ -636,19 +632,20 @@ def minutes_lines(figures: quota.Quota) -> list[Text]:
     The done figure is green once it reaches the daily, the color this screen
     says done with. Nothing else is colored but a part that could not be read.
     """
-    if figures.unavailable:
-        return [Text(f'{GROUP_INDENT}minutes unavailable — {figures.unavailable} could not be read', style='red')]
-    if not figures.daily and not figures.done and figures.habits_total is None and not figures.habits_unavailable:
+    daily, done = figures.daily, figures.done
+    if daily is None or done is None:
+        return [Text(f'{GROUP_INDENT}minutes unavailable — {", ".join(figures.unavailable)} could not be read', style='red')]
+    if not daily and not done and figures.habits_total is None and not figures.habits_unavailable:
         return []
     line = Text(GROUP_INDENT)
-    line.append(pursuits.minutes_text(figures.done), style=HOUR_STYLE if figures.daily and figures.done >= figures.daily else '')
-    line.append(f' done / {pursuits.minutes_text(figures.daily)} daily')
+    line.append(pursuits.minutes_text(done), style=HOUR_STYLE if daily and done >= daily else '')
+    line.append(f' done / {pursuits.minutes_text(daily)} daily')
     if figures.habits_unavailable:
         line.append(' · ')
         line.append('habits unavailable', style='red')
     elif figures.habits_total is not None:
         line.append(f' · habits {figures.habits_done} of {figures.habits_total}')
-    shown = [entry for entry in figures.catch_up if entry.shown]
+    shown = [entry for entry in figures.catch_up or [] if entry.shown]
     return [line] + [
         Text(f'{GROUP_INDENT}{pursuits.minutes_text(entry.extra_per_day)} more a day catches up in {entry.label}') for entry in shown
     ]
@@ -782,7 +779,7 @@ def cmd_today(as_json: bool) -> int:
 
 
 def today_command(
-    as_json: Annotated[bool, typer.Option('--json', help='Output both lists as JSON to stdout.')] = False,
+    as_json: Annotated[bool, typer.Option('--json', help='Output the day as JSON to stdout.')] = False,
 ) -> None:
     """What today still wants, and what it has had."""
     raise typer.Exit(cmd_today(as_json))
