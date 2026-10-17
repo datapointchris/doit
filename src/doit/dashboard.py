@@ -1400,28 +1400,30 @@ def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
     else:
         render_lanes(collected, dt.date.today(), row_cap)
         standing = pursuit_standing()
-        if standing:
+        if standing is not None:
             # Soft-wrapped, because the line ends in a command to type.
-            console.print(Text(f'  {standing}\n', style='yellow'), soft_wrap=True)
+            console.print(standing, soft_wrap=True)
     # A read-only glance always succeeds: degradation is shown per lane, and a
     # consumer of --json checks lanes[].status rather than the exit code.
     return 0
 
 
-def pursuit_standing() -> str:
-    """Which pursuits are behind, by name, or nothing when none owes anything.
+def pursuit_standing() -> Text | None:
+    """Which pursuits are behind, by name, or None when none owes anything.
 
     Guarded rather than trusted. A register that refuses to load is a real and
     deliberate failure mode, and it must cost this one line rather than the whole
-    glance — the dashboard's own lanes have nothing to do with the weights.
+    glance — the dashboard's own lanes have nothing to do with the weights. The
+    line then says so in red, because a missing line reads as nothing behind.
     """
     try:
         register = pursuits.load_pursuits()
         if not register:
-            return ''
-        return pursuits.standing_line(pursuits.build_state(register, dt.datetime.now().astimezone()))
-    except (pursuits.RegisterError, OSError, ValueError):
-        return ''
+            return None
+        line = pursuits.standing_line(pursuits.build_state(register, dt.datetime.now().astimezone()))
+    except (pursuits.RegisterError, OSError, ValueError) as error:
+        return Text(f'  pursuits unavailable — {error}\n', style='red')
+    return Text(f'  {line}\n', style='yellow') if line else None
 
 
 def dashboard_command(

@@ -329,7 +329,14 @@ def load_pursuits(path: Path | None = None) -> dict:
     path = register_path() if path is None else path
     if not path.exists():
         return {}
-    document = yaml.safe_load(path.read_text()) or {}
+    try:
+        document = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as error:
+        mark = getattr(error, 'problem_mark', None)
+        where = f' at line {mark.line + 1}, column {mark.column + 1}' if mark is not None else ''
+        raise RegisterError(f'{path}: not valid YAML{where}: {getattr(error, "problem", None) or error}') from error
+    if not isinstance(document, dict):
+        raise RegisterError(f'{path}: must be a mapping with a `pursuits` key, not {type(document).__name__}')
     pursuits = document.get('pursuits') or {}
     if not isinstance(pursuits, dict):
         raise RegisterError(f'{path}: `pursuits` must be a mapping of name to settings')

@@ -101,12 +101,13 @@ def test_a_missing_register_is_empty_not_an_error(tmp_path):
     assert pursuits.load_pursuits(tmp_path / 'nothing.yml') == {}
 
 
-def test_an_unknown_field_is_refused(tmp_path):
+def test_a_typo_in_the_register_is_refused_as_a_register_error(tmp_path):
     # A typo in a weight file silently misallocates attention for months, so it
-    # has to be loud rather than ignored.
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weght: 5\n')
-    with pytest.raises(pursuits.RegisterError, match='weght'):
-        pursuits.load_pursuits(path)
+    # has to be loud rather than ignored. A slip in the YAML itself is refused the
+    # same way, because every screen guarding the register catches only this.
+    for text, said in (('pursuits:\n  a:\n    weght: 5\n', 'weght'), ('pursuits: [a\n', 'not valid YAML'), ('- a\n', 'mapping')):
+        with pytest.raises(pursuits.RegisterError, match=said):
+            pursuits.load_pursuits(write_register(tmp_path, text))
 
 
 def test_every_field_the_register_accepts_is_named_in_the_template():
