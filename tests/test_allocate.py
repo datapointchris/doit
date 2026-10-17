@@ -70,6 +70,7 @@ def test_the_due_date_keeps_the_order_the_balance_had():
     worse = allocate.days_until_due(4.0, 3.0, 1.0)
     better = allocate.days_until_due(2.0, 3.0, 1.0)
 
+    assert worse is not None and better is not None
     assert worse < better < 0
 
 
@@ -137,7 +138,7 @@ def test_draw_returns_fewer_than_asked_when_candidates_run_out():
 
 
 def test_draw_is_reproducible_for_a_seed():
-    weights = {'a': 10, 'b': 20, 'c': 30, 'd': 40}
+    weights = {'a': 10.0, 'b': 20.0, 'c': 30.0, 'd': 40.0}
     assert allocate.draw(weights, 3, random.Random(7)) == allocate.draw(weights, 3, random.Random(7))
 
 

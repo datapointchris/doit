@@ -161,7 +161,7 @@ def plural(count: int, noun: str) -> str:
     return f'{count} {noun}' if count == 1 else f'{count} {noun}s'
 
 
-def clean(text: str) -> str:
+def clean(text: str | None) -> str:
     """Collapse a stored string onto one line.
 
     A backend can store text carrying newlines and tabs, such as a title scraped
@@ -198,7 +198,7 @@ def source_host(url: str) -> str:
     return host.removeprefix('www.')
 
 
-def describe(title: str, detail: str) -> str:
+def describe(title: str, detail: str | None) -> str:
     """A row's own words plus the gist of whatever note the backend carries,
     because a bare title like "Glove 80" names a thing without saying what to do
     with it.

@@ -63,7 +63,8 @@ def test_never_shown_leads_and_the_name_breaks_the_tie():
     """Stable across runs and machines, because nothing here reads a clock."""
     entries = [binding('zulu'), binding('alpha')]
 
-    assert rotate.next_up('tmux', entries, []).name == 'alpha'
+    shown = rotate.next_up('tmux', entries, [])
+    assert shown is not None and shown.name == 'alpha'
 
 
 def test_the_row_shown_longest_ago_comes_round_before_a_recent_one():
@@ -71,7 +72,8 @@ def test_the_row_shown_longest_ago_comes_round_before_a_recent_one():
     rotate.record('tmux', entries[0], dt.date(2026, 8, 16))
     rotate.record('tmux', entries[1], dt.date(2020, 1, 1))
 
-    assert rotate.next_up('tmux', entries, []).name == 'zulu'
+    shown = rotate.next_up('tmux', entries, [])
+    assert shown is not None and shown.name == 'zulu'
 
 
 def test_a_lens_with_no_candidates_surfaces_nothing_rather_than_failing():

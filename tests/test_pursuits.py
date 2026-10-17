@@ -56,6 +56,34 @@ def write_register(tmp_path, body: str) -> Path:
     return path
 
 
+def resolution(name: str, config: dict) -> dict:
+    """What a resolver answered, for a config that declares one and so always answers."""
+    answer = pursuits.resolve_one(name, config)
+    assert answer is not None
+    return answer
+
+
+def saved_draw(now: dt.datetime) -> dict:
+    """The cached draw a test has just written and expects to read back."""
+    draw = pursuits.load_cached_draw(now)
+    assert draw is not None
+    return draw
+
+
+def known_due(state: dict, name: str) -> float:
+    """Days until a paced pursuit is due, which a paced pursuit always has."""
+    due = pursuits.due_in_days(state, name)
+    assert due is not None
+    return due
+
+
+def skip_days(record: dict) -> int:
+    """Whole days between a skip's start and its expiry."""
+    started, expires = journal.parse_time(record['occurred_at']), journal.parse_time(record['expires_at'])
+    assert started is not None and expires is not None
+    return (expires - started).days
+
+
 def log_done(directory: Path, pursuit: str, days_ago: float) -> None:
     journal.append(
         journal.journal_path(directory, 'testbox'),
@@ -327,7 +355,7 @@ def test_a_just_logged_pursuit_never_outranks_anything_owed(sandbox):
 
 def test_a_cached_draw_is_reused_inside_the_window(sandbox):
     pursuits.save_cached_draw({'draw_id': 'abc', 'created_at': NOW.isoformat(), 'pinned': [], 'offered': ['chores']})
-    assert pursuits.load_cached_draw(NOW + dt.timedelta(minutes=5))['draw_id'] == 'abc'
+    assert saved_draw(NOW + dt.timedelta(minutes=5))['draw_id'] == 'abc'
 
 
 def test_a_cached_draw_expires(sandbox):
@@ -361,7 +389,7 @@ def test_logging_takes_the_pursuit_off_the_standing_draw(sandbox, monkeypatch):
 
     assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
 
-    cached = pursuits.load_cached_draw(dt.datetime.now().astimezone())
+    cached = saved_draw(dt.datetime.now().astimezone())
     assert pursuits.without_logged(cached)['offered'] == ['read-library']
 
 
@@ -394,7 +422,7 @@ def test_a_fully_logged_draw_is_replaced_rather_than_shown_empty(sandbox, monkey
 
     assert pursuits.cmd_next(False, False, False) == 0
 
-    assert pursuits.load_cached_draw(dt.datetime.now().astimezone())['draw_id'] != 'abc'
+    assert saved_draw(dt.datetime.now().astimezone())['draw_id'] != 'abc'
 
 
 def test_a_cached_failure_is_asked_again_without_disturbing_the_draw(sandbox, tmp_path):
@@ -415,7 +443,7 @@ def test_a_cached_failure_is_asked_again_without_disturbing_the_draw(sandbox, tm
     assert selection['offered'] == ['chores']
     assert selection['resolved']['chores']['choices'][0]['label'] == 'Trim Dingo Nails'
     assert 'error' not in selection['resolved']['chores']
-    assert pursuits.load_cached_draw(NOW)['resolved']['chores']['choices'][0]['label'] == 'Trim Dingo Nails'
+    assert saved_draw(NOW)['resolved']['chores']['choices'][0]['label'] == 'Trim Dingo Nails'
 
 
 def test_a_retry_that_finds_nothing_replaces_the_stale_error(sandbox, tmp_path):
@@ -517,14 +545,14 @@ def test_dig_dead_ends_rather_than_raising_on_a_bad_list_key(path):
 
 
 def test_resolve_one_reads_plain_lines_when_no_label_is_named():
-    resolved = pursuits.resolve_one('p', {'resolve': 'printf "first line\\nsecond\\n"'})
+    resolved = resolution('p', {'resolve': 'printf "first line\\nsecond\\n"'})
     assert resolved['choices'][0]['label'] == 'first line'
 
 
 def test_resolve_one_maps_json_fields(tmp_path):
     payload = tmp_path / 'tasks.json'
     payload.write_text(json.dumps([{'name': 'Trim Dingo Nails', 'id': 422}]))
-    resolved = pursuits.resolve_one('chores', {'resolve': f'cat {payload}', 'label': 'name', 'id': 'id'})
+    resolved = resolution('chores', {'resolve': f'cat {payload}', 'label': 'name', 'id': 'id'})
     assert resolved['choices'][0]['label'] == 'Trim Dingo Nails'
     assert resolved['choices'][0]['id'] == '422'
     assert resolved['choices'][0]['raw']['name'] == 'Trim Dingo Nails'
@@ -534,7 +562,7 @@ def test_resolve_one_digs_into_a_nested_list(tmp_path):
     payload = tmp_path / 'overview.json'
     payload.write_text(json.dumps({'in_progress_resources': [{'name': 'Chapter 6'}]}))
     config = {'resolve': f'cat {payload}', 'items': 'in_progress_resources', 'label': 'name'}
-    assert pursuits.resolve_one('cs', config)['choices'][0]['label'] == 'Chapter 6'
+    assert resolution('cs', config)['choices'][0]['label'] == 'Chapter 6'
 
 
 def test_resolve_one_accepts_a_single_object_where_a_list_would_do(tmp_path):
@@ -543,7 +571,7 @@ def test_resolve_one_accepts_a_single_object_where_a_list_would_do(tmp_path):
     payload = tmp_path / 'overview.json'
     payload.write_text(json.dumps({'projects': {'items': {'next': {'title': 'Ship the CLI', 'id': 'abc'}}}}))
     config = {'resolve': f'cat {payload}', 'items': 'projects.items.next', 'label': 'title', 'id': 'id'}
-    resolved = pursuits.resolve_one('build', config)
+    resolved = resolution('build', config)
     assert resolved['choices'][0]['label'] == 'Ship the CLI'
     assert resolved['choices'][0]['id'] == 'abc'
 
@@ -569,7 +597,7 @@ def test_resolve_one_carries_where_the_item_lives_and_what_it_is_about(tmp_path)
         'detail': 'notes',
     }
 
-    resolved = pursuits.resolve_one('build', config)
+    resolved = resolution('build', config)
 
     assert resolved['choices'][0]['context'] == 'goselfupdate · CLI machine contract conformance'
     assert resolved['choices'][0]['detail'] == 'Cobra returns flag-parse failures as ordinary errors.', 'the gist, not the whole note'
@@ -580,7 +608,7 @@ def test_resolve_one_takes_a_single_context_path_as_well_as_several(tmp_path):
     payload.write_text(json.dumps([{'name': 'Trim Dingo Nails', 'category': 'Dingo'}]))
     config = {'resolve': f'cat {payload}', 'label': 'name', 'context': 'category'}
 
-    assert pursuits.resolve_one('tasks', config)['choices'][0]['context'] == 'Dingo'
+    assert resolution('tasks', config)['choices'][0]['context'] == 'Dingo'
 
 
 def test_resolve_one_skips_a_context_field_the_row_does_not_carry(tmp_path):
@@ -590,7 +618,7 @@ def test_resolve_one_skips_a_context_field_the_row_does_not_carry(tmp_path):
     payload.write_text(json.dumps([{'title': 'Glove 80', 'repo': None, 'projects': [{'name': 'Sell Unused Shite'}]}]))
     config = {'resolve': f'cat {payload}', 'label': 'title', 'context': ['repo', 'projects.0.name']}
 
-    assert pursuits.resolve_one('build', config)['choices'][0]['context'] == 'Sell Unused Shite'
+    assert resolution('build', config)['choices'][0]['context'] == 'Sell Unused Shite'
 
 
 def test_resolve_one_fills_the_offered_items_id_into_the_view_command(tmp_path):
@@ -598,7 +626,7 @@ def test_resolve_one_fills_the_offered_items_id_into_the_view_command(tmp_path):
     payload.write_text(json.dumps([{'title': 'Ship the CLI', 'id': '019fa297-0c01-7737-bb4f-8f05de2fe2cd'}]))
     config = {'resolve': f'cat {payload}', 'label': 'title', 'id': 'id', 'view': 'icb projects items show {id}'}
 
-    resolved = pursuits.resolve_one('build', config)
+    resolved = resolution('build', config)
 
     assert resolved['choices'][0]['view'] == 'icb projects items show 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
 
@@ -609,7 +637,7 @@ def test_a_view_command_wanting_an_id_the_backend_withheld_is_not_printed(tmp_pa
     payload.write_text(json.dumps([{'title': 'Ship the CLI'}]))
     config = {'resolve': f'cat {payload}', 'label': 'title', 'view': 'icb projects items show {id}'}
 
-    assert pursuits.resolve_one('build', config)['choices'][0]['view'] == ''
+    assert resolution('build', config)['choices'][0]['view'] == ''
 
 
 def test_a_view_command_needing_no_id_is_printed_as_written():
@@ -633,19 +661,19 @@ def test_context_and_detail_without_a_label_are_refused(tmp_path):
 def test_resolve_one_reports_a_failing_backend_rather_than_dying():
     # `false` fails with nothing on either stream, so the status has to stand in —
     # a row that renders an empty value looks like a resolver that returned nothing.
-    resolved = pursuits.resolve_one('p', {'resolve': 'false'})
+    resolved = resolution('p', {'resolve': 'false'})
     assert resolved['error'] == 'exited 1'
     assert resolved['backend'] == 'false'
 
 
 def test_resolve_one_reports_a_backend_that_is_not_installed():
-    resolved = pursuits.resolve_one('p', {'resolve': 'definitely-not-a-real-command --json'})
+    resolved = resolution('p', {'resolve': 'definitely-not-a-real-command --json'})
     assert resolved['error']
     assert resolved['backend'] == 'definitely-not-a-real-command'
 
 
 def test_resolve_one_reports_json_that_is_not_json():
-    resolved = pursuits.resolve_one('p', {'resolve': 'echo notjson', 'label': 'name'})
+    resolved = resolution('p', {'resolve': 'echo notjson', 'label': 'name'})
     assert 'JSON' in resolved['error']
 
 
@@ -655,19 +683,19 @@ MATCHED_NOTHING = {'pursuit': 'p', 'candidates': 0, 'backend': 'cat', 'choices':
 def test_resolve_one_reports_an_empty_list_as_matching_nothing(tmp_path):
     payload = tmp_path / 'empty.json'
     payload.write_text('[]')
-    assert pursuits.resolve_one('p', {'resolve': f'cat {payload}', 'label': 'name'}) == MATCHED_NOTHING
+    assert resolution('p', {'resolve': f'cat {payload}', 'label': 'name'}) == MATCHED_NOTHING
 
 
 def test_resolve_one_reports_null_as_matching_nothing(tmp_path):
     payload = tmp_path / 'null.json'
     payload.write_text('null')
-    assert pursuits.resolve_one('p', {'resolve': f'cat {payload}', 'label': 'name'}) == MATCHED_NOTHING
+    assert resolution('p', {'resolve': f'cat {payload}', 'label': 'name'}) == MATCHED_NOTHING
 
 
 def test_resolve_one_reports_no_plain_lines_as_matching_nothing(tmp_path):
     payload = tmp_path / 'blank.txt'
     payload.write_text('\n  \n')
-    assert pursuits.resolve_one('p', {'resolve': f'cat {payload}'}) == MATCHED_NOTHING
+    assert resolution('p', {'resolve': f'cat {payload}'}) == MATCHED_NOTHING
 
 
 def test_resolve_one_counts_the_rows_that_matched(tmp_path):
@@ -678,7 +706,7 @@ def test_resolve_one_counts_the_rows_that_matched(tmp_path):
     """
     payload = tmp_path / 'books.json'
     payload.write_text(json.dumps([{'title': 'Ego and Archetype'}, {'title': 'Lucid Dreaming'}]))
-    resolved = pursuits.resolve_one('read', {'resolve': f'cat {payload}', 'label': 'title'})
+    resolved = resolution('read', {'resolve': f'cat {payload}', 'label': 'title'})
     assert [choice['label'] for choice in resolved['choices']] == ['Ego and Archetype', 'Lucid Dreaming']
     assert resolved['candidates'] == 2
 
@@ -687,7 +715,7 @@ def test_resolve_one_offers_a_handful_however_many_matched(tmp_path):
     """Fifty-four open tasks are a list, not a choice. The count still says fifty-four."""
     payload = tmp_path / 'tasks.json'
     payload.write_text(json.dumps([{'name': f'task {number}'} for number in range(54)]))
-    resolved = pursuits.resolve_one('tasks', {'resolve': f'cat {payload}', 'label': 'name'})
+    resolved = resolution('tasks', {'resolve': f'cat {payload}', 'label': 'name'})
 
     assert len(resolved['choices']) == pursuits.CANDIDATE_ROWS
     assert resolved['candidates'] == 54
@@ -697,7 +725,7 @@ def test_resolve_one_counts_after_the_register_narrows_the_rows(tmp_path):
     payload = tmp_path / 'tasks.json'
     payload.write_text(json.dumps([{'name': 'Journal'}, {'name': 'Pumice Stone'}]))
     config = {'resolve': f'cat {payload}', 'label': 'name', 'resolve_where': {'name': 'Journal'}}
-    assert pursuits.resolve_one('journal', config)['candidates'] == 1
+    assert resolution('journal', config)['candidates'] == 1
 
 
 def test_resolve_all_only_asks_pursuits_that_declare_a_resolver():
@@ -711,7 +739,7 @@ def test_on_log_substitutes_the_offered_items_id(sandbox, tmp_path):
     config = {'resolve': 'echo x', 'on_log': f'cp {tmp_path / "seed.txt"} {marker}'}
     (tmp_path / 'seed.txt').write_text('422')
     result = pursuits.run_on_log(config, {'id': '422', 'label': 'Task'}, '', None, assume_yes=True)
-    assert result['ran'] is True
+    assert result is not None and result['ran'] is True
     assert marker.read_text() == '422'
 
 
@@ -965,7 +993,7 @@ def test_the_draw_puts_every_offered_pursuit_on_the_screen(sandbox, monkeypatch,
     assert pursuits.cmd_next(False, False, True) == 0
 
     printed = capsys.readouterr().out
-    offered = pursuits.load_cached_draw(dt.datetime.now().astimezone())['offered']
+    offered = saved_draw(dt.datetime.now().astimezone())['offered']
     assert offered
     assert all(name in printed for name in offered)
 
@@ -1156,7 +1184,7 @@ def test_a_running_skip_holds_the_due_date_until_it_ends(tmp_path, monkeypatch):
     today = history_state(tmp_path, monkeypatch, records, 0.0)
 
     for name in HISTORY_NAMES:
-        due = pursuits.due_in_days(today, name)
+        due = known_due(today, name)
         assert due > 10.0, name
         assert not pursuits.owes(history_state(tmp_path, monkeypatch, records, due - 0.01), name), name
         assert pursuits.owes(history_state(tmp_path, monkeypatch, records, due + 0.01), name), name
@@ -1488,8 +1516,7 @@ def test_a_due_date_only_comes_closer_while_nothing_is_logged(tmp_path, monkeypa
     dues = [history_state(tmp_path, monkeypatch, HISTORIES[history], day) for day in range(40)]
 
     for name in HISTORY_NAMES:
-        series = [pursuits.due_in_days(state, name) for state in dues]
-        assert None not in series
+        series = [known_due(state, name) for state in dues]
         assert all(later <= earlier + 1e-9 for earlier, later in itertools.pairwise(series)), name
 
 
@@ -1643,7 +1670,7 @@ def test_an_owed_row_is_ordered_by_weight_before_lateness(tmp_path, monkeypatch)
     register = BALANCE_REGISTER + '\n  light:\n    weight: 5\n    cadence: 1d\n'
     state = balance_state(tmp_path, monkeypatch, [zeroed('chore', 1.2), zeroed('light', 40.0)], register=register)
 
-    assert pursuits.due_in_days(state, 'light') < pursuits.due_in_days(state, 'chore')
+    assert known_due(state, 'light') < known_due(state, 'chore')
     assert pursuits.offered_order(state, ['light', 'chore']) == ['chore', 'light']
     assert pursuits.pinned(state)[-1] == 'light', 'the furthest behind, and the lightest of everything owed'
 
@@ -1819,9 +1846,7 @@ def test_a_skip_records_the_span_it_covers(sandbox, monkeypatch):
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
     assert pursuits.cmd_skip('chores', '2w') == 0
 
-    record = journal.read_all(sandbox / 'state')[0]
-    started = journal.parse_time(record['occurred_at'])
-    assert (journal.parse_time(record['expires_at']) - started).days == 14
+    assert skip_days(journal.read_all(sandbox / 'state')[0]) == 14
 
 
 def test_a_skip_with_no_duration_covers_one_interval(sandbox, monkeypatch):
@@ -1830,9 +1855,7 @@ def test_a_skip_with_no_duration_covers_one_interval(sandbox, monkeypatch):
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
     assert pursuits.cmd_skip('chores', None) == 0
 
-    record = journal.read_all(sandbox / 'state')[0]
-    started = journal.parse_time(record['occurred_at'])
-    assert (journal.parse_time(record['expires_at']) - started).days == 7, 'the cadence is 1w'
+    assert skip_days(journal.read_all(sandbox / 'state')[0]) == 7, 'the cadence is 1w'
 
 
 def test_a_skip_names_when_the_pursuit_returns(sandbox, monkeypatch, capsys):
@@ -2126,11 +2149,11 @@ def test_the_orphan_warning_stays_silent_when_every_count_has_a_pursuit(sandbox,
     assert capsys.readouterr().out == ''
 
 
-def resolving(tmp_path, rows, **config) -> dict | None:
+def resolving(tmp_path, rows, **config) -> dict:
     """resolve_one against a payload on disk, with no subprocess of our own."""
     payload = tmp_path / 'rows.json'
     payload.write_text(json.dumps(rows))
-    return pursuits.resolve_one('journal', {'resolve': f'cat {payload}', 'label': 'name', 'id': 'id', **config})
+    return resolution('journal', {'resolve': f'cat {payload}', 'label': 'name', 'id': 'id', **config})
 
 
 def test_resolve_where_keeps_only_the_rows_that_are_this_pursuit(tmp_path):
@@ -2305,7 +2328,8 @@ def test_a_later_skip_shortens_an_earlier_one(sandbox, monkeypatch):
 
     now = dt.datetime.now().astimezone()
     own = pursuits.records_by_pursuit(journal.read_all(sandbox / 'state'))['chores']
-    assert (pursuits.skip_expiry(own) - now).days == 0
+    expiry = pursuits.skip_expiry(own)
+    assert expiry is not None and (expiry - now).days == 0
 
 
 def test_resume_with_no_name_brings_back_everything_skipped(sandbox, monkeypatch):

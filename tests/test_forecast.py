@@ -254,14 +254,16 @@ def test_select_takes_the_newest_when_no_handle_is_given(tmp_path):
     path = forecast.reading_path(tmp_path, 'testbox')
     forecast.append(path, reading(NOW - dt.timedelta(days=2), {}))
     forecast.append(path, reading(NOW, {}))
-    assert forecast.select(forecast.read_all(tmp_path)).generated == NOW.isoformat()
+    selected = forecast.select(forecast.read_all(tmp_path))
+    assert selected is not None and selected.generated == NOW.isoformat()
 
 
 def test_a_handle_selects_by_timestamp_prefix(tmp_path):
     path = forecast.reading_path(tmp_path, 'testbox')
     forecast.append(path, reading(NOW - dt.timedelta(days=2), {}))
     forecast.append(path, reading(NOW, {}))
-    assert forecast.select(forecast.read_all(tmp_path), '2026-08-02').generated.startswith('2026-08-02')
+    selected = forecast.select(forecast.read_all(tmp_path), '2026-08-02')
+    assert selected is not None and selected.generated.startswith('2026-08-02')
 
 
 def test_occasions_are_counted_inside_the_window_only():

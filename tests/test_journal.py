@@ -90,7 +90,8 @@ def test_days_since_reports_none_for_a_pursuit_never_logged(tmp_path):
     write_entries(tmp_path, 'mbp', [entry('chores', days_ago=3)])
     latest = journal.latest_occurrence(journal.read_all(tmp_path), 'done')
     elapsed = journal.days_since(latest, ['chores', 'brand-new'], NOW)
-    assert round(elapsed['chores']) == 3
+    chores = elapsed['chores']
+    assert chores is not None and round(chores) == 3
     assert elapsed['brand-new'] is None
 
 

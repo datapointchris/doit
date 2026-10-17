@@ -9,9 +9,11 @@ tree being wired up in a way that loses them.
 from importlib.metadata import PackageNotFoundError
 
 import pytest
+from typer.models import CommandInfo
 from typer.testing import CliRunner
 
 import doit
+import doit.cli
 from doit import __version__
 from doit import pursuits
 from doit.cli import app
@@ -29,6 +31,12 @@ def never_check_for_updates(monkeypatch):
     on a machine, not in CI.
     """
     monkeypatch.setattr('doit.cli.notify', lambda config: None)
+
+
+def command_name(command: CommandInfo) -> str:
+    """The name typer shows for a registered command: its own, or its function's."""
+    assert command.callback is not None
+    return command.name or command.callback.__name__
 
 
 @pytest.mark.parametrize('flag', ['-V', '--version'])
@@ -56,7 +64,7 @@ def test_the_pursuits_help_lists_every_verb_registered_under_it():
     the visible ones — `pursuits names` feeds the shell completion and would be
     noise on a screen a person reads.
     """
-    registered = {command.name or command.callback.__name__ for command in pursuits.app.registered_commands if not command.hidden}
+    registered = {command_name(command) for command in pursuits.app.registered_commands if not command.hidden}
     result = runner.invoke(app, ['pursuits', '--help'])
 
     assert registered
@@ -71,7 +79,7 @@ def test_root_help_lists_every_command():
     are excluded the same way the pursuits check above excludes them —
     `__preview` is what the fzf pane calls, not what anyone types.
     """
-    visible = {command.name or command.callback.__name__ for command in app.registered_commands if not command.hidden}
+    visible = {command_name(command) for command in app.registered_commands if not command.hidden}
     visible |= {group.name for group in app.registered_groups if group.name}
     result = runner.invoke(app, ['--help'])
 
