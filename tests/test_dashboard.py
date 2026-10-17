@@ -21,6 +21,7 @@ from doit import sources
 from doit import today
 from doit.cli import app as cli_app
 from doit.lanes import GridCell
+from doit.lanes import Lane
 from doit.lanes import Row
 from doit.lanes import Urgency
 
@@ -273,7 +274,7 @@ def test_articles_are_their_own_lane():
     assert lane.total == 61, '60 queued plus the one being read'
 
 
-def dotfiles_lane_from(runs: list) -> object:
+def dotfiles_lane_from(runs: list) -> Lane:
     return dashboard.dotfiles_adapter(sources.Result(source='', payload=runs, exit_code=0))[0]
 
 
@@ -311,7 +312,7 @@ def test_the_newest_run_per_box_is_the_one_that_counts():
     assert lane.meta == '1 machine(s) reporting', 'the older issue must not resurface'
 
 
-def articles_lane_with(**fields) -> object:
+def articles_lane_with(**fields) -> Lane:
     """The articles lane built from the fixture with its section patched.
 
     The committed fixture carries neither read field, so patching here is what

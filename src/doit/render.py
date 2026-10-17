@@ -83,7 +83,7 @@ def join_context(parts) -> str:
     return ' · '.join(seen)
 
 
-def first_sentence(text: str) -> str:
+def first_sentence(text: str | None) -> str:
     """The opening sentence of a stored note, collapsed onto one line.
 
     Notes run to paragraphs — the reasoning, the alternatives that were rejected,

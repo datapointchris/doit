@@ -6,6 +6,13 @@ weights. Neither says what the day has already had, because an outstanding
 count can only climb and a lane of hundreds of unread articles renders exactly
 like a lane of two overdue chores.
 
+**Above both lists, what today asks to hold the pace.** The timed pursuits'
+minutes and the counted pursuits' checkoffs, each in its own unit, with the
+habits, review and Labs as checklists under them. Then what is behind beyond
+today, and each timescale worth showing with how much more a day would clear it.
+`doit.quota` holds the arithmetic. Where the pursuits could not be read, the line
+names them instead of a figure.
+
 **What is not done is said once, in the due list, and it prints first.** It is
 what the reader acts on, and the done list is the record beneath it. Each group
 holds what one record owes, in that record's own order. Habits and pursuits show
@@ -62,6 +69,7 @@ from doit import journal
 from doit import labs
 from doit import lanes
 from doit import pursuits
+from doit import quota
 from doit import review
 from doit import sources
 from doit.lanes import GridCell
@@ -334,6 +342,10 @@ def item_name(row: dict) -> str:
     return str(row.get('id') or row.get('title') or '')
 
 
+def cleared_on(row: dict, today: dt.date) -> bool:
+    return row.get('last') == today.isoformat()
+
+
 def register_lanes(
     name: str,
     title: str,
@@ -354,8 +366,7 @@ def register_lanes(
     The owed group is ranked by `dashboard.maintenance_row`, the order the
     dashboard's MAINTENANCE lane already gives these.
     """
-    stamp = today.isoformat()
-    done = [row for row in rows if row.get('last') == stamp]
+    done = [row for row in rows if cleared_on(row, today)]
     # Done is subtracted from due rather than counted alongside it. An item on a
     # daily cadence done this morning still reports `overdue: 0`, because zero
     # means "wanted today" and it was — so without this it is cleared and owed
@@ -504,30 +515,54 @@ def pursuits_due(state: dict, today: dt.date) -> Lane:
     return Lane(name='pursuits', title='PURSUITS', rows=rows, total=len(rows), hints=['doit next --explain'])
 
 
-def pursuit_lanes(now: dt.datetime, today: dt.date) -> tuple[list[Lane], list[Lane]]:
-    """The pursuits' group in each list.
+def pursuit_lanes(now: dt.datetime, today: dt.date) -> tuple[list[Lane], list[Lane], dict | None]:
+    """The pursuits' group in each list, and the state both were built from.
 
     Guarded the way the dashboard guards its own standing line. A register that
     refuses to load is a real failure mode and it must cost these two groups
     rather than the whole screen — the rest has nothing to do with the weights.
     The failure is reported in the due list, where a missing group reads as
-    nothing owed.
+    nothing owed. The state is None both then and where the register is empty.
     """
     try:
         register = pursuits.load_pursuits()
         if not register:
-            return [], []
+            return [], [], None
         state = pursuits.build_state(register, now)
     except (pursuits.RegisterError, OSError, ValueError) as error:
-        return [], [lanes.unavailable('pursuits', 'PURSUITS', str(error))]
-    return [pursuits_done(state, today)], [pursuits_due(state, today)]
+        return [], [lanes.unavailable('pursuits', 'PURSUITS', str(error))], None
+    return [pursuits_done(state, today)], [pursuits_due(state, today)], state
+
+
+CHECKLIST_GROUPS = (*DAY_SET_LANES, 'review', 'labs')
+
+
+def checklists(done: list[Lane], due: list[Lane]) -> list[quota.Checklist]:
+    """Each checklist group as done today of done today and still due, or why it could not be read."""
+    found = []
+    for lane in due:
+        if lane.name not in CHECKLIST_GROUPS:
+            continue
+        if not lane.available:
+            found.append(quota.Checklist(lane.name, unavailable=lane.reason))
+            continue
+        finished = sum(len(cleared.grid) for cleared in done if cleared.name == lane.name)
+        found.append(quota.Checklist(lane.name, finished, finished + len(lane.rows)))
+    return sorted(found, key=lambda entry: CHECKLIST_GROUPS.index(entry.name))
+
+
+def day_quota(state: dict | None, done: list[Lane], due: list[Lane]) -> quota.Quota:
+    """The figures above both lists, with the pursuits named as unavailable where their group could not be read."""
+    failed = next((lane.reason for lane in due if lane.name == 'pursuits' and not lane.available), '')
+    return quota.build(state, checklists(done, due), failed)
 
 
 class Day(NamedTuple):
-    """Today's two lists, each holding its groups in the order they print."""
+    """Today's two lists, each holding its groups in the order they print, and the figures above them."""
 
     done: list[Lane]
     due: list[Lane]
+    figures: quota.Quota | None = None
 
 
 def build(registry: sources.Registry, now: dt.datetime) -> Day:
@@ -548,14 +583,14 @@ def build(registry: sources.Registry, now: dt.datetime) -> Day:
     built = dashboard.lanes_of(registry, results, None)
 
     sets_done, sets_due = set_lanes(built, now)
-    moved, owed = pursuit_lanes(now, today)
+    moved, owed, state = pursuit_lanes(now, today)
     cleared, backlog = maintenance_lanes(today)
 
     done = sets_done + moved + cleared
     for source in completion_sources:
         done.extend(sources.lanes_from(source, results[source.id]))
     due = appointment_lanes(built) + owed + backlog + sets_due
-    return Day(done, due)
+    return Day(done, due, day_quota(state, done, due))
 
 
 def has_something(lane: Lane) -> bool:
@@ -565,6 +600,8 @@ def has_something(lane: Lane) -> bool:
 def render(day: Day, today: dt.date) -> None:
     width = terminal_width()
     console.rule(f'[cyan]Today[/] · {today.strftime("%a %d %b")}', align='left')
+    if day.figures is not None:
+        render_quota(day.figures)
     due = [lane for lane in day.due if has_something(lane)]
     done = [lane for lane in day.done if has_something(lane)]
     if due:
@@ -575,6 +612,81 @@ def render(day: Day, today: dt.date) -> None:
             console.print()
         console.print('DONE', style=LIST_STYLE)
         render_done(done, width)
+
+
+def checkoffs_text(count: float) -> str:
+    whole = round(count)
+    return f'{whole} checkoff' if whole == 1 else f'{whole} checkoffs'
+
+
+def joined(parts: list[Text]) -> Text:
+    line = Text(GROUP_INDENT)
+    for index, part in enumerate(parts):
+        if index:
+            line.append(' · ')
+        line.append_text(part)
+    return line
+
+
+def today_parts(figures: quota.Quota) -> list[Text]:
+    """What today asks in each unit, green once today has paid it."""
+    if figures.unavailable:
+        return [Text('pursuits unavailable', style='red')]
+    parts = []
+    minutes, checkoffs = figures.minutes, figures.checkoffs
+    if minutes is not None and minutes.need > 0:
+        part = Text(pursuits.minutes_text(minutes.done), style=HOUR_STYLE if minutes.done >= minutes.need else '')
+        noun = 'pursuit' if minutes.asked_of == 1 else 'pursuits'
+        part.append(f' of {pursuits.minutes_text(minutes.need)} across {minutes.asked_of} {noun}')
+        parts.append(part)
+    if checkoffs is not None and checkoffs.need > 0:
+        part = Text(f'{round(checkoffs.done)}', style=HOUR_STYLE if checkoffs.done >= checkoffs.need else '')
+        part.append(f' of {checkoffs_text(checkoffs.need)}')
+        parts.append(part)
+    return parts
+
+
+def checklist_parts(figures: quota.Quota) -> list[Text]:
+    parts = []
+    for entry in figures.checklists:
+        if entry.unavailable:
+            parts.append(Text(f'{entry.name} unavailable', style='red'))
+        else:
+            parts.append(Text(f'{entry.name} {entry.done} of {entry.total}'))
+    return parts
+
+
+def behind_lines(figures: quota.Quota) -> list[Text]:
+    """What is behind beyond today in each unit, then each timescale worth showing."""
+    minutes, checkoffs = figures.minutes, figures.checkoffs
+    if minutes is None or checkoffs is None or not (minutes.behind or checkoffs.behind):
+        return []
+
+    def amounts(extra_minutes: float, extra_checkoffs: float) -> str:
+        said = [pursuits.minutes_text(extra_minutes)] if round(extra_minutes) else []
+        return ' and '.join(said + ([checkoffs_text(extra_checkoffs)] if extra_checkoffs else []))
+
+    lines = [Text(f'{GROUP_INDENT}{amounts(minutes.behind, checkoffs.behind)} behind')]
+    for entry in figures.catch_up:
+        if entry.shown:
+            extra = amounts(entry.minutes_per_day, entry.checkoffs_per_day)
+            lines.append(Text(f'{GROUP_INDENT}{extra} more a day catches up in {entry.label}'))
+    return lines
+
+
+def quota_lines(figures: quota.Quota) -> list[Text]:
+    """Today's ask, the checklists, what is behind, and each catch-up worth showing.
+
+    A figure is green once today has paid it, the color this screen says done
+    with. Nothing else is colored but a part that could not be read.
+    """
+    lines = [joined(parts) for parts in (today_parts(figures), checklist_parts(figures)) if parts]
+    return lines + behind_lines(figures)
+
+
+def render_quota(figures: quota.Quota) -> None:
+    for line in quota_lines(figures):
+        console.print(line, no_wrap=True, overflow='ellipsis')
 
 
 def group_heading(lane: Lane) -> Text:
@@ -687,6 +799,7 @@ def cmd_today(as_json: bool) -> int:
             'generated_at': lanes.timestamp(now),
             'done': [lanes.lane_to_dict(lane) for lane in day.done],
             'due': [lanes.lane_to_dict(lane) for lane in day.due],
+            'quota': None if day.figures is None else quota.to_dict(day.figures),
         }
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
@@ -699,7 +812,7 @@ def cmd_today(as_json: bool) -> int:
 
 
 def today_command(
-    as_json: Annotated[bool, typer.Option('--json', help='Output both lists as JSON to stdout.')] = False,
+    as_json: Annotated[bool, typer.Option('--json', help='Output the day as JSON to stdout.')] = False,
 ) -> None:
     """What today still wants, and what it has had."""
     raise typer.Exit(cmd_today(as_json))

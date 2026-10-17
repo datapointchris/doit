@@ -7,8 +7,8 @@ the half `doit next` runs on, and it has two jobs that never touch.
 **Standing is a running balance, in the pursuit's own unit.** Every pursuit
 declares its pace — one occurrence every so many days, or so many minutes a
 week — and the schedule asks for one checkoff per interval: one occurrence, or
-one week's minutes. What has been asked for over a recent window less what was
-done in it is the balance. The pace is declared rather than derived, so nothing
+one week's minutes. What has been asked for since the pursuit's zero point less
+what was done since is the balance. The pace is declared rather than derived, so nothing
 else in the register can move it: a pursuit's goal says the same thing whatever
 the other pursuits weigh and however much got logged last week.
 
@@ -65,66 +65,30 @@ def days_until_due(owed: float, interval: float, size: float) -> float | None:
     return interval - owed / size * interval
 
 
-def projected_days_until_due(
-    owed: float,
-    interval: float,
-    size: float,
-    fills_in: float,
-    departures: Iterable[tuple[float, float]],
-    returning: Iterable[tuple[float, float]] = (),
-    holding: Iterable[tuple[float, float]] = (),
-) -> float | None:
-    """Days until one checkoff is owed, for a balance kept over a sliding window.
+def projected_days_until_due(owed: float, interval: float, size: float, holding: Iterable[tuple[float, float]] = ()) -> float | None:
+    """Days until one checkoff is owed, with the clock stopped while a skip runs.
 
-    Standing counts only what the window holds, so a balance grows three ways.
-    Until the window is full, the schedule asks for more every day, at one
-    checkoff per interval. Once it is full, what is asked for stays level, except
-    while the window's start passes a skipped span, which the schedule asks for
-    again at the same rate. And it steps up as old payments leave. ``fills_in`` is
-    the days until the window is full, ``departures`` is each payment as ``(days
-    until it leaves, amount)``, and ``returning`` is each skipped span as ``(days
-    until the window's start reaches it, days until it has passed)``.
-
-    A skip still running stops the clock, so ``holding`` is each span from now
-    that it covers, ``(days until it starts, days until it ends)``. Inside one,
-    the schedule asks for nothing new, and a full window sheds the days the skip
-    is taking out of it.
-
-    Projected rather than read off the formula. A pursuit paid well ahead by a burst
-    a fortnight ago comes due the day that burst leaves the window, which no
-    rescaling of today's balance can say.
+    The balance grows at one checkoff per interval, except inside a skip. So
+    ``holding`` is each span from now that a skip covers, as ``(days until it
+    starts, days until it ends)``, disjoint and in order. Inside one, the
+    schedule asks for nothing.
 
     Overdue keeps :func:`days_until_due`, which says how late: a whole checkoff
-    owed is due now, and each one past it is one interval later. A window shorter
-    than one interval never asks for a whole checkoff, so it is never due and
-    answers None.
+    owed is due now, and each one past it is one interval later.
     """
     if interval <= 0 or math.isinf(interval) or size <= 0:
         return None
     if owed >= size:
         return days_until_due(owed, interval, size)
     rate = size / interval
-    # Each moment the balance's growth changes: (day, step in owed, change in how many
-    # sources accrue). Filling is one source until fills_in, each skipped span
-    # passing out of the window is one more while it does, and a running skip is
-    # one fewer, so a full window under a skip sheds what it asked for.
-    moments = [(fills_in, 0.0, -1)]
-    moments += [(days, amount, 0) for days, amount in departures]
-    for start, finish in returning:
-        moments += [(start, 0.0, 1), (finish, 0.0, -1)]
-    for start, finish in holding:
-        moments += [(start, 0.0, -1), (finish, 0.0, 1)]
-    day, accruing = 0.0, 1
-    for when, step, change in sorted(moments, key=lambda moment: (moment[0], -moment[2])):
-        when = max(when, day)
-        if accruing > 0 and day + (size - owed) / (rate * accruing) <= when:
-            return day + (size - owed) / (rate * accruing)
-        owed += rate * accruing * (when - day)
-        day, accruing = when, accruing + change
-        owed += step
-        if owed >= size:
-            return day
-    return day + (size - owed) / (rate * accruing) if accruing > 0 else None
+    day = 0.0
+    for start, finish in sorted(holding):
+        start = max(start, day)
+        if day + (size - owed) / rate <= start:
+            break
+        owed += rate * (start - day)
+        day = max(finish, start)
+    return day + (size - owed) / rate
 
 
 def candidates(weights: dict[str, float], ratios: dict[str, float], suppressed: Iterable[str]) -> dict[str, float]:

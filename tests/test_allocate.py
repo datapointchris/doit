@@ -70,6 +70,7 @@ def test_the_due_date_keeps_the_order_the_balance_had():
     worse = allocate.days_until_due(4.0, 3.0, 1.0)
     better = allocate.days_until_due(2.0, 3.0, 1.0)
 
+    assert worse is not None and better is not None
     assert worse < better < 0
 
 
@@ -77,41 +78,6 @@ def test_a_pursuit_with_no_schedule_is_due_at_no_time():
     assert allocate.days_until_due(1.0, 0.0, 1.0) is None
     assert allocate.days_until_due(1.0, math.inf, 1.0) is None
     assert allocate.days_until_due(1.0, 3.0, 0.0) is None
-
-
-def test_a_window_still_filling_comes_due_at_the_pace():
-    # Nothing has to leave a window that is not full yet; the schedule asks for
-    # more every day, exactly as an unbounded balance would.
-    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=28.0, departures=[]) == 7.0
-    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=28.0, departures=[]) == allocate.days_until_due(0.0, 7.0, 1.0)
-
-
-def test_a_full_window_comes_due_when_enough_payment_leaves_it():
-    # What is asked for is level once the window is full, so only a payment
-    # leaving can bring a checkoff due.
-    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=0.0, departures=[(13.0, 1.0), (6.0, 1.0)]) == 6.0
-    assert allocate.projected_days_until_due(0.5, 7.0, 1.0, fills_in=0.0, departures=[(3.0, 0.25), (9.0, 0.5)]) == 9.0
-
-
-def test_a_window_that_fills_before_the_pace_reaches_a_checkoff_waits_for_a_departure():
-    # Three days of growth is 3/7 of a checkoff, and the rest arrives when the
-    # payment leaves on day ten.
-    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=3.0, departures=[(10.0, 1.0)]) == 10.0
-
-
-def test_a_skipped_span_leaving_the_window_is_asked_for_again():
-    # The window's start reaches the skip on day two and passes it on day nine,
-    # asking for a week's pace across those seven days.
-    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=0.0, departures=[], returning=[(2.0, 9.0)]) == 9.0
-    assert allocate.projected_days_until_due(0.0, 7.0, 1.0, fills_in=0.0, departures=[(4.0, 0.5)], returning=[(2.0, 9.0)]) == 5.5
-
-
-def test_an_overdue_window_says_how_late_rather_than_projecting():
-    assert allocate.projected_days_until_due(2.0, 7.0, 1.0, fills_in=0.0, departures=[(1.0, 1.0)]) == -7.0
-
-
-def test_a_window_whose_payments_all_leave_short_of_a_checkoff_is_never_due():
-    assert allocate.projected_days_until_due(0.2, 7.0, 1.0, fills_in=0.0, departures=[(4.0, 0.3)]) is None
 
 
 def test_the_pool_holds_nothing_owed():
@@ -172,7 +138,7 @@ def test_draw_returns_fewer_than_asked_when_candidates_run_out():
 
 
 def test_draw_is_reproducible_for_a_seed():
-    weights = {'a': 10, 'b': 20, 'c': 30, 'd': 40}
+    weights = {'a': 10.0, 'b': 20.0, 'c': 30.0, 'd': 40.0}
     assert allocate.draw(weights, 3, random.Random(7)) == allocate.draw(weights, 3, random.Random(7))
 
 

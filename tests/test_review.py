@@ -39,6 +39,7 @@ def write_state(tmp_path, monkeypatch, done_dates: dict) -> None:
 
 def test_load_items_reads_the_register():
     items = review.load_items()
+    assert items is not None
     assert set(items) == {'never-done', 'overdue-item', 'fresh-item'}
     assert items['overdue-item']['cadence'] == '1w'
     assert items['fresh-item']['show'] == 'echo fresh'

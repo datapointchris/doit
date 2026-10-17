@@ -18,9 +18,10 @@ A pursuit declaring neither is *tracked*. It asks for nothing, so it is never
 due and never drawn, and it takes no weight. Its logs and evidence are still
 read, so `doit today` and `drift` show where the time went.
 
-Standing is one balance in the pursuit's own unit: what its pace asked for over
-the last four weeks, less what was done in them. The window opens no earlier
-than the pursuit's zero point. Positive is owed.
+Standing is one balance in the pursuit's own unit: what its pace asked for since
+the pursuit's zero point, less what was done since. Positive is owed. Nothing
+ages out of it, so a debt stands until it is paid or a reset forgives it, and a
+burst stays credited the same way.
 
 That balance is never the number on screen. Two units on one screen cannot be read
 against each other, and a signed number carries its whole meaning in the one
@@ -119,16 +120,14 @@ DRAW_SIZE = 5
 # tells it apart from one someone ran.
 FIRST_SEEN = 'first seen'
 
+# The note on a reset doit wrote because a pursuit moved between counting
+# occurrences and counting minutes, where no balance carries across.
+UNIT_CHANGED = 'unit changed'
+
 # How many names the one-line standing summary spells out before counting the
 # rest. It is a glance rather than a report, and a line that wraps is one nobody
 # reads to the end.
 STANDING_NAMES = 4
-
-# How far back standing looks. Four weeks holds a weekly goal four times over,
-# and is short enough that a burst or a lapse a season ago does not answer for
-# this week. Exact to the day is not the aim: a balance over a sliding window is
-# a reading of how the last month went, and it moves as the month moves.
-STANDING_WINDOW_DAYS = 28.0
 
 # A counted pursuit's pace is whole days and nothing else. A week or a month
 # reads naturally and invites `1w2d` and `3.5d`, which no reader checks twice.
@@ -206,21 +205,21 @@ TEMPLATE = """\
 # give it, and nothing asks.
 #
 #   until        optional end date; after it the pursuit pauses and says so
-#   paused       optional; keeps it in the file but out of the draw. A pause has
-#                no timestamp, so pair unpausing with `doit pursuits reset` — the
-#                schedule kept asking while nothing was reading the answer
+#   paused       optional; keeps it in the file but out of the draw, and the days
+#                it spends paused ask for nothing
 #   resolve      optional command answering "specifically what?" — see below
 #   on_log       optional command run after logging, e.g. completing the task
 #
-# Standing is one balance per pursuit: what its pace asked for over the last four
-# weeks, less what was done in them — occurrences for a cadence, minutes for
+# Standing is one balance per pursuit: what its pace asked for since its zero
+# point, less what was done since — occurrences for a cadence, minutes for
 # weekly_minutes. It is shown as the one answer both units give: when this next
 # comes due. Partial time always rolls over, so a 20-minute sitting against 45
-# minutes a week pays 20 minutes off, and a burst carries a pursuit until it is
-# four weeks old. The window opens no earlier than the pursuit's zero point,
-# written the first time doit reads it; `doit pursuits reset <pursuit>` moves it
-# to now, which is what to do after a long pause, and with no name it moves
-# every one.
+# minutes a week pays 20 minutes off. Nothing ages out: a debt stands until it is
+# paid, and a burst stays credited. A pace applies from the first time doit reads
+# it, so editing one never reprices the days before the edit. The zero point is
+# written the first time doit reads a pursuit; `doit pursuits reset <pursuit>`
+# moves it to now, which is the one way to forgive a debt, and with no name it
+# moves every one.
 #
 # resolve prints either plain lines (first line wins) or JSON. For JSON, name the
 # fields to read: `label` for what to show, `id` for what on_log substitutes into,
@@ -270,6 +269,9 @@ TEMPLATE = """\
 # Evidence counts occurrences, so a cadence takes it and so does a tracked
 # pursuit. An app says which day something happened and never how long, so a
 # weekly_minutes pursuit is paid by `doit log --minutes` alone.
+#
+# Standing counts back to the zero point, so the command has to answer that far
+# back. A `--limit` on it drops the oldest days, and each one dropped is owed.
 
 pursuits:
   chores:
@@ -282,7 +284,7 @@ pursuits:
     context: category
     view: icb tasks show {id}
     on_log: icb tasks complete {id}
-    evidence: icb tasks list --status completed --limit 100 --json
+    evidence: icb tasks list --status completed --json
     evidence_time: complete_date
 
   read-library:
@@ -327,7 +329,14 @@ def load_pursuits(path: Path | None = None) -> dict:
     path = register_path() if path is None else path
     if not path.exists():
         return {}
-    document = yaml.safe_load(path.read_text()) or {}
+    try:
+        document = yaml.safe_load(path.read_text()) or {}
+    except yaml.YAMLError as error:
+        mark = getattr(error, 'problem_mark', None)
+        where = f' at line {mark.line + 1}, column {mark.column + 1}' if mark is not None else ''
+        raise RegisterError(f'{path}: not valid YAML{where}: {getattr(error, "problem", None) or error}') from error
+    if not isinstance(document, dict):
+        raise RegisterError(f'{path}: must be a mapping with a `pursuits` key, not {type(document).__name__}')
     pursuits = document.get('pursuits') or {}
     if not isinstance(pursuits, dict):
         raise RegisterError(f'{path}: `pursuits` must be a mapping of name to settings')
@@ -498,6 +507,87 @@ def record_first_sightings(active: dict, records: list[dict], intervals: dict[st
     return written
 
 
+class Pace(NamedTuple):
+    """The interval and checkoff size a pace record set, and whether the pursuit counted minutes."""
+
+    interval: float
+    size: float
+    timed: bool
+
+
+def pace_of_record(record: dict) -> Pace | None:
+    """The pace one record set, or None where the register asked for nothing from then."""
+    interval, size = record.get('interval_days'), record.get('checkoff_size')
+    if isinstance(interval, bool) or isinstance(size, bool) or not isinstance(interval, int | float) or not isinstance(size, int | float):
+        return None
+    return Pace(float(interval), float(size), bool(record.get('timed')))
+
+
+def pace_records(records: list[dict]) -> list[tuple[dt.datetime, dict]]:
+    """Every pace record among ``records`` with the moment it took effect, oldest first."""
+    stamped = []
+    for record in records:
+        if record.get('event') != journal.Event.PACE:
+            continue
+        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        if when is not None:
+            stamped.append((when, record))
+    stamped.sort(key=lambda item: item[0])
+    return stamped
+
+
+def record_pace_changes(pursuits: dict, active: dict, records: list[dict], now: dt.datetime) -> list[dict]:
+    """Write the pace each pursuit asks for wherever the journal last recorded another, and return the records.
+
+    The register says only what is asked from now on, so a pace read off it alone
+    reprices every day back to the zero point whenever it is edited. Recording
+    each pace as doit first reads it keeps every span at the pace that was in
+    force over it. A pursuit outside the active set — paused, past its term,
+    weightless, tracked or gone from the register — is recorded as asking
+    nothing, which is what keeps a pause from being billed when it ends.
+
+    A change is written only where the register disagrees with the newest record
+    from any machine and with the newest this machine wrote. The second test is
+    what stops two machines whose registers differ from each writing their own
+    pace on every run: each has already said its piece. A machine reading a
+    register that has not synced yet still writes the old pace once, and the
+    hours until it catches up are priced at it.
+
+    Moving between counting occurrences and counting minutes also writes a reset.
+    A balance in one unit cannot carry into the other.
+    """
+    machine = machine_name()
+    newest: dict[str, Pace | None] = {}
+    mine: dict[str, Pace | None] = {}
+    counted: dict[str, Pace] = {}
+    for _, record in pace_records(records):
+        name, said = str(record.get('pursuit')), pace_of_record(record)
+        newest[name] = said
+        if record.get('machine') == machine:
+            mine[name] = said
+        if said is not None:
+            counted[name] = said
+    weekly = declared_minutes(pursuits)
+    written = []
+    for name in sorted(set(pursuits) | set(newest)):
+        current = None
+        if name in active:
+            interval, size = pace(active[name])
+            current = Pace(interval, size, name in weekly)
+        if name not in newest:
+            if current is None:
+                continue
+        elif current == newest[name] or (name in mine and current == mine[name]):
+            continue
+        if current is not None and name in counted and counted[name].timed != current.timed:
+            written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': now.isoformat(), 'note': UNIT_CHANGED}, now=now))
+        fields: dict[str, float | bool | None] = {'interval_days': None, 'checkoff_size': None, 'timed': None}
+        if current is not None:
+            fields = {'interval_days': current.interval, 'checkoff_size': current.size, 'timed': current.timed}
+        written.append(record_event(journal.Event.PACE, name, None, {'occurred_at': now.isoformat(), **fields}, now=now))
+    return written
+
+
 def zero_resets(records: list[dict]) -> dict[str, dt.datetime]:
     """Each pursuit's zero point as the journal states it.
 
@@ -518,26 +608,8 @@ def zero_resets(records: list[dict]) -> dict[str, dt.datetime]:
     return {**seen, **ran}
 
 
-def standing_window(config: dict, interval: float) -> float:
-    """How many days back a pursuit's standing looks.
-
-    :data:`STANDING_WINDOW_DAYS`, or two of the pursuit's own intervals where that
-    is longer, so the window always holds more than one checkoff. A pursuit paid
-    through an app is held to what that app remembers: billing over a span the
-    credit side cannot answer for is a debt that grows by construction, on the
-    pursuit most reliably done. Never below one interval, though. A window that
-    short never asks for a whole checkoff, so the pursuit would never come due.
-    """
-    if math.isinf(interval):
-        return STANDING_WINDOW_DAYS
-    window = max(STANDING_WINDOW_DAYS, 2.0 * interval)
-    if evidence.answerable(config):
-        window = max(min(window, float(evidence.OCCURRENCE_WINDOW_DAYS)), interval)
-    return window
-
-
-def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, window: float) -> dt.datetime:
-    """When a pursuit's balance starts counting: its last reset, or ``window`` days ago if later.
+def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float) -> dt.datetime:
+    """When a pursuit's balance starts counting: its last reset.
 
     A reset sets it, either `doit pursuits reset` or the one
     :func:`record_first_sightings` writes. Records handed in without one — a
@@ -550,14 +622,11 @@ def zero_point(reset: dt.datetime | None, now: dt.datetime, interval: float, win
     it opened up and the entry credits one checkoff against it. Recording that
     you did the thing then increases what you owe.
     """
-    opened = reset if reset is not None else now - dt.timedelta(days=0.0 if math.isinf(interval) else interval)
-    return max(opened, now - dt.timedelta(days=window))
+    return reset if reset is not None else now - dt.timedelta(days=0.0 if math.isinf(interval) else interval)
 
 
-def credits(
-    records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None
-) -> list[tuple[dt.datetime, float]]:
-    """Every payment since ``origin``, in the pursuit's own unit, with the moment it stops counting.
+def completed_since(records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None) -> float:
+    """Everything done since ``origin``, in the pursuit's own unit.
 
     A typed entry contributes the duration it carries on a timed pursuit, and one
     whole checkoff on a counted one — so an hour typed as four fragments and an
@@ -567,36 +636,24 @@ def credits(
     A day an app reports is one occurrence whatever happened inside it, which is
     what keeps a backend emitting a row per task from outrunning one emitting a
     row per session. An app day the journal carries is one act reported by both
-    records, so it counts once, even after the typed entry has left the window. A
-    timed pursuit takes no app days: an app says which day, never how long, and
-    the loader refuses one that declares evidence.
-
-    The moment beside each payment is when the start of the window passes it: the
-    entry's own time, or the end of the day an app reported.
+    records, so it counts once, even where the typed entry is dated before
+    ``origin``. A timed pursuit takes no app days: an app says which day, never
+    how long, and the loader refuses one that declares evidence.
     """
     size = minutes or 1.0
     typed = [record for record in records if record.get('event') == journal.Event.DONE]
     typed_days = {journal.local_day(record, now) for record in typed}
-    paid = []
+    paid = 0.0
     for record in typed:
         when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
-        if when is None or when < origin:
-            continue
-        paid.append((when, checkoff_equivalent(record, minutes) * size))
+        if when is not None and when >= origin:
+            paid += checkoff_equivalent(record, minutes) * size
     opened = origin.astimezone(now.tzinfo).date()
-    for day in app_days:
-        if day >= opened and day not in typed_days:
-            paid.append((dt.datetime.combine(day + dt.timedelta(days=1), dt.time(), tzinfo=now.tzinfo), 1.0))
-    return paid
-
-
-def completed_since(records: list[dict], app_days: list[dt.date], now: dt.datetime, origin: dt.datetime, minutes: float | None) -> float:
-    """Everything done since ``origin``, in the pursuit's own unit. See :func:`credits`."""
-    return sum(amount for _, amount in credits(records, app_days, now, origin, minutes))
+    return paid + sum(1.0 for day in app_days if day >= opened and day not in typed_days)
 
 
 class Standing(NamedTuple):
-    """One pursuit's standing over its window: both sides of the balance, and when it next comes due."""
+    """One pursuit's standing since its zero point: both sides of the balance, and when it next comes due."""
 
     asked: float
     done: float
@@ -609,7 +666,6 @@ def standing(
     app_days: list[dt.date],
     now: dt.datetime,
     origin: dt.datetime,
-    window: float,
     pace_of: tuple[float, float],
     minutes: float | None,
 ) -> Standing:
@@ -620,33 +676,45 @@ def standing(
     so the line a log prints is the line the next command shows.
 
     The clock stops for the span a skip covers, so passing on something is never
-    a way to owe more of it later. The due date is projected forward through the
-    window, as :func:`allocate.projected_days_until_due` describes: payments
-    leave it, a skip still running holds the clock until it ends, and skipped
-    days leave it too, after which the schedule asks for them.
+    a way to owe more of it later. A skip still running holds the due date until
+    it ends, as :func:`allocate.projected_days_until_due` describes.
     """
     interval, size = pace_of
-    paid = credits(records, app_days, now, origin, minutes)
     periods = skip_periods(records, origin)
-    elapsed = (now - origin).total_seconds() / 86400.0
-    skipped = sum((min(finish, now) - start).total_seconds() / 86400.0 for start, finish in periods if start < now)
-    span = max(elapsed - skipped, 0.0)
-    done = sum(amount for _, amount in paid)
-    asked, owed = balance(span, interval, size, 0.0), balance(span, interval, size, done)
+    done = completed_since(records, app_days, now, origin, minutes)
+    asked = asked_since(records, origin, now, pace_of)
+    owed = asked - done
 
     def ahead(moment: dt.datetime) -> float:
         return (moment - now).total_seconds() / 86400.0
 
-    due = projected_days_until_due(
-        owed,
-        interval,
-        size,
-        max(window - elapsed, 0.0),
-        [(ahead(stamp) + window, amount) for stamp, amount in paid],
-        [(ahead(start) + window, ahead(finish) + window) for start, finish in periods],
-        [(max(ahead(start), 0.0), ahead(finish)) for start, finish in periods if finish > now],
-    )
-    return Standing(asked, done, owed, due)
+    holding = [(max(ahead(start), 0.0), ahead(finish)) for start, finish in periods if finish > now]
+    return Standing(asked, done, owed, projected_days_until_due(owed, interval, size, holding))
+
+
+def asked_since(records: list[dict], origin: dt.datetime, now: dt.datetime, pace_of: tuple[float, float]) -> float:
+    """What the schedule asked for from ``origin`` to ``now``, each span at the pace in force over it.
+
+    The pace records say when each pace took effect, and the earliest one stands
+    back to ``origin``, since nothing records what came before it. Records handed
+    in with none, as a forecast replay or a test does, are priced at ``pace_of``
+    throughout. A span recorded as asking nothing asks nothing, and neither does
+    a day a skip took out of the schedule.
+    """
+    changes = [(when, pace_of_record(record)) for when, record in pace_records(records)]
+    if not changes:
+        changes = [(origin, Pace(pace_of[0], pace_of[1], False))]
+    starts = [origin] + [when for when, _ in changes[1:]]
+    ends = starts[1:] + [now]
+    skips = skip_spans(records, now, origin)
+    asked = 0.0
+    for start, end, (_, said) in zip(starts, ends, changes, strict=True):
+        start, end = max(start, origin), min(end, now)
+        if said is None or end <= start:
+            continue
+        held = sum(max((min(finish, end) - max(begin, start)).total_seconds(), 0.0) for begin, finish in skips) / 86400.0
+        asked += balance((end - start).total_seconds() / 86400.0 - held, said.interval, said.size, 0.0)
+    return asked
 
 
 def merged_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.datetime, dt.datetime]]:
@@ -666,18 +734,8 @@ def merged_spans(spans: list[tuple[dt.datetime, dt.datetime]]) -> list[tuple[dt.
     return merged
 
 
-def merged_span_days(spans: list[tuple[dt.datetime, dt.datetime]]) -> float:
-    """Total days covered by a set of possibly overlapping spans."""
-    return sum((finish - start).total_seconds() / 86400.0 for start, finish in merged_spans(spans))
-
-
-def skipped_days(records: list[dict], now: dt.datetime, origin: dt.datetime) -> float:
-    """Days inside the balance window that a skip took out of the schedule."""
-    return sum((finish - start).total_seconds() / 86400.0 for start, finish in skip_spans(records, now, origin))
-
-
 def skip_spans(records: list[dict], now: dt.datetime, origin: dt.datetime) -> list[tuple[dt.datetime, dt.datetime]]:
-    """The spans inside the balance window, up to now, that a skip took out of the schedule."""
+    """The spans from ``origin`` up to now that a skip took out of the schedule."""
     return merged_spans([(start, min(finish, now)) for start, finish in skip_periods(records, origin)])
 
 
@@ -751,7 +809,8 @@ def build_state(
 
     ``records`` and ``observed`` default to the journal on disk and a live round
     trip to every backend. Reading the journal from disk also writes the start of
-    any pursuit it has never zeroed, through :func:`record_first_sightings`;
+    any pursuit it has never zeroed, through :func:`record_first_sightings`, and
+    any pace the journal has not recorded, through :func:`record_pace_changes`;
     handed-in records never write. ``evidence_days`` goes with ``observed``: the
     days each app reported, which the live round trip would otherwise supply.
     :mod:`doit.forecast` supplies all three instead, which is what lets a simulated
@@ -775,6 +834,7 @@ def build_state(
         records = journal.read_all(directory) if directory and directory.exists() else []
     if directory is not None and directory.exists():
         records = [*records, *record_first_sightings(active, records, intervals, now)]
+        records = [*records, *record_pace_changes(pursuits, active, records, now)]
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
@@ -789,13 +849,12 @@ def build_state(
     # backend has to count what that backend saw as well as what got retyped.
     mine = records_by_pursuit(records)
     reset_at = zero_resets(records)
-    windows = {name: standing_window(config, intervals[name]) for name, config in active.items()}
-    origins = {name: zero_point(reset_at.get(name), now, intervals[name], windows[name]) for name in active}
+    origins = {name: zero_point(reset_at.get(name), now, intervals[name]) for name in active}
     standings: dict[str, Standing] = {}
     suppressed: set[str] = set()
     for name in active:
         own = mine.get(name, [])
-        standings[name] = standing(own, seen_days.get(name, []), now, origins[name], windows[name], paces[name], weekly_minutes.get(name))
+        standings[name] = standing(own, seen_days.get(name, []), now, origins[name], paces[name], weekly_minutes.get(name))
         expires = skip_expiry(own)
         if expires is not None and expires > now:
             suppressed.add(name)
@@ -831,7 +890,6 @@ def build_state(
         'checkoff_size': sizes,
         'weekly_minutes': weekly_minutes,
         'origins': origins,
-        'windows': windows,
         'suppressed': sorted(suppressed),
         'pool': pool,
         'probability': probability,
@@ -1326,11 +1384,9 @@ def standing_line(state: dict) -> str:
 
 
 def tally_text(state: dict, name: str) -> str:
-    """What a pursuit did of what its pace asked over its window, in its own unit.
+    """What a pursuit did of what its pace asked since its zero point, in its own unit.
 
-    The span is said wherever it is not the standard four weeks, which the column
-    heading names: a pursuit zeroed eighteen days ago has only been asked for
-    eighteen, and a cadence longer than a fortnight looks back two intervals.
+    Every tally says its span, because each pursuit counts from its own reset.
 
     A counted pursuit is asked for the checkoffs that have come due, a whole
     number, so the count agrees with the date beside it.
@@ -1343,7 +1399,7 @@ def tally_text(state: dict, name: str) -> str:
     else:
         text = f'{round(done)} of {math.floor(asked + 1e-9)}'
     days = round((state['now'] - state['origins'][name]).total_seconds() / 86400.0)
-    return text if days == round(STANDING_WINDOW_DAYS) else f'{text} in {days}d'
+    return f'{text} in {days}d'
 
 
 class Offer(NamedTuple):
@@ -1420,7 +1476,7 @@ OFFER_COLUMNS = (
     ('pursuit', 'name'),
     ('wt', 'weight'),
     ('goal', 'goal'),
-    (f'last {span_text(STANDING_WINDOW_DAYS)}', 'tally'),
+    ('done', 'tally'),
     ('due', 'due'),
 )
 
@@ -1551,8 +1607,8 @@ def explain_payload(state: dict) -> dict:
         'balance': {name: round(value, 2) for name, value in state['balance'].items()},
         'asked': {name: round(value, 2) for name, value in state['asked'].items()},
         'done': {name: round(value, 2) for name, value in state['done'].items()},
-        # Projected from when each payment leaves the window, which the balance
-        # beside it does not carry.
+        # Projected through any skip still running, which the balance beside it
+        # does not carry.
         'due': {name: None if value is None else round(value, 2) for name, value in state['due'].items()},
         'weekly_minutes': state['weekly_minutes'],
         # Recorded beside the balance because a balance is only interpretable
@@ -1799,7 +1855,6 @@ def restated_balance(state: dict, name: str, entry: dict) -> str:
         state['evidence_days'].get(name, []),
         state['now'],
         state['origins'][name],
-        state['windows'][name],
         (state['intervals'][name], state['checkoff_size'][name]),
         state['weekly_minutes'].get(name),
     ).due
@@ -2205,7 +2260,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
         own = mine.get(name, [])
         seen = state['evidence_days'].get(name, [])
-        start = max(cutoff, reset_at.get(name, cutoff))
+        start = max(cutoff, reset_at.get(name) or cutoff)
         done = completed_since(own, seen, now, start, weekly.get(name))
         logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, start))
         passes = sum(1 for record in own if is_pass(record) and in_window(record, cutoff))
@@ -2213,8 +2268,7 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
             continue
         asked = None
         if name in state['active']:
-            span = max((now - start).total_seconds() / 86400.0 - skipped_days(own, now, start), 0.0)
-            asked = balance(span, state['intervals'][name], state['checkoff_size'][name], 0.0)
+            asked = asked_since(own, start, now, (state['intervals'][name], state['checkoff_size'][name]))
         rows.append(
             {
                 'pursuit': name,
@@ -2327,8 +2381,6 @@ def cmd_drift(days: int, as_json: bool) -> int:
         return 0
 
     render_drift(rows)
-    if days > evidence.OCCURRENCE_WINDOW_DAYS:
-        console.print(f'  [yellow]Apps keep {evidence.OCCURRENCE_WINDOW_DAYS} days of dates, so days before that are typed logs alone.[/]')
     console.print()
     return 0
 
