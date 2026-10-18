@@ -101,6 +101,8 @@ from doit.render import fitted
 from doit.render import join_context
 from doit.render import span_text
 from doit.render import terminal_width
+from doit.window import first_instant
+from doit.window import window
 
 REGISTER_ENV = 'DOIT_PURSUITS'
 REGISTER = env_path(REGISTER_ENV, xdg_config_home() / 'doit' / 'pursuits.yml')
@@ -139,6 +141,9 @@ CANDIDATE_ROWS = 3
 
 # Two spaces between columns reads as one run of words on a wide terminal.
 GUTTER = 3
+
+# The window `pursuits drift` reads when given neither --since nor --until.
+DRIFT_SINCE = '90d'
 
 # Below this a choice is an ellipsis and a letter, so the backstop clips instead.
 MIN_CHOICE_WIDTH = 12
@@ -2228,7 +2233,7 @@ def render_orphaned_counters(register: dict) -> None:
     console.print(f'  [cyan]{journal_dir()}[/]')
 
 
-def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
+def drift_rows(pursuits: dict, state: dict, since: dt.datetime | None, until: dt.datetime | None) -> list[dict]:
     """Every pursuit worth a row: what its goal asked for over the window, and what got done.
 
     Both sides run from the later of the window's start and the pursuit's last
@@ -2247,28 +2252,36 @@ def drift_rows(pursuits: dict, state: dict, days: int) -> list[dict]:
     A tracked pursuit keeps a row whatever it did, because showing what got done
     is all it is for. It asks for nothing, and beside its count it carries the
     minutes its logs recorded.
+
+    An ``until`` drops every record and app day after it, so the window reads as
+    the journal stood then. ``since`` absent runs from the earliest of either.
     """
-    now = state['now']
-    cutoff = now - dt.timedelta(days=days)
+    end = until or state['now']
+    records = state['records']
+    evidence_days = state['evidence_days']
+    if until:
+        records = [record for record in records if (when := record_time(record)) is None or when < until]
+        evidence_days = {name: [day for day in days if first_instant(day) < until] for name, days in evidence_days.items()}
+    cutoff = since or earliest(records, evidence_days) or end
     weekly = declared_minutes(pursuits)
     tracked = state['tracked']
-    mine = records_by_pursuit(state['records'])
-    reset_at = zero_resets(state['records'])
+    mine = records_by_pursuit(records)
+    reset_at = zero_resets(records)
     counts = load_counts(journal_dir())
 
     rows = []
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
         own = mine.get(name, [])
-        seen = state['evidence_days'].get(name, [])
+        seen = evidence_days.get(name, [])
         start = max(cutoff, reset_at.get(name) or cutoff)
-        done = completed_since(own, seen, now, start, weekly.get(name))
+        done = completed_since(own, seen, end, start, weekly.get(name))
         logs = sum(1 for record in own if record.get('event') == journal.Event.DONE and in_window(record, start))
         passes = sum(1 for record in own if is_pass(record) and in_window(record, cutoff))
         if name not in state['watched'] and not done and not passes:
             continue
         asked = None
         if name in state['active']:
-            asked = asked_since(own, start, now, (state['intervals'][name], state['checkoff_size'][name]))
+            asked = asked_since(own, start, end, (state['intervals'][name], state['checkoff_size'][name]))
         rows.append(
             {
                 'pursuit': name,
@@ -2326,8 +2339,20 @@ def in_window(record: dict, cutoff: dt.datetime) -> bool:
     :func:`completed_since` — one record read two ways inside one report would
     count toward the log tally and not toward the amount.
     """
-    when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+    when = record_time(record)
     return when is not None and when >= cutoff
+
+
+def record_time(record: dict) -> dt.datetime | None:
+    """When a record says it happened, or None where its timestamp will not parse."""
+    return journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+
+
+def earliest(records: list[dict], evidence_days: dict[str, list[dt.date]]) -> dt.datetime | None:
+    """The first instant drift could read: the oldest record or app day."""
+    times = [when for record in records if (when := record_time(record))]
+    times += [first_instant(day) for days in evidence_days.values() for day in days]
+    return min(times, default=None)
 
 
 def render_drift(rows: list[dict]) -> None:
@@ -2354,7 +2379,7 @@ def render_drift(rows: list[dict]) -> None:
     console.print(table)
 
 
-def cmd_drift(days: int, as_json: bool) -> int:
+def cmd_drift(since: str | None, until: str | None, as_json: bool) -> int:
     """What each goal asked for over the window against what got done.
 
     The report the whole thing is for. It never adjusts a goal — what you said
@@ -2367,15 +2392,20 @@ def cmd_drift(days: int, as_json: bool) -> int:
     if not pursuits:
         return 1
     now = dt.datetime.now().astimezone()
+    try:
+        start, end = window(since or (None if until else DRIFT_SINCE), until, now)
+    except ValueError as error:
+        raise typer.BadParameter(str(error)) from None
     state = build_state(pursuits, now)
-    rows = drift_rows(pursuits, state, days)
+    rows = drift_rows(pursuits, state, start, end)
 
     if as_json:
         # See cmd_next: a Console would soft-wrap this into invalid JSON.
-        print(json.dumps({'window_days': days, 'rows': rows}, indent=2))
+        print(json.dumps({'since': start and start.isoformat(), 'until': (end or now).isoformat(), 'rows': rows}, indent=2))
         return 0
 
-    console.rule(f'[cyan]Drift · last {days} days', align='left')
+    opened = 'the first record' if start is None else f'{start:%d %b %Y %H:%M}'
+    console.rule(f'[cyan]Drift · {opened} to {"now" if end is None else f"{end:%d %b %Y %H:%M}"}', align='left')
     if not any(row['done'] for row in rows):
         console.print('Nothing recorded in the window yet — drift needs history before it can say anything.\n')
         return 0
@@ -2565,11 +2595,25 @@ def list_command(
 
 @app.command('drift')
 def drift_command(
-    days: Annotated[int, typer.Option('--days', help='How far back to measure.')] = 90,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            '--since',
+            help=(
+                'Where the window starts: a span back from now (30m, 12h, 7d, 2w), a day or an RFC 3339 instant. '
+                'With only --until, the first record.'
+            ),
+            show_default=DRIFT_SINCE,
+        ),
+    ] = None,
+    until: Annotated[
+        str | None,
+        typer.Option('--until', help='Where the window ends, in the same forms. A day includes all of itself.', show_default='now'),
+    ] = None,
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
     """What each goal asked for against what you did."""
-    run(lambda: cmd_drift(days, as_json))
+    run(lambda: cmd_drift(since, until, as_json))
 
 
 @app.command('dormant')

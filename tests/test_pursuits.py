@@ -1932,8 +1932,8 @@ def stub_evidence_days(monkeypatch, dates_by_pursuit: dict[str, list[str]]) -> N
     monkeypatch.setattr(pursuits.evidence, 'refresh', lambda *args, **kwargs: payload)
 
 
-def drift_rows(capsys, days: int = 90) -> dict:
-    assert pursuits.cmd_drift(days=days, as_json=True) == 0
+def drift_rows(capsys, since: str | None = None, until: str | None = None) -> dict:
+    assert pursuits.cmd_drift(since=since, until=until, as_json=True) == 0
     return {row['pursuit']: row for row in json.loads(capsys.readouterr().out)['rows']}
 
 
@@ -1994,10 +1994,11 @@ def test_each_pursuit_is_reported_in_its_own_unit(sandbox, capsys):
     assert (rows['read-library']['unit'], rows['read-library']['done']) == ('minutes', 90.0)
 
 
-def test_an_app_date_older_than_the_window_is_not_counted(sandbox, monkeypatch, capsys):
+def test_an_app_date_outside_the_window_is_not_counted(sandbox, monkeypatch, capsys):
     stub_evidence_days(monkeypatch, {'chores': [days_ago_iso(3), days_ago_iso(40)]})
 
-    assert drift_rows(capsys, days=7)['chores']['done'] == 1.0
+    assert drift_rows(capsys, since='7d')['chores']['done'] == 1.0
+    assert drift_rows(capsys, since='60d', until='10d')['chores']['done'] == 1.0
 
 
 def test_the_table_renders_when_only_an_app_recorded_anything(sandbox, monkeypatch, capsys):
@@ -2005,7 +2006,7 @@ def test_the_table_renders_when_only_an_app_recorded_anything(sandbox, monkeypat
     backend, and a guard on the log count suppressed the whole report there."""
     stub_evidence_days(monkeypatch, {'chores': [days_ago_iso(1)]})
 
-    assert pursuits.cmd_drift(days=90, as_json=False) == 0
+    assert pursuits.cmd_drift(since=None, until=None, as_json=False) == 0
 
     printed = [line for line in capsys.readouterr().out.splitlines() if line.startswith('chores')]
     assert printed and 'every 7d' in printed[0]
@@ -2013,7 +2014,7 @@ def test_the_table_renders_when_only_an_app_recorded_anything(sandbox, monkeypat
 
 def test_a_window_with_nothing_in_it_draws_no_table(sandbox, capsys):
     """An empty journal on a fresh register would otherwise print a row of zeroes per pursuit."""
-    assert pursuits.cmd_drift(days=90, as_json=False) == 0
+    assert pursuits.cmd_drift(since=None, until=None, as_json=False) == 0
 
     names = tuple(pursuits.load_pursuits())
     assert names
@@ -2116,7 +2117,7 @@ def test_a_paused_pursuit_with_days_keeps_them_and_asks_nothing(sandbox, capsys)
 def test_a_paused_pursuit_renders_a_dash_rather_than_an_amount_asked(sandbox, capsys):
     log_days_ago(sandbox / 'state', 'paused-thing', 1)
 
-    assert pursuits.cmd_drift(days=90, as_json=False) == 0
+    assert pursuits.cmd_drift(since=None, until=None, as_json=False) == 0
 
     printed = [line for line in capsys.readouterr().out.splitlines() if 'paused-thing' in line]
     assert printed and '—' in printed[0], printed
