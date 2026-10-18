@@ -1,7 +1,7 @@
 """Which forgotten thing to surface next, and the cursor that stops it repeating.
 
 Deciding what to put in front of you is an attention question, which is the one
-thing doit exists to answer. It sat in a display tool until now only by history.
+thing doit exists to answer.
 
 **One cursor per lens, never one across everything.** A single rotation makes a
 row's recurrence a function of the whole population rather than of what that row

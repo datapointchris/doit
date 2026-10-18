@@ -151,14 +151,15 @@ def library_dir() -> Path:
     path under `doit/` would say the collection is doit's, and the collection
     outlives any one tool that parses it.
 
-    Resolved here once rather than at every module that reaches into a
-    subdirectory of it: a literal repeated per consumer is one more place a move
-    has to be chased, and this path has already moved twice.
+    Resolved here once, and every reader reaches into a subdirectory of this
+    rather than resolving its own. A literal repeated per consumer is one more
+    place a move has to be chased, and an override per consumer lets two readers
+    answer from two checkouts.
 
-    The rungs are what let a second checkout be a pointer rather than a clone.
-    The library carried two clones before them — a dev one under `~/tools` and
-    the XDG one doit reads — kept in step by two sync mechanisms that never
-    compared notes and had no check that they agreed.
+    The rungs are what let a second checkout be a pointer rather than a clone. A
+    machine that authors cards points one rung at the checkout it commits from,
+    so writing a card and reading it are one file. Two clones would need two sync
+    mechanisms and a check that they agree, and nothing would run the check.
     """
     return resolve_path('DOIT_LIBRARY_DIR', 'library_dir', xdg_data_home() / 'terminal-library')
 

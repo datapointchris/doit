@@ -357,8 +357,8 @@ def article_reading(section: dict, today: dt.date) -> str:
     read leaves the count to speak for itself — a bare "0 read" says less than the
     backlog already did.
 
-    Older icb releases carry neither field, so both are read defensively and their
-    absence renders exactly what this lane rendered before them.
+    Both fields are read defensively, because an icb release may carry neither.
+    Without them the lane shows the unread count alone.
     """
     read_recently = section.get('read_last_30_days')
     if read_recently:

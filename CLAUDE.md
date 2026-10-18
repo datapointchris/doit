@@ -13,12 +13,13 @@ mirrors the `overdue` field the backends already emit. Backends own due-ness and
 that is the contract, and it is what lets the dashboard need no dependencies. Inside one package it
 reads as removable duplication. Do not remove it.
 
-**The review lane shells out to atuin on every render.** The dashboard deliberately stopped
-subprocessing its own lanes on cost grounds, so a new one reads as a regression. It is not the same
-call: those two spawned a Python interpreter each to re-read a local file this process could already
-open, whereas atuin is the only source that knows which machine ran a command, which is what makes a
-`scope: machine` item answerable at all. It is one query per process, shared by every item, and it
-falls back to this machine's zsh history whenever atuin cannot be asked.
+**The review lane shells out to atuin on every render.** The dashboard reads its own review and
+Labs lanes in-process on cost grounds, so a subprocess in a lane reads as a regression. It is not
+the same call: a subprocess for either of those would spawn a Python interpreter to re-read a local
+file this process can already open, whereas atuin is the only source that knows which machine ran a
+command, which is what makes an `observe: {scope: machine}` item answerable at all. It is one query
+per process, shared by every item, and it falls back to this machine's zsh history whenever atuin
+cannot be asked.
 
 **That one read has one parser, and every consumer folds it.** `observe.shell_history` answers "when
 was this register item last done". `usage.measure` folds the same cached read into a count and a

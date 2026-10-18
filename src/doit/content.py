@@ -215,10 +215,11 @@ def autosync(argv: list[str] | None = None) -> bool:
 
 
 def explain_missing() -> int:
-    """Say what to clone and where, rather than guessing a remote.
+    """Say there is no checkout, and print the clone to run by hand.
 
-    A default URL baked in here would be one more place a repo rename has to be
-    chased, and it would fail confusingly on a machine that wants a fork.
+    The command names `CONTENT_REMOTE`, the remote the clone on first run uses,
+    so running it by hand repeats that clone and nothing else.
+    `$DOIT_CONTENT_REMOTE` points both at a fork or a mirror.
     """
     # soft_wrap: a path rich has wrapped mid-way is a path you cannot copy, and
     # the whole point of this message is the command underneath it.

@@ -1,14 +1,11 @@
 """What the shell needs from doit, emitted by doit.
 
-Two blocks lived in dotfiles and referred to doit's internals: an eleven-line
-startup gate that tested `-x ~/.local/bin/menu-review`, and a completion function
-that read a cache path by hand. Both broke the moment the binaries collapsed into
-one, which is the tell — a config repo was carrying doit's implementation details
-because there was nowhere else to put them.
-
-Now dotfiles carries one `eval` line per block and doit carries the block. When
-the state path or the verb list changes, it changes here, and every machine picks
-it up on the next shell rather than on the next dotfiles edit.
+dotfiles carries one `eval` line per block, and doit carries the block. Each block
+names doit's internals: the state file the nudge gate reads, the cache file the
+completion reads, and the verb list. A block kept in a config repo would carry
+those details away from the code that owns them, and break whenever one moved.
+Kept here, a changed path or verb changes in one place, and every machine picks it
+up on its next shell rather than on the next dotfiles edit.
 
 The completion reads a flat file rather than calling doit. Completion has to feel
 instant and starting a Python process does not, so every run of the draw leaves
