@@ -61,6 +61,9 @@ class Skill:
 
     name: str
     description: str
+    # Claude Code appends this to the description in Claude's listing. It holds
+    # the triggers and how the skill differs from its siblings.
+    when_to_use: str
     argument_hint: str
     # Whether Claude may invoke it on its own. `disable-model-invocation: true`
     # also drops the description from the context window, so a skill that is
@@ -140,6 +143,7 @@ def load_skills() -> list[Skill]:
                 # frontmatter claims.
                 name=path.parent.name,
                 description=str(meta.get('description') or ''),
+                when_to_use=str(meta.get('when_to_use') or ''),
                 argument_hint=str(meta.get('argument-hint') or ''),
                 auto=not str(meta.get('disable-model-invocation') or '').lower().startswith('t'),
                 strict=strict,
@@ -196,6 +200,7 @@ def cmd_list(group: str | None, *, as_json: bool = False, full: bool = False) ->
                 'group': skill.group,
                 'summary': skill.summary,
                 'description': skill.description,
+                'when_to_use': skill.when_to_use,
                 'argument_hint': skill.argument_hint,
                 'auto_invocable': skill.auto,
                 'valid_yaml': skill.strict,
@@ -223,7 +228,7 @@ def cmd_list(group: str | None, *, as_json: bool = False, full: bool = False) ->
         for skill in grouped[name]:
             line = Text('  ')
             line.append(skill.name.ljust(width), style='green')
-            line.append(f'  {skill.description if full else skill.summary}')
+            line.append(f'  {f"{skill.description} {skill.when_to_use}".strip() if full else skill.summary}')
             # Full descriptions are paragraphs, so they wrap; a summary is one
             # line and is clipped rather than folded into a second row.
             console.print(line, no_wrap=not full, overflow=None if full else 'ellipsis')
@@ -270,6 +275,8 @@ def render_skill(skill: Skill, heading: bool = True) -> None:
         console.rule(f'[cyan]{skill.name}', align='left')
         console.print()
     block('Description', skill.description)
+    if skill.when_to_use:
+        block('When to use', skill.when_to_use)
     field('Invoke', f'/{skill.name} {skill.argument_hint}'.strip())
     field('Auto-invocable', 'yes' if skill.auto else f'no — only /{skill.name} reaches it')
     if not skill.strict:
