@@ -31,7 +31,7 @@ from doit.paths import library_dir
 from doit.render import console
 from doit.render import error_console
 
-WORKFLOWS_DIR = Path(os.environ.get('DOIT_WORKFLOWS_DIR') or library_dir() / 'workflows')
+WORKFLOWS_DIR = library_dir() / 'workflows'
 
 TEMPLATE = """\
 ---

@@ -21,10 +21,8 @@ wrapped, because a wrapped row is two rows.
 """
 
 import json
-import os
 import shutil
 from itertools import chain
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -36,7 +34,7 @@ from doit.paths import library_dir
 from doit.render import console
 from doit.render import error_console
 
-REGISTRY = Path(os.environ.get('DOIT_TOOLS_REGISTRY') or library_dir() / 'tools' / 'registry.yml')
+REGISTRY = library_dir() / 'tools' / 'registry.yml'
 
 # Shell keywords that can lead a `usage` string without being the command.
 LEADING_KEYWORDS = {'source', '.', 'eval', 'exec'}

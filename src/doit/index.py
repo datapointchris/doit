@@ -40,7 +40,7 @@ from doit.tools import invocation_head
 from doit.tools import load_registry
 
 SHELL_DIR = Path(os.environ.get('SHELL_DIR') or Path.home() / '.local' / 'shell')
-WORKFLOWS_DIR = Path(os.environ.get('DOIT_WORKFLOWS_DIR') or library_dir() / 'workflows')
+WORKFLOWS_DIR = library_dir() / 'workflows'
 FORGIT_PLUGIN = Path(os.environ.get('FORGIT_PLUGIN') or Path.home() / '.config' / 'zsh' / 'plugins' / 'forgit' / 'forgit.plugin.zsh')
 
 # The card that owns the tmux keybindings, so the in-tmux popup and this index

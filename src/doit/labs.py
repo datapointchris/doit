@@ -48,7 +48,7 @@ from doit.render import error_console
 from doit.state import load_state
 from doit.state import save_state
 
-LABS_DIR = Path(os.environ.get('DOIT_LABS_DIR') or library_dir() / 'labs')
+LABS_DIR = library_dir() / 'labs'
 STATE = Path(os.environ.get('DOIT_LABS_STATE') or xdg_state_home() / 'doit' / 'labs-state.json')
 
 # A flashcard session stays short — the research says a few minutes / <=5 new/day
