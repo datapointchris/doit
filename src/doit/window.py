@@ -15,9 +15,9 @@ def first_instant(day: dt.date) -> dt.datetime:
 
 
 def bound(value: str, now: dt.datetime, *, end: bool) -> dt.datetime:
-    """One flag's value as an aware instant; `end` marks `--until`, where a day includes all of itself."""
+    """One flag's value as an instant in the machine's zone; `end` marks `--until`, where a day includes all of itself."""
     if span := SPAN.fullmatch(value):
-        return now - dt.timedelta(**{SPAN_UNITS[span[2]]: int(span[1])})
+        return (now - dt.timedelta(**{SPAN_UNITS[span[2]]: int(span[1])})).astimezone()
     if DAY.fullmatch(value):
         day = dt.date.fromisoformat(value)
         return first_instant(day + dt.timedelta(days=1) if end else day)
@@ -27,7 +27,7 @@ def bound(value: str, now: dt.datetime, *, end: bool) -> dt.datetime:
         instant = None
     if instant is None or instant.tzinfo is None:
         raise ValueError(f'{value!r} is not {FORMS}. There is no month or year unit: write 26w, or a day.')
-    return instant
+    return instant.astimezone()
 
 
 def window(since: str | None, until: str | None, now: dt.datetime) -> tuple[dt.datetime | None, dt.datetime | None]:
