@@ -1001,6 +1001,7 @@ def build_state(
         # dates walks them.
         'tracked': tracked,
         'watched': watching,
+        'cycles': [cycle.name for cycle in running],
         'weights': weights,
         'intervals': intervals,
         'days_since': elapsed,
@@ -1722,6 +1723,10 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
 def explain_payload(state: dict) -> dict:
     """The full numeric state, the same shape recorded into every journal entry."""
     return {
+        # The weights are already scaled by these cycles. Naming them beside the
+        # weights lets a past day be read under the cycles in force that day,
+        # rather than under whatever the register declares when it is read.
+        'cycles': state['cycles'],
         'weights': state['weights'],
         'intervals': {name: round(value, 2) for name, value in state['intervals'].items() if not math.isinf(value)},
         'days_since': {name: None if value is None else round(value, 2) for name, value in state['days_since'].items()},
