@@ -16,18 +16,19 @@ needs no release of this repo.
 ## Install
 
 ```bash
-tag=$(git ls-remote --tags --refs --sort=-v:refname https://github.com/datapointchris/doit 'v*' | head -1 | cut -d/ -f3)
-uv tool install "git+https://github.com/datapointchris/doit@$tag"   # the newest release
-doit --version                                                      # the release that installed
-doit update --check                                                 # whether a newer one exists
-
-dotfiles packages apply --package doit   # or, where dotfiles manages the machine, its declared install
+uv tool install --index https://pypi.ichrisbirch.com/simple/ doit   # the newest release
+doit --version                                                       # the release that installed
+doit update --check                                                  # whether a newer one exists
 ```
+
+Every release is published to that package index. Name it on the install: without it uv asks PyPI,
+where `doit` is a different project. uv records the index beside the tool, which is where
+`doit update` reads it back.
 
 `doit update` installs the newest release over the running one. It refuses an install from a
 branch, a commit or a local checkout, because none of them carries a release version to compare.
-Install from a tag to keep it updatable. Every other command checks for a newer release at most
-once a day, and names one it finds in a line on stderr.
+Every other command checks for a newer release at most once a day, and names one it finds in a line
+on stderr.
 
 uv fetches the Python doit needs. git clones the cards. fzf is the picker behind `find`, `choose`
 and `labs choose`. atuin is optional: without it, shell history comes from this machine's zsh
