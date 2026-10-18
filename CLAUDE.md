@@ -9,9 +9,9 @@ that owns the domain, not here.
 ## What will look like a bug and is not
 
 **The dashboard duplicates due-ness.** It imports nothing from the cadence module and instead
-mirrors the `overdue` field the backends already emit. Backends own due-ness and speak `--json`;
-that is the contract, and it is what lets the dashboard need no dependencies. Inside one package it
-reads as removable duplication. Do not remove it.
+mirrors the `overdue` field the review and labs lanes already emit. Backends own due-ness and speak
+`--json`; that is the contract, and it is what lets the dashboard need no dependencies. Inside one
+package it reads as removable duplication. Do not remove it.
 
 **The review lane shells out to atuin on every render.** The dashboard reads its own review and
 Labs lanes in-process on cost grounds, so a subprocess in a lane reads as a regression. It is not
