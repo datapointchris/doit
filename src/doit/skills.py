@@ -12,13 +12,11 @@ rules that inflate every fuzzy match. Claude Code's own listing shows what the
 model sees, not what Chris wants to choose from. Here the whole description is the
 point.
 
-**Names group themselves.** A skill is `<verb>-<target>`, and the verb is the
-closed vocabulary the library is governed by — `review-`, `audit-`, `brief-`,
-`capture-`, plus the `learn-` namespace. Grouping splits on the name rather than
-matching a list, so the vocabulary lives in one place (`review-fleet` § "Skill
-health") and adding a verb needs no release here. A name that does not parse is
-visible by landing in its own group rather than by a check that has to be kept
-current.
+**Skills group by how they are reached.** `slash` holds the ones only `/name`
+reaches, because `disable-model-invocation` takes them out of Claude's listing,
+and `auto` holds the ones Claude may also start on its own. Slash skills come
+first. Nothing fires them, so a person has to come and find them. A name says
+what its skill does rather than what kind it is, so it is no basis for a group.
 
 This module owns `SKILLS_DIR` and the loader; `doit.index` reads through it, since
 a path defined per reader is a path that drifts.
@@ -28,7 +26,6 @@ import json
 import os
 import re
 from dataclasses import dataclass
-from itertools import chain
 from pathlib import Path
 from typing import Annotated
 
@@ -54,6 +51,9 @@ SUMMARY_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z])')
 # through YAML, which is the normal path.
 LENIENT_KEYS = ('name', 'description', 'argument-hint', 'disable-model-invocation')
 
+# How a skill is reached, in display order.
+GROUPS = ('slash', 'auto')
+
 
 @dataclass(frozen=True)
 class Skill:
@@ -76,7 +76,7 @@ class Skill:
 
     @property
     def group(self) -> str:
-        return self.name.split('-', 1)[0] if '-' in self.name else ''
+        return 'auto' if self.auto else 'slash'
 
     @property
     def summary(self) -> str:
@@ -172,27 +172,24 @@ def unknown_skill(name: str) -> int:
 
 def group_names(skills: list[Skill]) -> list[str]:
     """Every group present, in display order."""
-    return sorted({skill.group or 'ungrouped' for skill in skills})
+    present = {skill.group for skill in skills}
+    return [group for group in GROUPS if group in present]
 
 
-def check_group(group: str | None, skills: list[Skill]) -> None:
+def check_group(group: str | None) -> None:
     """Reject an unknown `--group` as a usage error, before anything renders.
 
     Ahead of the `--json` branch on purpose: a machine caller filtering on a
     group that does not exist was being handed `[]` and exit 0, which reads as
     "the group is empty" rather than "you named the wrong one".
-
-    Silent on an empty library, so the work box — which carries no `~/.claude`
-    at all — gets the explanation in `warn_no_skills` rather than a usage error
-    about a group that would have been valid anywhere else.
     """
-    if group and skills and group not in group_names(skills):
-        raise typer.BadParameter(f'unknown group {group!r}; choose from {", ".join(group_names(skills))}')
+    if group and group not in GROUPS:
+        raise typer.BadParameter(f'unknown group {group!r}; choose from {", ".join(GROUPS)}')
 
 
 def cmd_list(group: str | None, *, as_json: bool = False, full: bool = False) -> int:
     skills = load_skills()
-    check_group(group, skills)
+    check_group(group)
     if as_json:
         rows = [
             {
@@ -214,18 +211,13 @@ def cmd_list(group: str | None, *, as_json: bool = False, full: bool = False) ->
     if not skills:
         return warn_no_skills()
 
-    grouped: dict[str, list[Skill]] = {}
-    for skill in skills:
-        grouped.setdefault(skill.group or 'ungrouped', []).append(skill)
-    if group:
-        grouped = {group: grouped[group]}
-
+    shown = [skill for skill in skills if not group or skill.group == group]
     console.rule('[cyan]Skills', align='left')
-    width = max(len(skill.name) for skill in chain.from_iterable(grouped.values()))
-    for name in sorted(grouped):
+    width = max((len(skill.name) for skill in shown), default=0)
+    for name in group_names(shown):
         console.print()
         console.print(Text(name, style='yellow'))
-        for skill in grouped[name]:
+        for skill in [row for row in shown if row.group == name]:
             line = Text('  ')
             line.append(skill.name.ljust(width), style='green')
             line.append(f'  {f"{skill.description} {skill.when_to_use}".strip() if full else skill.summary}')
@@ -233,8 +225,7 @@ def cmd_list(group: str | None, *, as_json: bool = False, full: bool = False) ->
             # line and is clipped rather than folded into a second row.
             console.print(line, no_wrap=not full, overflow=None if full else 'ellipsis')
 
-    shown = sum(len(rows) for rows in grouped.values())
-    console.print(f'\n  {shown} skills · [cyan]doit claude skills show <name>[/]')
+    console.print(f'\n  {len(shown)} skills · [cyan]doit claude skills show <name>[/]')
     report_invalid(skills)
     return 0
 
@@ -290,20 +281,19 @@ def render_skill(skill: Skill, heading: bool = True) -> None:
 
 
 def cmd_groups(*, as_json: bool = False) -> int:
-    counts: dict[str, int] = {}
-    for skill in load_skills():
-        counts[skill.group or 'ungrouped'] = counts.get(skill.group or 'ungrouped', 0) + 1
+    loaded = load_skills()
+    counts = {name: sum(skill.group == name for skill in loaded) for name in group_names(loaded)}
     if as_json:
-        print(json.dumps([{'group': name, 'skills': counts[name]} for name in sorted(counts)], indent=2))
+        print(json.dumps([{'group': name, 'skills': count} for name, count in counts.items()], indent=2))
         return 0
     if not counts:
         return warn_no_skills()
     console.rule('[cyan]Skill groups', align='left')
     width = max(len(name) for name in counts)
-    for name in sorted(counts):
+    for name, count in counts.items():
         line = Text('  ')
         line.append(name.ljust(width), style='green')
-        line.append(f'  {counts[name]}')
+        line.append(f'  {count}')
         console.print(line)
     console.print('\n  [cyan]doit claude skills list --group <name>[/]')
     return 0
@@ -314,11 +304,11 @@ app = typer.Typer(name='skills', no_args_is_help=True, help='The Claude skills y
 
 @app.command('list')
 def list_command(
-    group: Annotated[str | None, typer.Option('--group', help='Limit to one verb group.')] = None,
+    group: Annotated[str | None, typer.Option('--group', help='Limit to slash or auto.')] = None,
     full: Annotated[bool, typer.Option('--full', help='The whole description, not its first sentence.')] = False,
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
-    """Every skill and when it fires, grouped by verb."""
+    """Every skill and when it fires, slash skills first, then auto."""
     raise typer.Exit(cmd_list(group, as_json=as_json, full=full))
 
 
@@ -331,7 +321,7 @@ def show_command(name: Annotated[str, typer.Argument(help='The skill to describe
 # A namespace rather than a bare `groups` that lists, matching the call already
 # made for `doit tools categories`: every node in the tree prints help bare, so
 # walking down one token at a time never runs something you did not ask for.
-groups_app = typer.Typer(name='groups', no_args_is_help=True, help='The verb groups skills are named under.')
+groups_app = typer.Typer(name='groups', no_args_is_help=True, help='How skills are reached: slash only, or auto.')
 app.add_typer(groups_app, name='groups')
 
 

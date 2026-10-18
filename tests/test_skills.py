@@ -1,9 +1,9 @@
 """Tests for doit.skills — reading the library, grouping it, and describing one.
 
-The fixture library is deliberately four awkward cases rather than four tidy
+The fixture library is deliberately three awkward cases rather than three tidy
 ones: a description carrying `e.g.`, a description whose unquoted `: ` makes the
-frontmatter invalid YAML, a manual-only skill, and a name that does not parse as
-`<verb>-<target>`. Each is something the real library actually contains.
+frontmatter invalid YAML, and a manual-only skill. Each is something the real
+library actually contains.
 """
 
 import json
@@ -64,26 +64,15 @@ def test_frontmatter_that_never_closes_is_rot_not_an_absent_block():
     assert absent[2] is True
 
 
-def test_the_group_comes_from_the_name_not_a_hardcoded_vocabulary():
-    """The closed verb set lives in review-fleet; a copy here would drift."""
-    names = by_name()
-
-    assert names['capture-note'].group == 'capture'
-    assert names['audit-repo'].group == 'audit'
-    assert names['orphan'].group == ''
-
-
 def test_sections_are_the_body_headings():
     assert by_name()['capture-note'].sections == ('Step 1 — Identify the tidbit', 'Step 2 — Write it')
 
 
-def test_list_groups_by_verb_and_puts_an_unparseable_name_on_its_own(capsys):
+def test_list_puts_slash_skills_before_auto(capsys):
     assert skills.cmd_list(None) == 0
 
     out = capsys.readouterr().out
-    assert 'capture' in out
-    assert 'ungrouped' in out
-    assert 'orphan' in out
+    assert out.index('slash') < out.index('audit-repo') < out.index('auto') < out.index('capture-note')
 
 
 def test_list_reports_frontmatter_that_is_not_valid_yaml(capsys):
@@ -111,15 +100,15 @@ def test_list_json_carries_what_a_caller_would_filter_on(capsys):
     rows = {row['name']: row for row in json.loads(capsys.readouterr().out)}
     assert rows['audit-repo']['auto_invocable'] is False
     assert rows['learn-explain']['valid_yaml'] is False
-    assert rows['capture-note']['group'] == 'capture'
+    assert rows['audit-repo']['group'] == 'slash'
 
 
 def test_list_can_be_scoped_to_one_group(capsys):
-    assert skills.cmd_list('capture') == 0
+    assert skills.cmd_list('slash') == 0
 
     out = capsys.readouterr().out
-    assert 'capture-note' in out
-    assert 'audit-repo' not in out
+    assert 'audit-repo' in out
+    assert 'capture-note' not in out
 
 
 def test_an_unknown_group_is_a_usage_error_naming_the_ones_that_exist():
@@ -127,7 +116,7 @@ def test_an_unknown_group_is_a_usage_error_naming_the_ones_that_exist():
     result = CliRunner().invoke(cli_app, ['claude', 'skills', 'list', '--group', 'nope'])
 
     assert result.exit_code == 2
-    assert 'ungrouped' in result.output
+    assert 'slash' in result.output
 
 
 def test_an_unknown_group_is_caught_before_json_is_emitted():
@@ -136,14 +125,6 @@ def test_an_unknown_group_is_caught_before_json_is_emitted():
 
     assert result.exit_code == 2
     assert '[]' not in result.output
-
-
-def test_an_empty_library_does_not_turn_a_group_into_a_usage_error(tmp_path, monkeypatch, capsys):
-    """On the work box every group is unknown; the explanation is the useful answer."""
-    monkeypatch.setattr(skills, 'SKILLS_DIR', tmp_path / 'absent')
-
-    assert skills.cmd_list('capture') == 0
-    assert 'work box' in capsys.readouterr().out
 
 
 def test_show_accepts_the_slash_form_a_user_would_type(capsys):
@@ -167,11 +148,11 @@ def test_an_unknown_skill_points_at_the_federated_search(capsys):
     assert 'doit find nope' in err
 
 
-def test_groups_counts_each_verb(capsys):
+def test_groups_counts_each_way_a_skill_is_reached(capsys):
     assert skills.cmd_groups(as_json=True) == 0
 
     counts = {row['group']: row['skills'] for row in json.loads(capsys.readouterr().out)}
-    assert counts == {'audit': 1, 'capture': 1, 'learn': 1, 'ungrouped': 1}
+    assert counts == {'slash': 1, 'auto': 2}
 
 
 def test_a_machine_without_the_library_is_not_an_error(tmp_path, monkeypatch, capsys):
