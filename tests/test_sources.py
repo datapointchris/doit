@@ -226,9 +226,9 @@ def test_a_block_that_is_not_a_mapping_names_itself(tmp_path):
 def test_today_replaces_a_whole_argv_part(tmp_path):
     stamp = dt.date(2026, 8, 6)
 
-    resolved = sources.resolved_command(['icb', 'tasks', '--start', '{today}', '--json'], stamp)
+    resolved = sources.resolved_command(['icb', 'tasks', '--since', '{today}', '--json'], stamp)
 
-    assert resolved == ['icb', 'tasks', '--start', '2026-08-06', '--json']
+    assert resolved == ['icb', 'tasks', '--since', '2026-08-06', '--json']
 
 
 def test_today_leaves_a_part_that_merely_contains_it_alone():

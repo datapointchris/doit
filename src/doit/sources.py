@@ -92,7 +92,7 @@ sources:
 # backend gets the date as its own argument.
 completions:
   icb-tasks:
-    command: [icb, tasks, list, --status, completed, --start, '{today}', --json]
+    command: [icb, tasks, list, --status, completed, --since, '{today}', --json]
     adapter: icb-tasks
 """
 
