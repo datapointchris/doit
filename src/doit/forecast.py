@@ -205,6 +205,7 @@ def simulate(
     budget: float,
     replicate: int,
     evidence_days: dict[str, list[dt.date]] | None = None,
+    cycles: list[pursuits.Cycle] | None = None,
 ) -> list[tuple[int, str, float]]:
     """One replicate: the real draw, run forward a day at a time against its own journal.
 
@@ -214,12 +215,16 @@ def simulate(
     backend keeps reporting it as freshly done never comes up at all. Frozen
     rather than dropped, so day one reads a pursuit paid through its app exactly
     as `doit next` does.
+
+    ``cycles`` are read once by the caller and judged against each simulated
+    day's date, so a cycle lapses inside the run on the day it would live.
+    None reads them from the register on every day.
     """
     records = list(seed_records)
     done: list[tuple[int, str, float]] = []
     for day in range(days):
         when = start + dt.timedelta(days=day)
-        state = pursuits.build_state(register, when, records=records, observed=observed, evidence_days=evidence_days)
+        state = pursuits.build_state(register, when, records=records, observed=observed, evidence_days=evidence_days, cycles=cycles)
         selection = pursuits.compute_draw(state, seed=replicate * 100_003 + day)
         for name, minutes in spend_a_day(selection['offered'], cost, budget):
             done.append((day, name, minutes))
@@ -249,7 +254,8 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
     # Read after the live state, which writes a first sighting for any pursuit the
     # journal has never zeroed. Seeded without one, every simulated day would put
     # that pursuit's start one interval back from the day itself.
-    live = pursuits.build_state(register, now)
+    cycles = pursuits.load_cycles(register)
+    live = pursuits.build_state(register, now, cycles=cycles)
     records = journal.read_all(directory) if directory.exists() else []
     active = live['active']
     cost = durations(active, records)
@@ -257,7 +263,7 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
     units = {name: 'minutes' if name in live['weekly_minutes'] else 'checkoffs' for name in active}
 
     runs = [
-        simulate(register, records, live['observed'], cost, now, horizon, budget, replicate, live['evidence_days'])
+        simulate(register, records, live['observed'], cost, now, horizon, budget, replicate, live['evidence_days'], cycles)
         for replicate in range(replicates)
     ]
 
