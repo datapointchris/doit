@@ -1,4 +1,7 @@
-"""The window a read covers: `--since` and `--until`, each a span, a day or an instant."""
+"""The window a read covers: `--since` and `--until`, each a span, a day or an instant.
+
+The span grammar here is the one every flag taking a span reads.
+"""
 
 import datetime as dt
 import re
@@ -9,6 +12,18 @@ SPAN_UNITS = {'s': 'seconds', 'm': 'minutes', 'h': 'hours', 'd': 'days', 'w': 'w
 FORMS = 'a span (30m, 12h, 7d, 2w), a day (2026-10-01) or an RFC 3339 instant'
 
 
+def span(value: str, units: str = 'smhdw') -> dt.timedelta | None:
+    """A span such as 30m or 2w as a duration, None where it is not one in `units`.
+
+    Every flag that takes a span parses it here, so a letter means one thing on every flag.
+    A flag narrows `units` where a finer one means nothing to it.
+    """
+    match = SPAN.fullmatch(value)
+    if match is None or match[2] not in units:
+        return None
+    return dt.timedelta(**{SPAN_UNITS[match[2]]: int(match[1])})
+
+
 def first_instant(day: dt.date) -> dt.datetime:
     """The day's first instant, built in the machine's zone rather than reached by adding hours."""
     return dt.datetime(day.year, day.month, day.day).astimezone()
@@ -16,8 +31,8 @@ def first_instant(day: dt.date) -> dt.datetime:
 
 def bound(value: str, now: dt.datetime, *, end: bool) -> dt.datetime:
     """One flag's value as an instant in the machine's zone; `end` marks `--until`, where a day includes all of itself."""
-    if span := SPAN.fullmatch(value):
-        return (now - dt.timedelta(**{SPAN_UNITS[span[2]]: int(span[1])})).astimezone()
+    if (length := span(value)) is not None:
+        return (now - length).astimezone()
     if DAY.fullmatch(value):
         day = dt.date.fromisoformat(value)
         return first_instant(day + dt.timedelta(days=1) if end else day)

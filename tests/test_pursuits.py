@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 
 import pytest
+import typer
 from test_evidence import emitting
 from typer.testing import CliRunner
 
@@ -506,22 +507,6 @@ def test_match_pursuit_refuses_an_ambiguous_prefix():
 
 def test_match_pursuit_returns_none_for_a_miss():
     assert pursuits.match_pursuit('nope', pursuits.load_pursuits()) is None
-
-
-@pytest.mark.parametrize(
-    ('token', 'expected'),
-    [('90m', dt.timedelta(minutes=90)), ('3h', dt.timedelta(hours=3)), ('2d', dt.timedelta(days=2)), ('1w', dt.timedelta(weeks=1))],
-)
-def test_parse_ago_units(token, expected):
-    assert pursuits.parse_ago(token) == expected
-
-
-def test_parse_ago_defaults_a_bare_number_to_hours():
-    assert pursuits.parse_ago('3') == dt.timedelta(hours=3)
-
-
-def test_parse_ago_rejects_nonsense():
-    assert pursuits.parse_ago('yesterday') is None
 
 
 def test_dig_follows_a_dotted_path():
@@ -1916,7 +1901,7 @@ def test_a_skip_names_when_the_pursuit_returns(sandbox, monkeypatch, capsys):
     assert pursuits.cmd_skip('read-library', '3d') == 0
 
     # The interpolated values, never the sentence around them. A year printed as
-    # `08 Sep` makes `--for 1y` and `--for 1d` read identically, and the verb that
+    # `08 Sep` makes `--for 52w` and `--for 1d` read identically, and the verb that
     # retires the mark has to be reachable from the screen that writes it.
     #
     # The date comes from the record the command wrote, so there is one clock
@@ -1932,6 +1917,12 @@ def test_skip_span_falls_back_to_a_day_where_the_weight_implies_no_interval():
     assert pursuits.skip_span(None, math.inf) == 1
     assert pursuits.skip_span(None, None) == 1
     assert pursuits.skip_span('2w', 3.0) == 14
+
+
+@pytest.mark.parametrize('duration', ['1mo', '1y', '3', '12h', '0d'])
+def test_skip_for_takes_whole_days_or_weeks_only(duration):
+    with pytest.raises(typer.BadParameter):
+        pursuits.skip_span(duration, 3.0)
 
 
 def test_a_reset_writes_a_zero_point_without_touching_what_happened(sandbox, monkeypatch):
@@ -2346,7 +2337,7 @@ def test_a_backdated_log_reports_the_standing_the_next_command_will(sandbox, mon
 
 def test_resume_ends_a_standing_skip(sandbox, monkeypatch):
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
-    assert pursuits.cmd_skip('chores', '1y') == 0
+    assert pursuits.cmd_skip('chores', '52w') == 0
     assert 'chores' in pursuits.build_state(pursuits.load_pursuits(), dt.datetime.now().astimezone())['suppressed']
 
     assert pursuits.cmd_resume('chores') == 0
@@ -2374,10 +2365,10 @@ def test_resuming_a_pursuit_with_no_skip_writes_nothing(sandbox, monkeypatch):
 
 
 def test_a_later_skip_shortens_an_earlier_one(sandbox, monkeypatch):
-    """Taking the furthest-reaching expiry made a mistyped `--for 1y` unreachable
+    """Taking the furthest-reaching expiry made a mistyped `--for 52w` unreachable
     by any command the tool ships, on a file that is never rewritten."""
     monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
-    assert pursuits.cmd_skip('chores', '1y') == 0
+    assert pursuits.cmd_skip('chores', '52w') == 0
     assert pursuits.cmd_skip('chores', '1d') == 0
 
     now = dt.datetime.now().astimezone()
