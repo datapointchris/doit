@@ -1469,6 +1469,58 @@ def test_a_build_journals_a_pace_when_the_register_changes_and_only_then(tmp_pat
     ]
 
 
+CYCLE_REGISTER = """
+pursuits:
+  chore:
+    weight: 25
+    cadence: 4d
+  read:
+    weight: 25
+    weekly_minutes: 315
+cycles:
+  - name: hold
+    until: 2026-08-07
+    multiply: {read: 2}
+    cadence: {chore: 2d}
+"""
+
+
+def test_a_cycle_steers_weights_and_pace_through_its_until_date_and_then_lapses(tmp_path, monkeypatch):
+    """Four days at the held 2d and four at the declared 4d owe 2 + 1, so the
+    days a cycle ran are priced at its cadence and none after it."""
+    running = balance_state(tmp_path, monkeypatch, [zeroed('chore', 0.0)], CYCLE_REGISTER)
+    lapsed = pursuits.build_state(pursuits.load_pursuits(), NOW + dt.timedelta(days=4))
+    later = pursuits.build_state(pursuits.load_pursuits(), NOW + dt.timedelta(days=8))
+
+    assert running['weights'] == {'chore': 25.0, 'read': 50.0}
+    assert running['intervals']['chore'] == 2.0
+    assert lapsed['weights'] == {'chore': 25.0, 'read': 25.0}
+    assert lapsed['intervals']['chore'] == 4.0
+    assert later['balance']['chore'] == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize(
+    'cycle',
+    [
+        '{name: c, until: 2026-08-07, multiply: {missing: 2}}',
+        '{name: c, until: 2026-08-07, multiply: {read: 0}}',
+        '{name: c, until: 2026-08-07, cadence: {read: 2d}}',
+        '{name: c, until: 2026-08-07, cadence: {chore: 1w}}',
+        '{name: c, multiply: {read: 2}}',
+        '{name: c, until: 2026-08-07, multiplier: {read: 2}}',
+    ],
+)
+def test_a_cycle_the_draw_cannot_trust_is_refused(tmp_path, cycle):
+    """A cycle naming no pursuit, a weight it would zero, a timed pursuit moved
+    onto a cadence, a pace that is not whole days, a cycle with no end, and a
+    key the loader does not read would each lean the draw by something nobody wrote."""
+    path = write_register(tmp_path, CYCLE_REGISTER.split('cycles:')[0] + f'cycles:\n  - {cycle}\n')
+    register = pursuits.load_pursuits(path)
+
+    with pytest.raises(pursuits.RegisterError):
+        pursuits.load_cycles(register, path)
+
+
 HISTORY_REGISTER = """
 pursuits:
   daily:

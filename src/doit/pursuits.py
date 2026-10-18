@@ -277,6 +277,22 @@ TEMPLATE = """\
 #
 # Standing counts back to the zero point, so the command has to answer that far
 # back. A `--limit` on it drops the oldest days, and each one dropped is owed.
+#
+# A cycle leans the draw for a stretch and lapses by itself after its until
+# date, so nothing has to be put back by hand. Cycles sit in a list beside
+# pursuits, which stay as declared. `multiply` scales a weight, and the
+# multipliers of running cycles compound. `cadence` holds a pursuit that counts
+# occurrences to a tighter pace. It is a floor, so where two running cycles hold
+# one pursuit the shorter cadence wins. A cycle sets no target and keeps no count.
+#
+#  cycles:
+#    - name: read-more
+#      until: 2026-09-20
+#      multiply: {read-library: 2.4}
+#    - name: hold
+#      until: 2026-09-05
+#      multiply: {study-computer-science: 0.3}
+#      cadence: {chores: 2d}
 
 pursuits:
   chores:
@@ -421,6 +437,98 @@ def load_settings(path: Path | None = None) -> dict:
     if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
         raise RegisterError(f'{REGISTER if path is None else path}: forecast.budget_minutes must be a positive whole number')
     return settings
+
+
+# Keys a cycle may declare. Refused otherwise, for the reason a pursuit's are.
+CYCLE_FIELDS = {'name', 'until', 'multiply', 'cadence'}
+
+
+class Cycle(NamedTuple):
+    """A stretch of time that leans the draw one way, through its last day."""
+
+    name: str
+    until: dt.date
+    multiply: dict[str, float]
+    cadence: dict[str, str]
+
+
+def load_cycles(pursuits: dict, path: Path | None = None) -> list[Cycle]:
+    """The register's `cycles:` list, validated against the pursuits it names.
+
+    A cycle scales weights and tightens cadences until its `until` date, then
+    lapses by itself. Nothing in `pursuits:` is edited to start one or put back to
+    end one, so the base register stands throughout. It carries no target and no
+    count against one: it changes what is offered, never what is measured.
+
+    A multiplier is positive, because a pursuit wanted out of the draw is paused,
+    and a zero weight would stop its pace from asking anything. A cadence
+    override needs a pursuit that already counts occurrences. Moving a timed
+    pursuit onto a cadence changes its unit, and that restarts its balance.
+    """
+    path = register_path() if path is None else path
+    if not path.exists():
+        return []
+    document = yaml.safe_load(path.read_text()) or {}
+    declared = document.get('cycles') or []
+    if not isinstance(declared, list):
+        raise RegisterError(f'{path}: `cycles` must be a list, each entry with a name and an until date')
+    cycles = []
+    for entry in declared:
+        if not isinstance(entry, dict) or not isinstance(entry.get('name'), str) or not entry['name']:
+            raise RegisterError(f'{path}: every cycle is a mapping with a name')
+        name = entry['name']
+        unknown = set(entry) - CYCLE_FIELDS
+        if unknown:
+            raise RegisterError(f'cycle {name}: unknown key(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(CYCLE_FIELDS))}')
+        until = entry.get('until')
+        if not isinstance(until, dt.date) or isinstance(until, dt.datetime):
+            raise RegisterError(f'cycle {name}: until must be a date (YYYY-MM-DD), the last day the cycle runs')
+        multiply = entry.get('multiply') or {}
+        cadence = entry.get('cadence') or {}
+        if not isinstance(multiply, dict) or not isinstance(cadence, dict):
+            raise RegisterError(f'cycle {name}: multiply and cadence are each a mapping of pursuit to value')
+        for pursuit in [*multiply, *cadence]:
+            if pursuit not in pursuits:
+                raise RegisterError(f'cycle {name}: {pursuit} is not a pursuit in the register')
+        for pursuit, factor in multiply.items():
+            if not isinstance(factor, int | float) or isinstance(factor, bool) or factor <= 0:
+                raise RegisterError(f'cycle {name}: multiply.{pursuit} must be a positive number')
+        for pursuit, days in cadence.items():
+            if pursuits[pursuit].get('cadence') is None:
+                raise RegisterError(f'cycle {name}: cadence.{pursuit} overrides a cadence, and {pursuit} declares none')
+            if not DAYS_CADENCE.fullmatch(str(days).strip()):
+                raise RegisterError(f'cycle {name}: cadence.{pursuit} is a whole number of days, like 3d or 9d')
+        cycles.append(
+            Cycle(
+                name,
+                until,
+                {pursuit: float(factor) for pursuit, factor in multiply.items()},
+                {pursuit: str(days).strip() for pursuit, days in cadence.items()},
+            )
+        )
+    return cycles
+
+
+def running_cycles(cycles: list[Cycle], today: dt.date) -> list[Cycle]:
+    """The cycles in force on ``today``, which includes each one's `until` day."""
+    return [cycle for cycle in cycles if today <= cycle.until]
+
+
+def cycle_weight(name: str, config: dict, running: list[Cycle]) -> float:
+    """A pursuit's declared weight, times every running cycle's multiplier for it."""
+    return float(config['weight']) * math.prod(cycle.multiply.get(name, 1.0) for cycle in running)
+
+
+def cycle_paced(name: str, config: dict, running: list[Cycle]) -> dict:
+    """A pursuit's config with the shortest cadence any running cycle holds it to.
+
+    The shortest, because each override is a floor somebody asked for, and only
+    the tightest meets every one of them.
+    """
+    overrides = [cycle.cadence[name] for cycle in running if name in cycle.cadence]
+    if not overrides:
+        return config
+    return {**config, 'cadence': min(overrides, key=parse_cadence)}
 
 
 def term_ended(config: dict, today: dt.date) -> bool:
@@ -796,6 +904,7 @@ def build_state(
     records: list[dict] | None = None,
     observed: dict[str, dt.datetime] | None = None,
     evidence_days: dict[str, list[dt.date]] | None = None,
+    cycles: list[Cycle] | None = None,
 ) -> dict:
     """Everything the draw and every view need: intervals, balances, weights, the pool.
 
@@ -823,14 +932,21 @@ def build_state(
     only way the forecast could come to disagree with the draw it claims to
     predict. Injecting them is also what keeps a thirty-day simulation from
     making thirty evidence calls and thirty file reads per replicate.
+
+    ``cycles`` defaults to the register's `cycles:` list. Those running on
+    ``now``'s date scale the weights and hold cadences tighter. The held cadence
+    is what gets journaled as the pace, so the days a cycle runs are priced at
+    it and the days after at the register's own.
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
     watching = watched(pursuits, today)
     tracked = {name: config for name, config in watching.items() if name not in active}
-    weights = {name: float(config['weight']) for name, config in active.items()}
+    running = running_cycles(load_cycles(pursuits) if cycles is None else cycles, today)
+    weights = {name: cycle_weight(name, config, running) for name, config in active.items()}
     weekly_minutes = declared_minutes(pursuits)
-    paces = {name: pace(config) for name, config in active.items()}
+    held = {name: cycle_paced(name, config, running) for name, config in active.items()}
+    paces = {name: pace(config) for name, config in held.items()}
     intervals = {name: interval for name, (interval, _) in paces.items()}
     sizes = {name: size for name, (_, size) in paces.items()}
 
@@ -839,7 +955,7 @@ def build_state(
         records = journal.read_all(directory) if directory and directory.exists() else []
     if directory is not None and directory.exists():
         records = [*records, *record_first_sightings(active, records, intervals, now)]
-        records = [*records, *record_pace_changes(pursuits, active, records, now)]
+        records = [*records, *record_pace_changes(pursuits, held, records, now)]
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
