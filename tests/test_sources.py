@@ -9,6 +9,7 @@ import datetime as dt
 import json
 
 import pytest
+from typer.testing import CliRunner
 
 from doit import lanes
 from doit import sources
@@ -294,6 +295,25 @@ def test_a_rejected_command_names_the_program_to_reinstall_rather_than_the_sourc
     result = sources.Result(source='prs', exit_code=2, failure=sources.Failure.FAILED)
 
     assert sources.reason('prs', result) == 'installed pull-requests does not understand `--json` — reinstall it'
+
+
+def test_list_json_carries_each_sources_block_and_verdict(tmp_path, monkeypatch):
+    body = (
+        'sources:\n'
+        f'  day:\n    command: [echo, {json.dumps(json.dumps(CONFORMING))}]\n'
+        'completions:\n'
+        '  gone:\n    command: [definitely-not-a-real-command]\n'
+    )
+    monkeypatch.setattr(sources, 'SOURCES', write_sources(tmp_path, body))
+
+    result = CliRunner().invoke(sources.app, ['list', '--json'])
+
+    assert result.exit_code == 0
+    rows = {row['id']: row for row in json.loads(result.stdout)}
+    assert rows['day']['block'] == 'outstanding'
+    assert (rows['day']['answered'], rows['day']['lanes'], rows['day']['via']) == (True, 1, 'contract')
+    assert rows['gone']['block'] == 'today'
+    assert (rows['gone']['answered'], rows['gone']['failure'], rows['gone']['lanes']) == (False, 'not-installed', 0)
 
 
 @pytest.mark.parametrize('bad', [None, {'lanes': 'nope'}, [], 'text'])
