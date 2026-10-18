@@ -102,6 +102,7 @@ from doit.render import join_context
 from doit.render import span_text
 from doit.render import terminal_width
 from doit.window import first_instant
+from doit.window import span
 from doit.window import window
 
 REGISTER_ENV = 'DOIT_PURSUITS'
@@ -881,7 +882,7 @@ def skip_expiry(records: list[dict]) -> dt.datetime | None:
 
     The newest rather than the one reaching furthest, so a later skip can shorten
     an earlier one and `doit pursuits resume` can end one outright. Taking the
-    maximum expiry instead makes a mistyped `--for 1y` unreachable by any command
+    maximum expiry instead makes a mistyped `--for 52w` unreachable by any command
     the tool ships, on an append-only file that is never rewritten.
     """
     newest: dt.datetime | None = None
@@ -1885,16 +1886,6 @@ def prompt_for_minutes() -> int:
         error_console.print('  A whole number of minutes.')
 
 
-def parse_ago(token: str) -> dt.timedelta | None:
-    """'3h' → 3 hours, '2d' → 2 days, '90m' → 90 minutes. None if unparsable."""
-    units = {'m': 'minutes', 'h': 'hours', 'd': 'days', 'w': 'weeks'}
-    number = ''.join(character for character in token if character.isdigit())
-    unit = ''.join(character for character in token if character.isalpha()) or 'h'
-    if not number or unit not in units:
-        return None
-    return dt.timedelta(**{units[unit]: int(number)})
-
-
 def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_yes: bool) -> dict | None:
     """Run the pursuit's write-through command against the item that was offered.
 
@@ -2035,9 +2026,9 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     state = build_state(pursuits, now)
     occurred = now
     if ago:
-        delta = parse_ago(ago)
+        delta = span(ago)
         if delta is None:
-            raise typer.BadParameter('--ago takes 90m / 3h / 2d / 1w')
+            raise typer.BadParameter(f'--ago takes a span such as 30s, 90m, 3h, 2d or 1w, not {ago!r}.')
         occurred = now - delta
 
     # The cached draw is what was on screen, so it already knows which concrete
@@ -2137,14 +2128,14 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
     if matched not in state['active']:
         error_console.print(f'{matched} is not in the draw ({why_unpriced(state, matched)}), so there is nothing to pass.')
         return 1
-    span = skip_span(duration, state['intervals'][matched])
-    expires = now + dt.timedelta(days=span)
+    days = skip_span(duration, state['intervals'][matched])
+    expires = now + dt.timedelta(days=days)
     record_event(journal.Event.SKIP, matched, state, {'expires_at': expires.isoformat(), 'draw_id': cached.get('draw_id')})
     # The pass only means something against a new draw, and the span it covers is
     # already in the journal, so the stale cache goes.
     DRAW_CACHE.unlink(missing_ok=True)
     passed = Text.from_markup('[yellow]Passed[/] ')
-    passed.append(f'{matched} — out of the draw for {span}d, until {expires:%d %b %Y}. Owes nothing meanwhile, weight untouched.')
+    passed.append(f'{matched} — out of the draw for {days}d, until {expires:%d %b %Y}. Owes nothing meanwhile, weight untouched.')
     console.print(passed)
     console.print(f'  Back sooner:  [cyan]doit pursuits resume {matched}[/]')
     return 0
@@ -2204,10 +2195,13 @@ def skip_span(duration: str | None, interval: float | None) -> int:
     interval gets a day, which is the shortest a pass can be and still be one.
     """
     if duration:
-        span = parse_cadence(duration)
-        if span <= 0:
-            raise typer.BadParameter('--for takes 3d / 2w / 1mo / 1y')
-        return span
+        # A pass is counted in whole days, so a finer unit has nothing to mean here.
+        length = span(duration, units='dw')
+        if length is None or length.days <= 0:
+            raise typer.BadParameter(
+                f'--for takes days or weeks, such as 3d or 2w, not {duration!r}. There is no month or year unit: write 4w.'
+            )
+        return length.days
     if interval is None or math.isinf(interval):
         return 1
     return max(round(interval), 1)
@@ -2670,7 +2664,7 @@ def next_command(
 def log_command(
     pursuit: Annotated[str | None, typer.Argument(help='The pursuit, by name or unambiguous prefix (asked for when omitted).')] = None,
     note: Annotated[list[str] | None, typer.Argument(help='Free text recorded with the entry (asked for when omitted).')] = None,
-    ago: Annotated[str | None, typer.Option('--ago', help='Log something you did earlier: 90m / 3h / 2d / 1w.')] = None,
+    ago: Annotated[str | None, typer.Option('--ago', help='Log something you did earlier: a span such as 30s, 90m, 3h, 2d or 1w.')] = None,
     minutes: Annotated[
         int | None,
         typer.Option('--minutes', min=1, help='How long it took, in whole minutes (asked for when a pursuit is measured in time).'),
@@ -2691,7 +2685,7 @@ def skip_command(
     pursuit: Annotated[str | None, typer.Argument(help='The pursuit, by name or unambiguous prefix (asked for when omitted).')] = None,
     duration: Annotated[
         str | None,
-        typer.Option('--for', help='How long to pass for: 3d / 2w / 1mo. One interval when omitted.'),
+        typer.Option('--for', help='How long to pass for, in days or weeks: 3d or 2w. One interval when omitted.'),
     ] = None,
 ) -> None:
     """Pass on one — out of the draw until it expires, owing nothing meanwhile."""
