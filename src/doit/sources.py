@@ -329,7 +329,7 @@ def list_command() -> None:
         error_console.print(Text(f'sources.yml: {problem}', style='yellow'))
     if not registry.sources and not registry.completions:
         console.print(Text(f'No sources configured in {SOURCES}.'))
-        console.print('Write one with [cyan]doit sources example[/].')
+        console.print('Write one with [cyan]doit sources edit[/].')
         raise typer.Exit(0)
 
     # One call for the whole file, so the two blocks cost what the slower of

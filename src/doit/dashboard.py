@@ -1378,7 +1378,7 @@ def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
             console.print(Text(f'sources.yml: {problem}', style='yellow'))
     if not registry.sources:
         console.print(Text(f'No sources configured in {sources.SOURCES}.'))
-        console.print('Write one with [cyan]doit sources example[/], then edit it.')
+        console.print('Write one with [cyan]doit sources edit[/].')
 
     offered = collect(registry, None)
     collected = [found for found in offered if found.name in lane] if lane else offered
