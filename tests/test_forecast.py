@@ -327,10 +327,13 @@ def test_show_without_a_stored_reading_says_how_to_take_one(tmp_path, capsys):
     assert 'forecast run' in capsys.readouterr().err
 
 
-def test_trend_before_anything_has_matured_says_so(register, tmp_path, capsys):
+@pytest.mark.parametrize('as_json', [False, True])
+def test_trend_before_anything_has_matured_fails_on_stderr(register, tmp_path, capsys, as_json):
     forecast.append(forecast.reading_path(tmp_path, 'testbox'), reading(dt.datetime.now().astimezone(), {}))
-    assert forecast.cmd_trend(7, as_json=False, directory=tmp_path) == 0
-    assert 'days old yet' in capsys.readouterr().out
+    assert forecast.cmd_trend(7, as_json=as_json, directory=tmp_path) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    assert captured.err
 
 
 def test_the_forecast_reads_the_budget_from_the_register(tmp_path, monkeypatch):
