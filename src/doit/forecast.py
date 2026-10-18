@@ -472,10 +472,6 @@ def emit(reading: Reading) -> None:
 
 def emit_trend(verdicts: list[Verdict], days: int, readings: int) -> None:
     console.rule(f'[cyan]Trend · {days}-day predictions against the journal', align='left')
-    if not verdicts:
-        console.print(f'  No reading is {days} days old yet, so nothing can be graded.')
-        console.print('  [cyan]doit forecast run[/] takes one; the schedule takes them unattended.')
-        return
     header = Text('  ')
     header.append(f'{"pursuit":<9} {"said":>7} {"did":>7} {"error":>8}', style='dim')
     console.print(header)
@@ -556,6 +552,9 @@ def cmd_trend(days: int, as_json: bool, directory: Path) -> int:
     records = journal.read_all(journal_directory) if journal_directory.exists() else []
     now = dt.datetime.now().astimezone()
     verdicts = grade(stored, records, now, days)
+    if not verdicts:
+        error_console.print(f'No reading is {days} days old yet, so nothing can be graded:  [cyan]doit forecast run[/]')
+        return 1
     if as_json:
         print(json.dumps({'days': days, 'verdicts': [dc.asdict(v) for v in verdicts]}, indent=2))
         return 0
