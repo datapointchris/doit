@@ -1479,8 +1479,10 @@ def test_a_cycle_steers_weights_and_pace_through_its_until_date_and_then_lapses(
 
     assert running['weights'] == {'chore': 25.0, 'read': 50.0}
     assert running['intervals']['chore'] == 2.0
+    assert pursuits.explain_payload(running)['cycles'] == ['hold']
     assert lapsed['weights'] == {'chore': 25.0, 'read': 25.0}
     assert lapsed['intervals']['chore'] == 4.0
+    assert pursuits.explain_payload(lapsed)['cycles'] == []
     assert later['balance']['chore'] == pytest.approx(3.0)
 
 
