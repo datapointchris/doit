@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from enum import StrEnum
 from pathlib import Path
+from typing import Annotated
 
 import typer
 import yaml
@@ -322,12 +323,17 @@ app = typer.Typer(name='sources', no_args_is_help=True, help='Which apps doit as
 
 
 @app.command('list')
-def list_command() -> None:
+def list_command(
+    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
+) -> None:
     """Every configured source, and whether it answers."""
     registry = load()
     for problem in registry.problems:
         error_console.print(Text(f'sources.yml: {problem}', style='yellow'))
     if not registry.sources and not registry.completions:
+        if as_json:
+            print(json.dumps([], indent=2))
+            raise typer.Exit(0)
         console.print(Text(f'No sources configured in {SOURCES}.'))
         console.print('Write one with [cyan]doit sources edit[/].')
         raise typer.Exit(0)
@@ -336,31 +342,56 @@ def list_command() -> None:
     # them costs rather than the sum.
     everything = list(registry.sources.values()) + list(registry.completions.values())
     results = fetch(everything)
+    outstanding = [answer('outstanding', source, results[name]) for name, source in registry.sources.items()]
+    today = [answer('today', source, results[name]) for name, source in registry.completions.items()]
+    if as_json:
+        print(json.dumps(outstanding + today, indent=2))
+        raise typer.Exit(0)
     width = max(len(source.id) for source in everything)
-    report_block('outstanding', registry.sources, results, width)
-    report_block('today', registry.completions, results, width)
+    report_block('outstanding', outstanding, width)
+    report_block('today', today, width)
     raise typer.Exit(0)
 
 
-def report_block(title: str, block: dict[str, Source], results: dict[str, Result], width: int) -> None:
+def answer(block: str, source: Source, result: Result) -> dict[str, object]:
+    """One source's verdict: whether it answered, and with how many lanes in which dialect.
+
+    `via` is `contract` for a lane document and `adapter:<name>` otherwise, and
+    is null when there are no lanes to describe. `failure` and `reason` are null
+    for a source that answered.
+    """
+    built = [] if result.failure else lanes_from(source, result)
+    via = None
+    if built:
+        via = 'contract' if lanes.is_lane_document(result.payload) else f'adapter:{source.adapter}'
+    return {
+        'id': source.id,
+        'block': block,
+        'command': list(source.command),
+        'answered': result.failure is None,
+        'failure': str(result.failure) if result.failure else None,
+        'reason': reason(source.id, result) if result.failure else None,
+        'lanes': len(built),
+        'via': via,
+    }
+
+
+def report_block(title: str, answers: list[dict[str, object]], width: int) -> None:
     """One block's sources, each with whether it answered. Silent when empty.
 
     An empty block is a question nobody configured, which is not a problem to
     report — a heading over nothing would read as something missing.
     """
-    if not block:
+    if not answers:
         return
     console.print(Text(title, style='cyan'))
-    for name, source in block.items():
-        result = results[name]
-        built = lanes_from(source, result)
+    for row in answers:
         line = Text('  ')
-        line.append(name.ljust(width), style='yellow')
-        if result.failure:
-            line.append(f'  {reason(name, result)}', style='red')
-        elif built:
-            speaks = 'contract' if lanes.is_lane_document(result.payload) else f'adapter:{source.adapter}'
-            line.append(f'  {len(built)} lanes via {speaks}')
+        line.append(str(row['id']).ljust(width), style='yellow')
+        if not row['answered']:
+            line.append(f'  {row["reason"]}', style='red')
+        elif row['lanes']:
+            line.append(f'  {row["lanes"]} lanes via {row["via"]}')
         else:
             line.append('  answered, but offered no lanes', style='yellow')
         console.print(line, no_wrap=True, overflow='ellipsis')
