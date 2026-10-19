@@ -73,8 +73,8 @@ def test_statuses_orders_most_overdue_first(tmp_path, monkeypatch):
     assert [row['id'] for row in rows] == ['never-done', 'overdue-item', 'fresh-item']
     assert rows[1]['overdue'] == 23  # 30 days since done, 7-day cadence
     assert rows[2]['overdue'] == -28  # done today, 28-day cadence
-    assert review.is_due(rows[1]['overdue']) is True
-    assert review.is_due(rows[2]['overdue']) is False
+    assert rows[1]['due'] is True
+    assert rows[2]['due'] is False
 
 
 def observe_history(tmp_path, monkeypatch, entries: dict) -> None:
@@ -149,9 +149,14 @@ def test_list_json_emits_every_item_with_its_status(capsys):
         'show',
         'last',
         'overdue',
+        'due',
         'observed',
         'problem',
     }
+    # Never done reads overdue: null, which a consumer cannot filter on as due.
+    assert rows[0]['id'] == 'never-done'
+    assert rows[0]['overdue'] is None
+    assert rows[0]['due'] is True
 
 
 def test_list_json_is_parsable_without_a_register(monkeypatch, capsys):

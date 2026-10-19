@@ -43,11 +43,13 @@ def test_statuses_scheduled_sorts_before_ondemand():
     assert rows[-1]['scheduled'] is False
 
 
-def test_is_due_row():
+def test_due_tells_never_practiced_from_on_demand():
     rows = {r['id']: r for r in labs.statuses()}
-    # Scheduled + never practiced → due; on-demand → never due.
-    assert labs.is_due_row(rows['scheduled-lab']) is True
-    assert labs.is_due_row(rows['ondemand-lab']) is False
+    # Both read overdue: null. Scheduled + never practiced → due; on-demand → never due.
+    assert rows['scheduled-lab']['overdue'] is None
+    assert rows['ondemand-lab']['overdue'] is None
+    assert rows['scheduled-lab']['due'] is True
+    assert rows['ondemand-lab']['due'] is False
 
 
 @pytest.fixture

@@ -153,6 +153,7 @@ def statuses() -> list[dict]:
                 'show': meta.get('show', '') or '',
                 'last': last,
                 'overdue': overdue,
+                'due': is_due(overdue),
                 'observed': bool(seen.date) and last == seen.date,
                 'problem': seen.problem,
             }
@@ -224,7 +225,7 @@ def cmd_due() -> int:
 
 def cmd_list(as_json: bool = False) -> int:
     # --json emits every item with its derived status, due or not, so a consumer
-    # (the dashboard) filters on `overdue` itself and can say "2 due of 9". A
+    # filters on `due` or `overdue` itself and can say "2 due of 9". A
     # missing register is an empty list, not the prose hint: --json must always
     # be parseable.
     if as_json:
@@ -385,7 +386,11 @@ def due_command() -> None:
 def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
-    """Every registered item and its status."""
+    """Every registered item and its status.
+
+    In --json, `overdue` is days past due (negative is days until due) and null
+    when the item was never done, which counts as due; `due` says so directly.
+    """
     raise typer.Exit(cmd_list(as_json))
 
 

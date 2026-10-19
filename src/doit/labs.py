@@ -116,18 +116,20 @@ def statuses() -> list[dict]:
         last = state.get(lab_id)
         # No cadence → practice-on-demand: never scheduled, so never "due".
         overdue = overdue_days(last, cadence, today) if cadence else None
-        rows.append(
-            {
-                'id': lab_id,
-                'title': meta['title'],
-                'tags': meta['tags'],
-                'cadence': cadence,
-                'cadence_days': parse_cadence(cadence) if cadence else 0,
-                'last': last,
-                'overdue': overdue,
-                'scheduled': bool(cadence),
-            }
-        )
+        row = {
+            'id': lab_id,
+            'title': meta['title'],
+            'tags': meta['tags'],
+            'cadence': cadence,
+            'cadence_days': parse_cadence(cadence) if cadence else 0,
+            'last': last,
+            'overdue': overdue,
+            'scheduled': bool(cadence),
+        }
+        # `overdue` is None both for a never-practiced Lab, which is due, and
+        # for an on-demand one, which never is, so it cannot answer "due?" alone.
+        row['due'] = is_due_row(row)
+        rows.append(row)
     rows.sort(key=lambda r: (0 if r['scheduled'] else 1, -(float('inf') if r['overdue'] is None else r['overdue'])))
     return rows
 
@@ -214,7 +216,7 @@ def cmd_due(limit: int | None = None) -> int:
 
 def cmd_list(as_json: bool = False, limit: int | None = None) -> int:
     # --json emits the whole deck with each Lab's derived status, so a consumer
-    # (the dashboard) filters on `overdue`/`scheduled` itself. An empty deck is
+    # filters on `due`, or on `overdue`/`scheduled` itself. An empty deck is
     # an empty list, not the prose hint: --json must always be parsable.
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
@@ -403,7 +405,11 @@ def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
     limit: LimitOption = None,
 ) -> None:
-    """Every Lab and its schedule status."""
+    """Every Lab and its schedule status.
+
+    In --json, `overdue` is days past due (negative is days until due) and null
+    when the Lab was never practiced or has no cadence; `due` says which.
+    """
     raise typer.Exit(cmd_list(as_json, limit))
 
 
