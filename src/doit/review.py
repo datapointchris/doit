@@ -35,6 +35,7 @@ from doit.cadence import is_due
 from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
 from doit.cadence import status_label
+from doit.editor import open_in_editor
 from doit.observe import newest
 from doit.observe import observed
 from doit.paths import xdg_config_home
@@ -349,7 +350,7 @@ def cmd_edit() -> int:
     if not REGISTER.exists():
         REGISTER.parent.mkdir(parents=True, exist_ok=True)
         REGISTER.write_text(TEMPLATE)
-    subprocess.run([os.environ.get('EDITOR', 'vi'), str(REGISTER)], check=False)
+    open_in_editor(REGISTER)
     return 0
 
 

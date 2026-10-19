@@ -77,6 +77,7 @@ from doit.allocate import draw
 from doit.allocate import first_draw_probabilities
 from doit.allocate import projected_days_until_due
 from doit.cadence import parse_cadence
+from doit.editor import open_in_editor
 from doit.journal import bump_counts
 from doit.journal import checkoff_equivalent
 from doit.journal import counts_by_machine
@@ -2620,7 +2621,7 @@ def cmd_edit() -> int:
     if not register.exists():
         register.parent.mkdir(parents=True, exist_ok=True)
         register.write_text(TEMPLATE)
-    subprocess.run([os.environ.get('EDITOR', 'vi'), str(register)], check=False)
+    open_in_editor(register)
     try:
         write_names_cache(load_pursuits())
     except RegisterError as error:
