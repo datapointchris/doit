@@ -147,7 +147,7 @@ def test_new_writes_straight_into_the_deck(tmp_path, monkeypatch):
     file — a Lab created here is immediately loadable.
     """
     monkeypatch.setattr(labs, 'LABS_DIR', tmp_path)
-    monkeypatch.setattr(labs, 'open_editor', lambda path: None)
+    monkeypatch.setattr(labs, 'open_in_editor', lambda path: None)
 
     assert labs.cmd_new('Find Files Fast') == 0
 

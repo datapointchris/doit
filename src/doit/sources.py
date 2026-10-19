@@ -49,6 +49,7 @@ import yaml
 from rich.text import Text
 
 from doit import lanes
+from doit.editor import open_in_editor
 from doit.paths import xdg_config_home
 from doit.render import console
 from doit.render import error_console
@@ -410,7 +411,7 @@ def edit_command() -> None:
     if not SOURCES.exists():
         SOURCES.parent.mkdir(parents=True, exist_ok=True)
         SOURCES.write_text(TEMPLATE)
-    subprocess.run([os.environ.get('EDITOR', 'vi'), str(SOURCES)], check=False)
+    open_in_editor(SOURCES)
     raise typer.Exit(0)
 
 

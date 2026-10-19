@@ -14,10 +14,7 @@ row in the federated index alongside tools, skills, aliases and tmux keys, and
 scoping that index is a filter rather than a second search.
 """
 
-import os
 import random
-import subprocess
-from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -27,6 +24,7 @@ from doit.cards import first_heading
 from doit.cards import render_body
 from doit.cards import slugify
 from doit.cards import split_frontmatter
+from doit.editor import open_in_editor
 from doit.paths import library_dir
 from doit.render import console
 from doit.render import error_console
@@ -127,12 +125,8 @@ def cmd_new(name: str) -> int:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(TEMPLATE.format(title=name))
     console.print(Text.from_markup('[green]✓[/] Created ') + Text(str(target)))
-    open_editor(target)
+    open_in_editor(target)
     return 0
-
-
-def open_editor(path: Path) -> None:
-    subprocess.run([os.environ.get('EDITOR', 'nvim'), str(path)], check=False)
 
 
 app = typer.Typer(name='workflows', no_args_is_help=True, help='The reference cards.')

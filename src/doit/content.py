@@ -33,6 +33,7 @@ from typing import Annotated
 import typer
 from rich.text import Text
 
+from doit.editor import open_in_editor
 from doit.paths import library_dir
 from doit.paths import library_source
 from doit.paths import machine_name
@@ -301,7 +302,7 @@ def edit_command(
     for subdir in ('workflows', 'labs'):
         candidate = CONTENT_DIR / subdir / f'{what}.md'
         if candidate.exists():
-            subprocess.run([os.environ.get('EDITOR', 'nvim'), str(candidate)], check=False)
+            open_in_editor(candidate)
             raise typer.Exit(0)
     error_console.print(Text(f'No card or Lab named {what!r} under {CONTENT_DIR}.'))
     raise typer.Exit(1)

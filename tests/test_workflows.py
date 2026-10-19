@@ -71,7 +71,7 @@ def test_new_writes_straight_into_the_cards_directory(tmp_path, monkeypatch):
     checkout now, so authoring writes the file the reader reads.
     """
     monkeypatch.setattr(workflows, 'WORKFLOWS_DIR', tmp_path)
-    monkeypatch.setattr(workflows, 'open_editor', lambda path: None)
+    monkeypatch.setattr(workflows, 'open_in_editor', lambda path: None)
 
     assert workflows.cmd_new('Review And Merge A PR') == 0
 
@@ -82,7 +82,7 @@ def test_new_writes_straight_into_the_cards_directory(tmp_path, monkeypatch):
 
 def test_new_refuses_to_overwrite(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(workflows, 'WORKFLOWS_DIR', tmp_path)
-    monkeypatch.setattr(workflows, 'open_editor', lambda path: None)
+    monkeypatch.setattr(workflows, 'open_in_editor', lambda path: None)
     (tmp_path / 'already-here.md').write_text('# Already Here\n')
 
     assert workflows.cmd_new('Already Here') == 1

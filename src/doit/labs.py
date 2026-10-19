@@ -40,6 +40,7 @@ from doit.cards import first_heading
 from doit.cards import render_body
 from doit.cards import slugify
 from doit.cards import split_frontmatter
+from doit.editor import open_in_editor
 from doit.paths import library_dir
 from doit.paths import xdg_state_home
 from doit.render import can_prompt
@@ -292,7 +293,7 @@ def cmd_new(name: str) -> int:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(TEMPLATE.format(title=name))
     console.print(Text.from_markup('[green]✓[/] Created ') + Text(str(target)))
-    open_editor(target)
+    open_in_editor(target)
     return 0
 
 
@@ -300,12 +301,8 @@ def cmd_edit(lab_id: str) -> int:
     path = LABS_DIR / f'{lab_id}.md'
     if not path.exists():
         return unknown_lab(lab_id)
-    open_editor(path)
+    open_in_editor(path)
     return 0
-
-
-def open_editor(path: Path) -> None:
-    subprocess.run([os.environ.get('EDITOR', 'nvim'), str(path)], check=False)
 
 
 def unknown_lab(lab_id: str) -> int:
