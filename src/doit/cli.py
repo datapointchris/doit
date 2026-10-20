@@ -36,18 +36,20 @@ TAGLINE = 'What to do now, and everything that decides it.'
 # do now". Routing lives on this screen and on a hub that owns several children,
 # never on a leaf — a tool that explains its workflow at every altitude buries
 # the command list it is trying to introduce.
+#
+# The examples sit in an indented block because markdown joins the lines of a
+# paragraph, and each example has to keep a line of its own.
 ROOT_HELP = f"""{TAGLINE}
 
-Start with **doit dashboard** for the spread, or **doit next** to be handed one thing.
-They are separate systems: **next** draws from the pursuit weights you declared and ranks
-across everything, **dashboard** reads every lane and ranks across none of them. They meet
-only on the dashboard.
+Examples:
 
-**doit today** is the narrow one. It admits only what a day can finish: what the day
-still owes, above what it has had in the order it happened.
+    doit dashboard     the spread: every lane, ranked across none of them
+    doit next          be handed one thing, ranked by your pursuit weights
+    doit today         only what the day can finish, above what it has had
+    doit review due    every review item due; the dashboard shows three
+    doit labs due      every Labs exercise due to practice now
 
-Reach for **doit review due** or **doit labs due** when MAINTENANCE is the line that caught
-your eye — the dashboard shows three of those rows and there are usually more.
+**next** and **dashboard** are separate systems. They meet only on the dashboard.
 """
 
 app = typer.Typer(name='doit', no_args_is_help=True, help=ROOT_HELP, rich_markup_mode='markdown')

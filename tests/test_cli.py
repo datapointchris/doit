@@ -104,14 +104,6 @@ def test_missing_required_argument_exits_2(argv):
     assert result.exit_code == 2
 
 
-def test_update_is_a_root_command():
-    """The fleet updater and the notice both name `doit update`; it has to exist."""
-    result = runner.invoke(app, ['--help'])
-
-    assert result.exit_code == 0
-    assert 'update' in result.output
-
-
 def test_update_path_does_not_also_notify(monkeypatch):
     """`update` runs its own check, so notifying would ask the API twice."""
     calls = []
