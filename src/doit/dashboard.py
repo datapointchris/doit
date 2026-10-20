@@ -576,6 +576,11 @@ def build_training_lane(results: dict[str, sources.Result], today: dt.date) -> L
     is the thing you can go and do — the same reason the learning lane rows
     resources rather than track units.
 
+    A cycle nearing or past its target date is the one exception. Its lateness
+    is a fact about the cycle, so it gets a single row ahead of the cycle's
+    workouts. Stamped on every workout instead, it would paint one you did
+    yesterday as overdue as one you never started.
+
     What was already performed is deliberately absent. A dashboard lane says
     what is outstanding, and a session is the opposite of outstanding.
     """
@@ -585,24 +590,23 @@ def build_training_lane(results: dict[str, sources.Result], today: dt.date) -> L
 
     rows = []
     active = 0
+    prescribed = 0
     for cycle in result.payload:
         if not isinstance(cycle, dict) or cycle.get('status') != 'active':
             continue
         active += 1
-        target = cycle.get('target_date')
-        urgency = Urgency.NONE
-        if isinstance(target, str):
-            remaining = (dt.date.fromisoformat(target) - today).days
-            urgency = Urgency.OVERDUE if remaining < 0 else Urgency.DUE if remaining <= 14 else Urgency.NONE
+        target_row = cycle_target_row(cycle, today)
+        if target_row is not None:
+            rows.append(target_row)
         for workout in cycle.get('workouts') or []:
             if not isinstance(workout, dict):
                 continue
+            prescribed += 1
             rows.append(
                 Row(
                     label=str(workout.get('phase') or 'do'),
                     text=str(workout.get('workout_name') or ''),
                     note=performed_note(workout, today),
-                    urgency=urgency,
                     handle=f'meso workouts show {workout.get("workout_id")}',
                 )
             )
@@ -611,10 +615,36 @@ def build_training_lane(results: dict[str, sources.Result], today: dt.date) -> L
     return LaneView(
         name='training',
         title='TRAINING',
-        meta=f'{active} cycle{plural} active · {len(rows)} prescribed',
+        meta=f'{active} cycle{plural} active · {prescribed} prescribed',
         rows=rows,
         total=len(rows),
         hints=['meso cycles list', 'meso sessions list'],
+    )
+
+
+# How close a cycle's target date comes before the lane starts naming it.
+CYCLE_DUE_DAYS = 14
+
+
+def cycle_target_row(cycle: dict, today: dt.date) -> Row | None:
+    """The cycle's target date as one row, once it is near or past.
+
+    A cycle with its date well ahead, or none at all, says nothing outstanding,
+    so it gets no row. meso's overview carries no cycle id, so the handle is the
+    listing that shows every cycle's dates.
+    """
+    target = cycle.get('target_date')
+    if not isinstance(target, str):
+        return None
+    remaining = days_away(target, today)
+    if remaining is None or remaining > CYCLE_DUE_DAYS:
+        return None
+    return Row(
+        label='target',
+        text=str(cycle.get('name') or ''),
+        note=relative_day(target, today),
+        urgency=Urgency.OVERDUE if remaining < 0 else Urgency.DUE,
+        handle='meso cycles list',
     )
 
 

@@ -1017,12 +1017,25 @@ def test_a_paused_cycle_contributes_nothing():
     assert all('Calf' not in row.text for row in lane.rows)
 
 
-def test_a_cycle_past_its_target_pushes_harder_than_one_with_months_left():
-    relaxed = training_lane(MESO_CYCLES, dt.date(2026, 1, 1))
-    assert relaxed.rows[0].urgency == dashboard.Urgency.NONE
-
-    late = training_lane(MESO_CYCLES, dt.date(2026, 11, 1))
-    assert late.rows[0].urgency == dashboard.Urgency.OVERDUE
+def test_a_cycle_past_its_target_says_so_once_and_leaves_its_workouts_alone():
+    """Lateness belongs to the cycle. Stamped on each workout, it would call one
+    done yesterday as overdue as one never started."""
+    cycle = {
+        'name': 'Lower Body',
+        'status': 'active',
+        'target_date': '2026-07-14',
+        'workouts': [
+            {'workout_id': 1, 'workout_name': 'Loaded Lower', 'frequency': '2×/week', 'last_performed_on': '2026-07-23'},
+            {'workout_id': 2, 'workout_name': 'Mobility', 'frequency': '4×/week', 'last_performed_on': None},
+        ],
+    }
+    lane = training_lane([cycle])
+    assert [(row.text, row.urgency) for row in lane.rows] == [
+        ('Lower Body', dashboard.Urgency.OVERDUE),
+        ('Loaded Lower', dashboard.Urgency.NONE),
+        ('Mobility', dashboard.Urgency.NONE),
+    ]
+    assert lane.meta == '1 cycle active · 2 prescribed'
 
 
 def test_a_training_lane_that_cannot_answer_says_so_rather_than_vanishing():
