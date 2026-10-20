@@ -51,6 +51,16 @@ def test_load_items_none_without_a_register(monkeypatch):
     assert review.load_items() is None
 
 
+def test_unknown_item_field_is_refused(tmp_path, monkeypatch):
+    """A misspelled field would otherwise drop the item's observer without a word."""
+    register_file = tmp_path / 'register.yml'
+    register_file.write_text('items:\n  typo:\n    cadence: 1w\n    obsrve: false\n')
+    monkeypatch.setattr(review, 'REGISTER', register_file)
+    with pytest.raises(review.RegisterError):
+        review.load_items()
+    assert CliRunner().invoke(review.app, ['list']).exit_code == 1
+
+
 def test_statuses_never_done_reads_as_most_urgent():
     rows = {row['id']: row for row in review.statuses()}
     assert rows['never-done']['overdue'] is None

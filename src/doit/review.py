@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -41,6 +42,7 @@ from doit.observe import observed
 from doit.paths import xdg_config_home
 from doit.paths import xdg_state_home
 from doit.render import console
+from doit.render import error_console
 from doit.render import nudge_header
 from doit.render import nudge_row
 from doit.render import nudge_width
@@ -91,12 +93,42 @@ NUDGE_MAX_ITEMS = 8
 NUDGE_INTERVAL = xdg_state_home() / 'doit' / 'nudge-interval-minutes'
 
 
+# Fields a register item may declare: the ones the TEMPLATE header documents.
+# Anything else is a typo, and a typo here is silent damage. A misspelled
+# `observe:` is ignored, so the item loses its observer, reads as never done,
+# and counts overdue days forever with nothing printed.
+ITEM_FIELDS = {'description', 'cadence', 'command', 'show', 'requires', 'observe'}
+
+
+class RegisterError(ValueError):
+    """A review register that cannot be read as written.
+
+    A ValueError, so the dashboard and `doit today` degrade the review lane to
+    this message rather than dropping it or failing the whole view.
+    """
+
+
 def load_items() -> dict | None:
-    """The register's items, or None if there is no register file yet."""
+    """The register's items, or None if there is no register file yet.
+
+    Raises RegisterError on an item that is not a mapping or declares a field
+    outside ITEM_FIELDS.
+    """
     if not REGISTER.exists():
         return None
     data = yaml.safe_load(REGISTER.read_text()) or {}
-    return data.get('items') or {}
+    items = data.get('items') or {}
+    for item_id, meta in items.items():
+        if meta is None:
+            continue
+        if not isinstance(meta, dict):
+            raise RegisterError(f'{item_id}: must be a mapping of fields, not {type(meta).__name__}')
+        unknown = set(meta) - ITEM_FIELDS
+        if unknown:
+            # The accepted set is named so a reader can see `observe` beside a
+            # misspelled `obsrve` and fix it without leaving the terminal.
+            raise RegisterError(f'{item_id}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(ITEM_FIELDS))}')
+    return items
 
 
 def applies_here(requires: str) -> bool:
@@ -373,13 +405,27 @@ def write_nudge_interval(minutes: int) -> int:
     return 0
 
 
+def run(action: Callable[[], int]) -> None:
+    """Run a command body, turning an unreadable register into one line naming it.
+
+    Without this a RegisterError escapes as a traceback, burying the line that
+    says which field is wrong.
+    """
+    try:
+        code = action()
+    except RegisterError as error:
+        error_console.print(f'[yellow]{REGISTER}:[/] {error}')
+        raise typer.Exit(1) from None
+    raise typer.Exit(code)
+
+
 app = typer.Typer(name='review', no_args_is_help=True, help="What's due to revisit, on a cadence.")
 
 
 @app.command('due')
 def due_command() -> None:
     """What's due now, most overdue first."""
-    raise typer.Exit(cmd_due())
+    run(cmd_due)
 
 
 @app.command('list')
@@ -391,13 +437,13 @@ def list_command(
     In --json, `overdue` is days past due (negative is days until due) and null
     when the item was never done, which counts as due; `due` says so directly.
     """
-    raise typer.Exit(cmd_list(as_json))
+    run(lambda: cmd_list(as_json))
 
 
 @app.command('done')
 def done_command(item_id: Annotated[str, typer.Argument(help='The register id to mark done.')]) -> None:
     """Mark an item done, advancing its due date."""
-    raise typer.Exit(cmd_done(item_id))
+    run(lambda: cmd_done(item_id))
 
 
 @app.command('edit')
@@ -420,4 +466,4 @@ def nudge_every_command(
 @app.command('nudge', hidden=True)
 def nudge_command() -> None:
     """The startup nudge, called by the shell gate rather than by hand."""
-    raise typer.Exit(cmd_nudge())
+    run(cmd_nudge)
