@@ -12,6 +12,11 @@ belongs: what a lane looks like is doit's question, so doit is what answers it.
 A tool that answers "what is open" should not also carry doit's row shape,
 because its other consumers render the same data completely differently.
 
+The adapter also carries the command it reads. The command and the shape are
+one contract with the tool, so they live together in code, where a sweep for a
+renamed flag finds them. A `sources.yml` entry names the adapter and says
+nothing of its command; one that restates it is told to delete the line.
+
 **Conforming** — the source emits a lane document (see `doit.lanes`) directly and
 doit renders it with no adapter. Available, and the right choice only for a tool
 whose entire reason to exist is feeding this dashboard.
@@ -34,6 +39,7 @@ fails shows its error. A configured lane is never silently dropped.
 import datetime as dt
 import json
 import os
+import re
 import shlex
 import subprocess
 from collections.abc import Callable
@@ -70,9 +76,11 @@ TEMPLATE = """\
 # doit does not know which apps exist — this file is the only place that says.
 # Adding one is an edit here, never a release.
 #
-#   command   argv to run; it must print a lane document on stdout
+#   adapter   name a Python adapter in doit; it knows the command to run and
+#             shapes that command's own model into lanes
+#   command   argv to run, for a source with no adapter; it must print a lane
+#             document on stdout
 #   timeout   seconds to wait (default 5)
-#   adapter   name a Python adapter in doit that shapes this source's own model
 #   lanes     optional; restricts which of a source's lanes are shown
 #
 # A source emitting doit's own lane document needs no adapter. Run
@@ -82,19 +90,16 @@ TEMPLATE = """\
 # What is outstanding. Read by `doit dashboard`.
 sources:
   icb:
-    command: [icb, overview, --json]
     adapter: icb
 
   learning:
-    command: [learning, overview, --json]
     adapter: learning
 
 # What happened today. Read by `doit today`. Same four settings, and `{today}`
-# in place of an argv part becomes the local ISO date — a whole part only, so a
-# backend gets the date as its own argument.
+# in place of an argv part of a command becomes the local ISO date — a whole
+# part only, so a backend gets the date as its own argument.
 completions:
   icb-tasks:
-    command: [icb, tasks, list, --status, completed, --since, '{today}', --json]
     adapter: icb-tasks
 """
 
@@ -164,17 +169,28 @@ def parse_block(declared: object, block: str, problems: list[str]) -> dict[str, 
         if not isinstance(config, dict):
             problems.append(f'{name}: must be a mapping of settings')
             continue
+        adapter_name = str(config.get('adapter') or '')
+        adapter = ADAPTERS.get(adapter_name)
         command = config.get('command')
+        if adapter is not None:
+            # Reported rather than skipped, so the lane keeps answering while the
+            # stale line waits to be deleted.
+            if command is not None:
+                problems.append(f'{name}: the {adapter_name} adapter supplies its own command — delete `command`')
+            command = list(adapter.command)
         if isinstance(command, str):
             command = shlex.split(command)
         if not isinstance(command, list) or not command:
-            problems.append(f'{name}: needs a `command` to run')
+            if adapter_name:
+                problems.append(f'{name}: this doit has no adapter named {adapter_name} — update doit, or correct `adapter:`')
+            else:
+                problems.append(f'{name}: needs an `adapter` or a `command` to run')
             continue
         found[name] = Source(
             id=name,
             command=[str(part) for part in command],
             timeout=float(config.get('timeout') or DEFAULT_TIMEOUT_SECONDS),
-            adapter=str(config.get('adapter') or ''),
+            adapter=adapter_name,
             lanes=tuple(config.get('lanes') or ()),
         )
     return found
@@ -261,13 +277,31 @@ def reason(name: str, result: Result | None) -> str:
     if result.failure is Failure.UNREADABLE:
         return f'{name} did not return JSON'
     if result.failure is Failure.FAILED:
-        # Exit 2 is a usage error across these CLIs, so a rejected command means
-        # the installed binary predates it.
+        # Exit 2 is a usage error across these CLIs. Either side can be the
+        # stale one, an old binary or a command written for one, so the tool's
+        # own words say which flag or verb it refused.
         if result.exit_code == 2:
             program, *args = result_command(name)
-            return f'installed {program} does not understand `{" ".join(args)}` — reinstall it'
+            refused = error_line(result.stderr)
+            return f'{program}: {refused}' if refused else f'{program} rejected `{" ".join(args)}`'
         return first_line(result.stderr) or f'{name} exited {result.exit_code}'
     return ''
+
+
+def rejected(result: Result) -> bool:
+    """Whether the tool refused the command itself, as opposed to failing to answer it."""
+    return result.failure is Failure.FAILED and result.exit_code == 2
+
+
+def error_line(stderr: str) -> str:
+    """The stderr line stating the error, without its `Error:` label.
+
+    The first line opening with `error` where there is one, since a CLI may print
+    usage or a runner's progress ahead of it. The first line otherwise.
+    """
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    stated = next((line for line in lines if line.lower().startswith('error')), lines[0] if lines else '')
+    return re.sub(r'^error:\s*', '', stated, flags=re.IGNORECASE)
 
 
 def result_command(name: str) -> list[str]:
@@ -282,14 +316,23 @@ def result_command(name: str) -> list[str]:
     return list(source.command) if source else [name]
 
 
-# An adapter turns a non-conforming source's own model into lanes. Registered by
-# the module that owns the knowledge, so this file imports no backend.
-Adapter = Callable[[Result], list[lanes.Lane]]
+@dataclass(frozen=True)
+class Adapter:
+    """The command a non-conforming tool is asked, and what turns its answer into lanes.
+
+    Registered by the module that owns the knowledge, so this file imports no
+    backend. `{today}` in the command is substituted as `resolved_command` says.
+    """
+
+    command: tuple[str, ...]
+    build: Callable[[Result], list[lanes.Lane]]
+
+
 ADAPTERS: dict[str, Adapter] = {}
 
 
-def register_adapter(name: str, adapter: Adapter) -> None:
-    ADAPTERS[name] = adapter
+def register_adapter(name: str, command: tuple[str, ...], build: Callable[[Result], list[lanes.Lane]]) -> None:
+    ADAPTERS[name] = Adapter(command, build)
 
 
 def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
@@ -306,7 +349,7 @@ def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
         if adapter is None:
             missing = f'this doit has no adapter named {source.adapter} — update doit, or correct `adapter:` in sources.yml'
         else:
-            built = adapter(result)
+            built = adapter.build(result)
     if source.lanes:
         # A conforming source names its lanes only in its payload, so a call that
         # failed produces no payload and the lane disappears — the silent drop
@@ -327,7 +370,12 @@ app = typer.Typer(name='sources', no_args_is_help=True, help='Which apps doit as
 def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
-    """Every configured source, and whether it answers."""
+    """Every configured source, and whether it answers.
+
+    Exits 3 when an installed tool rejects the command a source runs. That
+    break waits on a person, whereas a tool that is absent, logged out or slow
+    is reported and exits 0.
+    """
     registry = load()
     for problem in registry.problems:
         error_console.print(Text(f'sources.yml: {problem}', style='yellow'))
@@ -345,13 +393,14 @@ def list_command(
     results = fetch(everything)
     outstanding = [answer('outstanding', source, results[name]) for name, source in registry.sources.items()]
     today = [answer('today', source, results[name]) for name, source in registry.completions.items()]
+    code = 3 if any(rejected(result) for result in results.values()) else 0
     if as_json:
         print(json.dumps(outstanding + today, indent=2))
-        raise typer.Exit(0)
+        raise typer.Exit(code)
     width = max(len(source.id) for source in everything)
     report_block('outstanding', outstanding, width)
     report_block('today', today, width)
-    raise typer.Exit(0)
+    raise typer.Exit(code)
 
 
 def answer(block: str, source: Source, result: Result) -> dict[str, object]:

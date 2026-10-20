@@ -147,7 +147,7 @@ def test_a_payload_that_is_not_a_list_yields_no_rows():
 
 
 def adapter_for(source_id: str):
-    return sources.ADAPTERS[source_id]
+    return sources.ADAPTERS[source_id].build
 
 
 def test_project_items_are_listed_by_when_they_were_completed_not_touched():

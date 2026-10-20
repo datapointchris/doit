@@ -59,7 +59,7 @@ def test_the_contract_wins_over_a_registered_adapter():
 
     Its adapter simply stops being reached, with nothing in doit changing.
     """
-    sources.register_adapter('never', lambda _: [lanes.Lane(name='from-adapter', title='X')])
+    sources.register_adapter('never', ('day',), lambda _: [lanes.Lane(name='from-adapter', title='X')])
     source = sources.Source(id='day', command=['day'], adapter='never')
 
     built = sources.lanes_from(source, sources.Result(source='day', payload=CONFORMING, exit_code=0))
@@ -157,17 +157,30 @@ def test_both_blocks_parse_into_the_same_source(tmp_path):
     """
     path = write_sources(
         tmp_path,
-        'sources:\n  icb:\n    command: [icb, overview, --json]\n    adapter: icb\n'
-        'completions:\n  icb-tasks:\n    command: [icb, tasks, list, --json]\n    adapter: icb-tasks\n    timeout: 9\n',
+        'sources:\n  day:\n    command: [day, --json]\ncompletions:\n  done:\n    command: [done, --json]\n    timeout: 9\n',
     )
 
     registry = sources.load(path)
 
-    assert list(registry.sources) == ['icb']
-    assert list(registry.completions) == ['icb-tasks']
-    assert registry.completions['icb-tasks'] == sources.Source(
-        id='icb-tasks', command=['icb', 'tasks', 'list', '--json'], timeout=9.0, adapter='icb-tasks'
-    )
+    assert list(registry.sources) == ['day']
+    assert list(registry.completions) == ['done']
+    assert registry.completions['done'] == sources.Source(id='done', command=['done', '--json'], timeout=9.0)
+
+
+def test_an_adapted_entry_runs_its_adapters_command_and_a_restated_one_is_reported(tmp_path):
+    """The command belongs to the adapter, so no copy in sources.yml can drift from it.
+
+    A restated command is ignored rather than the entry dropped, so the lane
+    keeps answering while the line waits to be deleted.
+    """
+    sources.register_adapter('owned', ('owned', '--json'), lambda _: [])
+    body = 'sources:\n  quiet:\n    adapter: owned\n  stale:\n    adapter: owned\n    command: [owned, --old-flag]\n'
+
+    registry = sources.load(write_sources(tmp_path, body))
+
+    assert registry.sources['quiet'].command == ['owned', '--json']
+    assert registry.sources['stale'].command == ['owned', '--json']
+    assert registry.problems == ['stale: the owned adapter supplies its own command — delete `command`']
 
 
 def test_a_file_with_no_completions_block_is_not_a_problem(tmp_path):
@@ -289,12 +302,21 @@ def test_a_failing_source_shows_its_first_stderr_line():
     assert sources.reason('icb', result) == 'error: not logged in — run `icb auth login`'
 
 
-def test_a_rejected_command_names_the_program_to_reinstall_rather_than_the_source_id(tmp_path, monkeypatch):
-    """The id is a label in sources.yml, and `prs` runs `pull-requests`."""
-    monkeypatch.setattr(sources, 'SOURCES', write_sources(tmp_path, 'sources:\n  prs:\n    command: [pull-requests, --json]\n'))
-    result = sources.Result(source='prs', exit_code=2, failure=sources.Failure.FAILED)
+def test_list_exits_3_and_quotes_the_tool_when_it_rejects_a_command(tmp_path, monkeypatch):
+    """A rejected command waits on a person, so a scheduled `list` fails on it.
 
-    assert sources.reason('prs', result) == 'installed pull-requests does not understand `--json` — reinstall it'
+    The reason is the tool's own error under the program's name rather than the
+    source id. Either the binary or the command can be the stale side, and only
+    the tool's words say which flag it refused.
+    """
+    body = 'completions:\n  stale:\n    command: [sh, -c, "echo \'Error: unknown flag: --start\' >&2; exit 2"]\n'
+    monkeypatch.setattr(sources, 'SOURCES', write_sources(tmp_path, body))
+
+    result = CliRunner().invoke(sources.app, ['list', '--json'])
+
+    assert result.exit_code == 3
+    [row] = json.loads(result.stdout)
+    assert row['reason'] == 'sh: unknown flag: --start'
 
 
 def test_list_json_carries_each_sources_block_and_verdict(tmp_path, monkeypatch):

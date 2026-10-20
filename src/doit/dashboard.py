@@ -1134,27 +1134,37 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
     return [build_learning_lane({'learning': result}, dt.date.today())]
 
 
-# Every adapter doit ships, with the lanes each one can name. One table rather
-# than two lists, because the registration and the `--lane` enum have to agree.
-# A separate enum is one an adapter can be registered without touching, and a
-# lane `--help` cannot name is a lane nobody can find.
+# Every adapter doit ships, with the command it reads and the lanes it can name.
+# One table rather than two lists, because the registration and the `--lane`
+# enum have to agree. A separate enum is one an adapter can be registered without
+# touching, and a lane `--help` cannot name is a lane nobody can find.
+#
+# meso is asked for cycles rather than sessions: the lane says what is
+# prescribed, and what was performed is the opposite of outstanding.
+#
+# pull-requests reads repos.json's `provider`, so one command answers on a box
+# whose forge is Bitbucket.
+#
+# dotfiles' `--limit` is a window over the run history every box shares, not a
+# row count. Boxes that check every few minutes fill a small window within the
+# hour, and a box off for longer than the window drops out of the fold.
 SHIPPED_ADAPTERS = (
-    ('icb', icb_adapter, tuple(name for name, _ in ICB_LANES)),
-    ('problems', problems_adapter, ('problems',)),
-    ('learning', learning_adapter, ('learning',)),
-    ('meso', meso_adapter, ('training',)),
-    ('prs', prs_adapter, ('prs',)),
-    ('dotfiles', dotfiles_adapter, ('dotfiles',)),
+    ('icb', ('icb', 'overview', '--json'), icb_adapter, tuple(name for name, _ in ICB_LANES)),
+    ('problems', ('fleet', 'inbox', 'list', '--json'), problems_adapter, ('problems',)),
+    ('learning', ('learning', 'overview', '--json'), learning_adapter, ('learning',)),
+    ('meso', ('meso', 'cycles', 'list', '--json'), meso_adapter, ('training',)),
+    ('prs', ('pull-requests',), prs_adapter, ('prs',)),
+    ('dotfiles', ('dotfiles', 'report', 'list', '--json', '--limit', '80'), dotfiles_adapter, ('dotfiles',)),
 )
 
-for adapter_id, adapter_fn, _ in SHIPPED_ADAPTERS:
-    sources.register_adapter(adapter_id, adapter_fn)
+for adapter_id, command, adapter_fn, _ in SHIPPED_ADAPTERS:
+    sources.register_adapter(adapter_id, command, adapter_fn)
 
 # Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
 # conforming source contributes lanes doit has never heard of, and a machine
 # whose sources.yml omits one of these is offered fewer. `--lane` is checked
 # against what actually came back rather than against this.
-LANE_NAMES = [*chain.from_iterable(declared for _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
+LANE_NAMES = [*chain.from_iterable(declared for _, _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
 
 
 def read_local(read: Callable[[], object]) -> sources.Result:

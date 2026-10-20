@@ -101,7 +101,7 @@ def test_every_shipped_adapter_names_the_lanes_it_declares():
     and the name is the word typed at `--lane`, so a reader who copies the header
     has to get a lane back.
     """
-    for adapter_id, adapter, declared in dashboard.SHIPPED_ADAPTERS:
+    for adapter_id, _, adapter, declared in dashboard.SHIPPED_ADAPTERS:
         answered = sources.Result(source=adapter_id, payload=ADAPTER_PAYLOADS[adapter_id], exit_code=0)
         broke = sources.Result(source=adapter_id, exit_code=1, stderr='no', failure=sources.Failure.FAILED)
 
@@ -124,7 +124,7 @@ def test_the_lane_enum_covers_every_adapter_doit_ships():
     `test_the_two_adapter_tables_do_not_overlap` holds the other half.
     """
     registered = set(sources.ADAPTERS)
-    tabled = {adapter_id for adapter_id, _, _ in dashboard.SHIPPED_ADAPTERS}
+    tabled = {adapter_id for adapter_id, *_ in dashboard.SHIPPED_ADAPTERS}
 
     assert tabled <= registered, 'a tabled adapter that never registered is one `--lane` cannot reach'
     assert set(dashboard.LOCAL_LANES) <= set(dashboard.LANE_NAMES)
@@ -137,7 +137,7 @@ def test_the_two_adapter_tables_do_not_overlap():
     both would have one silently replace the other at import time — and which
     won would depend on import order.
     """
-    dashboard_ids = {adapter_id for adapter_id, _, _ in dashboard.SHIPPED_ADAPTERS}
+    dashboard_ids = {adapter_id for adapter_id, *_ in dashboard.SHIPPED_ADAPTERS}
     completion_ids = {adapter_id for adapter_id, _ in today.COMPLETION_ADAPTERS}
 
     assert not dashboard_ids & completion_ids, 'an id in both tables is one registration overwriting the other'

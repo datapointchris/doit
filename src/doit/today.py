@@ -209,7 +209,9 @@ def completion_cell(row: dict, label_field: str, date_field: str, now: dt.dateti
     return GridCell(row_text(row, label_field), True, done_at=instant_text(row.get(date_field), now))
 
 
-def flat_adapter(source_id: str, name: str, title: str, label_field: str, date_field: str, hint: str) -> sources.Adapter:
+def flat_adapter(
+    source_id: str, name: str, title: str, label_field: str, date_field: str, hint: str
+) -> Callable[[sources.Result], list[Lane]]:
     """An adapter for a backend answering with a flat array of finished things.
 
     Most of the completion sources are this shape and differ only in which
@@ -218,9 +220,9 @@ def flat_adapter(source_id: str, name: str, title: str, label_field: str, date_f
     that file by name.
 
     The failure reason is asked for under the source id, never the lane name.
-    `reason` looks the configured argv back up by that id to say which command
-    an old binary rejected, so a lane name here would lose the command and name
-    a thing that was never a source.
+    `reason` looks the argv back up by that id to name the program that
+    rejected it, so a lane name here would lose the command and name a thing
+    that was never a source.
     """
 
     def adapter(result: sources.Result) -> list[Lane]:
@@ -233,15 +235,70 @@ def flat_adapter(source_id: str, name: str, title: str, label_field: str, date_f
     return adapter
 
 
-# Which completion source answers which group. The field names came from live
-# payloads, so check one before changing a row here.
+TODAY = sources.TODAY_PLACEHOLDER
+
+# Which completion source answers which group, with the command it runs. The
+# field names came from live payloads, so check one before changing a row here.
+#
+# A command bounds its read to today where the tool can. The adapter filters on
+# the date field regardless, so the bound saves transfer and the filter is what
+# makes the count right. learning has no date flag, so its whole history comes
+# back and the filter does all of it.
 FLAT_COMPLETIONS = (
-    ('tasks', 'TASKS', 'icb-tasks', 'name', 'complete_date', 'icb tasks list --status completed'),
-    ('projects', 'PROJECTS', 'icb-projects', 'title', 'completed_at', 'icb projects items list --status completed'),
-    ('issues', 'ISSUES', 'icb-issues', 'title', 'closed_ts', 'icb issues list --status completed'),
-    ('articles', 'ARTICLES', 'icb-articles', 'title', 'last_read_date', 'icb articles list'),
-    ('books', 'BOOKS', 'icb-books', 'title', 'read_finish_date', 'icb books list'),
-    ('learning', 'LEARNING', 'learning-completed', 'title', 'completed_at', 'learning completed list --all'),
+    (
+        'tasks',
+        'TASKS',
+        'icb-tasks',
+        'name',
+        'complete_date',
+        ('icb', 'tasks', 'list', '--status', 'completed', '--since', TODAY, '--json'),
+        'icb tasks list --status completed',
+    ),
+    (
+        'projects',
+        'PROJECTS',
+        'icb-projects',
+        'title',
+        'completed_at',
+        ('icb', 'projects', 'items', 'list', '--status', 'completed', '--since', TODAY, '--json'),
+        'icb projects items list --status completed',
+    ),
+    (
+        'issues',
+        'ISSUES',
+        'icb-issues',
+        'title',
+        'closed_ts',
+        ('icb', 'issues', 'list', '--status', 'completed', '--since', TODAY, '--json'),
+        'icb issues list --status completed',
+    ),
+    (
+        'articles',
+        'ARTICLES',
+        'icb-articles',
+        'title',
+        'last_read_date',
+        ('icb', 'articles', 'list', '--since', TODAY, '--json'),
+        'icb articles list',
+    ),
+    (
+        'books',
+        'BOOKS',
+        'icb-books',
+        'title',
+        'read_finish_date',
+        ('icb', 'books', 'list', '--since', TODAY, '--json'),
+        'icb books list',
+    ),
+    (
+        'learning',
+        'LEARNING',
+        'learning-completed',
+        'title',
+        'completed_at',
+        ('learning', 'completed', 'list', '--all', '--json'),
+        'learning completed list --all',
+    ),
 )
 
 # meso answers three kinds in one document and names each kind's rows
@@ -277,12 +334,12 @@ def meso_adapter(result: sources.Result) -> list[Lane]:
 # one: a registration nothing enumerates is a row no test can assert about, and
 # these share a global registry with the dashboard's.
 COMPLETION_ADAPTERS: tuple[tuple[str, str], ...] = tuple(
-    (adapter_id, lane_name) for lane_name, _, adapter_id, _, _, _ in FLAT_COMPLETIONS
+    (adapter_id, lane_name) for lane_name, _, adapter_id, _, _, _, _ in FLAT_COMPLETIONS
 ) + (('meso-review', 'training'),)
 
-for lane_name, lane_title, adapter_id, label, stamp, command in FLAT_COMPLETIONS:
-    sources.register_adapter(adapter_id, flat_adapter(adapter_id, lane_name, lane_title, label, stamp, command))
-sources.register_adapter('meso-review', meso_adapter)
+for lane_name, lane_title, adapter_id, label, stamp, command, hint in FLAT_COMPLETIONS:
+    sources.register_adapter(adapter_id, command, flat_adapter(adapter_id, lane_name, lane_title, label, stamp, hint))
+sources.register_adapter('meso-review', ('meso', 'review', '--since', '1d', '--json'), meso_adapter)
 
 
 def filled(template: str, handle: str) -> str:

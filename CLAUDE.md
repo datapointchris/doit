@@ -93,8 +93,11 @@ both read it, and a constant defined per reader is a constant that drifts.
 
 ## Sources are configuration, not code
 
-`doit` must not know which apps supply *lanes*. Adding a source is an edit to `sources.yml`, never a
-release. That bounds the rule to the dashboard; `doit.machine` asks dotfiles a question no lane
+`doit` must not know which apps supply *lanes*. Adding a source that prints the lane document is an
+edit to `sources.yml`, never a release. A source with an adapter is already code, and the adapter
+carries its command too. The command and the model it returns are one contract, and a copy of the
+command in `sources.yml` is one no sweep of the code finds when its tool renames a flag. That bounds
+the rule to the dashboard; `doit.machine` asks dotfiles a question no lane
 answers, and the tiers sanction it — doit is `experimental` above a `universal` tool, so when the one
 below moves, this is what changes.
 A source that is not configured is silent; one configured but missing gets a single line; one that

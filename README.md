@@ -228,15 +228,21 @@ ordering over unlike things would be invented rather than meaningful, so the das
 none of them. A lane of rows shows three, and tasks and learning show five. Naming one lane with
 `--lane` shows ten. A grid such as the habits is a set only useful whole, so it is never cut.
 
-doit knows nothing about which apps exist. `$XDG_CONFIG_HOME/doit/sources.yml` declares each
-source's id, the command to run, and how its output becomes lanes. Every backend already speaks
-`--json`. A named adapter shapes a source's own model, and a source that prints doit's lane document
-needs none. Adding a source is an edit, never a release.
+doit knows nothing about which apps exist. `$XDG_CONFIG_HOME/doit/sources.yml` declares which
+sources to ask and how each one's output becomes lanes. Every backend already speaks `--json`. A
+source that prints doit's lane document names its command and needs no adapter, so adding one is an
+edit, never a release. A source that prints its own model names an adapter in doit instead. The
+adapter carries the command as well as the shape, because the two are one contract with that tool.
+A `command` written beside an `adapter` is reported and ignored.
 
 A source that is not configured is silent. One that is configured but missing gets a single line.
 One that runs and fails shows its error. A lane is never silently dropped, because a dashboard that
 quietly omits one reads as nothing outstanding. The command exits 0 whatever its lanes say. A script
 reading `--json` checks each lane's `status`.
+
+`doit sources list` exits 3 when an installed tool rejects a source's command as a usage error, and
+names the tool's own complaint. A tool that is absent, logged out or slow exits 0. A scheduled run
+of it therefore fails only on a break that needs a person.
 
 The dashboard computes no schedule. It mirrors the `overdue` each backend emits, because the backend
 owns due-ness. The MAINTENANCE lane shows three rows of review and Labs, and there are usually more.
