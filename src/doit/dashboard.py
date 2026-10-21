@@ -978,8 +978,8 @@ def run_box(run: dict) -> str:
     `machine` names the manifest a box converges to, and two boxes can share one —
     both Macs declare `macos-personal-workstation`, so folding on it counts them
     as one and the newer run hides the older. `host` is the bare hostname and is
-    what makes the writes unique, which `standards/data.md` § "A reader of a shared
-    directory selects by the key that made the writes unique" asks a reader to use.
+    what makes the writes unique, so a reader of a synced directory picks each
+    box's file by it rather than taking whichever file is newest.
 
     A run written before dotfiles carried `host` falls back to `machine`, which is
     what this fold has always used.
