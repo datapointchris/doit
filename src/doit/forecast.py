@@ -157,9 +157,9 @@ def durations(register: dict, records: list[dict]) -> dict[str, Duration]:
     for record in records:
         if record.get('event') != journal.Event.DONE:
             continue
-        minutes = record.get('duration_minutes')
-        if isinstance(minutes, int | float) and not isinstance(minutes, bool) and minutes > 0:
-            logged.setdefault(str(record.get('pursuit')), []).append(float(minutes))
+        minutes = journal.recorded_minutes(record)
+        if minutes is not None:
+            logged.setdefault(str(record.get('pursuit')), []).append(minutes)
 
     answer: dict[str, Duration] = {}
     for name in register:

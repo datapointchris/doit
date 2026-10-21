@@ -171,10 +171,21 @@ def checkoff_equivalent(record: dict, size: float | None) -> float:
     """
     if not size:
         return 1.0
+    minutes = recorded_minutes(record)
+    return 1.0 if minutes is None else minutes / size
+
+
+def recorded_minutes(record: dict) -> float | None:
+    """The minutes a record kept, or None where it kept none a sitting could last.
+
+    A bool is refused though Python counts it an int, and so is anything at or
+    below zero. Every reader of a duration asks here, so a balance, a forecast,
+    drift and the today view all count the same entry the same way.
+    """
     minutes = record.get('duration_minutes')
     if not isinstance(minutes, int | float) or isinstance(minutes, bool) or minutes <= 0:
-        return 1.0
-    return float(minutes) / size
+        return None
+    return float(minutes)
 
 
 def load_counts(directory: Path) -> dict[str, int]:

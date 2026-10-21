@@ -513,8 +513,8 @@ def journal_entry(record: dict) -> str:
     so it gets no number rather than a zero.
     """
     name = str(record.get('pursuit') or '')
-    minutes = record.get('duration_minutes')
-    if isinstance(minutes, int | float) and not isinstance(minutes, bool):
+    minutes = journal.recorded_minutes(record)
+    if minutes is not None:
         return f'{name} · {round(minutes)} min'
     return name
 

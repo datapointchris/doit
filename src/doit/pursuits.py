@@ -2435,11 +2435,9 @@ def logged_minutes(records: list[dict], start: dt.datetime) -> float:
     """The minutes typed entries since ``start`` recorded. An entry giving none adds none."""
     total = 0.0
     for record in records:
-        minutes = record.get('duration_minutes')
         if record.get('event') != journal.Event.DONE or not in_window(record, start):
             continue
-        if isinstance(minutes, int | float) and not isinstance(minutes, bool) and minutes > 0:
-            total += minutes
+        total += journal.recorded_minutes(record) or 0.0
     return total
 
 
