@@ -31,6 +31,7 @@ import datetime as dt
 import json
 import shlex
 import subprocess
+from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -270,13 +271,20 @@ def stale(entry: dict | None, now: dt.datetime, ttl: float) -> bool:
 
 
 def refresh(
-    pursuits: dict,
+    register: dict,
     directory: Path,
     now: dt.datetime,
     force: bool = False,
     ttl: float = REFRESH_TTL_SECONDS,
+    *,
+    ask: Collection[str] | None = None,
 ) -> dict:
     """Bring the cache up to date, asking only the apps whose answer has aged out.
+
+    ``register`` is every pursuit, and it alone decides which cached answers
+    survive. ``ask`` names the pursuits to bring up to date, every one by default,
+    and only their answers come back. A caller asking fewer therefore leaves the
+    others' answers in the cache rather than deleting them.
 
     A failed read keeps the previous `last` and its dates and records why, so one
     logged-out CLI degrades that pursuit to its journal rather than emptying the
@@ -284,22 +292,23 @@ def refresh(
     """
     payload = load(directory)
     entries = payload.setdefault('pursuits', {})
-    candidates = declared(pursuits)
+    declaring = declared(register)
 
     # A pursuit that stopped declaring evidence stops carrying an answer, or a
     # weight edit would silently keep an old app's verdict alive. Done before the
     # nothing-to-do exit, because dropping one is itself something to do.
-    dropped = [name for name in entries if name not in candidates]
+    dropped = [name for name in entries if name not in declaring]
     for name in dropped:
         del entries[name]
 
+    candidates = declaring if ask is None else {name: config for name, config in declaring.items() if name in ask}
     due = {
         name: config
         for name, config in candidates.items()
         if force or stale(entries.get(name), now, ttl) or (entries.get(name) or {}).get('declaration') != declaration(config)
     }
     if not due and not dropped:
-        return payload
+        return answered(payload, candidates)
 
     if due:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -317,7 +326,12 @@ def refresh(
 
     payload['schema_version'] = SCHEMA_VERSION
     save(directory, payload)
-    return payload
+    return answered(payload, candidates)
+
+
+def answered(payload: dict, names: Collection[str]) -> dict:
+    """The cache as one caller sees it: the answers of the pursuits it asked."""
+    return {**payload, 'pursuits': {name: entry for name, entry in payload['pursuits'].items() if name in names}}
 
 
 def observed(payload: dict) -> dict[str, dt.datetime]:

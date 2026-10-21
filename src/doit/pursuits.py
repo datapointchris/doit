@@ -559,9 +559,8 @@ def is_tracked(config: dict, today: dt.date) -> bool:
 def watched(pursuits: dict, today: dt.date) -> dict:
     """Every pursuit whose app is asked and whose done is shown: the active ones and the tracked ones.
 
-    Decided here and nowhere else. `evidence.refresh` deletes the cached answer
-    of any pursuit it is not handed, so a second copy of this set that drifted
-    would empty a pursuit's evidence.
+    Decided here and nowhere else, so the state build and `doit pursuits evidence`
+    ask the same apps and show the same pursuits.
     """
     return {name: config for name, config in pursuits.items() if is_active(config, today) or is_tracked(config, today)}
 
@@ -961,7 +960,7 @@ def build_state(
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
-    observations = {} if observed is not None else evidence.refresh(watching, CACHE_DIR, now)
+    observations = {} if observed is not None else evidence.refresh(pursuits, CACHE_DIR, now, ask=watching)
     seen = evidence.observed(observations) if observed is None else observed
     seen_days = evidence.occurrences(observations) if observed is None else (evidence_days or {})
     last_done = evidence.merged(latest_occurrence(records, journal.Event.DONE), seen)
@@ -2569,7 +2568,7 @@ def cmd_evidence(as_json: bool = False) -> int:
         return 1
     now = dt.datetime.now().astimezone()
     watching = watched(pursuits, now.date())
-    observations = evidence.refresh(watching, CACHE_DIR, now, force=True)
+    observations = evidence.refresh(pursuits, CACHE_DIR, now, force=True, ask=watching)
     seen = evidence.observed(observations)
     failed = evidence.problems(observations)
     declared = evidence.declared(watching)

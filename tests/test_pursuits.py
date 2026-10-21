@@ -224,8 +224,7 @@ def test_a_pursuit_with_no_pace_is_tracked_and_never_drawn(tmp_path, sandbox, mo
 
 
 def test_a_tracked_pursuits_app_is_read_and_its_day_counted(tmp_path, sandbox, monkeypatch, capsys):
-    """Narrowing the evidence view's set back to the drawn pursuits reported
-    `build` as undeclared, and a refresh handed fewer drops its cached answer."""
+    """`doit pursuits evidence` asks a tracked pursuit's app, and drift counts the day it reported."""
     yesterday = (dt.datetime.now().astimezone() - dt.timedelta(days=1)).isoformat()
     command = json.dumps(emitting([{'closed_ts': yesterday}]))
     register = f'pursuits:\n  build:\n    evidence: {command}\n    evidence_time: closed_ts\n'
