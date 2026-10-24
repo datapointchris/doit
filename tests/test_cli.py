@@ -9,6 +9,7 @@ tree being wired up in a way that loses them.
 from importlib.metadata import PackageNotFoundError
 
 import pytest
+from typer.main import get_command
 from typer.models import CommandInfo
 from typer.testing import CliRunner
 
@@ -16,6 +17,7 @@ import doit
 import doit.cli
 from doit import __version__
 from doit import pursuits
+from doit.cli import accepted_placements
 from doit.cli import app
 
 runner = CliRunner()
@@ -102,6 +104,14 @@ def test_missing_required_argument_exits_2(argv):
     result = runner.invoke(app, argv)
 
     assert result.exit_code == 2
+
+
+def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
+    """`doit next --no-input` is refused by `next`; the root is where it goes."""
+    with pytest.raises(Exception) as refused:
+        get_command(app).main(['next', '--no-input'], prog_name='doit', standalone_mode=False)
+
+    assert accepted_placements(refused.value) == ['doit --no-input next']
 
 
 def test_update_path_does_not_also_notify(monkeypatch):
