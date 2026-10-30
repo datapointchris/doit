@@ -52,7 +52,6 @@ handles stay plain.
 
 import datetime as dt
 import json
-from collections.abc import Callable
 from itertools import chain
 from typing import Annotated
 from typing import NamedTuple
@@ -62,11 +61,9 @@ from rich.text import Text
 
 from doit import dashboard
 from doit import happened
-from doit import labs
 from doit import lanes
 from doit import pursuits
 from doit import quota
-from doit import review
 from doit import sources
 from doit import window
 from doit.happened import GROUP_INDENT
@@ -101,7 +98,7 @@ DAY_SHAPED_ROW_LANES = ('upcoming',)
 # by having a grid, for two reasons. A grid says "the whole set", not "due
 # today". And a lane that failed has no grid, so finding sets that way would
 # drop a failed habits lane from the due list without a word.
-DAY_SET_LANES = ('habits',)
+DAY_SET_LANES = (lanes.HABITS,)
 
 # Past three a group is a backlog. The row after them says how many more there
 # are and what to type to see them.
@@ -135,8 +132,12 @@ def filled(template: str, handle: str) -> str:
     return handle
 
 
-def set_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
-    """What each day set still holds, or the set itself where it could not be read."""
+def set_lanes(built: list[dashboard.LaneView], done: list[Lane]) -> list[Lane]:
+    """What each day set still holds, or the set itself where it could not be read.
+
+    A member is owed while neither the set's own tick nor the done group names
+    it, so the two halves never list one habit in both or in neither.
+    """
     due: list[Lane] = []
     for lane in built:
         if lane.name not in DAY_SET_LANES:
@@ -144,10 +145,29 @@ def set_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
         if not lane.available:
             due.append(lane)
             continue
+        finished = {cell.text for group in done if group.name == lane.name for cell in group.grid}
         template = lane.hints[0] if lane.hints else ''
-        left = [Row(cell.text, '', handle=filled(template, cell.handle)) for cell in lane.grid if not cell.done]
+        left = [
+            Row(cell.text, '', handle=filled(template, cell.handle)) for cell in lane.grid if not cell.done and cell.text not in finished
+        ]
         due.append(Lane(name=lane.name, title=lane.title, rows=left, total=len(left), hints=[f'doit dashboard --lane {lane.name}']))
     return due
+
+
+def missing_done_halves(built: list[dashboard.LaneView], folded: list[Lane]) -> list[Lane]:
+    """An unavailable done group for each day set that answered while no completion source supplied its done half.
+
+    Without it a member ticked today is in neither list: the set no longer
+    owes it, and nothing lists it done.
+    """
+    have = {lane.name for lane in folded}
+    missing = []
+    for lane in built:
+        if lane.name not in DAY_SET_LANES or not lane.available or lane.name in have:
+            continue
+        supplier = next((adapter_id for adapter_id, name in happened.COMPLETION_ADAPTERS if name == lane.name), lane.name)
+        missing.append(lanes.unavailable(lane.name, lane.title, f'no {supplier} entry under completions in sources.yml'))
+    return missing
 
 
 def appointment_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
@@ -169,20 +189,11 @@ def appointment_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
     return found
 
 
-def register_owed(
-    register: happened.Register,
-    rows: list[dict],
-    is_due: Callable[[dict], bool],
-    act: Callable[[dict], str],
-    bounds: Bounds,
-    now: dt.datetime,
-) -> Lane:
+def register_owed(register: happened.Register, rows: list[dict], bounds: Bounds, now: dt.datetime) -> Lane:
     """What a register still owes today, ranked the way the dashboard's MAINTENANCE lane ranks it.
 
-    `is_due` is the register's own predicate. Review is due when never done or
-    past its date; a Lab is due only when it is also scheduled, so an on-demand
-    Lab never is. One rule written here would agree with `doit review due` and
-    disagree with `doit labs due`.
+    Each register is asked its own `is_due`. One rule written here would agree
+    with `doit review due` and disagree with `doit labs due`.
 
     An item done today is left off. One on a daily cadence done this morning
     still reports `overdue: 0`, because zero means "wanted today" and it was —
@@ -190,23 +201,14 @@ def register_owed(
     """
     ranked = sorted(
         (
-            dashboard.maintenance_row(happened.item_name(row), register.describe(row), row, act(row))
+            dashboard.maintenance_row(happened.item_name(row), register.describe(row), row, register.act(row))
             for row in rows
-            if not happened.lands_within(row.get('last'), bounds, now) and is_due(row)
+            if not happened.lands_within(row.get('last'), bounds, now) and register.is_due(row)
         ),
         key=lambda entry: entry[0],
     )
     owed = [row for _, row in ranked]
     return Lane(name=register.name, title=register.title, rows=owed, total=len(owed), hints=[register.hint])
-
-
-# How each register says an item is owed and what acts on it. A review item's
-# own `command` is its handle. A Lab has none, because it is a document you
-# open, and the verb that opens it is doit's.
-OWED_RULES: dict[str, tuple[Callable[[dict], bool], Callable[[dict], str]]] = {
-    'review': (lambda row: review.is_due(row.get('overdue')), lambda row: str(row.get('command') or '')),
-    'labs': (labs.is_due_row, lambda row: f'doit labs show {happened.item_name(row)}'),
-}
 
 
 def maintenance_lanes(kept: happened.Kept, bounds: Bounds, now: dt.datetime) -> list[Lane]:
@@ -216,8 +218,7 @@ def maintenance_lanes(kept: happened.Kept, bounds: Bounds, now: dt.datetime) -> 
         if register.name in kept.register_errors:
             due.append(lanes.unavailable(register.name, register.title, kept.register_errors[register.name]))
             continue
-        is_due, act = OWED_RULES[register.name]
-        due.append(register_owed(register, kept.registers.get(register.name, []), is_due, act, bounds, now))
+        due.append(register_owed(register, kept.registers.get(register.name, []), bounds, now))
     return due
 
 
@@ -266,19 +267,21 @@ def pursuit_lanes(kept: happened.Kept, bounds: Bounds) -> list[Lane]:
     return [pursuits_due(kept.state, bounds)]
 
 
-CHECKLIST_GROUPS = (*DAY_SET_LANES, 'review', 'labs')
+CHECKLIST_GROUPS = (*DAY_SET_LANES, *(register.name for register in happened.registers()))
 
 
 def checklists(done: list[Lane], due: list[Lane]) -> list[quota.Checklist]:
-    """Each checklist group as done today of done today and still due, or why it could not be read."""
+    """Each checklist group as done today of done today and still due, or why either half could not be read."""
     found = []
     for lane in due:
         if lane.name not in CHECKLIST_GROUPS:
             continue
-        if not lane.available:
-            found.append(quota.Checklist(lane.name, unavailable=lane.reason))
+        cleared_groups = [cleared for cleared in done if cleared.name == lane.name]
+        failed = lane if not lane.available else next((cleared for cleared in cleared_groups if not cleared.available), None)
+        if failed is not None:
+            found.append(quota.Checklist(lane.name, unavailable=failed.reason))
             continue
-        finished = sum(len(cleared.grid) for cleared in done if cleared.name == lane.name)
+        finished = sum(len(cleared.grid) for cleared in cleared_groups)
         found.append(quota.Checklist(lane.name, finished, finished + len(lane.rows)))
     return sorted(found, key=lambda entry: CHECKLIST_GROUPS.index(entry.name))
 
@@ -316,11 +319,13 @@ def build(registry: sources.Registry, now: dt.datetime) -> Day:
     results = sources.fetch(lane_sources + completion_sources, bounds)
     built = dashboard.lanes_of(registry, results, None)
     kept = happened.read_kept(now)
+    folded = happened.fold(registry, results, kept, bounds, now)
+    folded += missing_done_halves(built, folded)
 
-    due = appointment_lanes(built) + pursuit_lanes(kept, bounds) + maintenance_lanes(kept, bounds, now) + set_lanes(built)
+    due = appointment_lanes(built) + pursuit_lanes(kept, bounds) + maintenance_lanes(kept, bounds, now) + set_lanes(built, folded)
     failed = {lane.name for lane in due if not lane.available}
-    folded = [lane for lane in happened.fold(registry, results, kept, bounds, now) if lane.available or lane.name not in failed]
-    done = sorted(folded, key=lambda lane: lane.name not in DAY_SET_LANES)
+    shown = [lane for lane in folded if lane.available or lane.name not in failed]
+    done = sorted(shown, key=lambda lane: lane.name not in DAY_SET_LANES)
     return Day(done, due, day_quota(kept.state, done, due))
 
 

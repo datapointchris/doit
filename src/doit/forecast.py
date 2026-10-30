@@ -373,7 +373,7 @@ def actual_occasions(records: list[dict], start: dt.datetime, days: int) -> dict
     for record in records:
         if record.get('event') != journal.Event.DONE:
             continue
-        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        when = journal.occurred(record)
         if when is None or not (start <= when < finish):
             continue
         counted[str(record.get('pursuit'))] = counted.get(str(record.get('pursuit')), 0) + 1

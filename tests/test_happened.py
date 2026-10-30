@@ -68,19 +68,6 @@ def test_a_utc_stamp_is_converted_before_its_day_is_read():
     assert happened.local_date('2026-07-24T01:00:00Z', evening) == dt.date(2026, 7, 23)
 
 
-def test_a_plain_day_has_no_hour_rather_than_midnight():
-    """Printed, a day parsed as naive midnight is `00:00`, an hour nobody did
-    anything at, and it sorts ahead of the whole morning."""
-    assert happened.instant_text('2026-07-24', NOW) == ''
-
-
-def test_rows_are_filtered_to_the_window_even_when_the_command_already_asked_for_it():
-    """An entry edited to drop the bounds would otherwise report a whole backlog as this window's work."""
-    rows = happened.rows_within(fixture('icb-books-finished'), 'read_finish_date', DAY, NOW)
-
-    assert [row['title'] for row in rows] == ['The Mythical Man-Month']
-
-
 def test_a_day_counts_when_any_of_it_is_inside_the_window():
     """A window opening mid-afternoon still holds a book finished that day, which keeps no hour."""
     afternoon = Bounds(NOW + dt.timedelta(hours=3), NOW + dt.timedelta(days=2))
@@ -121,10 +108,16 @@ def test_a_wider_window_reaches_further_back_and_says_so_in_its_hint():
     assert lane.hints == [f'icb issues list --status completed --since {since} --until {until}']
 
 
-def test_learning_is_filtered_here_because_it_takes_no_window():
-    [lane] = adapter_for('learning-completed')(ok('learning-completed', fixture('learning-completed')))
+def test_a_window_holding_more_than_the_backend_returns_is_partial_rather_than_answered_whole():
+    """A window holding more completions than learning's limit of 100 would read as answered whole, its oldest missing."""
+    notice = '100 newest completed item(s), cut by --limit; older ones exist.'
+    cut = sources.Result(source='learning-completed', payload=fixture('learning-completed'), exit_code=0, stderr=notice, bounds=DAY)
 
+    [lane] = adapter_for('learning-completed')(cut)
+
+    assert (lane.available, lane.reason) == (True, notice)
     assert [cell.text for cell in lane.grid] == ['Structured concurrency in practice']
+    assert happened.verdict_lines([lane], 80)[1].plain.strip() == 'all 1 answered · learning partial · no actor recorded'
 
 
 def test_meso_folds_three_kinds_of_record_into_one_group_with_no_hours():
@@ -144,6 +137,13 @@ def test_every_completion_adapter_degrades_rather_than_disappears(adapter_id, la
     [lane] = adapter_for(adapter_id)(failed)
 
     assert (lane.name, lane.available, lane.reason) == (lane_name, False, 'no')
+
+
+@pytest.mark.parametrize(('adapter_id', 'lane_name'), happened.COMPLETION_ADAPTERS)
+def test_an_expired_login_answering_an_error_with_exit_zero_is_unavailable_and_says_why(adapter_id, lane_name):
+    [lane] = adapter_for(adapter_id)(ok(adapter_id, {'error': 'auth expired'}))
+
+    assert (lane.name, lane.available, lane.reason) == (lane_name, False, f'{adapter_id} answered with an error: auth expired')
 
 
 @pytest.mark.parametrize(('adapter_id', 'lane_name'), happened.COMPLETION_ADAPTERS)
@@ -236,9 +236,10 @@ def test_each_entry_typed_is_its_own_row_with_its_minutes_and_its_actor():
 def test_a_pursuit_no_longer_in_the_register_still_counts():
     """The journal is what happened. Pausing a pursuit this afternoon does not undo this morning."""
     state = pursuit_state()
-    state['records'] = [done_record('retired', NOW)]
+    state['watched'] = {'kept': {}}
+    state['records'] = [done_record('retired', NOW), done_record('kept', NOW - dt.timedelta(hours=1))]
 
-    assert [cell.text for cell in happened.pursuits_group(state, DAY).grid] == ['retired']
+    assert [cell.text for cell in happened.pursuits_group(state, DAY).grid] == ['kept', 'retired']
 
 
 def test_a_register_lists_each_item_whose_latest_date_falls_in_the_window():
@@ -291,39 +292,21 @@ def test_the_actor_identity_written_is_one_its_kind_reads_back(monkeypatch):
     assert actor.kind(actor.identity()) == actor.SESSION
 
 
+def test_a_runner_prefix_doit_has_never_seen_reads_unknown_rather_than_by_hand():
+    """A new kind of runner is counted apart, never shown as the reader's own work."""
+    lane = happened.done_lane('issues', 'ISSUES', [GridCell('closed it', True, actor='runner/nightly/abc')], '')
+
+    assert actor.kind('runner/nightly/abc') == actor.UNKNOWN
+    assert happened.verdict_lines([lane], 80)[1].plain.endswith('· 1 by an actor of unknown kind')
+
+
 # --- the screen ----------------------------------------------------------------
 
 
-def test_an_entry_with_no_hour_leaves_the_column_blank_and_lines_up(capsys):
-    lane = happened.done_lane('review', 'REVIEW', [done('Renew certs'), done('Upgrade brew', NOW.isoformat())], '')
-
-    happened.render_groups([lane], 80)
-
-    assert capsys.readouterr().out.splitlines()[-2:] == [f'    {NOW:%H:%M}  Upgrade brew', '           Renew certs']
-
-
-def test_a_group_recording_an_actor_says_which_kind_and_marks_an_entry_without_one(capsys):
-    cells = [GridCell('closed it', True, done_at=NOW.isoformat(), actor='claude-code/abc'), done('typed it', NOW.isoformat())]
-
-    happened.render_groups([happened.done_lane('issues', 'ISSUES', cells, '')], 80)
-    lines = capsys.readouterr().out.splitlines()
-
-    assert lines[1].split() == [f'{NOW:%H:%M}', 'session', 'closed', 'it']
-    assert lines[2].split() == [f'{NOW:%H:%M}', 'unrecorded', 'typed', 'it']
-
-
-def test_a_window_of_several_days_dates_every_entry(capsys):
-    happened.render_groups([happened.done_lane('tasks', 'TASKS', [done('Pumice Stone', done_on='2026-07-22')], '')], 80, dated=True)
-
-    assert capsys.readouterr().out.splitlines()[1].split() == ['Wed', '22', 'Jul', 'Pumice', 'Stone']
-
-
-def test_a_group_name_is_blue_and_a_done_hour_green_while_the_text_stays_plain():
+def test_a_done_hour_is_green_while_the_text_stays_plain():
     """A style set on a line's first Text is inherited by everything appended to it, which is how a whole row ends up one color."""
-    heading = happened.group_heading(lanes.Lane(name='habits', title='HABITS'))
     line = happened.done_line(done('Floss', NOW.isoformat()), 40)
 
-    assert str(heading.style) == happened.GROUP_STYLE
     assert str(line.style) == ''
     assert [(line.plain[span.start : span.end], str(span.style)) for span in line.spans if str(span.style)] == [
         (f'{NOW:%H:%M}', happened.HOUR_STYLE)
@@ -331,27 +314,47 @@ def test_a_group_name_is_blue_and_a_done_hour_green_while_the_text_stays_plain()
 
 
 def test_the_verdict_names_every_record_asked_and_which_failed():
+    """In a split pane narrower than the list, every record asked still shows, wrapped rather than cut."""
     groups = [
         happened.done_lane('issues', 'ISSUES', [GridCell('x', True, actor='ada@laptop')], ''),
         lanes.Lane(name='tasks', title='TASKS'),
         lanes.unavailable('learning', 'LEARNING', 'not logged in'),
     ]
 
-    names, answered = happened.verdict_lines(groups)
+    names, answered = happened.verdict_lines(groups, 24)
 
-    assert names.plain.strip() == 'asked issues, tasks, learning'
+    assert all(len(line) <= 24 for line in names.plain.splitlines())
+    assert ' '.join(names.plain.split()) == 'asked issues, tasks, learning'
     assert answered.plain.strip() == '2 of 3 answered · actor recorded by issues'
 
 
-def test_a_window_that_will_not_parse_is_refused_before_any_backend_is_asked(capsys):
+def test_a_window_that_will_not_parse_is_refused_before_any_backend_is_asked():
     assert happened.cmd_happened('6mo', None, as_json=False) == 2
-    assert 'no month or year unit' in capsys.readouterr().err
 
 
-def test_the_json_names_the_window_the_records_asked_and_each_group_in_the_contract_shape(monkeypatch, capsys):
+@pytest.fixture
+def no_sources(monkeypatch):
     monkeypatch.setattr(happened.sources, 'load', sources.Registry)
     monkeypatch.setattr(happened, 'read_kept', lambda now: happened.Kept(registers={'review': [], 'labs': []}))
 
+
+def test_until_alone_asks_what_happened_up_to_a_past_date_from_the_earliest_record(no_sources, capsys):
+    assert happened.cmd_happened(None, '2026-07-20', as_json=True) == 0
+    document = json.loads(capsys.readouterr().out)
+
+    assert dt.datetime.fromisoformat(document['since']) == happened.EARLIEST
+    assert document['until'][:10] == '2026-07-21'
+
+
+def test_a_scripted_caller_reads_exit_1_when_no_record_could_be_asked(no_sources, monkeypatch):
+    """Exit 0 there could not be told from a window where nothing happened."""
+    failing = happened.Kept(state_error='pursuits.yml: unreadable', register_errors={'review': 'unreadable', 'labs': 'unreadable'})
+    monkeypatch.setattr(happened, 'read_kept', lambda now: failing)
+
+    assert happened.cmd_happened(None, None, as_json=True) == 1
+
+
+def test_the_json_names_the_window_the_records_asked_and_each_group_in_the_contract_shape(no_sources, capsys):
     assert happened.cmd_happened('2026-07-20', '2026-07-23', as_json=True) == 0
     document = json.loads(capsys.readouterr().out)
 

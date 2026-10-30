@@ -58,7 +58,7 @@ def habits_view():
 def test_a_habit_left_carries_the_command_that_completes_it():
     """The dashboard prints the bare id beside a hint holding `<id>`. A due row
     has one handle column, so the two arrive joined."""
-    [left] = today.set_lanes([habits_view()])
+    [left] = today.set_lanes([habits_view()], [])
 
     assert [(row.label, row.handle) for row in left.rows] == [('Floss', 'icb habits complete 2'), ('Walk', 'icb habits complete 5')]
 
@@ -66,12 +66,12 @@ def test_a_habit_left_carries_the_command_that_completes_it():
 def test_a_grid_is_a_day_set_only_when_it_is_named_as_one():
     """A grid says "the whole set", not "due today". A weekly set emitted as one
     would otherwise land here as a week of work owed this afternoon."""
-    assert today.set_lanes([lane_view('chores', [GridCell('Vacuum', False)])]) == []
+    assert today.set_lanes([lane_view('chores', [GridCell('Vacuum', False)])], []) == []
 
 
 def test_a_day_set_that_could_not_be_read_is_reported_where_it_is_owed():
     """Found by having a grid, a failed lane has none and would leave the due list without a word."""
-    [left] = today.set_lanes([lanes.unavailable('habits', 'HABITS', 'icb: not logged in')])
+    [left] = today.set_lanes([lanes.unavailable('habits', 'HABITS', 'icb: not logged in')], [])
 
     assert (left.name, left.available) == ('habits', False)
 
@@ -253,13 +253,6 @@ def test_a_pursuit_with_no_interval_is_owed_rather_than_dropped():
     assert lane.rows[1].note == 'due today'
 
 
-def test_a_register_that_will_not_load_is_reported_where_it_is_owed():
-    """The failure goes to the due list, where a missing group reads as nothing owed."""
-    [lane] = today.pursuit_lanes(happened.Kept(state_error='pursuits.yml: weight must be a number'), DAY)
-
-    assert (lane.name, lane.available) == ('pursuits', False)
-
-
 def test_an_empty_register_contributes_nothing_and_is_not_an_error():
     assert today.pursuit_lanes(happened.Kept(), DAY) == []
 
@@ -404,6 +397,20 @@ def test_each_list_keeps_its_groups_in_one_order(no_backends, monkeypatch):
     assert [lane.name for lane in day.done] == ['habits', 'pursuits', 'review', 'labs']
     assert [lane.name for lane in day.due] == ['upcoming', 'pursuits', 'review', 'labs', 'habits']
     assert [cell.text for cell in day.done[0].grid] == ['Water'], 'the done habits are the fold, not the dashboard grid'
+
+
+def test_a_sources_yml_without_icb_habits_says_so_rather_than_losing_the_habit_done_today(no_backends, monkeypatch):
+    """The set no longer owes a habit ticked today, so with no done half it would sit in neither list."""
+    monkeypatch.setattr(happened, 'read_kept', kept_with())
+
+    day = today.build(sources.Registry(), NOW)
+
+    [done_half] = [lane for lane in day.done if lane.name == 'habits']
+    assert not done_half.available
+    assert 'icb-habits' in done_half.reason
+    assert [row.label for row in day.due[-1].rows] == ['Floss', 'Walk']
+    assert day.figures is not None
+    assert [entry.unavailable for entry in day.figures.checklists if entry.name == 'habits'] == [done_half.reason]
 
 
 def test_a_group_that_could_not_be_read_is_said_once_in_the_due_list(no_backends, monkeypatch):

@@ -32,6 +32,10 @@ from typing import TypeGuard
 # reader below treats an absent field as its empty value.
 SCHEMA_VERSION = 1
 
+# The day set's lane, under one name for the grid of the whole set and for the
+# group of those done, because `doit today` matches the two by it.
+HABITS = 'habits'
+
 
 class Urgency(StrEnum):
     """How hard a row's note should push.
@@ -82,9 +86,8 @@ class GridCell:
     done_at: str = ''
     # The local day it was done, ISO 8601, set whether or not the hour is known.
     done_on: str = ''
-    # Who did it, as the record wrote it: `claude-code/<session>` for a session,
-    # `claude-code-unattended/...` or `worker/<job>` for a scheduled run, and
-    # `<user>@<host>` by hand. Blank where the record keeps no actor.
+    # Who did it, as the record wrote it; `doit.actor.kind` reads the spelling.
+    # Blank where the record keeps no actor.
     actor: str = ''
 
 

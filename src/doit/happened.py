@@ -4,16 +4,21 @@ The fold for one question, "what happened". `doit happened` renders it over the
 window asked, and `doit today` renders it over the day, so the two cannot
 disagree about what a day held.
 
-**Every record that keeps a completion is asked.** doit's own three are the
-pursuit journal with each app's evidence, review, and Labs. The rest are every
+**Every record that keeps a completion is asked.** doit's own are the pursuit
+journal with each app's evidence, and the registers. The rest are every
 `completions:` entry in `sources.yml`, each asked about the same window.
 
 **Each row carries its source and its actor.** The source is the group it is
-listed under. The actor is whatever the record wrote, an issue's `closed_by` or
-a journal entry's `actor`, and is blank where the record keeps none. Three
-actors write to the records: a person by hand, a session that person drives,
-and an unattended job. The screen says which of the three, and `--json` carries
-the identity as written.
+listed under. The actor is whatever the record wrote, and is blank where the
+record keeps none. Three actors write to the records: a person by hand, a
+session that person drives, and an unattended job. The screen says which of the
+three, or unknown for a spelling `doit.actor` does not recognize, and `--json`
+carries the identity as written.
+
+**A source that answered but wrote to stderr is partial.** Every backend here
+is silent on stderr when it answers in full, so a line there is the backend
+saying what it left out, such as a list cut by its own limit. The group keeps
+its rows and carries that line, and the verdict counts it apart.
 
 **What is done is named, not counted.** Inside a group the entries run in the
 order they happened, with the hour wherever the record kept one. A record
@@ -31,6 +36,7 @@ window is listed once, on the later day.
 import datetime as dt
 import json
 import shlex
+import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
@@ -57,6 +63,8 @@ from doit.render import terminal_width
 from doit.window import Bounds
 
 DEFAULT_SINCE = '7d'
+# Where `--until` alone starts, asked of every backend as an instant.
+EARLIEST = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
 
 GROUP_STYLE = 'bold blue'
 HOUR_STYLE = 'green'
@@ -197,6 +205,26 @@ SINCE = sources.SINCE_PLACEHOLDER
 UNTIL = sources.UNTIL_PLACEHOLDER
 
 
+def unreadable_reason(source_id: str, result: sources.Result, expected: str) -> str:
+    """Why a result holds no group: the failure, or what an answer exiting 0 held in place of `expected`.
+
+    A backend whose login expired can print `{"error": ...}` and exit 0, and
+    `sources.reason` has no failure to name for that.
+    """
+    if result.failure is not None:
+        return sources.reason(source_id, result)
+    payload = result.payload
+    if isinstance(payload, dict) and payload.get('error'):
+        return f'{source_id} answered with an error: {payload["error"]}'
+    return f'{source_id} answered with {type(payload).__name__} where {expected} was expected'
+
+
+def with_cut(lane: Lane, result: sources.Result) -> Lane:
+    """The group, partial where its backend answered and still wrote to stderr."""
+    lane.reason = sources.first_line(result.stderr)
+    return lane
+
+
 def flat_adapter(
     source_id: str, name: str, title: str, label_field: str, date_field: str, actor_field: str, command: tuple[str, ...]
 ) -> Callable[[sources.Result], list[Lane]]:
@@ -214,29 +242,28 @@ def flat_adapter(
     """
 
     def adapter(result: sources.Result) -> list[Lane]:
-        if not isinstance(result.payload, list):
-            return [lanes.unavailable(name, title, sources.reason(source_id, result))]
+        if result.failure is not None or not isinstance(result.payload, list):
+            return [lanes.unavailable(name, title, unreadable_reason(source_id, result, 'a list'))]
         now = dt.datetime.now().astimezone()
         bounds = result.bounds or window.day_of(now)
         cells = [
             done_cell(row_text(row, label_field), row.get(date_field), now, str(row.get(actor_field) or '') if actor_field else '')
             for row in rows_within(result.payload, date_field, bounds, now)
         ]
-        return [done_lane(name, title, cells, hint_for(command, bounds))]
+        return [with_cut(done_lane(name, title, cells, hint_for(command, bounds)), result)]
 
     return adapter
 
 
 # Which completion source answers which group, with the field holding its title,
 # its date and its actor, and the command it runs. The field names came from
-# live payloads, so check one before changing a row here. Only issues record an
-# actor.
+# live payloads, so check one before changing a row here.
 #
-# learning takes no window, so its whole history comes back and the filter does
-# all of the narrowing.
+# learning still returns only its newest 100 inside the window, and says so on
+# stderr when it cuts, which marks the group partial.
 FLAT_COMPLETIONS: tuple[tuple[str, str, str, str, str, str, tuple[str, ...]], ...] = (
     (
-        'habits',
+        lanes.HABITS,
         'HABITS',
         'icb-habits',
         'name',
@@ -296,7 +323,7 @@ FLAT_COMPLETIONS: tuple[tuple[str, str, str, str, str, str, tuple[str, ...]], ..
         'title',
         'completed_at',
         '',
-        ('learning', 'completed', 'list', '--all', '--json'),
+        ('learning', 'completed', 'list', '--all', '--since', SINCE, '--until', UNTIL, '--json'),
     ),
 )
 
@@ -316,8 +343,8 @@ def meso_adapter(result: sources.Result) -> list[Lane]:
     meso records days, not hours, so every entry here is untimed.
     """
     payload = result.payload
-    if not isinstance(payload, dict):
-        return [lanes.unavailable('training', 'TRAINING', sources.reason('meso-review', result))]
+    if result.failure is not None or not isinstance(payload, dict) or payload.get('error'):
+        return [lanes.unavailable('training', 'TRAINING', unreadable_reason('meso-review', result, 'an object'))]
     now = dt.datetime.now().astimezone()
     bounds = result.bounds or window.day_of(now)
     cells = [
@@ -325,7 +352,7 @@ def meso_adapter(result: sources.Result) -> list[Lane]:
         for key, label_field, date_field in MESO_KINDS
         for row in rows_within(payload.get(key), date_field, bounds, now)
     ]
-    return [done_lane('training', 'TRAINING', cells, hint_for(MESO_COMMAND, bounds))]
+    return [with_cut(done_lane('training', 'TRAINING', cells, hint_for(MESO_COMMAND, bounds)), result)]
 
 
 # Every completion adapter doit ships, with the group each one produces. One
@@ -372,7 +399,7 @@ def moved_within(state: dict, bounds: Bounds) -> list[tuple[str, GridCell]]:
     entries = []
     typed: set[tuple[str, dt.date]] = set()
     for record in state.get('records') or []:
-        stamp = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        stamp = journal.occurred(record)
         if record.get('event') != journal.Event.DONE or stamp is None:
             continue
         stamp = stamp.astimezone(now.tzinfo)
@@ -400,10 +427,13 @@ def item_name(row: dict) -> str:
 
 
 class Register(NamedTuple):
-    """One register doit keeps, and how an item in it is described.
+    """One register doit keeps: how an item in it is described, when it is owed, and what acts on it.
 
     A slug names a row to the tooling, and what it is for exists only in its
-    description or title, so that is the text.
+    description or title, so that is the text. `is_due` is the register's own
+    predicate, because a Lab is owed only when it is also scheduled. A review
+    item's own `command` is its act. A Lab has none, because it is a document
+    you open, and the verb that opens it is doit's.
     """
 
     name: str
@@ -411,13 +441,31 @@ class Register(NamedTuple):
     read: Callable[[], list[dict]]
     describe: Callable[[dict], str]
     hint: str
+    is_due: Callable[[dict], bool]
+    act: Callable[[dict], str]
 
 
 def registers() -> tuple[Register, ...]:
     """Built per call rather than at import, so each read goes through the module's current `statuses`."""
     return (
-        Register('review', 'REVIEW', review.statuses, lambda row: str(row.get('desc') or item_name(row)), 'doit review due'),
-        Register('labs', 'LABS', labs.statuses, lambda row: str(row.get('title') or item_name(row)), 'doit labs due'),
+        Register(
+            'review',
+            'REVIEW',
+            review.statuses,
+            lambda row: str(row.get('desc') or item_name(row)),
+            'doit review due',
+            lambda row: review.is_due(row.get('overdue')),
+            lambda row: str(row.get('command') or ''),
+        ),
+        Register(
+            'labs',
+            'LABS',
+            labs.statuses,
+            lambda row: str(row.get('title') or item_name(row)),
+            'doit labs due',
+            labs.is_due_row,
+            lambda row: f'doit labs show {item_name(row)}',
+        ),
     )
 
 
@@ -506,7 +554,7 @@ def read(registry: sources.Registry, bounds: Bounds, now: dt.datetime) -> list[L
 
 
 def has_something(lane: Lane) -> bool:
-    return not lane.available or bool(lane.grid or lane.rows)
+    return not lane.available or bool(lane.reason or lane.grid or lane.rows)
 
 
 def group_heading(lane: Lane) -> Text:
@@ -516,6 +564,12 @@ def group_heading(lane: Lane) -> Text:
 def render_unavailable(lane: Lane) -> None:
     line = Text(ITEM_INDENT)
     line.append(f'unavailable — {lane.reason}', style='red')
+    console.print(line, no_wrap=True, overflow='ellipsis')
+
+
+def render_partial(lane: Lane) -> None:
+    line = Text(ITEM_INDENT)
+    line.append(f'partial — {lane.reason}', style='yellow')
     console.print(line, no_wrap=True, overflow='ellipsis')
 
 
@@ -560,6 +614,8 @@ def render_groups(groups: list[Lane], width: int, *, dated: bool = False) -> Non
         if not lane.available:
             render_unavailable(lane)
             continue
+        if lane.reason:
+            render_partial(lane)
         actor_width = ACTOR_WIDTH if any(cell.actor for cell in lane.grid) else 0
         used = len(ITEM_INDENT) + CLOCK_WIDTH + COLUMN_GAP
         used += date_width + COLUMN_GAP if date_width else 0
@@ -568,29 +624,44 @@ def render_groups(groups: list[Lane], width: int, *, dated: bool = False) -> Non
             console.print(done_line(cell, max(10, width - used), date_width, actor_width), no_wrap=True, overflow='ellipsis')
 
 
-def verdict_lines(groups: list[Lane]) -> list[Text]:
-    """Which records were asked, how many answered, and which recorded who did what."""
+def verdict_lines(groups: list[Lane], width: int) -> list[Text]:
+    """Which records were asked, how many answered and which only in part, and who did what.
+
+    The names wrap under their own indent rather than being cut, because
+    naming every record asked is the line's only job.
+    """
     asked = [lane.name for lane in groups]
     failed = [lane.name for lane in groups if not lane.available]
+    cut = [lane.name for lane in groups if lane.available and lane.reason]
     recording = [lane.name for lane in groups if any(cell.actor for cell in lane.grid)]
-    names = Text(f'{GROUP_INDENT}asked {", ".join(asked)}' if asked else f'{GROUP_INDENT}no record to ask')
+    unknown = sum(actor.kind(cell.actor) == actor.UNKNOWN for lane in groups for cell in lane.grid)
+    lead = f'{GROUP_INDENT}asked '
+    wrapped = textwrap.fill(
+        ', '.join(asked), width, initial_indent=lead, subsequent_indent=' ' * len(lead), break_long_words=False, break_on_hyphens=False
+    )
+    names = Text(wrapped if asked else f'{GROUP_INDENT}no record to ask')
     answered = Text(GROUP_INDENT)
     if failed:
         answered.append(f'{len(asked) - len(failed)} of {len(asked)} answered', style='red')
     else:
         answered.append(f'all {len(asked)} answered')
+    if cut:
+        answered.append(f' · {", ".join(cut)} partial', style='yellow')
     answered.append(f' · actor recorded by {", ".join(recording)}' if recording else ' · no actor recorded')
+    if unknown:
+        answered.append(f' · {unknown} by an actor of unknown kind', style='yellow')
     return [names, answered]
 
 
 def window_title(bounds: Bounds, open_ended: bool) -> str:
+    start = 'the earliest record' if bounds.start == EARLIEST else f'{bounds.start:%a %d %b %H:%M}'
     stop = 'now' if open_ended else f'{bounds.stop:%a %d %b %H:%M}'
-    return f'{bounds.start:%a %d %b %H:%M} to {stop}'
+    return f'{start} to {stop}'
 
 
 def render(groups: list[Lane], bounds: Bounds, open_ended: bool) -> None:
     console.rule(f'[cyan]Happened[/] · {window_title(bounds, open_ended)}', align='left')
-    for line in verdict_lines(groups):
+    for line in verdict_lines(groups, terminal_width()):
         console.print(line, no_wrap=True, overflow='ellipsis')
     shown = [lane for lane in groups if has_something(lane)]
     if shown:
@@ -598,14 +669,16 @@ def render(groups: list[Lane], bounds: Bounds, open_ended: bool) -> None:
         render_groups(shown, terminal_width(), dated=bounds.days() > 1)
 
 
-def cmd_happened(since: str, until: str | None, as_json: bool) -> int:
+def cmd_happened(since: str | None, until: str | None, as_json: bool) -> int:
     now = dt.datetime.now().astimezone()
+    if since is None and until is None:
+        since = DEFAULT_SINCE
     try:
         start, stop = window.window(since, until, now)
     except ValueError as error:
         error_console.print(f'doit happened: {error}')
         return 2
-    bounds = Bounds(start or now, stop or now)
+    bounds = Bounds(start or EARLIEST, stop or now)
     if bounds.start >= bounds.stop:
         error_console.print(f'doit happened: --since {since} is not before {until or "now"}.')
         return 2
@@ -621,6 +694,7 @@ def cmd_happened(since: str, until: str | None, as_json: bool) -> int:
             'until': bounds.stop.isoformat(timespec='seconds'),
             'asked': [lane.name for lane in groups],
             'unavailable': [lane.name for lane in groups if not lane.available],
+            'partial': [lane.name for lane in groups if lane.available and lane.reason],
             'groups': [lanes.lane_to_dict(lane) for lane in groups],
         }
         # Plain print, never the rich console: a Console soft-wraps at terminal
@@ -628,13 +702,20 @@ def cmd_happened(since: str, until: str | None, as_json: bool) -> int:
         print(json.dumps(document, indent=2))
     else:
         render(groups, bounds, open_ended=until is None)
-    # A read-only glance always succeeds. Degradation is shown per group, and a
-    # consumer of --json reads `unavailable` rather than the exit code.
-    return 0
+    # A read that asked some records exits 0 and names the rest in its verdict.
+    # One that could ask none exits 1, so a script can tell it from a quiet window.
+    return 1 if all(not lane.available for lane in groups) else 0
 
 
 def happened_command(
-    since: Annotated[str, typer.Option('--since', help=f'Start of the window: {window.FORMS}.')] = DEFAULT_SINCE,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            '--since',
+            help=f'Start of the window: {window.FORMS}. {DEFAULT_SINCE} ago where neither end is given, '
+            'the earliest record where only --until is.',
+        ),
+    ] = None,
     until: Annotated[
         str | None, typer.Option('--until', help='End of the window, in the same forms; a day includes all of itself. Now where omitted.')
     ] = None,

@@ -286,10 +286,11 @@ comes from. A group that could not be read is said once, in the due list.
 doit happened                                     # the last 7 days, to now
 doit happened --since 2026-10-19 --until 2026-10-25
 doit happened --since 12h --json                  # each group in the lane contract's shape
+doit happened --until 2026-09-01                  # everything up to September
 ```
 
-`--since` and `--until` each take a span (`30m`, `12h`, `7d`, `2w`), a day, or an RFC 3339 instant.
-A day on `--until` includes all of itself. There is no month unit.
+`--since` and `--until` each take a span, a day, or an RFC 3339 instant. `doit happened --help` lists
+the forms. `--until` alone runs from the earliest record.
 
 Pursuits come from the journal and the evidence cache together, so one satisfied inside its own CLI
 is listed without also being typed. Every journal entry in the window counts, whether or not the
@@ -299,16 +300,19 @@ about the same window.
 
 A line above the groups names every record asked and how many answered. A group that answered with
 nothing prints nothing, so that line is what says it was asked. A group that could not be read
-always prints, with why.
+always prints, with why. A backend that answered and still wrote to stderr, such as a list cut at
+its own limit, leaves its group partial: the rows print under what it said. The command exits 1
+when no record could be asked, and 0 otherwise.
 
-Each entry shows its day when the window spans several, and the hour its record kept. Review, Labs,
-habits, books and training record only the day, so their entries follow that day's timed ones with the
-hour blank rather than shown as midnight.
+Each entry shows its day when the window spans several, and the hour its record kept. A record that
+keeps only the day lists its entries after that day's timed ones, with the hour blank rather than
+shown as midnight.
 
 Where a record says who did a thing, the entry says which of three: `by hand`, `session` for a
-Claude session someone drives, or `unattended` for a scheduled run. An issue records its closer,
-and `doit log` stamps each journal entry the same way. Every other record keeps no actor, so its
-group has no actor column. `--json` carries the identity as recorded.
+Claude session someone drives, or `unattended` for a scheduled run. `doit log` stamps each journal
+entry the same way. An identity in a shape doit does not recognize reads `unknown`, and the line
+above the groups counts it. A group whose record keeps no actor has no actor column. `--json`
+carries the identity as recorded.
 
 A `completions:` entry takes the same settings a lane source takes, and answers "what happened"
 instead of "what is outstanding". An argv part written as `{since}` or `{until}` becomes that end of

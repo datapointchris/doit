@@ -236,8 +236,9 @@ def load(path: Path | None = None) -> Registry:
 def resolved_command(command: list[str], bounds: Bounds) -> list[str]:
     """The argv to run, with `{since}` and `{until}` replaced by the window's ends as RFC 3339 instants.
 
-    Instants rather than days, because a window may start mid-afternoon and
-    the cli-design window rule has a client resolve both ends before any call.
+    Instants rather than days, because a window may start mid-afternoon. A
+    backend handed a day would answer for all of it, so the client resolves
+    both ends before any call.
 
     Equality rather than a substring replace. A backend takes each end as its
     own argument, so splicing one into a longer string has no caller — and
@@ -259,6 +260,10 @@ def run(source: Source, bounds: Bounds) -> Result:
         return Result(source=source.id, failure=Failure.NOT_INSTALLED, bounds=bounds)
     except subprocess.TimeoutExpired:
         return Result(source=source.id, failure=Failure.TIMED_OUT, timeout=source.timeout, bounds=bounds)
+    except OSError as error:
+        # A file without its execute bit, among others. One source that cannot
+        # start costs its own lane, never every other source in the round.
+        return Result(source=source.id, stderr=str(error), failure=Failure.FAILED, bounds=bounds)
 
     stderr = completed.stderr.strip()
     if completed.returncode != 0:

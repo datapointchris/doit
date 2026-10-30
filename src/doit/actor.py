@@ -5,14 +5,18 @@ entry and an issue close read alike and one `kind` sorts both.
 """
 
 import os
+import re
 import socket
 
-# Set by the scheduler on every job it runs, naming the job.
+# Set by the scheduler on every job it runs, as `<job>@<machine>`.
 SCHEDULED_JOB_ENV = 'ICB_ACTOR'
 
 BY_HAND = 'by hand'
 SESSION = 'session'
 UNATTENDED = 'unattended'
+UNKNOWN = 'unknown'
+
+USER_AT_HOST = re.compile(r'[^/@\s]+@[^/@\s]+|[^/@\s]+')
 
 
 def identity() -> str:
@@ -33,11 +37,16 @@ def identity() -> str:
 
 
 def kind(recorded: str) -> str:
-    """Which of the three actors a recorded identity names, blank where none was recorded."""
+    """Which of the three actors a recorded identity names, blank where none was recorded.
+
+    Only a bare `<user>@<host>` reads as by hand. An identity in a shape this
+    does not know reads as unknown, so a new kind of runner is never shown as
+    the reader's own work.
+    """
     if not recorded:
         return ''
     if recorded.startswith(('claude-code-unattended/', 'worker/')):
         return UNATTENDED
     if recorded.startswith('claude-code/'):
         return SESSION
-    return BY_HAND
+    return BY_HAND if USER_AT_HOST.fullmatch(recorded) else UNKNOWN
