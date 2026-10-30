@@ -80,6 +80,12 @@ class GridCell:
     # only the day, because a midnight standing in for an unknown hour sorts
     # first and prints as a time nobody did anything at.
     done_at: str = ''
+    # The local day it was done, ISO 8601, set whether or not the hour is known.
+    done_on: str = ''
+    # Who did it, as the record wrote it: `claude-code/<session>` for a session,
+    # `claude-code-unattended/...` or `worker/<job>` for a scheduled run, and
+    # `<user>@<host>` by hand. Blank where the record keeps no actor.
+    actor: str = ''
 
 
 @dataclass
@@ -156,6 +162,8 @@ def cell_from(payload: dict) -> GridCell:
         done=bool(payload.get('done')),
         handle=str(payload.get('handle', '')),
         done_at=str(payload.get('done_at') or ''),
+        done_on=str(payload.get('done_on') or ''),
+        actor=str(payload.get('actor') or ''),
     )
 
 
@@ -224,7 +232,17 @@ def lane_to_dict(lane: Lane) -> dict:
         'rows': [
             {'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency), 'handle': row.handle} for row in lane.rows
         ],
-        'grid': [{'text': cell.text, 'done': cell.done, 'handle': cell.handle, 'done_at': cell.done_at} for cell in lane.grid],
+        'grid': [
+            {
+                'text': cell.text,
+                'done': cell.done,
+                'handle': cell.handle,
+                'done_at': cell.done_at,
+                'done_on': cell.done_on,
+                'actor': cell.actor,
+            }
+            for cell in lane.grid
+        ],
         'total': lane.total,
         'in_flight': lane.in_flight,
         'hints': lane.hints,

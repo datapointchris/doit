@@ -24,14 +24,10 @@ one command away, on the row saying how many there are.
 A pursuit logged this morning can still be weeks behind its pace. The day has
 had it, so it is listed as done and only as done.
 
-**What is done is named, not counted.** Each group is one record: the habits,
-the pursuits, review, Labs, then each completion source. Inside a group the
-entries run in the order they happened, with the hour wherever the record kept
-one. A count would leave the reader to recall what it stood for.
-
-A group with nothing in it prints nothing. An empty heading spends a line on
-what its absence already says. A group that could not be read always prints,
-because a missing group reads as nothing to do.
+**The done list is `doit.happened`'s fold over the day.** `doit happened` renders
+the same fold over any window, so the two cannot disagree about what a day held.
+A group that could not be read is said once, in the due list, where its absence
+would read as nothing owed. A group with nothing in it prints nothing.
 
 Nothing here recomputes due-ness. The dashboard mirrors the `overdue` a backend
 emits rather than deriving it again, and that holds just as hard at this
@@ -65,14 +61,20 @@ import typer
 from rich.text import Text
 
 from doit import dashboard
-from doit import journal
+from doit import happened
 from doit import labs
 from doit import lanes
 from doit import pursuits
 from doit import quota
 from doit import review
 from doit import sources
-from doit.lanes import GridCell
+from doit import window
+from doit.happened import GROUP_INDENT
+from doit.happened import HOUR_STYLE
+from doit.happened import ITEM_INDENT
+from doit.happened import group_heading
+from doit.happened import has_something
+from doit.happened import render_unavailable
 from doit.lanes import Lane
 from doit.lanes import Row
 from doit.lanes import Urgency
@@ -84,6 +86,7 @@ from doit.render import handle_column
 from doit.render import print_handle_below
 from doit.render import span_text
 from doit.render import terminal_width
+from doit.window import Bounds
 
 # The one row-based lane whose urgency means today. Every other lane marks DUE
 # on a window rather than on the day, so `urgency != NONE` reads as "wants
@@ -97,7 +100,7 @@ DAY_SHAPED_ROW_LANES = ('upcoming',)
 # The complete sets whose every member is due every day. Named rather than found
 # by having a grid, for two reasons. A grid says "the whole set", not "due
 # today". And a lane that failed has no grid, so finding sets that way would
-# drop a failed habits lane from both lists without a word.
+# drop a failed habits lane from the due list without a word.
 DAY_SET_LANES = ('habits',)
 
 # Past three a group is a backlog. The row after them says how many more there
@@ -118,227 +121,6 @@ DUE_LABEL_MAX = 20
 DUE_TEXT_MIN = 16
 
 LIST_STYLE = 'cyan'
-GROUP_STYLE = 'bold blue'
-HOUR_STYLE = 'green'
-
-GROUP_INDENT = '  '
-ITEM_INDENT = '    '
-CLOCK_WIDTH = len('00:00')
-
-
-def local_date(value: object, now: dt.datetime) -> dt.date | None:
-    """The local calendar day a backend's timestamp landed on.
-
-    Both shapes, because these fields are not consistent across apps and never
-    will be: `read_finish_date` is a plain day and `complete_date` is an
-    instant. One function, so both land on the same day.
-
-    The instant is converted before its day is read. The apps stamp in UTC, so
-    the first ten characters of `2026-09-21T01:00:00Z` say the 21st while the
-    work happened at nine in the evening of the 20th in `-04:00`. Truncating
-    first moves every evening onto tomorrow.
-
-    Truncation is the fallback, for a plain day with no time to convert and for
-    a stamp whose day is readable while its time is not.
-    """
-    if not value:
-        return None
-    text = str(value)
-    stamp = journal.parse_time(text)
-    if stamp is not None:
-        return stamp.astimezone(now.tzinfo).date() if stamp.tzinfo else stamp.date()
-    try:
-        return dt.date.fromisoformat(text[:10])
-    except ValueError:
-        return None
-
-
-def local_instant(value: object, now: dt.datetime) -> dt.datetime | None:
-    """When a record says something happened, in local time, if it says an hour.
-
-    A plain day parses as naive midnight. Shown, that is `00:00`, an hour nobody
-    did anything at, and it sorts ahead of the whole morning. So only a stamp
-    carrying an offset is a time here.
-    """
-    if isinstance(value, dt.datetime):
-        stamp: dt.datetime | None = value
-    else:
-        stamp = journal.parse_time(str(value)) if value else None
-    if stamp is None or stamp.tzinfo is None:
-        return None
-    return stamp.astimezone(now.tzinfo)
-
-
-def instant_text(value: object, now: dt.datetime) -> str:
-    """`GridCell.done_at` for a record's stamp: local, with its offset, or blank."""
-    stamp = local_instant(value, now)
-    return '' if stamp is None else stamp.isoformat(timespec='seconds')
-
-
-def rows_done_today(payload: object, date_field: str, now: dt.datetime) -> list[dict]:
-    """The rows in a completions payload whose date is today.
-
-    Filtered here even where the command already asked the backend for one day.
-    `{today}` in the argv is a transfer cost saved, not the thing that makes the
-    answer right — an entry edited to drop it would otherwise report a whole
-    backlog as this morning's work, and report it silently.
-    """
-    if not isinstance(payload, list):
-        return []
-    today = now.date()
-    return [row for row in payload if isinstance(row, dict) and local_date(row.get(date_field), now) == today]
-
-
-def done_lane(name: str, title: str, cells: list[GridCell], hint: str) -> Lane:
-    """One group of the done list, in the order its entries happened.
-
-    Sorted here rather than by the renderer, so `--json` hands a consumer the
-    order the screen shows. An entry whose record kept only the day has no place
-    in that order, so it follows the timed ones in the order it arrived.
-    """
-    timed = sorted((cell for cell in cells if cell.done_at), key=lambda cell: dt.datetime.fromisoformat(cell.done_at))
-    ordered = timed + [cell for cell in cells if not cell.done_at]
-    return Lane(name=name, title=title, meta=f'{len(ordered)} done', grid=ordered, total=len(ordered), hints=[hint] if hint else [])
-
-
-def row_text(row: dict, label_field: str) -> str:
-    return str(row.get(label_field) or '').strip() or '—'
-
-
-def completion_cell(row: dict, label_field: str, date_field: str, now: dt.datetime) -> GridCell:
-    return GridCell(row_text(row, label_field), True, done_at=instant_text(row.get(date_field), now))
-
-
-def flat_adapter(
-    source_id: str, name: str, title: str, label_field: str, date_field: str, hint: str
-) -> Callable[[sources.Result], list[Lane]]:
-    """An adapter for a backend answering with a flat array of finished things.
-
-    Most of the completion sources are this shape and differ only in which
-    field is the title and which is the date. A closure here rather than two
-    more keys in `sources.yml`, because `lanes.py` rejects field mappings in
-    that file by name.
-
-    The failure reason is asked for under the source id, never the lane name.
-    `reason` looks the argv back up by that id to name the program that
-    rejected it, so a lane name here would lose the command and name a thing
-    that was never a source.
-    """
-
-    def adapter(result: sources.Result) -> list[Lane]:
-        if result.payload is None or not isinstance(result.payload, list):
-            return [lanes.unavailable(name, title, sources.reason(source_id, result))]
-        now = dt.datetime.now().astimezone()
-        rows = rows_done_today(result.payload, date_field, now)
-        return [done_lane(name, title, [completion_cell(row, label_field, date_field, now) for row in rows], hint)]
-
-    return adapter
-
-
-TODAY = sources.TODAY_PLACEHOLDER
-
-# Which completion source answers which group, with the command it runs. The
-# field names came from live payloads, so check one before changing a row here.
-#
-# Each command bounds its read to today. The adapter filters on the date field
-# regardless, so the bound saves transfer and the filter is what makes the count
-# right.
-FLAT_COMPLETIONS = (
-    (
-        'tasks',
-        'TASKS',
-        'icb-tasks',
-        'name',
-        'complete_date',
-        ('icb', 'tasks', 'list', '--status', 'completed', '--since', TODAY, '--json'),
-        'icb tasks list --status completed',
-    ),
-    (
-        'projects',
-        'PROJECTS',
-        'icb-projects',
-        'title',
-        'completed_at',
-        ('icb', 'projects', 'items', 'list', '--status', 'completed', '--since', TODAY, '--json'),
-        'icb projects items list --status completed',
-    ),
-    (
-        'issues',
-        'ISSUES',
-        'icb-issues',
-        'title',
-        'closed_ts',
-        ('icb', 'issues', 'list', '--status', 'completed', '--since', TODAY, '--json'),
-        'icb issues list --status completed',
-    ),
-    (
-        'articles',
-        'ARTICLES',
-        'icb-articles',
-        'title',
-        'last_read_date',
-        ('icb', 'articles', 'list', '--since', TODAY, '--json'),
-        'icb articles list',
-    ),
-    (
-        'books',
-        'BOOKS',
-        'icb-books',
-        'title',
-        'read_finish_date',
-        ('icb', 'books', 'list', '--since', TODAY, '--json'),
-        'icb books list',
-    ),
-    (
-        'learning',
-        'LEARNING',
-        'learning-completed',
-        'title',
-        'completed_at',
-        ('learning', 'completed', 'list', '--all', '--since', TODAY, '--json'),
-        'learning completed list --all',
-    ),
-)
-
-# meso answers three kinds in one document and names each kind's rows
-# differently, which is why it cannot use the flat adapter above.
-MESO_KINDS = (
-    ('sessions', 'workout_name', 'performed_on'),
-    ('log_entries', 'mood', 'entry_date'),
-    ('measurements', 'metric', 'measured_on'),
-)
-
-
-def meso_adapter(result: sources.Result) -> list[Lane]:
-    """`meso review --since 1d` as one training group.
-
-    One call covering sessions, log entries and measurements. `--since` takes a
-    window rather than a date, so `1d` reaches back further than midnight and
-    the day filter here is what narrows it. meso records days, not hours, so
-    every entry here is untimed.
-    """
-    payload = result.payload
-    if not isinstance(payload, dict):
-        return [lanes.unavailable('training', 'TRAINING', sources.reason('meso-review', result))]
-    now = dt.datetime.now().astimezone()
-    cells = []
-    for key, label_field, date_field in MESO_KINDS:
-        for row in rows_done_today(payload.get(key), date_field, now):
-            cells.append(completion_cell(row, label_field, date_field, now))
-    return [done_lane('training', 'TRAINING', cells, 'meso review --since 1d')]
-
-
-# Every completion adapter doit ships, with the lane each one produces. One
-# table rather than a list beside a loop, for the reason `SHIPPED_ADAPTERS` is
-# one: a registration nothing enumerates is a row no test can assert about, and
-# these share a global registry with the dashboard's.
-COMPLETION_ADAPTERS: tuple[tuple[str, str], ...] = tuple(
-    (adapter_id, lane_name) for lane_name, _, adapter_id, _, _, _, _ in FLAT_COMPLETIONS
-) + (('meso-review', 'training'),)
-
-for lane_name, lane_title, adapter_id, label, stamp, command, hint in FLAT_COMPLETIONS:
-    sources.register_adapter(adapter_id, command, flat_adapter(adapter_id, lane_name, lane_title, label, stamp, hint))
-sources.register_adapter('meso-review', ('meso', 'review', '--since', '1d', '--json'), meso_adapter)
 
 
 def filled(template: str, handle: str) -> str:
@@ -353,13 +135,8 @@ def filled(template: str, handle: str) -> str:
     return handle
 
 
-def set_lanes(built: list[dashboard.LaneView], now: dt.datetime) -> tuple[list[Lane], list[Lane]]:
-    """Each day set split in two: the done group, and the group still to do.
-
-    A set that could not be read goes to the due list alone. That is where its
-    absence would read as nothing left to do.
-    """
-    done: list[Lane] = []
+def set_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
+    """What each day set still holds, or the set itself where it could not be read."""
     due: list[Lane] = []
     for lane in built:
         if lane.name not in DAY_SET_LANES:
@@ -367,12 +144,10 @@ def set_lanes(built: list[dashboard.LaneView], now: dt.datetime) -> tuple[list[L
         if not lane.available:
             due.append(lane)
             continue
-        finished = [GridCell(cell.text, True, done_at=instant_text(cell.done_at, now)) for cell in lane.grid if cell.done]
-        done.append(done_lane(lane.name, lane.title, finished, ''))
         template = lane.hints[0] if lane.hints else ''
         left = [Row(cell.text, '', handle=filled(template, cell.handle)) for cell in lane.grid if not cell.done]
         due.append(Lane(name=lane.name, title=lane.title, rows=left, total=len(left), hints=[f'doit dashboard --lane {lane.name}']))
-    return done, due
+    return due
 
 
 def appointment_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
@@ -394,96 +169,56 @@ def appointment_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
     return found
 
 
-def item_name(row: dict) -> str:
-    return str(row.get('id') or row.get('title') or '')
-
-
-def cleared_on(row: dict, today: dt.date) -> bool:
-    return row.get('last') == today.isoformat()
-
-
-def register_lanes(
-    name: str,
-    title: str,
+def register_owed(
+    register: happened.Register,
     rows: list[dict],
     is_due: Callable[[dict], bool],
-    today: dt.date,
-    describe: Callable[[dict], str],
     act: Callable[[dict], str],
-    hint: str,
-) -> tuple[Lane, Lane]:
-    """A register's done group, and its group of what is still owed.
+    bounds: Bounds,
+    now: dt.datetime,
+) -> Lane:
+    """What a register still owes today, ranked the way the dashboard's MAINTENANCE lane ranks it.
 
     `is_due` is the register's own predicate. Review is due when never done or
     past its date; a Lab is due only when it is also scheduled, so an on-demand
     Lab never is. One rule written here would agree with `doit review due` and
     disagree with `doit labs due`.
 
-    The owed group is ranked by `dashboard.maintenance_row`, the order the
-    dashboard's MAINTENANCE lane already gives these.
+    An item done today is left off. One on a daily cadence done this morning
+    still reports `overdue: 0`, because zero means "wanted today" and it was —
+    so without this it would be listed as done and owed at once.
     """
-    done = [row for row in rows if cleared_on(row, today)]
-    # Done is subtracted from due rather than counted alongside it. An item on a
-    # daily cadence done this morning still reports `overdue: 0`, because zero
-    # means "wanted today" and it was — so without this it is cleared and owed
-    # at once.
-    finished = {id(row) for row in done}
     ranked = sorted(
         (
-            dashboard.maintenance_row(item_name(row), describe(row), row, act(row))
+            dashboard.maintenance_row(happened.item_name(row), register.describe(row), row, act(row))
             for row in rows
-            if id(row) not in finished and is_due(row)
+            if not happened.lands_within(row.get('last'), bounds, now) and is_due(row)
         ),
         key=lambda entry: entry[0],
     )
     owed = [row for _, row in ranked]
-    return (
-        done_lane(name, title, [GridCell(describe(row), True) for row in done], hint),
-        Lane(name=name, title=title, rows=owed, total=len(owed), hints=[hint]),
-    )
+    return Lane(name=register.name, title=register.title, rows=owed, total=len(owed), hints=[register.hint])
 
 
-def maintenance_lanes(today: dt.date) -> tuple[list[Lane], list[Lane]]:
-    """The two registers doit keeps itself, each split into done and owed.
+# How each register says an item is owed and what acts on it. A review item's
+# own `command` is its handle. A Lab has none, because it is a document you
+# open, and the verb that opens it is doit's.
+OWED_RULES: dict[str, tuple[Callable[[dict], bool], Callable[[dict], str]]] = {
+    'review': (lambda row: review.is_due(row.get('overdue')), lambda row: str(row.get('command') or '')),
+    'labs': (labs.is_due_row, lambda row: f'doit labs show {happened.item_name(row)}'),
+}
 
-    Read as statuses rather than through the dashboard's `maintenance` lane,
-    which interleaves them into one ranked excerpt and drops the done half.
 
-    A register's slug names a row to the tooling, and what it is for exists only
-    in its description or title, so that is the text. A review item's own
-    `command` is its handle. A Lab has none, because it is a document you open,
-    and the verb that opens it is doit's.
-    """
-    done: list[Lane] = []
+def maintenance_lanes(kept: happened.Kept, bounds: Bounds, now: dt.datetime) -> list[Lane]:
+    """What each register doit keeps still owes, or why it could not be read."""
     due: list[Lane] = []
-    for name, title, read, is_due, describe, act, hint in (
-        (
-            'review',
-            'REVIEW',
-            review.statuses,
-            lambda row: review.is_due(row.get('overdue')),
-            lambda row: str(row.get('desc') or item_name(row)),
-            lambda row: str(row.get('command') or ''),
-            'doit review due',
-        ),
-        (
-            'labs',
-            'LABS',
-            labs.statuses,
-            labs.is_due_row,
-            lambda row: str(row.get('title') or item_name(row)),
-            lambda row: f'doit labs show {item_name(row)}',
-            'doit labs due',
-        ),
-    ):
-        try:
-            cleared, owed = register_lanes(name, title, read(), is_due, today, describe, act, hint)
-        except (OSError, ValueError) as error:
-            due.append(lanes.unavailable(name, title, str(error)))
+    for register in happened.registers():
+        if register.name in kept.register_errors:
+            due.append(lanes.unavailable(register.name, register.title, kept.register_errors[register.name]))
             continue
-        done.append(cleared)
-        due.append(owed)
-    return done, due
+        is_due, act = OWED_RULES[register.name]
+        due.append(register_owed(register, kept.registers.get(register.name, []), is_due, act, bounds, now))
+    return due
 
 
 def owing(state: dict) -> list[tuple[str, float | None]]:
@@ -505,62 +240,13 @@ def owing(state: dict) -> list[tuple[str, float | None]]:
     return sorted(behind, key=lambda row: (row[1] is None, row[1] if row[1] is not None else 0))
 
 
-def journal_entry(record: dict) -> str:
-    """A journal entry as the pursuit it was for, and its minutes if it kept any.
-
-    A timed pursuit logged without `--minutes` records no duration on purpose,
-    so it gets no number rather than a zero.
-    """
-    name = str(record.get('pursuit') or '')
-    minutes = journal.recorded_minutes(record)
-    if minutes is not None:
-        return f'{name} · {round(minutes)} min'
-    return name
-
-
-def moved_today(state: dict, today: dt.date) -> list[tuple[str, GridCell]]:
-    """Every entry for a pursuit today moved, from either record, beside its name.
-
-    The journal answers what got typed, one entry per act at its own time. The
-    evidence answers what the apps saw. A pursuit satisfied inside its own CLI
-    appears only there, so it is added once, at the last time its app saw it.
-    One also typed today is already listed, and its evidence adds nothing.
-
-    Only pursuits the register still draws or tracks. A journal is history and
-    the register is now, so commenting one out or pausing it takes it off today.
-    """
-    now = state['now']
-    current = state['watched']
-    entries = []
-    typed = set()
-    for record in state.get('records') or []:
-        name = str(record.get('pursuit') or '')
-        if record.get('event') != journal.Event.DONE or name not in current or journal.local_day(record, now) != today:
-            continue
-        typed.add(name)
-        stamp = instant_text(record.get('occurred_at') or record.get('logged_at'), now)
-        entries.append((name, GridCell(journal_entry(record), True, done_at=stamp)))
-    observed = state.get('observed') or {}
-    for name, days in (state.get('evidence_days') or {}).items():
-        if name in typed or name not in current or today not in days:
-            continue
-        seen = local_instant(observed.get(name), now)
-        when = seen.isoformat(timespec='seconds') if seen is not None and seen.date() == today else ''
-        entries.append((name, GridCell(name, True, done_at=when)))
-    return entries
-
-
-def pursuits_done(state: dict, today: dt.date) -> Lane:
-    return done_lane('pursuits', 'PURSUITS', [cell for _, cell in moved_today(state, today)], 'doit next --explain')
-
-
-def pursuits_due(state: dict, today: dt.date) -> Lane:
+def pursuits_due(state: dict, bounds: Bounds) -> Lane:
     """Each pursuit owing a checkoff, furthest behind first, with the command that logs it.
 
     A pursuit moved today is left off however far behind it still is. Doing it
-    checks it off for the day, so `pursuits_done` lists it and this does not.
+    checks it off for the day, so the done list names it and this does not.
     """
-    moved = {name for name, _ in moved_today(state, today)}
+    moved = {name for name, _ in happened.moved_within(state, bounds)}
     rows = []
     for name, due_in in owing(state):
         if name in moved:
@@ -571,23 +257,13 @@ def pursuits_due(state: dict, today: dt.date) -> Lane:
     return Lane(name='pursuits', title='PURSUITS', rows=rows, total=len(rows), hints=['doit next --explain'])
 
 
-def pursuit_lanes(now: dt.datetime, today: dt.date) -> tuple[list[Lane], list[Lane], dict | None]:
-    """The pursuits' group in each list, and the state both were built from.
-
-    Guarded the way the dashboard guards its own standing line. A register that
-    refuses to load is a real failure mode and it must cost these two groups
-    rather than the whole screen — the rest has nothing to do with the weights.
-    The failure is reported in the due list, where a missing group reads as
-    nothing owed. The state is None both then and where the register is empty.
-    """
-    try:
-        register = pursuits.load_pursuits()
-        if not register:
-            return [], [], None
-        state = pursuits.build_state(register, now)
-    except (pursuits.RegisterError, OSError, ValueError) as error:
-        return [], [lanes.unavailable('pursuits', 'PURSUITS', str(error))], None
-    return [pursuits_done(state, today)], [pursuits_due(state, today)], state
+def pursuit_lanes(kept: happened.Kept, bounds: Bounds) -> list[Lane]:
+    """The pursuits' due group, or why the register would not load; nothing where it is empty."""
+    if kept.state_error:
+        return [lanes.unavailable('pursuits', 'PURSUITS', kept.state_error)]
+    if kept.state is None:
+        return []
+    return [pursuits_due(kept.state, bounds)]
 
 
 CHECKLIST_GROUPS = (*DAY_SET_LANES, 'review', 'labs')
@@ -631,26 +307,21 @@ def build(registry: sources.Registry, now: dt.datetime) -> Day:
     appointment keeps its hour whatever else is owed. A set you are part-way
     through is the one thing here you can finish in a minute, so it sits at the
     bottom where it does not push a commitment off the screen.
+
+    The done groups lead with the day sets, then run in the fold's order.
     """
-    today = now.date()
+    bounds = window.day_of(now)
     lane_sources = list(registry.sources.values())
     completion_sources = list(registry.completions.values())
-    results = sources.fetch(lane_sources + completion_sources)
+    results = sources.fetch(lane_sources + completion_sources, bounds)
     built = dashboard.lanes_of(registry, results, None)
+    kept = happened.read_kept(now)
 
-    sets_done, sets_due = set_lanes(built, now)
-    moved, owed, state = pursuit_lanes(now, today)
-    cleared, backlog = maintenance_lanes(today)
-
-    done = sets_done + moved + cleared
-    for source in completion_sources:
-        done.extend(sources.lanes_from(source, results[source.id]))
-    due = appointment_lanes(built) + owed + backlog + sets_due
-    return Day(done, due, day_quota(state, done, due))
-
-
-def has_something(lane: Lane) -> bool:
-    return not lane.available or bool(lane.grid or lane.rows)
+    due = appointment_lanes(built) + pursuit_lanes(kept, bounds) + maintenance_lanes(kept, bounds, now) + set_lanes(built)
+    failed = {lane.name for lane in due if not lane.available}
+    folded = [lane for lane in happened.fold(registry, results, kept, bounds, now) if lane.available or lane.name not in failed]
+    done = sorted(folded, key=lambda lane: lane.name not in DAY_SET_LANES)
+    return Day(done, due, day_quota(kept.state, done, due))
 
 
 def render(day: Day, today: dt.date) -> None:
@@ -667,7 +338,7 @@ def render(day: Day, today: dt.date) -> None:
         if due:
             console.print()
         console.print('DONE', style=LIST_STYLE)
-        render_done(done, width)
+        happened.render_groups(done, width)
 
 
 def checkoffs_text(count: float) -> str:
@@ -743,45 +414,6 @@ def quota_lines(figures: quota.Quota) -> list[Text]:
 def render_quota(figures: quota.Quota) -> None:
     for line in quota_lines(figures):
         console.print(line, no_wrap=True, overflow='ellipsis')
-
-
-def group_heading(lane: Lane) -> Text:
-    return Text(f'{GROUP_INDENT}{lane.name}', style=GROUP_STYLE)
-
-
-def render_unavailable(lane: Lane) -> None:
-    line = Text(ITEM_INDENT)
-    line.append(f'unavailable — {lane.reason}', style='red')
-    console.print(line, no_wrap=True, overflow='ellipsis')
-
-
-def clock(done_at: str) -> str:
-    return dt.datetime.fromisoformat(done_at).strftime('%H:%M') if done_at else ''
-
-
-def done_line(cell: GridCell, text_width: int) -> Text:
-    """One thing done: the hour it happened, then what it was.
-
-    An entry whose record kept only the day leaves the hour blank rather than
-    printing a guess, so its text still lines up with the timed ones.
-    """
-    hour = clock(cell.done_at)
-    line = Text(ITEM_INDENT)
-    line.append(hour, style=HOUR_STYLE)
-    line.append(' ' * (CLOCK_WIDTH - len(hour) + 2))
-    line.append(fitted(cell.text, text_width))
-    return line
-
-
-def render_done(groups: list[Lane], width: int) -> None:
-    text_width = max(10, width - len(ITEM_INDENT) - CLOCK_WIDTH - 2)
-    for lane in groups:
-        console.print(group_heading(lane))
-        if not lane.available:
-            render_unavailable(lane)
-            continue
-        for cell in lane.grid:
-            console.print(done_line(cell, text_width), no_wrap=True, overflow='ellipsis')
 
 
 def visible_rows(lane: Lane) -> list[Row]:

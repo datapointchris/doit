@@ -5,6 +5,7 @@ The span grammar here is the one every flag taking a span reads.
 
 import datetime as dt
 import re
+from typing import NamedTuple
 
 SPAN = re.compile(r'(\d+)([smhdw])')
 DAY = re.compile(r'\d{4}-\d{2}-\d{2}')
@@ -43,6 +44,30 @@ def bound(value: str, now: dt.datetime, *, end: bool) -> dt.datetime:
     if instant is None or instant.tzinfo is None:
         raise ValueError(f'{value!r} is not {FORMS}. There is no month or year unit: write 26w, or a day.')
     return instant.astimezone()
+
+
+class Bounds(NamedTuple):
+    """A window both ends of which are known, half-open: `start` is inside it and `stop` is not."""
+
+    start: dt.datetime
+    stop: dt.datetime
+
+    def holds(self, instant: dt.datetime) -> bool:
+        return self.start <= instant < self.stop
+
+    def touches(self, day: dt.date) -> bool:
+        """Whether any of a local day falls inside, the test a record keeping only the day can be put to."""
+        return first_instant(day) < self.stop and first_instant(day + dt.timedelta(days=1)) > self.start
+
+    def days(self) -> int:
+        """How many local days the window touches, so a reader knows whether a row needs its date."""
+        last = (self.stop - dt.timedelta(microseconds=1)).astimezone().date()
+        return (last - self.start.astimezone().date()).days + 1
+
+
+def day_of(now: dt.datetime) -> Bounds:
+    """The local day `now` falls in, midnight to midnight."""
+    return Bounds(first_instant(now.date()), first_instant(now.date() + dt.timedelta(days=1)))
 
 
 def window(since: str | None, until: str | None, now: dt.datetime) -> tuple[dt.datetime | None, dt.datetime | None]:

@@ -23,12 +23,14 @@ whose entire reason to exist is feeding this dashboard.
 
 Two blocks, and the difference is which question the entry answers. `sources:`
 answers what is outstanding and feeds `doit dashboard`. `completions:` answers
-what happened today and feeds `doit today`. An entry in either is the same
-`Source`, so one parser, one runner and one failure policy serve both — the
-block an entry sits in is the whole of what distinguishes it.
+what happened over a window and feeds `doit happened` and `doit today`. An
+entry in either is the same `Source`, so one parser, one runner and one failure
+policy serve both — the block an entry sits in is the whole of what
+distinguishes it.
 
-A completions command needs today's date, and `{today}` is the only token
-substituted into one. `resolved_command` carries what is matched and why.
+A completions command needs the window it answers for, and `{since}` and
+`{until}` are the only tokens substituted into one. `resolved_command` carries
+what is matched and why.
 
 Failure policy is code, not config, because it must not vary by source. A source
 absent from the file is silent — it is not configured, so it does not exist. One
@@ -59,6 +61,8 @@ from doit.editor import open_in_editor
 from doit.paths import xdg_config_home
 from doit.render import console
 from doit.render import error_console
+from doit.window import Bounds
+from doit.window import day_of
 
 SOURCES = Path(os.environ.get('DOIT_SOURCES') or xdg_config_home() / 'doit' / 'sources.yml')
 
@@ -66,9 +70,10 @@ SOURCES = Path(os.environ.get('DOIT_SOURCES') or xdg_config_home() / 'doit' / 's
 # concurrently, so this is the worst-case total rather than a per-source penalty.
 DEFAULT_TIMEOUT_SECONDS = 5.0
 
-# The one substitution a command may ask for. `resolved_command` says what it
-# matches against.
-TODAY_PLACEHOLDER = '{today}'
+# The substitutions a command may ask for. `resolved_command` says what they
+# match against.
+SINCE_PLACEHOLDER = '{since}'
+UNTIL_PLACEHOLDER = '{until}'
 
 TEMPLATE = """\
 # Which apps doit asks, and what it asks them.
@@ -95,10 +100,14 @@ sources:
   learning:
     adapter: learning
 
-# What happened today. Read by `doit today`. Same four settings, and `{today}`
-# in place of an argv part of a command becomes the local ISO date — a whole
-# part only, so a backend gets the date as its own argument.
+# What happened over a window. Read by `doit happened`, and by `doit today` for
+# the day. Same four settings, and `{since}` and `{until}` in place of an argv
+# part of a command become the window's ends as RFC 3339 instants — a whole
+# part only, so a backend gets each as its own argument.
 completions:
+  icb-habits:
+    adapter: icb-habits
+
   icb-tasks:
     adapter: icb-tasks
 """
@@ -133,6 +142,8 @@ class Result:
     stderr: str = ''
     failure: Failure | None = None
     timeout: float | None = None
+    # The window the call was asked about, so an adapter filters to the same one.
+    bounds: Bounds | None = None
 
 
 @dataclass
@@ -140,7 +151,7 @@ class Registry:
     """The configured sources, plus whatever the file itself got wrong.
 
     `sources` answers what is outstanding, `completions` answers what happened
-    today. Two maps rather than one with a flag, because every caller wants one
+    over a window. Two maps rather than one with a flag, because every caller wants one
     question or the other and none wants them interleaved — the dashboard would
     otherwise have to filter out the completion entries on every render.
     """
@@ -222,42 +233,49 @@ def load(path: Path | None = None) -> Registry:
     return registry
 
 
-def resolved_command(command: list[str], today: dt.date | None = None) -> list[str]:
-    """The argv to run, with `{today}` replaced by the local ISO date.
+def resolved_command(command: list[str], bounds: Bounds) -> list[str]:
+    """The argv to run, with `{since}` and `{until}` replaced by the window's ends as RFC 3339 instants.
 
-    Equality rather than a substring replace. A backend takes the date as its
-    own argument, so splicing it into a longer string has no caller — and
-    refusing that case means a path or a title that happens to contain the
+    Instants rather than days, because a window may start mid-afternoon and
+    the cli-design window rule has a client resolve both ends before any call.
+
+    Equality rather than a substring replace. A backend takes each end as its
+    own argument, so splicing one into a longer string has no caller — and
+    refusing that case means a path or a title that happens to contain a
     token is passed through untouched rather than silently rewritten.
     """
-    stamp = (today or dt.date.today()).isoformat()
-    return [stamp if part == TODAY_PLACEHOLDER else part for part in command]
+    ends = {
+        SINCE_PLACEHOLDER: bounds.start.isoformat(timespec='seconds'),
+        UNTIL_PLACEHOLDER: bounds.stop.isoformat(timespec='seconds'),
+    }
+    return [ends.get(part, part) for part in command]
 
 
-def run(source: Source) -> Result:
-    command = resolved_command(source.command)
+def run(source: Source, bounds: Bounds) -> Result:
+    command = resolved_command(source.command, bounds)
     try:
         completed = subprocess.run(command, capture_output=True, text=True, timeout=source.timeout, check=False)
     except FileNotFoundError:
-        return Result(source=source.id, failure=Failure.NOT_INSTALLED)
+        return Result(source=source.id, failure=Failure.NOT_INSTALLED, bounds=bounds)
     except subprocess.TimeoutExpired:
-        return Result(source=source.id, failure=Failure.TIMED_OUT, timeout=source.timeout)
+        return Result(source=source.id, failure=Failure.TIMED_OUT, timeout=source.timeout, bounds=bounds)
 
     stderr = completed.stderr.strip()
     if completed.returncode != 0:
-        return Result(source=source.id, exit_code=completed.returncode, stderr=stderr, failure=Failure.FAILED)
+        return Result(source=source.id, exit_code=completed.returncode, stderr=stderr, failure=Failure.FAILED, bounds=bounds)
     try:
-        return Result(source=source.id, payload=json.loads(completed.stdout), exit_code=0, stderr=stderr)
+        return Result(source=source.id, payload=json.loads(completed.stdout), exit_code=0, stderr=stderr, bounds=bounds)
     except json.JSONDecodeError:
-        return Result(source=source.id, exit_code=0, stderr=stderr, failure=Failure.UNREADABLE)
+        return Result(source=source.id, exit_code=0, stderr=stderr, failure=Failure.UNREADABLE, bounds=bounds)
 
 
-def fetch(sources: list[Source]) -> dict[str, Result]:
-    """Every source, concurrently. Only what was asked for is called."""
+def fetch(sources: list[Source], bounds: Bounds | None = None) -> dict[str, Result]:
+    """Every source, concurrently, each asked about `bounds`, today where none is given. Only what was asked for is called."""
     if not sources:
         return {}
+    asked = bounds or day_of(dt.datetime.now().astimezone())
     with ThreadPoolExecutor(max_workers=len(sources)) as pool:
-        return {result.source: result for result in pool.map(run, sources)}
+        return {result.source: result for result in pool.map(lambda source: run(source, asked), sources)}
 
 
 def first_line(text: str) -> str:
@@ -321,7 +339,8 @@ class Adapter:
     """The command a non-conforming tool is asked, and what turns its answer into lanes.
 
     Registered by the module that owns the knowledge, so this file imports no
-    backend. `{today}` in the command is substituted as `resolved_command` says.
+    backend. `{since}` and `{until}` in the command are substituted as
+    `resolved_command` says.
 
     `timeout` is how long the tool may take, where it budgets itself longer
     than the default. It belongs with the command for the same reason the
@@ -401,14 +420,14 @@ def list_command(
     everything = list(registry.sources.values()) + list(registry.completions.values())
     results = fetch(everything)
     outstanding = [answer('outstanding', source, results[name]) for name, source in registry.sources.items()]
-    today = [answer('today', source, results[name]) for name, source in registry.completions.items()]
+    happened = [answer('happened', source, results[name]) for name, source in registry.completions.items()]
     code = 3 if any(rejected(result) for result in results.values()) else 0
     if as_json:
-        print(json.dumps(outstanding + today, indent=2))
+        print(json.dumps(outstanding + happened, indent=2))
         raise typer.Exit(code)
     width = max(len(source.id) for source in everything)
     report_block('outstanding', outstanding, width)
-    report_block('today', today, width)
+    report_block('happened', happened, width)
     raise typer.Exit(code)
 
 

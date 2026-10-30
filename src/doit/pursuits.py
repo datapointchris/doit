@@ -68,6 +68,7 @@ import yaml
 from rich.table import Table
 from rich.text import Text
 
+from doit import actor
 from doit import evidence
 from doit import journal
 from doit.allocate import WEEK_DAYS
@@ -1949,6 +1950,7 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt
         'occurred_at': extra.pop('occurred_at', now.isoformat()),
         'tz': str(now.tzinfo),
         'machine': machine_name(),
+        'actor': actor.identity(),
         **extra,
     }
     if state is not None:

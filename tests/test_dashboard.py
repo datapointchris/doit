@@ -16,9 +16,9 @@ import pytest
 from typer.testing import CliRunner
 
 from doit import dashboard
+from doit import happened
 from doit import render
 from doit import sources
-from doit import today
 from doit.cli import app as cli_app
 from doit.lanes import GridCell
 from doit.lanes import Lane
@@ -116,7 +116,7 @@ def test_every_shipped_adapter_names_the_lanes_it_declares():
 def test_the_lane_enum_covers_every_adapter_doit_ships():
     """A lane nobody can discover is a lane that does not exist for the reader.
 
-    Containment rather than equality. `doit.today` registers completion
+    Containment rather than equality. `doit.happened` registers completion
     adapters into the same global registry, and whether they are present here
     depends on whether anything has imported that module yet — so an equality
     check passes or fails on test ordering rather than on the invariant. What
@@ -133,12 +133,12 @@ def test_the_lane_enum_covers_every_adapter_doit_ships():
 def test_the_two_adapter_tables_do_not_overlap():
     """One id cannot answer two questions, because registration is last-wins.
 
-    The dashboard's adapters and today's share `sources.ADAPTERS`, so a name in
+    The dashboard's adapters and the completion adapters share `sources.ADAPTERS`, so a name in
     both would have one silently replace the other at import time — and which
     won would depend on import order.
     """
     dashboard_ids = {adapter_id for adapter_id, *_ in dashboard.SHIPPED_ADAPTERS}
-    completion_ids = {adapter_id for adapter_id, _ in today.COMPLETION_ADAPTERS}
+    completion_ids = {adapter_id for adapter_id, _ in happened.COMPLETION_ADAPTERS}
 
     assert not dashboard_ids & completion_ids, 'an id in both tables is one registration overwriting the other'
 
