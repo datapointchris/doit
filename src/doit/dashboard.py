@@ -1128,23 +1128,28 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
 # dotfiles' `--limit` is a window over the run history every box shares, not a
 # row count. Boxes that check every few minutes fill a small window within the
 # hour, and a box off for longer than the window drops out of the fold.
+#
+# The last column is how long each tool may take, None for the default. `icb
+# overview` bounds its whole fan-out at 15 seconds, so doit waits longer and
+# icb's own deadline reports first. pull-requests asks the git host once per repo,
+# and dotfiles reads every box's runs from a shared directory.
 SHIPPED_ADAPTERS = (
-    ('icb', ('icb', 'overview', '--json'), icb_adapter, tuple(name for name, _ in ICB_LANES)),
-    ('problems', ('fleet', 'inbox', 'list', '--json'), problems_adapter, ('problems',)),
-    ('learning', ('learning', 'overview', '--json'), learning_adapter, ('learning',)),
-    ('meso', ('meso', 'cycles', 'list', '--json'), meso_adapter, ('training',)),
-    ('prs', ('pull-requests',), prs_adapter, ('prs',)),
-    ('dotfiles', ('dotfiles', 'report', 'list', '--json', '--limit', '80'), dotfiles_adapter, ('dotfiles',)),
+    ('icb', ('icb', 'overview', '--json'), icb_adapter, tuple(name for name, _ in ICB_LANES), 20.0),
+    ('problems', ('fleet', 'inbox', 'list', '--json'), problems_adapter, ('problems',), None),
+    ('learning', ('learning', 'overview', '--json'), learning_adapter, ('learning',), None),
+    ('meso', ('meso', 'cycles', 'list', '--json'), meso_adapter, ('training',), None),
+    ('prs', ('pull-requests',), prs_adapter, ('prs',), 15.0),
+    ('dotfiles', ('dotfiles', 'report', 'list', '--json', '--limit', '80'), dotfiles_adapter, ('dotfiles',), 10.0),
 )
 
-for adapter_id, command, adapter_fn, _ in SHIPPED_ADAPTERS:
-    sources.register_adapter(adapter_id, command, adapter_fn)
+for adapter_id, command, adapter_fn, _, timeout in SHIPPED_ADAPTERS:
+    sources.register_adapter(adapter_id, command, adapter_fn, timeout)
 
 # Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
 # conforming source contributes lanes doit has never heard of, and a machine
 # whose sources.yml omits one of these is offered fewer. `--lane` is checked
 # against what actually came back rather than against this.
-LANE_NAMES = [*chain.from_iterable(declared for _, _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
+LANE_NAMES = [*chain.from_iterable(declared for _, _, _, declared, _ in SHIPPED_ADAPTERS), *LOCAL_LANES]
 
 
 def read_local(read: Callable[[], object]) -> sources.Result:

@@ -80,7 +80,7 @@ TEMPLATE = """\
 #             shapes that command's own model into lanes
 #   command   argv to run, for a source with no adapter; it must print a lane
 #             document on stdout
-#   timeout   seconds to wait (default 5)
+#   timeout   seconds to wait (default: the adapter's own, else 5)
 #   lanes     optional; restricts which of a source's lanes are shown
 #
 # A source emitting doit's own lane document needs no adapter. Run
@@ -189,7 +189,7 @@ def parse_block(declared: object, block: str, problems: list[str]) -> dict[str, 
         found[name] = Source(
             id=name,
             command=[str(part) for part in command],
-            timeout=float(config.get('timeout') or DEFAULT_TIMEOUT_SECONDS),
+            timeout=float(config.get('timeout') or (adapter.timeout if adapter else None) or DEFAULT_TIMEOUT_SECONDS),
             adapter=adapter_name,
             lanes=tuple(config.get('lanes') or ()),
         )
@@ -322,17 +322,26 @@ class Adapter:
 
     Registered by the module that owns the knowledge, so this file imports no
     backend. `{today}` in the command is substituted as `resolved_command` says.
+
+    `timeout` is how long the tool may take, where it budgets itself longer
+    than the default. It belongs with the command for the same reason the
+    command does: a caller's limit below the tool's own cuts the tool off while
+    it still counts itself healthy, and a copy in `sources.yml` is one nobody
+    revisits when the tool's budget moves.
     """
 
     command: tuple[str, ...]
     build: Callable[[Result], list[lanes.Lane]]
+    timeout: float | None = None
 
 
 ADAPTERS: dict[str, Adapter] = {}
 
 
-def register_adapter(name: str, command: tuple[str, ...], build: Callable[[Result], list[lanes.Lane]]) -> None:
-    ADAPTERS[name] = Adapter(command, build)
+def register_adapter(
+    name: str, command: tuple[str, ...], build: Callable[[Result], list[lanes.Lane]], timeout: float | None = None
+) -> None:
+    ADAPTERS[name] = Adapter(command, build, timeout)
 
 
 def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:

@@ -284,6 +284,16 @@ def test_output_that_is_not_json_is_reported_as_such():
     assert sources.reason('noise', result) == 'noise did not return JSON'
 
 
+def test_an_adapter_brings_its_own_timeout_and_the_file_may_still_set_one(tmp_path, monkeypatch):
+    """A caller's limit below the tool's own budget cuts the tool off while it still counts itself healthy."""
+    monkeypatch.setitem(sources.ADAPTERS, 'patient', sources.Adapter(('patient',), lambda result: [], 20.0))
+    body = 'sources:\n  own:\n    adapter: patient\n  set:\n    adapter: patient\n    timeout: 3\n'
+
+    registry = sources.load(write_sources(tmp_path, body))
+
+    assert (registry.sources['own'].timeout, registry.sources['set'].timeout) == (20.0, 3.0)
+
+
 def test_a_timeout_reports_the_bound_it_actually_used():
     result = sources.run(sources.Source(id='slow', command=['sleep', '5'], timeout=0.25))
 

@@ -101,7 +101,7 @@ def test_every_shipped_adapter_names_the_lanes_it_declares():
     and the name is the word typed at `--lane`, so a reader who copies the header
     has to get a lane back.
     """
-    for adapter_id, _, adapter, declared in dashboard.SHIPPED_ADAPTERS:
+    for adapter_id, _, adapter, declared, _ in dashboard.SHIPPED_ADAPTERS:
         answered = sources.Result(source=adapter_id, payload=ADAPTER_PAYLOADS[adapter_id], exit_code=0)
         broke = sources.Result(source=adapter_id, exit_code=1, stderr='no', failure=sources.Failure.FAILED)
 
