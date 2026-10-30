@@ -29,7 +29,7 @@ FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'happened'
 NOW = dt.datetime(2026, 7, 24, 12, 0, 0).astimezone()
 TODAY = NOW.date()
 DAY = window.day_of(NOW)
-WEEK = Bounds(NOW - dt.timedelta(days=7), NOW)
+WEEK = Bounds(NOW - dt.timedelta(days=7), DAY.stop)
 
 
 def fixture(name: str):
@@ -210,7 +210,7 @@ def test_a_pursuit_is_done_from_either_record():
     ]
 
     assert [cell.text for cell in happened.pursuits_group(state, DAY).grid] == ['build', 'chore']
-    assert [cell.text for cell in happened.pursuits_group(state, WEEK).grid] == ['read', 'build'], 'the week reaches the 21st'
+    assert [cell.text for cell in happened.pursuits_group(state, WEEK).grid] == ['read', 'build', 'chore'], 'the week reaches the 21st'
 
 
 def test_evidence_adds_nothing_for_a_day_the_pursuit_was_also_typed():
