@@ -240,10 +240,9 @@ TODAY = sources.TODAY_PLACEHOLDER
 # Which completion source answers which group, with the command it runs. The
 # field names came from live payloads, so check one before changing a row here.
 #
-# A command bounds its read to today where the tool can. The adapter filters on
-# the date field regardless, so the bound saves transfer and the filter is what
-# makes the count right. learning has no date flag, so its whole history comes
-# back and the filter does all of it.
+# Each command bounds its read to today. The adapter filters on the date field
+# regardless, so the bound saves transfer and the filter is what makes the count
+# right.
 FLAT_COMPLETIONS = (
     (
         'tasks',
@@ -296,7 +295,7 @@ FLAT_COMPLETIONS = (
         'learning-completed',
         'title',
         'completed_at',
-        ('learning', 'completed', 'list', '--all', '--json'),
+        ('learning', 'completed', 'list', '--all', '--since', TODAY, '--json'),
         'learning completed list --all',
     ),
 )
