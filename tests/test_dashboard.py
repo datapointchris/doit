@@ -388,6 +388,27 @@ def test_learning_lane_names_resources_rather_than_positions():
     ], 'tracks interleave with the section so neither stream crowds the other out'
 
 
+def test_learning_lane_says_why_when_an_older_cli_cannot_read_the_plan():
+    """An installed CLI older than the API's plan schema exits 0 with only warnings."""
+    results = all_results()
+    skew = 'the API serves plan schema 2 and this build reads 1'
+    results['learning'] = sources.Result(
+        source='learning',
+        payload={
+            'current_section': None,
+            'track_focus': [],
+            'in_progress_resources': [],
+            'warnings': [{'section': 'current_section', 'message': skew}, {'section': 'tracks', 'message': skew}],
+        },
+        exit_code=0,
+    )
+
+    lane = dashboard.build_learning_lane(results, TODAY)
+
+    assert lane.available is False
+    assert skew in lane.reason
+
+
 def test_learning_lane_does_not_repeat_a_resource_listed_twice():
     lane = lanes_by_name(all_results())['learning']
 

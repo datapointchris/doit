@@ -506,6 +506,11 @@ def build_learning_lane(results: dict[str, sources.Result], today: dt.date) -> L
     # Interleaved, not appended: the tracks are the streams most easily crowded
     # out, and they are the reason the lane spans more than the current section.
     rows = round_robin(track_rows(payload.get('track_focus') or [], seen), started + unstarted)
+
+    # The source turns a part it could not read into a warning and exits 0, so an empty lane would read as nothing to study.
+    warnings = '; '.join(w.get('message', '') for w in payload.get('warnings') or [] if w.get('message'))
+    if warnings and not rows:
+        return unavailable('learning', 'LEARNING', warnings)
     return LaneView(
         name='learning',
         title='LEARNING',
@@ -513,6 +518,7 @@ def build_learning_lane(results: dict[str, sources.Result], today: dt.date) -> L
         rows=rows,
         total=len(rows),
         hints=['learning overview'],
+        reason=warnings,
     )
 
 
