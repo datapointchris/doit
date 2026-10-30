@@ -140,6 +140,7 @@ class Failure(StrEnum):
     NOT_INSTALLED = 'not-installed'
     TIMED_OUT = 'timed-out'
     FAILED = 'failed'
+    LIMITED = 'limited'
     EMPTY = 'empty'
     NO_RESULT = 'no-result'
 
@@ -148,6 +149,7 @@ FAILURE_TEXT: dict[Failure, str] = {
     Failure.NOT_INSTALLED: 'claude is not installed on this machine, so no reading can be taken.',
     Failure.TIMED_OUT: 'claude did not answer within {detail}.',
     Failure.FAILED: 'claude failed: {detail}',
+    Failure.LIMITED: 'claude was refused by the account: the {detail} limit is spent.',
     Failure.EMPTY: 'claude returned nothing.',
     Failure.NO_RESULT: 'claude replied without a result frame. The reply began {detail}',
 }
@@ -191,11 +193,50 @@ class DigestFailed(Exception):
     enough to write one, so a failure still says what it spent.
     """
 
-    def __init__(self, reason: Failure, detail: str = '', reply: Reply | None = None) -> None:
+    def __init__(self, reason: Failure, detail: str = '', reply: Reply | None = None, limit: dict | None = None) -> None:
         self.reason = reason
         self.detail = detail
         self.reply = reply
+        self.limit = limit
         super().__init__(FAILURE_TEXT[reason].format(detail=detail))
+
+
+# Claude Code's answer to a call whose API key's organization has no credit
+# left, matched without regard to case.
+CREDITS_REFUSED = 'credit balance is too low'
+
+
+def read_limit(stdout: str) -> dict | None:
+    """The limit that refused the call, in the shape the scheduler's result ``limit`` takes, or None.
+
+    A spent plan window is a ``rate_limit_event`` frame reading ``rejected``,
+    naming ``rateLimitType`` and ``resetsAt``. Spent API credits send no frame:
+    Claude Code 2.1.314 ends the call ``is_error`` with "Credit balance is too
+    low". A result frame that carried a reply was not refused, whatever rode
+    beside it. Named in the result, the refusal lets the scheduler file the run
+    under the limit rather than as the job's own failure.
+    """
+    try:
+        parsed = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None
+    frames = [f for f in (parsed if isinstance(parsed, list) else [parsed]) if isinstance(f, dict)]
+    result = next((f for f in reversed(frames) if f.get('type') == 'result'), None)
+    if result is not None:
+        text = str(result.get('result') or '')
+        if not result.get('is_error') and (text.strip() or result.get('structured_output') is not None):
+            return None
+        if CREDITS_REFUSED in text.lower():
+            return {'window': 'credits'}
+    for frame in frames:
+        info = frame.get('rate_limit_info') if frame.get('type') == 'rate_limit_event' else None
+        if not isinstance(info, dict) or info.get('status') != 'rejected' or info.get('isUsingOverage'):
+            continue
+        found: dict = {'window': info.get('rateLimitType') or 'unknown'}
+        if info.get('resetsAt'):
+            found['resets_at'] = dt.datetime.fromtimestamp(info['resetsAt'], dt.UTC).strftime('%Y-%m-%dT%H:%M:%SZ')
+        return found
+    return None
 
 
 @dataclass(frozen=True)
@@ -458,6 +499,9 @@ def ask(prompt: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> Reply:
             raise DigestFailed(Failure.TIMED_OUT, f'{timeout:.0f}s') from expired
 
     reply = read_reply(result.stdout)
+    # Read before the exit status, because a refused call can exit 0.
+    if limit := read_limit(result.stdout):
+        raise DigestFailed(Failure.LIMITED, limit['window'], reply, limit)
     if result.returncode != 0 or (reply is not None and reply.is_error):
         detail = (reply.text.strip() if reply else '') or result.stderr.strip() or f'exit {result.returncode}'
         raise DigestFailed(Failure.FAILED, detail, reply)
@@ -578,12 +622,14 @@ class RunOutcome:
     """What one ``run`` came to.
 
     ``summary`` is the line a scheduler shows for the run. ``reply`` is the
-    call's result frame where the call got far enough to write one.
+    call's result frame where the call got far enough to write one, and
+    ``limit`` the account's limit that refused it.
     """
 
     code: int
     summary: str
     reply: Reply | None = None
+    limit: dict | None = None
 
 
 def exports_used(tables: list[usage_table.UsageTable], chosen: usage_table.Chosen) -> dict[str, ExportUsed]:
@@ -641,7 +687,7 @@ def take_reading(days: int, directory: Path) -> RunOutcome:
         reply = ask(build_prompt(rows, today, days, [host.through for _, host in chosen.values()]))
     except DigestFailed as failure:
         error_console.print(str(failure))
-        return RunOutcome(1, str(failure).splitlines()[0], failure.reply)
+        return RunOutcome(1, str(failure).splitlines()[0], failure.reply, failure.limit)
 
     digest = Digest(
         generated=dt.datetime.now(dt.UTC).isoformat(timespec='seconds'),
@@ -707,6 +753,8 @@ def result_record(outcome: RunOutcome) -> dict[str, object]:
         if outcome.reply.session_id:
             record['session_id'] = outcome.reply.session_id
         record['usage'] = dc.asdict(outcome.reply.usage)
+    if outcome.limit:
+        record['limit'] = outcome.limit
     return record
 
 

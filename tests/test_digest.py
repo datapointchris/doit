@@ -474,6 +474,31 @@ def test_a_refused_call_still_hands_over_its_session_and_its_reason(monkeypatch,
     assert digest.read_all(tmp_path / 'state') == []
 
 
+@pytest.mark.parametrize(
+    ('frames', 'exit_code', 'limit'),
+    [
+        (
+            [{'type': 'result', 'subtype': 'success', 'is_error': True, 'result': 'Credit balance is too low'}],
+            1,
+            {'window': 'credits'},
+        ),
+        (
+            [{'type': 'rate_limit_event', 'rate_limit_info': {'status': 'rejected', 'rateLimitType': 'five_hour', 'resetsAt': 1791493800}}],
+            0,
+            {'window': 'five_hour', 'resets_at': '2026-10-08T21:10:00Z'},
+        ),
+    ],
+    ids=['API credits run dry', 'a plan window spent'],
+)
+def test_a_digest_refused_by_a_spent_limit_names_it_in_its_result(monkeypatch, tmp_path, scheduled, frames, exit_code, limit):
+    """A scheduled digest whose account's API credits or plan window are spent names the limit, so the run is filed under it."""
+    stand_in_claude(tmp_path, monkeypatch, json.dumps(frames), exit_code=exit_code)
+
+    assert digest.cmd_run(days=90, directory=tmp_path / 'state') == 1
+
+    assert json.loads(scheduled.read_text())['limit'] == limit
+
+
 def test_the_session_never_sees_where_the_result_goes(monkeypatch, tmp_path, scheduled):
     """Only the run owns its result. A session holding the path could write there first."""
     seen = stand_in_claude(tmp_path, monkeypatch, recorded_reply('answered'))
