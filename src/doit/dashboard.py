@@ -473,35 +473,19 @@ def build_learning_lane(results: dict[str, sources.Result], today: dt.date) -> L
         return unavailable('learning', 'LEARNING', sources.reason('learning', result))
 
     payload = result.payload
-    section = payload.get('current_section') or {}
-    progress = section.get('progress') or {}
-    meta = f'{section.get("name", "")} · {done_items(progress)} of {progress.get("total_items", 0)} done' if section else ''
-
-    # Every row is a resource you could open right now, and the source chose each
-    # one. The section supplies its focus, which already leaves out a resource the
-    # plan draws from another listing; each track supplies exactly one. A unit
-    # name is a position in a curriculum, not something you can sit down and do.
-    focus = payload.get('section_focus') or {}
-    started = []
-    unstarted = []
-    seen = set()
-    for resource in [*(payload.get('in_progress_resources') or []), *(focus.get('in_progress') or [])]:
-        if resource.get('id') in seen:
-            continue
-        seen.add(resource.get('id'))
-        started.append(resource_row('open', resource))
-    for resource in focus.get('not_started') or []:
-        if resource.get('id') in seen:
-            continue
-        seen.add(resource.get('id'))
-        unstarted.append(resource_row('start', resource))
-
-    # Interleaved, not appended: the tracks are the streams most easily crowded
-    # out, and they are the reason the lane spans more than the current section.
-    rows = round_robin(track_rows(payload.get('track_focus') or [], seen), started + unstarted)
-
     # The source turns a part it could not read into a warning and exits 0, so an empty lane would read as nothing to study.
     warnings = '; '.join(w.get('message', '') for w in payload.get('warnings') or [] if w.get('message'))
+
+    # The rows are the plan's own head, in its order: every started resource,
+    # then what the plan draws after them, five in all. A source older than
+    # plan_head prints none, and an empty lane would read as nothing to study.
+    head = payload.get('plan_head')
+    if head is None:
+        return unavailable('learning', 'LEARNING', warnings or 'the source predates plan_head; update its CLI')
+    rows = [plan_entry_row(entry) for entry in head]
+    started = sum(1 for entry in head if entry.get('started'))
+    meta = f'{started} started · {len(head) - started} next'
+
     if warnings and not rows:
         return unavailable('learning', 'LEARNING', warnings)
     return LaneView(
@@ -621,35 +605,16 @@ def meso_adapter(result: sources.Result) -> list[LaneView]:
     return [build_training_lane({'meso': result}, dt.date.today())]
 
 
-def resource_row(label: str, resource: dict, note: str = '') -> Row:
-    """One openable resource. The handle is the read verb rather than the URL the
-    resource carries: a link is not something you type, and `view` prints it
-    along with everything else the row had no room for."""
-    return Row(label, resource.get('title', ''), note, handle=view_handle('learning resources show', resource))
+def plan_entry_row(entry: dict) -> Row:
+    """One resource from the plan's head, noted with the stream that draws it.
 
-
-def track_rows(focuses: list[dict], seen: set) -> list[Row]:
-    """One openable resource per track, noted with the track it advances.
-
-    The note carries the track's name and progress because the row's title says
-    nothing about which stream it belongs to — and that, not the resource, is
-    what you are choosing between.
+    A started one is `open` and the rest are `start`. The handle is the read
+    verb rather than the URL the resource carries: a link is not something you
+    type, and `view` prints it along with everything else the row had no room for.
     """
-    rows = []
-    for focus in focuses:
-        resource = focus.get('resource')
-        if not resource or resource.get('id') in seen:
-            continue
-        seen.add(resource.get('id'))
-        progress = focus.get('progress') or {}
-        note = f'{focus.get("display_name", "")} {done_items(progress)}/{progress.get("total_items", 0)}'
-        rows.append(resource_row('open' if focus.get('started') else 'start', resource, note))
-    return rows
-
-
-def done_items(progress: dict) -> int:
-    """Items no longer waiting: completed, skipped or abandoned, the count the source's own views call done."""
-    return sum(progress.get(key, 0) for key in ('completed_items', 'skipped_items', 'abandoned_items'))
+    label = 'open' if entry.get('started') else 'start'
+    handle = view_handle('learning resources show', entry, key='resource_id')
+    return Row(label, entry.get('title', ''), entry.get('stream_name') or '', handle=handle)
 
 
 def build_maintenance_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:

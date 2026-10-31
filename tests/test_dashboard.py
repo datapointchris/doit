@@ -372,19 +372,19 @@ def test_clean_collapses_any_whitespace():
     assert dashboard.clean(None) == ''
 
 
-def test_learning_lane_names_resources_rather_than_positions():
-    """A track's current unit is a position, not a thing you can open."""
+def test_learning_lane_is_the_plan_head_in_its_order():
+    """Started resources lead, and what follows fills the head, each noted with its stream."""
     lane = lanes_by_name(all_results())['learning']
 
-    assert lane.meta == 'A Current Section · 7 of 42 done', 'a skipped item is done, as the source counts it'
-    assert [(row.label, row.text) for row in lane.rows] == [
-        ('start', 'What To Open On First Track'),
-        ('open', 'A Resource In Progress'),
-        ('open', 'Already Open On Third Track'),
-        ('open', 'A Started Resource'),
-        ('start', 'The Next Resource'),
-        ('start', 'The One After Next'),
-    ], 'tracks interleave with the section so neither stream crowds the other out'
+    assert lane.meta == '2 started · 3 next'
+    assert [(row.label, row.text, row.note) for row in lane.rows] == [
+        ('open', 'A Started Book', 'First Track'),
+        ('open', 'A Started Article', 'A Section'),
+        ('start', 'The Next Resource', 'Second Track'),
+        ('start', 'The One After Next', 'First Track'),
+        ('start', 'The Fifth Resource', 'A Section'),
+    ]
+    assert lane.rows[0].handle == 'learning resources show 11'
 
 
 def test_learning_lane_says_why_when_an_older_cli_cannot_read_the_plan():
@@ -406,49 +406,6 @@ def test_learning_lane_says_why_when_an_older_cli_cannot_read_the_plan():
 
     assert lane.available is False
     assert skew in lane.reason
-
-
-def test_learning_lane_does_not_repeat_a_resource_listed_twice():
-    lane = lanes_by_name(all_results())['learning']
-
-    titles = [row.text for row in lane.rows]
-    assert titles.count('A Resource In Progress') == 1, 'the section lists it too'
-
-
-def test_learning_track_rows_say_which_stream_they_advance():
-    lane = lanes_by_name(all_results())['learning']
-
-    notes = {row.text: row.note for row in lane.rows}
-    assert notes['What To Open On First Track'] == 'First Track 2/61'
-    assert notes['Already Open On Third Track'] == 'Third Track 9/30'
-    assert notes['A Resource In Progress'] == '', 'section rows are already named by the heading'
-
-
-def test_learning_track_with_nothing_left_contributes_no_row():
-    lane = lanes_by_name(all_results())['learning']
-
-    assert 'Fourth Track' not in ' '.join(row.note for row in lane.rows)
-
-
-def test_learning_section_rows_are_the_section_focus_and_not_its_raw_items():
-    """The section lists a resource another stream's plan draws first, and its
-    focus leaves that one out. Rows read from the raw items would offer it here."""
-    lane = lanes_by_name(all_results())['learning']
-
-    assert 'Drawn For Another Stream' not in [row.text for row in lane.rows]
-
-
-def test_learning_track_focus_is_not_repeated_from_the_section():
-    """A track whose current unit is the section would otherwise list the same
-    resource twice."""
-    payload = fixture('learning-overview.json')
-    payload['track_focus'][0]['resource'] = {'id': 901, 'title': 'The Next Resource', 'status_id': 1}
-    results = all_results()
-    results['learning'] = sources.Result(source='icb', payload=payload, exit_code=0)
-
-    lane = dashboard.build_learning_lane(results, TODAY)
-
-    assert [row.text for row in lane.rows].count('The Next Resource') == 1
 
 
 def test_maintenance_lane_counts_only_what_is_due():
