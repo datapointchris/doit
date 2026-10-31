@@ -123,16 +123,22 @@ def test_a_stamp_still_wins_when_it_is_the_later_evidence(tmp_path, monkeypatch)
     assert row['observed'] is False
 
 
+def test_a_practice_item_is_done_only_when_you_say_so(tmp_path, monkeypatch):
+    """Opening a Lab is not practicing it, so its command in history leaves it never done."""
+    register_file = tmp_path / 'register.yml'
+    register_file.write_text('practice:\n  rg-lab:\n    cadence: 2w\n    command: doit labs show rg-lab\n')
+    monkeypatch.setattr(review, 'REGISTER', register_file)
+    observe_history(tmp_path, monkeypatch, {'doit labs show rg-lab': dt.date.today()})
+
+    [row] = review.statuses('practice')
+
+    assert (row['block'], row['last'], row['due']) == ('practice', None, True)
+
+
 def test_the_template_names_every_field_an_item_may_declare():
     """The template is the whole schema documentation — it is what a fresh
-    install writes and what the file being hand-edited carries at its head.
-
-    The list is spelled out rather than derived, because this register has no
-    KNOWN_FIELDS to check against: `load_items` hands whatever YAML holds
-    straight to `statuses`, so a typo drops an observer silently and the item
-    reads as never done. `show` and `requires` were both read by the code and
-    named nowhere here."""
-    for field in ('description', 'cadence', 'command', 'show', 'requires', 'observe'):
+    install writes and what the file being hand-edited carries at its head."""
+    for field in [*review.ITEM_FIELDS, *review.BLOCKS]:
         assert re.search(rf'\b{field}\b', review.TEMPLATE), f'{field} is read by review and absent from its template'
 
 
@@ -152,6 +158,7 @@ def test_list_json_emits_every_item_with_its_status(capsys):
     assert len(rows) == 3, '--json emits the whole register, not just what is due'
     assert set(rows[0]) == {
         'id',
+        'block',
         'cadence',
         'cadence_days',
         'desc',

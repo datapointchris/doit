@@ -1,5 +1,4 @@
-"""Tests for doit.state — the atomic last-done JSON state file shared by review
-and labs."""
+"""Tests for doit.state — the atomic last-done JSON state file."""
 
 from doit import state
 
@@ -9,7 +8,7 @@ def test_load_state_missing_returns_empty(tmp_path):
 
 
 def test_save_then_load_roundtrips(tmp_path):
-    path = tmp_path / 'labs-state.json'
+    path = tmp_path / 'review-state.json'
     state.save_state(path, {'fd-find-files': '2026-07-17'})
     assert state.load_state(path) == {'fd-find-files': '2026-07-17'}
 

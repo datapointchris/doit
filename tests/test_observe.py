@@ -81,8 +81,8 @@ def test_last_run_without_a_history_file_observes_nothing_and_does_not_complain(
 
 
 def test_newest_date_in_reads_the_latest_stamp_in_a_foreign_state_file(tmp_path):
-    """A rotation cursor's shape: every row stamped with the day it last
-    surfaced, so the newest value is when a reminder last actually landed."""
+    """Every row stamped with the day it last happened, so the newest value is
+    when anything in the file last did."""
     path = write_dates(tmp_path, 'reminders.json', {'jira': '2026-08-07', 'eza': '2026-06-19', 'bat': '2026-07-01'})
 
     assert observe.newest_date_in(path).date == '2026-08-07'

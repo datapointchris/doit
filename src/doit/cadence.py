@@ -1,4 +1,4 @@
-"""Cadence parsing and due-date math shared by the review register and labs.
+"""Cadence parsing and due-date math for the review register.
 
 A cadence token is ``<n><unit>`` — ``2w`` / ``1mo`` / ``10d`` / ``1y`` (a bare
 number means days). The due date is always derived, never stored:

@@ -116,9 +116,9 @@ def test_an_appointment_says_how_late_in_its_note():
 # --- the registers -----------------------------------------------------------
 
 
-def owed(review_rows=(), lab_rows=()):
+def owed(review_rows=()):
     """`maintenance_lanes` over the given statuses, so each test reaches the real table of how an item is described and acted on."""
-    kept = happened.Kept(registers={'review': list(review_rows), 'labs': list(lab_rows)})
+    kept = happened.Kept(registers={'review': list(review_rows), 'practice': []})
     return today.maintenance_lanes(kept, DAY, NOW)
 
 
@@ -150,26 +150,10 @@ def test_an_item_due_today_reads_as_due_rather_than_late():
     assert review.rows[0].urgency == Urgency.DUE
 
 
-def test_an_on_demand_lab_is_never_owed():
-    """A Lab is due only when it is scheduled, which review items always are.
-
-    A rule written here in place of `labs.is_due_row` would read an on-demand
-    Lab's absent `overdue` as never done, and owe it every day forever.
-    """
-    rows = [
-        {'id': 'tmux', 'title': 'Panes and sessions', 'overdue': None, 'last': None, 'scheduled': True},
-        {'id': 'jq', 'overdue': None, 'last': None, 'scheduled': False},
-    ]
-
-    [_, labs] = owed(lab_rows=rows)
-
-    assert [(row.label, row.text, row.handle) for row in labs.rows] == [('tmux', 'Panes and sessions', 'doit labs show tmux')]
-
-
 def test_a_register_that_cannot_be_read_is_reported_where_it_is_owed():
-    kept = happened.Kept(registers={'labs': []}, register_errors={'review': 'state.json: permission denied'})
+    kept = happened.Kept(registers={'practice': []}, register_errors={'review': 'state.json: permission denied'})
 
-    assert [(lane.name, lane.available) for lane in today.maintenance_lanes(kept, DAY, NOW)] == [('review', False), ('labs', True)]
+    assert [(lane.name, lane.available) for lane in today.maintenance_lanes(kept, DAY, NOW)] == [('review', False), ('practice', True)]
 
 
 # --- the pursuits ------------------------------------------------------------
@@ -261,12 +245,12 @@ def test_an_empty_register_contributes_nothing_and_is_not_an_error():
 
 
 def test_a_group_past_three_shows_three_then_how_many_more_and_where():
-    lane = Lane(name='labs', title='LABS', rows=[Row(str(n), '') for n in range(5)], total=5, hints=['doit labs due'])
+    lane = Lane(name='practice', title='PRACTICE', rows=[Row(str(n), '') for n in range(5)], total=5, hints=['doit review due'])
 
     rows = today.visible_rows(lane)
 
     assert [row.label for row in rows] == ['0', '1', '2', '2 more']
-    assert rows[-1].handle == 'doit labs due'
+    assert rows[-1].handle == 'doit review due'
 
 
 @pytest.mark.parametrize('name', today.ROUTINE_GROUPS)
@@ -279,7 +263,7 @@ def test_a_routine_group_shows_ten_before_its_more_row(name):
 def test_still_due_prints_above_done(capsys):
     day = today.Day(
         done=[happened.done_lane('tasks', 'TASKS', [done('Pumice Stone')], '')],
-        due=[Lane(name='labs', title='LABS', rows=[Row('a-lab', 'Work through it')], total=1)],
+        due=[Lane(name='practice', title='PRACTICE', rows=[Row('a-lab', 'Work through it')], total=1)],
     )
 
     today.render(day, TODAY)
@@ -296,7 +280,7 @@ def test_a_handle_too_wide_for_its_row_is_printed_whole_beneath_it(monkeypatch, 
         title='REVIEW',
         rows=[
             Row('a-review', 'Read the report', 'never run', Urgency.OVERDUE, wide),
-            Row('labs', 'Work through a Lab', 'never run', handle='doit labs choose'),
+            Row('practice', 'Work through a Lab', 'never run', handle='doit labs choose'),
         ],
         total=2,
     )
@@ -313,8 +297,8 @@ def test_a_long_label_leaves_the_text_its_floor_beside_an_inline_handle(monkeypa
     monkeypatch.setenv('COLUMNS', '80')
     text = 'Work through a Lab you are due on'
     lane = Lane(
-        name='labs',
-        title='LABS',
+        name='practice',
+        title='PRACTICE',
         rows=[Row('x' * today.DUE_LABEL_MAX, text, 'never run', Urgency.OVERDUE, 'doit labs show a-lab')],
         total=1,
     )
@@ -327,14 +311,14 @@ def test_a_long_label_leaves_the_text_its_floor_beside_an_inline_handle(monkeypa
 def test_a_group_that_answered_with_nothing_prints_nothing_while_one_that_failed_does(capsys):
     day = today.Day(
         done=[Lane(name='articles', title='ARTICLES'), happened.done_lane('tasks', 'TASKS', [done('Pumice Stone')], '')],
-        due=[Lane(name='labs', title='LABS'), lanes.unavailable('habits', 'HABITS', 'icb: not logged in')],
+        due=[Lane(name='practice', title='PRACTICE'), lanes.unavailable('habits', 'HABITS', 'icb: not logged in')],
     )
 
     today.render(day, TODAY)
     out = capsys.readouterr().out
 
     assert 'articles' not in out
-    assert 'labs' not in out
+    assert 'practice' not in out
     assert 'Pumice Stone' in out
     assert 'unavailable — icb: not logged in' in out
 
@@ -381,7 +365,7 @@ def no_backends(monkeypatch):
 
 
 def kept_with(state=None, **registers):
-    return lambda now: happened.Kept(state=state, registers={'review': [], 'labs': [], **registers})
+    return lambda now: happened.Kept(state=state, registers={'review': [], 'practice': [], **registers})
 
 
 def test_each_list_keeps_its_groups_in_one_order(no_backends, monkeypatch):
@@ -394,8 +378,8 @@ def test_each_list_keeps_its_groups_in_one_order(no_backends, monkeypatch):
 
     day = today.build(today.sources.load(), NOW)
 
-    assert [lane.name for lane in day.done] == ['habits', 'pursuits', 'review', 'labs']
-    assert [lane.name for lane in day.due] == ['upcoming', 'pursuits', 'review', 'labs', 'habits']
+    assert [lane.name for lane in day.done] == ['habits', 'pursuits', 'review', 'practice']
+    assert [lane.name for lane in day.due] == ['upcoming', 'pursuits', 'review', 'practice', 'habits']
     assert [cell.text for cell in day.done[0].grid] == ['Water'], 'the done habits are the fold, not the dashboard grid'
 
 
@@ -438,4 +422,4 @@ def test_the_json_carries_both_lists_with_each_lane_in_the_contract_shape(no_bac
     [_, moved, *_] = lanes.from_document({'lanes': document['done']})
     assert [(cell.text, cell.actor, cell.done_on) for cell in moved.grid] == [('chore', 'ada@laptop', TODAY.isoformat())]
     assert dt.datetime.fromisoformat(moved.grid[0].done_at) == NOW
-    assert [lane['name'] for lane in document['due']] == ['upcoming', 'pursuits', 'review', 'labs', 'habits']
+    assert [lane['name'] for lane in document['due']] == ['upcoming', 'pursuits', 'review', 'practice', 'habits']

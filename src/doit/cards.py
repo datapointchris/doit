@@ -16,8 +16,8 @@ import yaml
 def split_frontmatter(text: str) -> tuple[dict, str]:
     """(frontmatter dict, body) for a card's text.
 
-    The frontmatter carries only `tags` and, for Labs, an optional `cadence`; a
-    card's title is its first `# ` heading rather than a frontmatter field, which
+    The frontmatter carries only `tags`; a card's title is its first `# `
+    heading rather than a frontmatter field, which
     keeps markdownlint happy (no duplicate H1) and means the rendered card reads
     the same as the file.
     """

@@ -49,8 +49,7 @@ Examples:
     doit next          be handed one thing, ranked by your pursuit weights
     doit today         only what the day can finish, above what it has had
     doit happened      what every record says happened this past week
-    doit review due    every review item due; the dashboard shows three
-    doit labs due      every Labs exercise due to practice now
+    doit review due    every review and practice item due; the dashboard shows three
 
 **next** and **dashboard** are separate systems. They meet only on the dashboard.
 """
@@ -122,8 +121,8 @@ app = typer.Typer(name='doit', cls=RootGroup, no_args_is_help=True, help=ROOT_HE
 # redirects that or empties it, and it is the user's lever rather than ours.
 UPDATE_CONFIG = Config(tool='doit', owner='datapointchris')
 
-# The draw and the two things you do to what it just offered sit at the root:
-# they act on the answer, while `pursuits` manages the file that produced it.
+# The draw sits at the root because it is typed most. Logging and skipping live
+# under `pursuits`, beside the file they write to.
 app.command('next')(pursuits.next_command)
 app.command('dashboard')(dashboard.dashboard_command)
 app.command('today')(today.today_command)

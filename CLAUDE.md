@@ -9,13 +9,13 @@ that owns the domain, not here.
 ## What will look like a bug and is not
 
 **The dashboard duplicates due-ness.** It imports nothing from the cadence module and instead
-mirrors the `overdue` field the review and labs lanes already emit. Backends own due-ness and speak
+mirrors the `overdue` field the review register already emits. Backends own due-ness and speak
 `--json`; that is the contract, and it is what lets the dashboard need no dependencies. Inside one
 package it reads as removable duplication. Do not remove it.
 
-**The review lane shells out to atuin on every render.** The dashboard reads its own review and
-Labs lanes in-process on cost grounds, so a subprocess in a lane reads as a regression. It is not
-the same call: a subprocess for either of those would spawn a Python interpreter to re-read a local
+**The review lane shells out to atuin on every render.** The dashboard reads its own review
+register in-process on cost grounds, so a subprocess in a lane reads as a regression. It is not
+the same call: a subprocess for the register would spawn a Python interpreter to re-read a local
 file this process can already open, whereas atuin is the only source that knows which machine ran a
 command, which is what makes an `observe: {scope: machine}` item answerable at all. It is one query
 per process, shared by every item, and it falls back to this machine's zsh history whenever atuin
@@ -85,8 +85,8 @@ writing into a directory that never syncs.
 `doit find` and `doit show` assemble a subject from every collection that has it and render none
 of it themselves — each lens hands off to whatever owns it. `doit.tools` is that owner for the
 registry and for the shell collections, so its card shapes take plain arguments rather than index
-rows: that is what lets `doit show` compose them and the reminder rotation reuse them without
-`tools` importing `index`, which would close a cycle.
+rows: that is what lets `doit show` compose them without `tools` importing `index`, which would
+close a cycle.
 
 The registry's own path and loader live in `doit.tools` for the same reason — `index` and `labs`
 both read it, and a constant defined per reader is a constant that drifts.

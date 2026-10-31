@@ -29,8 +29,8 @@ guessed midnight.
 nothing prints nothing, so the verdict is what says it was asked. A group that
 could not be read always prints, because a missing group reads as nothing done.
 
-Review and Labs keep one date per item, the latest. An item done twice in a
-window is listed once, on the later day.
+The review register keeps one date per item, the latest. An item done twice in
+a window is listed once, on the later day.
 """
 
 import datetime as dt
@@ -48,7 +48,6 @@ from rich.text import Text
 
 from doit import actor
 from doit import journal
-from doit import labs
 from doit import lanes
 from doit import pursuits
 from doit import review
@@ -427,46 +426,37 @@ def item_name(row: dict) -> str:
 
 
 class Register(NamedTuple):
-    """One register doit keeps: how an item in it is described, when it is owed, and what acts on it.
+    """One block of the review register, read as a record of its own.
 
-    A slug names a row to the tooling, and what it is for exists only in its
-    description or title, so that is the text. `is_due` is the register's own
-    predicate, because a Lab is owed only when it is also scheduled. A review
-    item's own `command` is its act. A Lab has none, because it is a document
-    you open, and the verb that opens it is doit's.
+    Maintenance and practice share a file and a row shape. They are kept apart
+    on screen because a deck of never-practiced Labs would bury the maintenance
+    that is due. A slug names a row to the tooling, and what it is for exists
+    only in its description, so that is the text. An item's `command` is its act.
     """
 
     name: str
     title: str
-    read: Callable[[], list[dict]]
-    describe: Callable[[dict], str]
-    hint: str
-    is_due: Callable[[dict], bool]
-    act: Callable[[dict], str]
+    block: str
+    hint: str = 'doit review due'
+
+    def read(self) -> list[dict]:
+        return review.statuses(self.block)
+
+    @staticmethod
+    def describe(row: dict) -> str:
+        return str(row.get('desc') or item_name(row))
+
+    @staticmethod
+    def is_due(row: dict) -> bool:
+        return review.is_due(row.get('overdue'))
+
+    @staticmethod
+    def act(row: dict) -> str:
+        return str(row.get('command') or '')
 
 
 def registers() -> tuple[Register, ...]:
-    """Built per call rather than at import, so each read goes through the module's current `statuses`."""
-    return (
-        Register(
-            'review',
-            'REVIEW',
-            review.statuses,
-            lambda row: str(row.get('desc') or item_name(row)),
-            'doit review due',
-            lambda row: review.is_due(row.get('overdue')),
-            lambda row: str(row.get('command') or ''),
-        ),
-        Register(
-            'labs',
-            'LABS',
-            labs.statuses,
-            lambda row: str(row.get('title') or item_name(row)),
-            'doit labs due',
-            labs.is_due_row,
-            lambda row: f'doit labs show {item_name(row)}',
-        ),
-    )
+    return (Register('review', 'REVIEW', 'items'), Register('practice', 'PRACTICE', 'practice'))
 
 
 def register_group(register: Register, rows: list[dict], bounds: Bounds, now: dt.datetime) -> Lane:

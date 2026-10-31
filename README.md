@@ -41,7 +41,7 @@ and names the command that starts one.
 
 ```bash
 doit content status          # clones terminal-library on first use, then says where and which setting chose it
-doit labs due                # proves the cards arrived: every Lab with a cadence, since none is practiced yet
+doit labs list               # proves the cards arrived: every Lab in the checkout
 
 doit sources example         # an annotated sources.yml, printed, writing nothing
 doit sources edit            # writes that example where doit reads it, if no file is there, then opens $EDITOR
@@ -81,11 +81,11 @@ data and exit 0.
 
 ## The grammar
 
-The noun comes first and the verb last: `doit review due`, `doit labs done <lab>`,
-`doit forecast run`. The draw and the two things done to its answer sit at the root as `next`,
-`log` and `skip`. They act on what was just offered, while `pursuits` manages the file that
-produced it. The other single-verb reads sit at the root beside them: `dashboard`, `today`, `find`,
-`choose`, `show` and `launch`.
+The noun comes first and the verb last: `doit review due`, `doit labs show <lab>`,
+`doit forecast run`. The draw sits at the root as `next`, because it is what you type most. Logging
+and skipping a pursuit are `doit pursuits log` and `doit pursuits skip`, beside the file that holds
+the pursuits. The other single-verb reads sit at the root beside `next`: `dashboard`, `today`,
+`find`, `choose`, `show` and `launch`.
 
 Every node prints its help when given no arguments, so the tree can be walked one word at a time
 without a cryptic error. A usage error exits 2. `--no-input` never prompts, and fails naming the
@@ -99,13 +99,12 @@ words because they are two things, and one word would make "did you update?" amb
 | Ask | Surface | Reads |
 | --- | --- | --- |
 | What should I do now | `next` | `pursuits.yml`, the journal, each pursuit's `resolve` and `evidence` commands |
-| What is outstanding anywhere | `dashboard` | every `sources:` entry in `sources.yml`, plus doit's own review, Labs and kit rows |
-| What does today still want, and what has it had | `today` | the same sources, every `completions:` entry, the journal, the review and Labs state |
-| What happened over a window, and who did it | `happened` | every `completions:` entry, the journal and the evidence cache, the review and Labs state |
+| What is outstanding anywhere | `dashboard` | every `sources:` entry in `sources.yml`, plus doit's own review register and kit rows |
+| What does today still want, and what has it had | `today` | the same sources, every `completions:` entry, the journal, the review state |
+| What happened over a window, and who did it | `happened` | every `completions:` entry, the journal and the evidence cache, the review state |
 | Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered |
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
-| What is due to revisit | `review due` | `register.yml` and shell history |
-| What is due to practice | `labs due` | the Labs in terminal-library, and `labs-state.json` |
+| What is due to revisit or practice | `review due` | `register.yml`, the review state and shell history |
 | How do I use this tool | `show`, `find`, `tools show` | the registry and cards in terminal-library, your shell's functions and aliases |
 | What was that command | `choose` | the same index, ending on the invocation |
 | What do I own and never use | `kit unused` | the same index, joined to shell history |
@@ -246,8 +245,8 @@ names the tool's own complaint. A tool that is absent, logged out or slow exits 
 of it therefore fails only on a break that needs a person.
 
 The dashboard computes no schedule. It mirrors the `overdue` each backend emits, because the backend
-owns due-ness. The MAINTENANCE lane shows three rows of review and Labs, and there are usually more.
-`doit review due` and `doit labs due` are those lanes at full depth.
+owns due-ness. The MAINTENANCE lane shows three rows of review and practice items, and there are
+usually more. `doit review due` is that lane at full depth.
 
 The dashboard is the glance across tasks, habits, books and learning. `fleet info` is the other
 pane: the development brief across repos that a coding session reads.
@@ -270,7 +269,7 @@ in the order it happened.
 
 Above both, one line says what today asks to hold every pace. It counts minutes across the timed
 pursuits and checkoffs of the counted ones, each in its own unit and never converted into the
-other. The next line counts the habits, review and Labs as checklists. Under them is what is behind
+other. The next line counts the habits, review and practice as checklists. Under them is what is behind
 beyond today, and how much more a day, in each unit, would clear it over each timescale worth
 showing.
 
@@ -293,8 +292,8 @@ the forms. `--until` alone runs from the earliest record.
 
 Pursuits come from the journal and the evidence cache together, so one satisfied inside its own CLI
 is listed without also being typed. Every journal entry in the window counts, whether or not the
-register still names its pursuit. Review items and Labs come from their own state files, which keep
-only each item's latest date. Everything else is a `completions:` entry in `sources.yml`, asked
+register still names its pursuit. Review and practice items come from the review state file, which
+keeps only each item's latest date. Everything else is a `completions:` entry in `sources.yml`, asked
 about the same window.
 
 A line above the groups names every record asked and how many answered. A group that answered with
@@ -319,15 +318,13 @@ the window as an RFC 3339 instant, so a backend filters its own rows rather than
 to be filtered here. Nothing is required. With the block absent, `doit happened` and `doit today`
 list doit's own records and say nothing about the rest.
 
-## `review` and `labs` — due is observed, not declared
+## `review` — maintenance is observed, practice is declared
 
 ```bash
-doit review due              # what is due to revisit, most overdue first
+doit review due              # what is due to revisit or practice, most overdue first
 doit review done <id>        # counts too, and the later of it and the observed date wins
 doit review nudge-every 8h   # how often the shell's startup nudge may print
-doit labs due                # the Labs due to practice
-doit labs show <lab>         # open one to read while you work in another pane
-doit labs done <lab>         # mark it practiced, advancing its schedule
+doit labs show <lab>         # open a Lab to read while you work in another pane
 ```
 
 The review register is `$XDG_CONFIG_HOME/doit/register.yml`. Each item declares what to revisit and
@@ -342,8 +339,19 @@ So an item done at one desk counts at the other. Work that is per-machine declar
 than doing it, such as a picker, declares `observe: false`. Otherwise abandoning it halfway counts
 as having done it.
 
-A Lab is one markdown file under `labs/` in terminal-library. Practicing one is recorded by
-`doit labs done`, never observed. A Lab with no cadence is practice on demand and never comes due.
+A Lab is one markdown file under `labs/` in terminal-library, and carries no schedule. The Labs you
+work through on a schedule are items in the register's `practice:` block, keyed by the Lab's id.
+Opening a Lab is not practicing it, so a practice item observes nothing by default, and
+`doit review done <lab>` records it. The startup nudge leaves practice out. `doit today` counts it
+as its own checklist, so a deck of never-practiced Labs cannot bury the maintenance that is due.
+
+```yaml
+practice:
+  rg-search-code:
+    description: Search code with ripgrep
+    cadence: 2w
+    command: doit labs show rg-search-code
+```
 
 ## `find`, `show`, `choose` — one index over everything you own, rendered by whoever owns it
 

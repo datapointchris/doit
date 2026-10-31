@@ -1,5 +1,5 @@
 """Tests for doit.render's nudge primitives — the one-line-per-item renderers
-shared by review and labs.
+the nudges share.
 
 The bound these hold is the whole point of a nudge: a row that wraps is two rows,
 so a clip that is off by a column silently doubles what shell startup prints. The

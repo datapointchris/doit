@@ -1,6 +1,7 @@
 [
   {
     "id": "never-done-item",
+    "block": "items",
     "cadence": "1w",
     "desc": "Has never been marked done",
     "command": "",
@@ -11,6 +12,7 @@
   },
   {
     "id": "overdue-item",
+    "block": "items",
     "cadence": "1w",
     "desc": "Past its due date",
     "command": "echo overdue",
@@ -21,6 +23,7 @@
   },
   {
     "id": "due-today-item",
+    "block": "items",
     "cadence": "2w",
     "desc": "Due exactly today",
     "command": "",
@@ -31,6 +34,7 @@
   },
   {
     "id": "not-yet-due-item",
+    "block": "items",
     "cadence": "4w",
     "desc": "Not due for a while",
     "command": "",
@@ -38,5 +42,27 @@
     "last": "2026-07-24",
     "overdue": -28,
     "cadence_days": 0
+  },
+  {
+    "id": "overdue-lab",
+    "block": "practice",
+    "cadence": "2w",
+    "desc": "An Overdue Lab",
+    "command": "doit labs show overdue-lab",
+    "show": "",
+    "last": "2026-07-01",
+    "overdue": 9,
+    "cadence_days": 14
+  },
+  {
+    "id": "not-yet-due-lab",
+    "block": "practice",
+    "cadence": "2mo",
+    "desc": "A Lab Not Yet Due",
+    "command": "doit labs show not-yet-due-lab",
+    "show": "",
+    "last": "2026-07-20",
+    "overdue": -56,
+    "cadence_days": 60
   }
 ]

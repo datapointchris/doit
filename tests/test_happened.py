@@ -269,13 +269,13 @@ def test_a_source_that_produced_no_group_is_still_counted_among_those_asked():
 
     groups = happened.fold(registry, results, happened.Kept(), DAY, NOW)
 
-    assert [(lane.name, lane.available) for lane in groups] == [('review', True), ('labs', True), ('quiet', True), ('broken', False)]
+    assert [(lane.name, lane.available) for lane in groups] == [('review', True), ('practice', True), ('quiet', True), ('broken', False)]
 
 
 def test_a_pursuits_register_that_will_not_load_costs_its_group_and_nothing_else():
     groups = happened.fold(sources.Registry(), {}, happened.Kept(state_error='pursuits.yml: weight must be a number'), DAY, NOW)
 
-    assert [(lane.name, lane.available) for lane in groups] == [('pursuits', False), ('review', True), ('labs', True)]
+    assert [(lane.name, lane.available) for lane in groups] == [('pursuits', False), ('review', True), ('practice', True)]
 
 
 def test_the_actor_identity_written_is_one_its_kind_reads_back(monkeypatch):
@@ -335,7 +335,7 @@ def test_a_window_that_will_not_parse_is_refused_before_any_backend_is_asked():
 @pytest.fixture
 def no_sources(monkeypatch):
     monkeypatch.setattr(happened.sources, 'load', sources.Registry)
-    monkeypatch.setattr(happened, 'read_kept', lambda now: happened.Kept(registers={'review': [], 'labs': []}))
+    monkeypatch.setattr(happened, 'read_kept', lambda now: happened.Kept(registers={'review': [], 'practice': []}))
 
 
 def test_until_alone_asks_what_happened_up_to_a_past_date_from_the_earliest_record(no_sources, capsys):
@@ -348,7 +348,7 @@ def test_until_alone_asks_what_happened_up_to_a_past_date_from_the_earliest_reco
 
 def test_a_scripted_caller_reads_exit_1_when_no_record_could_be_asked(no_sources, monkeypatch):
     """Exit 0 there could not be told from a window where nothing happened."""
-    failing = happened.Kept(state_error='pursuits.yml: unreadable', register_errors={'review': 'unreadable', 'labs': 'unreadable'})
+    failing = happened.Kept(state_error='pursuits.yml: unreadable', register_errors={'review': 'unreadable', 'practice': 'unreadable'})
     monkeypatch.setattr(happened, 'read_kept', lambda now: failing)
 
     assert happened.cmd_happened(None, None, as_json=True) == 1
@@ -359,6 +359,6 @@ def test_the_json_names_the_window_the_records_asked_and_each_group_in_the_contr
     document = json.loads(capsys.readouterr().out)
 
     assert (document['since'][:10], document['until'][:10]) == ('2026-07-20', '2026-07-24')
-    assert document['asked'] == ['review', 'labs']
+    assert document['asked'] == ['review', 'practice']
     assert document['unavailable'] == []
-    assert [lane.name for lane in lanes.from_document({'lanes': document['groups']})] == ['review', 'labs']
+    assert [lane.name for lane in lanes.from_document({'lanes': document['groups']})] == ['review', 'practice']

@@ -1,5 +1,5 @@
-"""Tests for doit.cadence — the cadence tokens and derived due-date math shared
-by review and labs."""
+"""Tests for doit.cadence — the cadence tokens and derived due-date math the
+review register runs on."""
 
 import datetime as dt
 

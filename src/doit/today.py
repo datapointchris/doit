@@ -8,7 +8,7 @@ like a lane of two overdue chores.
 
 **Above both lists, what today asks to hold the pace.** The timed pursuits'
 minutes and the counted pursuits' checkoffs, each in its own unit, with the
-habits, review and Labs as checklists under them. Then what is behind beyond
+habits, review and practice as checklists under them. Then what is behind beyond
 today, and each timescale worth showing with how much more a day would clear it.
 `doit.quota` holds the arithmetic. Where the pursuits could not be read, the line
 names them instead of a figure.
@@ -191,9 +191,6 @@ def appointment_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
 
 def register_owed(register: happened.Register, rows: list[dict], bounds: Bounds, now: dt.datetime) -> Lane:
     """What a register still owes today, ranked the way the dashboard's MAINTENANCE lane ranks it.
-
-    Each register is asked its own `is_due`. One rule written here would agree
-    with `doit review due` and disagree with `doit labs due`.
 
     An item done today is left off. One on a daily cadence done this morning
     still reports `overdue: 0`, because zero means "wanted today" and it was —

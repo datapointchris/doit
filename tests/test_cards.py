@@ -21,10 +21,8 @@ def test_strip_frontmatter_passthrough_without_block():
 
 def test_parse_frontmatter(tmp_path):
     f = tmp_path / 'x.md'
-    f.write_text('---\ntags: [a, b]\ncadence: 1w\n---\n# H\n')
-    meta = cards.parse_frontmatter(f)
-    assert meta['tags'] == ['a', 'b']
-    assert meta['cadence'] == '1w'
+    f.write_text('---\ntags: [a, b]\n---\n# H\n')
+    assert cards.parse_frontmatter(f) == {'tags': ['a', 'b']}
 
 
 def test_parse_frontmatter_none_when_absent(tmp_path):

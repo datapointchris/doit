@@ -6,13 +6,9 @@ works, alternatives. Any environment setup is a copy-pasteable code block inside
 the Lab — you run it yourself in a second pane and work through the steps at your
 own keyboard. Nothing is graded; the point is the reps.
 
-Two concerns, kept apart like the review register:
-  - the Labs themselves   markdown, hand-authored, only ever read by this tool
-  - labs-state.json       the last-practiced date per Lab, written by `done`
-
-Scheduling reuses the review register's model: next_due = last_done + cadence,
-derived not stored. A Lab with no `cadence:` is practice-on-demand and never
-shows as due.
+A Lab is shared reference and carries no schedule. When you practice one is
+personal, so it lives in the review register's `practice:` block, and `doit
+review done <id>` records it.
 
 There is one Labs directory, not a source and an installed copy. It is a git
 checkout that `doit content sync` pulls, so authoring writes straight to the file
@@ -20,37 +16,26 @@ the reader reads — which is why nothing here resolves a second path or links o
 into the other.
 """
 
-import datetime as dt
 import json
-import os
 import random
 import subprocess
-from pathlib import Path
 from typing import Annotated
 
 import typer
 from rich.text import Text
 
 from doit import tools
-from doit.cadence import is_due
-from doit.cadence import overdue_days
-from doit.cadence import parse_cadence
-from doit.cadence import status_label
 from doit.cards import first_heading
 from doit.cards import render_body
 from doit.cards import slugify
 from doit.cards import split_frontmatter
 from doit.editor import open_in_editor
 from doit.paths import library_dir
-from doit.paths import xdg_state_home
 from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
-from doit.state import load_state
-from doit.state import save_state
 
 LABS_DIR = library_dir() / 'labs'
-STATE = Path(os.environ.get('DOIT_LABS_STATE') or xdg_state_home() / 'doit' / 'labs-state.json')
 
 # A flashcard session stays short — the research says a few minutes / <=5 new/day
 # beats long cramming — so a session samples at most this many cards.
@@ -59,7 +44,6 @@ FLASH_SESSION = 10
 TEMPLATE = """\
 ---
 tags: []
-cadence: 1mo
 ---
 
 # {title}
@@ -85,7 +69,7 @@ LAB=$(mktemp -d) && cd "$LAB"
 
 
 def load_labs() -> dict:
-    """{lab_id: {title, tags, cadence, path}} for every Lab markdown file."""
+    """{lab_id: {title, tags, path}} for every Lab markdown file."""
     deck: dict[str, dict] = {}
     if not LABS_DIR.exists():
         return deck
@@ -95,69 +79,25 @@ def load_labs() -> dict:
         deck[lab_id] = {
             'title': first_heading(body) or lab_id,
             'tags': meta.get('tags') or [],
-            'cadence': str(meta.get('cadence') or ''),
             'path': path,
         }
     return deck
 
 
-def statuses() -> list[dict]:
-    """Every Lab with its derived schedule state, most urgent first.
-
-    Scheduled Labs (those with a cadence) sort ahead of on-demand ones; within
-    the scheduled group, never-practiced sorts first, then most overdue.
-    """
-    labs = load_labs()
-    state = load_state(STATE)
-    today = dt.date.today()
-    rows = []
-    for lab_id, meta in labs.items():
-        cadence = meta['cadence']
-        last = state.get(lab_id)
-        # No cadence → practice-on-demand: never scheduled, so never "due".
-        overdue = overdue_days(last, cadence, today) if cadence else None
-        row = {
-            'id': lab_id,
-            'title': meta['title'],
-            'tags': meta['tags'],
-            'cadence': cadence,
-            'cadence_days': parse_cadence(cadence) if cadence else 0,
-            'last': last,
-            'overdue': overdue,
-            'scheduled': bool(cadence),
-        }
-        # `overdue` is None both for a never-practiced Lab, which is due, and
-        # for an on-demand one, which never is, so it cannot answer "due?" alone.
-        row['due'] = is_due_row(row)
-        rows.append(row)
-    rows.sort(key=lambda r: (0 if r['scheduled'] else 1, -(float('inf') if r['overdue'] is None else r['overdue'])))
-    return rows
-
-
-def is_due_row(row: dict) -> bool:
-    """A row is due only if it is scheduled and its cadence has elapsed."""
-    return row['scheduled'] and is_due(row['overdue'])
+def deck_rows() -> list[dict]:
+    """Every Lab as its id, title and tags, in id order."""
+    return [{'id': lab_id, 'title': meta['title'], 'tags': meta['tags']} for lab_id, meta in load_labs().items()]
 
 
 def render_row(row: dict) -> None:
-    if row['scheduled']:
-        meta = f'every {row["cadence"]}'
-        if row['last']:
-            meta += f' · last {row["last"]}'
-        status = status_label(row['overdue'])
-    else:
-        meta = 'on demand'
-        status = '—'
     line = Text('  ')
-    line.append(f'{row["id"]:<24}', style='yellow')
-    line.append(f'  {status}  ·  {meta}')
+    line.append(row['id'], style='yellow')
+    line.append(f'  {row["title"]}')
     console.print(line)
-    console.print(Text(f'      {row["title"]}'))
     if row['tags']:
         tags = Text('      ')
         tags.append(f'#{" #".join(row["tags"])}', style='cyan')
         console.print(tags)
-    console.print()
 
 
 def cmd_show(lab_id: str) -> int:
@@ -168,7 +108,7 @@ def cmd_show(lab_id: str) -> int:
     console.print()
     hint = Text()
     hint.append('Work through it in your other pane, then:', style='cyan')
-    hint.append(f'  doit labs done {lab_id}')
+    hint.append(f'  doit review done {lab_id}')
     console.print(hint)
     return 0
 
@@ -192,64 +132,25 @@ def more_line(shown: int, total: int, browse: str) -> None:
         console.print(f'  +{total - shown} more  ·  [cyan]{browse}[/]')
 
 
-def cmd_due(limit: int | None = None) -> int:
-    """What's due to practice, bounded to the first `limit` rows when given.
-
-    The bound is what lets this same view serve a review item's `show:`. That
-    slot runs at shell startup, where an unbounded deck is a catalog rather
-    than a prompt, and the deck comes due in clumps.
-    """
-    if not load_labs():
-        return warn_no_labs()
-    console.rule('[cyan]Labs — due to practice', align='left')
-    due = [r for r in statuses() if is_due_row(r)]
-    if not due:
-        console.print('[green]✓[/] No Labs due. Browse them all with [cyan]doit labs list[/].')
-        return 0
-    shown = bounded(due, limit)
-    for row in shown:
-        render_row(row)
-    more_line(len(shown), len(due), 'doit labs due')
-    console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   mark done:  [cyan]doit labs done <id>[/]')
-    return 0
-
-
 def cmd_list(as_json: bool = False, limit: int | None = None) -> int:
-    # --json emits the whole deck with each Lab's derived status, so a consumer
-    # filters on `due`, or on `overdue`/`scheduled` itself. An empty deck is
-    # an empty list, not the prose hint: --json must always be parsable.
+    # An empty deck is an empty list, not the prose hint: --json must always be
+    # parsable.
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings and hand a consumer
         # a parse error instead of data.
-        print(json.dumps(bounded(statuses(), limit), indent=2))
+        print(json.dumps(bounded(deck_rows(), limit), indent=2))
         return 0
-    if not load_labs():
+    deck = deck_rows()
+    if not deck:
         return warn_no_labs()
     console.rule('[cyan]Labs — full deck', align='left')
-    deck = statuses()
     shown = bounded(deck, limit)
     for row in shown:
         render_row(row)
+    console.print()
     more_line(len(shown), len(deck), 'doit labs list')
     console.print('Practice one:  [cyan]doit labs show <id>[/]   ·   choose interactively:  [cyan]doit labs choose[/]')
-    return 0
-
-
-def cmd_done(lab_id: str) -> int:
-    labs = load_labs()
-    if lab_id not in labs:
-        return unknown_lab(lab_id)
-    today = dt.date.today().isoformat()
-    state = load_state(STATE)
-    state[lab_id] = today
-    save_state(STATE, state)
-    cadence = labs[lab_id]['cadence']
-    done = Text.from_markup('[green]✓[/] Marked ')
-    done.append(lab_id, style='yellow')
-    due_again = f' Due again in {parse_cadence(cadence)}d.' if cadence else ''
-    done.append(f' practiced ({today}).{due_again}')
-    console.print(done)
     return 0
 
 
@@ -394,22 +295,12 @@ app = typer.Typer(name='labs', no_args_is_help=True, help='Hands-on practice Lab
 LimitOption = Annotated[int | None, typer.Option('--limit', '-n', help='Show at most this many, then say how many are left.')]
 
 
-@app.command('due')
-def due_command(limit: LimitOption = None) -> None:
-    """What's due to practice now."""
-    raise typer.Exit(cmd_due(limit))
-
-
 @app.command('list')
 def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
     limit: LimitOption = None,
 ) -> None:
-    """Every Lab and its schedule status.
-
-    In --json, `overdue` is days past due (negative is days until due) and null
-    when the Lab was never practiced or has no cadence; `due` says which.
-    """
+    """Every Lab, with its title and tags."""
     raise typer.Exit(cmd_list(as_json, limit))
 
 
@@ -431,12 +322,6 @@ def flash_command(
 ) -> None:
     """Quick recall drill from tool examples."""
     raise typer.Exit(cmd_flash(subject))
-
-
-@app.command('done')
-def done_command(lab_id: Annotated[str, typer.Argument(help='The Lab to mark practiced.')]) -> None:
-    """Mark a Lab practiced, advancing its schedule."""
-    raise typer.Exit(cmd_done(lab_id))
 
 
 @app.command('new')

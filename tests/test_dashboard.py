@@ -43,7 +43,6 @@ def all_results() -> dict:
         'icb': ok('icb-overview.json'),
         'learning': ok('learning-overview.json'),
         'review': ok('review-list.json'),
-        'labs': ok('labs-list.json'),
         'kit': ok('kit-unresolved.json'),
     }
 
@@ -456,7 +455,7 @@ def test_maintenance_lane_counts_only_what_is_due():
     lane = lanes_by_name(all_results())['maintenance']
 
     # 3 review items due (never-done, overdue, due-today) and 1 lab; the
-    # not-yet-due and on-demand entries are excluded.
+    # not-yet-due entries are excluded.
     assert lane.meta == '3 reviews · 1 lab due'
 
 
@@ -467,7 +466,6 @@ def test_maintenance_lane_says_what_an_entry_is_for():
 
     assert 'never-done-item' not in {row.text for row in lane.rows}
     assert 'Has never been marked done' in {row.text for row in lane.rows}
-    assert 'An Overdue Lab' in {row.text for row in lane.rows}, 'labs carry a title instead'
 
 
 def test_maintenance_lane_ranks_by_how_late_a_row_actually_is():
@@ -521,7 +519,6 @@ def test_maintenance_rows_carry_the_command_that_does_them():
 
     handles = {row.text: row.handle for row in lane.rows}
     assert handles['Past its due date'] == 'echo overdue', "the register's own command"
-    assert handles['An Overdue Lab'] == 'doit labs show overdue-lab', 'a Lab is a document doit opens'
 
 
 def test_maintenance_shows_both_kinds_when_every_row_is_equally_urgent():
@@ -531,12 +528,9 @@ def test_maintenance_shows_both_kinds_when_every_row_is_equally_urgent():
     put every review above every lab — leaving a heading reading "14 reviews · 16
     labs due" above ten reviews and not one lab.
     """
-    reviews = [{'id': f'r{n}', 'desc': f'Review {n}', 'command': '', 'overdue': None} for n in range(5)]
-    labs = [{'id': f'l{n}', 'title': f'Lab {n}', 'scheduled': True, 'overdue': None} for n in range(5)]
-    results = {
-        'review': sources.Result(source='review', payload=reviews, exit_code=0),
-        'labs': sources.Result(source='labs', payload=labs, exit_code=0),
-    }
+    reviews = [{'id': f'r{n}', 'block': 'items', 'desc': f'Review {n}', 'command': '', 'overdue': None} for n in range(5)]
+    labs = [{'id': f'l{n}', 'block': 'practice', 'desc': f'Lab {n}', 'command': '', 'overdue': None} for n in range(5)]
+    results = {'review': sources.Result(source='review', payload=reviews + labs, exit_code=0)}
 
     lane = dashboard.build_maintenance_lane(results, TODAY)
 
@@ -691,17 +685,6 @@ def test_lane_is_unavailable_when_its_backend_is_missing():
     assert lanes['tasks'].available is False
     assert 'not installed' in lanes['tasks'].reason
     assert lanes['maintenance'].available is True, 'one dead backend must not cost the other lanes'
-
-
-def test_maintenance_renders_what_it_has_when_one_backend_is_missing():
-    results = all_results()
-    results['labs'] = sources.Result(source='icb', failure=sources.Failure.NOT_INSTALLED)
-
-    lane = dashboard.build_maintenance_lane(results, TODAY)
-
-    assert lane.available is True
-    assert [row.label for row in lane.rows] == ['review', 'review', 'review']
-    assert 'doit labs is not installed' in lane.reason
 
 
 def test_section_warning_degrades_only_its_own_lane():

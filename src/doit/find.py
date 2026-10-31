@@ -51,8 +51,7 @@ AREAS = [
     ('next', 'What to do now, drawn from your weighted pursuits'),
     ('dashboard', 'Everything outstanding across your apps, in lanes'),
     ('find', 'Search everything you own, and open what you pick'),
-    ('review due', 'What is due to revisit'),
-    ('labs due', 'Hands-on practice that is due now'),
+    ('review due', 'What is due to revisit or practice'),
 ]
 
 FZF_FAILED = 2

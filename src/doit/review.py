@@ -13,6 +13,10 @@ Two files, by design:
 The due date is derived, never stored: next_due = last_done + cadence. A new item
 with no recorded done simply shows as never done. Storing only last_done means
 there is no date to keep in sync and nothing to drift.
+
+The register holds two blocks: `items` for maintenance and `practice` for the
+Labs you work through. The Labs live in terminal-library, which is shared
+reference. When you practice one is yours, so its schedule is kept here.
 """
 
 import contextlib
@@ -76,12 +80,19 @@ TEMPLATE = """\
 #   observe: {history: <command>}       watch a different command than `command`
 #   observe: {scope: machine}           only runs on this machine count
 #   observe: false                      observe nothing; only `review done` counts
+#
+# `practice:` holds the Labs you work through on a schedule, with the same
+# fields, keyed by the Lab's id. Opening a Lab is not practicing it, so a
+# practice item observes nothing unless it says otherwise, and `doit review
+# done <id>` is what records it. An id names one item across both blocks.
 
 items:
   prune-docker:
     description: Remove stopped containers and dangling images
     cadence: 1mo
     command: docker system prune
+
+practice: {}
 """
 
 # A nudge you have to scroll is a nudge you learn to ignore, so the roster is
@@ -100,6 +111,11 @@ NUDGE_INTERVAL = xdg_state_home() / 'doit' / 'nudge-interval-minutes'
 # and counts overdue days forever with nothing printed.
 ITEM_FIELDS = {'description', 'cadence', 'command', 'show', 'requires', 'observe'}
 
+# The register's blocks, and what an item in each observes when it names no
+# observer. Maintenance is done when its command runs. Practice is done when you
+# say so, because the command that opens a Lab is not the practice.
+BLOCKS = {'items': None, 'practice': False}
+
 
 class RegisterError(ValueError):
     """A review register that cannot be read as written.
@@ -109,27 +125,50 @@ class RegisterError(ValueError):
     """
 
 
-def load_items() -> dict | None:
-    """The register's items, or None if there is no register file yet.
+def load_register() -> dict[str, dict] | None:
+    """Each block's items by id, or None if there is no register file yet.
 
-    Raises RegisterError on an item that is not a mapping or declares a field
-    outside ITEM_FIELDS.
+    Raises RegisterError on an unknown block, an item that is not a mapping or
+    declares a field outside ITEM_FIELDS, or an id in both blocks. The state
+    file is keyed by id alone, so one id in two blocks would share a stamp.
     """
     if not REGISTER.exists():
         return None
     data = yaml.safe_load(REGISTER.read_text()) or {}
-    items = data.get('items') or {}
-    for item_id, meta in items.items():
-        if meta is None:
-            continue
-        if not isinstance(meta, dict):
-            raise RegisterError(f'{item_id}: must be a mapping of fields, not {type(meta).__name__}')
-        unknown = set(meta) - ITEM_FIELDS
-        if unknown:
-            # The accepted set is named so a reader can see `observe` beside a
-            # misspelled `obsrve` and fix it without leaving the terminal.
-            raise RegisterError(f'{item_id}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(ITEM_FIELDS))}')
-    return items
+    # A misspelled block is ignored by every reader, so its items silently never
+    # come due. Refused here, it is one line naming the blocks that exist.
+    unknown_blocks = set(data) - set(BLOCKS)
+    if unknown_blocks:
+        raise RegisterError(f'unknown block(s) {", ".join(sorted(unknown_blocks))}. Accepted: {", ".join(BLOCKS)}')
+    register = {block: data.get(block) or {} for block in BLOCKS}
+    owner: dict[str, str] = {}
+    for block, items in register.items():
+        for item_id, meta in items.items():
+            if item_id in owner:
+                raise RegisterError(f'{item_id}: in both {owner[item_id]} and {block}; an id names one item')
+            owner[item_id] = block
+            check_item(item_id, meta)
+    return register
+
+
+def check_item(item_id: str, meta: object) -> None:
+    if meta is None:
+        return
+    if not isinstance(meta, dict):
+        raise RegisterError(f'{item_id}: must be a mapping of fields, not {type(meta).__name__}')
+    unknown = set(meta) - ITEM_FIELDS
+    if unknown:
+        # The accepted set is named so a reader can see `observe` beside a
+        # misspelled `obsrve` and fix it without leaving the terminal.
+        raise RegisterError(f'{item_id}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(ITEM_FIELDS))}')
+
+
+def load_items() -> dict | None:
+    """Every item in every block by id, or None if there is no register file yet."""
+    register = load_register()
+    if register is None:
+        return None
+    return {item_id: meta for items in register.values() for item_id, meta in items.items()}
 
 
 def applies_here(requires: str) -> bool:
@@ -153,8 +192,8 @@ def applies_here(requires: str) -> bool:
     return not declared.known or declared.declares(requires)
 
 
-def statuses() -> list[dict]:
-    """Every item with its derived overdue days, most urgent first.
+def statuses(block: str | None = None) -> list[dict]:
+    """Every item in one block, or in every block, with its derived overdue days, most urgent first.
 
     overdue is the number of days past due (negative = not yet due); None means
     the item has never been done, which sorts to the very top as most urgent.
@@ -164,33 +203,35 @@ def statuses() -> list[dict]:
     of the same act, so the later one wins and neither can move the date
     backwards — an item stays done once anything at all can show it was done.
     """
-    items = load_items() or {}
+    register = load_register() or {}
     state = load_state(STATE)
     today = dt.date.today()
     rows = []
-    for item_id, meta in items.items():
-        meta = meta or {}
-        if not applies_here(meta.get('requires', '') or ''):
-            continue
-        stamped = state.get(item_id)
-        seen = observed(meta.get('observe'), meta.get('command', '') or '')
-        last = newest(stamped, seen.date)
-        overdue = overdue_days(last, meta.get('cadence', ''), today)
-        rows.append(
-            {
-                'id': item_id,
-                'cadence': str(meta.get('cadence', '')),
-                'cadence_days': parse_cadence(meta.get('cadence', '')),
-                'desc': meta.get('description', '') or '',
-                'command': meta.get('command', '') or '',
-                'show': meta.get('show', '') or '',
-                'last': last,
-                'overdue': overdue,
-                'due': is_due(overdue),
-                'observed': bool(seen.date) and last == seen.date,
-                'problem': seen.problem,
-            }
-        )
+    for name in [block] if block else list(BLOCKS):
+        for item_id, meta in register.get(name, {}).items():
+            meta = meta or {}
+            if not applies_here(meta.get('requires', '') or ''):
+                continue
+            stamped = state.get(item_id)
+            seen = observed(meta.get('observe', BLOCKS[name]), meta.get('command', '') or '')
+            last = newest(stamped, seen.date)
+            overdue = overdue_days(last, meta.get('cadence', ''), today)
+            rows.append(
+                {
+                    'id': item_id,
+                    'block': name,
+                    'cadence': str(meta.get('cadence', '')),
+                    'cadence_days': parse_cadence(meta.get('cadence', '')),
+                    'desc': meta.get('description', '') or '',
+                    'command': meta.get('command', '') or '',
+                    'show': meta.get('show', '') or '',
+                    'last': last,
+                    'overdue': overdue,
+                    'due': is_due(overdue),
+                    'observed': bool(seen.date) and last == seen.date,
+                    'problem': seen.problem,
+                }
+            )
     rows.sort(key=lambda r: float('inf') if r['overdue'] is None else r['overdue'], reverse=True)
     return rows
 
@@ -230,6 +271,11 @@ def warn_no_register() -> None:
     console.print('Add items there, or create one with [cyan]doit review edit[/].')
 
 
+# Each block's heading in the browse views. Practice prints after maintenance,
+# because a deck of never-practiced Labs would otherwise push it off the screen.
+BLOCK_TITLES = {'items': 'Review', 'practice': 'Practice'}
+
+
 def cmd_due() -> int:
     if load_items() is None:
         warn_no_register()
@@ -239,14 +285,18 @@ def cmd_due() -> int:
         console.print('The review register has no items yet.')
         return 0
 
-    console.rule("[cyan]Review — what's due", align='left')
     due = [row for row in rows if is_due(row['overdue'])]
     if due:
-        for row in due:
-            render_item(row)
+        for block, title in BLOCK_TITLES.items():
+            in_block = [row for row in due if row['block'] == block]
+            if in_block:
+                console.rule(f"[cyan]{title} — what's due", align='left')
+                for row in in_block:
+                    render_item(row)
         console.print('Mark one done:  [cyan]doit review done <id>[/]')
         return 0
 
+    console.rule("[cyan]Review — what's due", align='left')
     console.print('[green]✓[/] All caught up.')
     soonest = rows[0]  # sorted desc, so the least-overdue (soonest) is first
     up_next = Text('  Next up: ')
@@ -258,9 +308,9 @@ def cmd_due() -> int:
 
 def cmd_list(as_json: bool = False) -> int:
     # --json emits every item with its derived status, due or not, so a consumer
-    # filters on `due` or `overdue` itself and can say "2 due of 9". A
-    # missing register is an empty list, not the prose hint: --json must always
-    # be parseable.
+    # filters on `due` or `overdue` itself and can say "2 due of 9". Each row
+    # names its `block`. A missing register is an empty list, not the prose hint:
+    # --json must always be parseable.
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings and hand a consumer
@@ -270,9 +320,12 @@ def cmd_list(as_json: bool = False) -> int:
     if load_items() is None:
         warn_no_register()
         return 0
-    console.rule('[cyan]Review — full register', align='left')
-    for row in statuses():
-        render_item(row)
+    for block, title in BLOCK_TITLES.items():
+        rows = statuses(block)
+        if rows or block == 'items':
+            console.rule(f'[cyan]{title} — full register', align='left')
+        for row in rows:
+            render_item(row)
     render_orphans()
     return 0
 
@@ -361,7 +414,9 @@ def cmd_nudge() -> int:
     """
     if load_items() is None:
         return 0
-    due = [row for row in statuses() if is_due(row['overdue'])]
+    # Maintenance only. A Lab is practice you sit down for, not something to be
+    # interrupted with at the first shell.
+    due = [row for row in statuses('items') if is_due(row['overdue'])]
     if not due:
         return 0
     shown = due[:NUDGE_MAX_ITEMS]

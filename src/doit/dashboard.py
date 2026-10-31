@@ -20,11 +20,11 @@ Every row names a thing you could act on. A lane that can only report structure
 resolves it to the underlying resource instead of spending a row on it.
 
 This is a renderer, nothing more. Every backend speaks `--json` and owns its own
-domain rules (which book is next, which habit is due today, when a Lab is
+domain rules (which book is next, which habit is due today, when a review item is
 overdue); the dashboard only lays out what they return. That is why it knows no app's
-semantics. It reads doit's own review and labs lanes in-process rather than
-shelling back out to itself — those return the same rows their `--json` prints,
-so the backend still owns due-ness and nothing here re-derives a schedule.
+semantics. It reads doit's own review register in-process rather than shelling
+back out to itself — that returns the same rows its `--json` prints, so the
+backend still owns due-ness and nothing here re-derives a schedule.
 
 `is_due_row` below therefore mirrors `doit.cadence.is_due` rather than importing
 it. Inside one package that reads as removable duplication. It is not: backends
@@ -46,7 +46,6 @@ import typer
 from rich.text import Text
 
 from doit import index as indexmodel
-from doit import labs
 from doit import lanes as lanemodel
 from doit import pursuits
 from doit import review
@@ -69,18 +68,12 @@ NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'
 
 # doit's own lanes, read in-process. These are not sources: the source registry
 # exists so doit need not know which *other* apps are installed, and doit does
-# know its own modules.
-#
-# They were subprocesses — `doit review list --json` — on the grounds that
-# uniformity over `--json` was the contract. It cost two full interpreter starts
-# per dashboard (0.73s of 0.98s CPU on the maintenance lane) to read a local YAML
-# file and a directory of markdown already reachable from here. The contract that
-# actually matters is unaffected: these functions return the exact rows the
-# `--json` output prints, so the backend still owns due-ness and the dashboard
+# know its own modules. A subprocess would start an interpreter to read a local
+# YAML file already reachable from here. These functions return the exact rows
+# their `--json` prints, so the backend still owns due-ness and the dashboard
 # still never re-derives a cadence.
-LOCAL_BACKENDS = {
+LOCAL_BACKENDS: dict[str, Callable[[], object]] = {
     'review': review.statuses,
-    'labs': labs.statuses,
     'kit': indexmodel.unresolved_rows,
 }
 
@@ -661,55 +654,36 @@ def done_items(progress: dict) -> int:
 
 def build_maintenance_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     review = results.get('review')
-    labs = results.get('labs')
-
-    ranked_reviews = []
-    ranked_labs = []
-    reasons = []
+    items = review.payload if review else None
+    if not isinstance(items, list):
+        return unavailable('maintenance', 'MAINTENANCE', sources.reason('doit review', review))
 
     # The register slug (`indy-reindex`) identifies a row to the tooling; what it
     # is for only exists in the description, so that is what gets shown — and the
     # register's own `command` is the handle, because a row saying "Re-index indy"
     # without saying `indy index` names the intent and withholds the act.
-    review_items = review.payload if review else None
-    if isinstance(review_items, list):
-        for item in review_items:
-            if is_due_row(item):
-                ranked_reviews.append(maintenance_row('review', item.get('desc') or item.get('id', ''), item, item.get('command', '')))
-    else:
-        reasons.append(sources.reason('doit review', review))
+    ranked: dict[str, list[tuple[tuple[int, int], Row]]] = {'items': [], 'practice': []}
+    for item in items:
+        if is_due_row(item) and item.get('block', 'items') in ranked:
+            label = 'lab' if item.get('block') == 'practice' else 'review'
+            ranked[item.get('block', 'items')].append(
+                maintenance_row(label, item.get('desc') or item.get('id', ''), item, item.get('command', ''))
+            )
 
-    # A Lab carries no command of its own — it is a document you open, and the
-    # verb that opens it is doit's. Naming it here is not backend knowledge
-    # leaking in: this is doit's own lane, reading doit's own module.
-    labs_items = labs.payload if labs else None
-    if isinstance(labs_items, list):
-        for item in labs_items:
-            if item.get('scheduled') and is_due_row(item):
-                handle = f'doit labs show {item.get("id", "")}'
-                ranked_labs.append(maintenance_row('lab', item.get('title') or item.get('id', ''), item, handle))
-    else:
-        reasons.append(sources.reason('doit labs', labs))
-
-    if len(reasons) == 2:
-        return unavailable('maintenance', 'MAINTENANCE', '; '.join(reasons))
-
-    # Ranked within a kind, then interleaved across the two. A single sort put
+    # Ranked within a block, then interleaved across the two. One sort would put
     # every review above every lab, because a never-run row of either kind ranks
-    # identically and reviews were collected first — so a heading reading
-    # "14 reviews · 16 labs due" sat above ten reviews and no lab at all.
-    ranked_reviews.sort(key=lambda entry: entry[0])
-    ranked_labs.sort(key=lambda entry: entry[0])
-    review_due, labs_due = len(ranked_reviews), len(ranked_labs)
-    rows = round_robin([row for _, row in ranked_reviews], [row for _, row in ranked_labs])
+    # identically, so a heading reading "14 reviews · 16 labs due" would sit
+    # above ten reviews and no lab at all.
+    for block in ranked.values():
+        block.sort(key=lambda entry: entry[0])
+    rows = round_robin([row for _, row in ranked['items']], [row for _, row in ranked['practice']])
     return LaneView(
         name='maintenance',
         title='MAINTENANCE',
-        meta=f'{plural(review_due, "review")} · {plural(labs_due, "lab")} due',
+        meta=f'{plural(len(ranked["items"]), "review")} · {plural(len(ranked["practice"]), "lab")} due',
         rows=rows,
         total=len(rows),
-        hints=['doit review due', 'doit labs due'],
-        reason='; '.join(reasons),
+        hints=['doit review due'],
     )
 
 
