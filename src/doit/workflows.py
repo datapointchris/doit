@@ -10,7 +10,7 @@ writes the file the reader reads — one path, resolved once, rather than a syml
 followed backwards to wherever the content is authored.
 
 Searching cards is `doit find --source workflow`, not a verb here. A card is one
-row in the federated index alongside tools, skills, aliases and tmux keys, and
+row in the federated index alongside tools, aliases and tmux keys, and
 scoping that index is a filter rather than a second search.
 """
 

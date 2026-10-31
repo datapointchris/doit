@@ -17,7 +17,6 @@ from pyselfupdate.typercmd import add_update_command
 from typer.core import TyperGroup
 
 from doit import __version__
-from doit import claude
 from doit import content
 from doit import dashboard
 from doit import find
@@ -144,7 +143,6 @@ app.add_typer(forecast.app, name='forecast')
 app.add_typer(review.app, name='review')
 app.add_typer(labs.app, name='labs')
 app.add_typer(workflows.app, name='workflows')
-app.add_typer(claude.app, name='claude')
 app.add_typer(tools.app, name='tools')
 app.add_typer(find.kit_app, name='kit')
 app.add_typer(shell.app, name='shell')

@@ -11,12 +11,12 @@ three places is three places a move has to be chased.
 The card shapes take plain arguments rather than index rows. A function, an
 alias, a git alias and a forgit shortcut are not in the registry at all; they
 are parsed out of shell files by the index. Keeping the renderers ignorant of
-where their arguments came from is what lets `doit show` compose them and the
-reminder rotation reuse them without this module importing either.
+where their arguments came from is what lets `doit show` compose them without
+this module importing the index.
 
-Every card comes in two densities. The full one is a browse view and carries
-every field. The brief one is an interrupt — a startup nudge, a preview pane —
-and carries identity, what the thing is, and one command, clipped rather than
+A registry card comes in two densities. The full one is a browse view and
+carries every field. The brief one is an interrupt, such as a preview pane, and
+carries identity, what the thing is, and one command, clipped rather than
 wrapped, because a wrapped row is two rows.
 """
 
@@ -203,33 +203,32 @@ def render_tool(name: str, meta: dict, brief: bool = False, heading: bool = True
         console.print(Text('  Sort the stale entries from those with doit kit unresolved', style='cyan'), no_wrap=True)
 
 
-def render_function(name: str, description: str, body: str = '', brief: bool = False) -> None:
+def render_function(name: str, description: str, body: str = '') -> None:
     """A shell function: what it does, then the function itself.
 
     The body is the refresher — it is how you remember what the thing actually
-    does — and it is however long the function is, which is exactly what brief
-    drops rather than clips.
+    does.
     """
     card_title(name, 'shell function')
-    card_detail(description, brief)
-    if body and not brief:
+    card_detail(description, brief=False)
+    if body:
         console.print()
         for line in body.splitlines():
             console.print(Text(f'    {line}'), no_wrap=True, overflow='ellipsis')
 
 
-def render_alias(name: str, command: str, description: str = '', brief: bool = False) -> None:
+def render_alias(name: str, command: str, description: str = '') -> None:
     card_title(name, 'alias')
-    card_detail(description, brief)
-    card_arrow(command, brief)
+    card_detail(description, brief=False)
+    card_arrow(command, brief=False)
 
 
-def render_git_alias(name: str, command: str, brief: bool = False) -> None:
+def render_git_alias(name: str, command: str) -> None:
     card_title(f'git {name}', 'git alias')
-    card_arrow(f'git {command}', brief)
+    card_arrow(f'git {command}', brief=False)
 
 
-def render_zsh_key(name: str, rebind: str, description: str = '', brief: bool = False) -> None:
+def render_zsh_key(name: str, rebind: str, description: str = '') -> None:
     """A zsh keybinding: what pressing it does, then the line that binds it.
 
     The arrow carries the whole `bindkey` rather than the widget alone, because
@@ -237,14 +236,13 @@ def render_zsh_key(name: str, rebind: str, description: str = '', brief: bool = 
     the raw sequence it needs appears nowhere else on the card.
     """
     card_title(name, 'zsh keybinding')
-    card_detail(description, brief)
-    card_arrow(rebind, brief)
+    card_detail(description, brief=False)
+    card_arrow(rebind, brief=False)
 
 
-def render_forgit(name: str, action: str, brief: bool = False) -> None:
-    card_arrow_text = f'interactive git {action}, via fzf'
+def render_forgit(name: str, action: str) -> None:
     card_title(name, 'forgit')
-    card_arrow(card_arrow_text, brief)
+    card_arrow(f'interactive git {action}, via fzf', brief=False)
 
 
 def cmd_show(name: str, brief: bool) -> int:

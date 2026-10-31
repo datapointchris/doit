@@ -78,9 +78,10 @@ TEMPLATE = """\
 #   observe: false                      observe nothing; only `review done` counts
 
 items:
-  revisit-a-tool:
-    description: Open doit launch, pick a tool you have not used lately, relearn it
-    cadence: 1w
+  prune-docker:
+    description: Remove stopped containers and dangling images
+    cadence: 1mo
+    command: docker system prune
 """
 
 # A nudge you have to scroll is a nudge you learn to ignore, so the roster is
@@ -321,9 +322,9 @@ def run_show(row: dict) -> None:
 
     A `show:` command must be a read. Anything it changes is a change nothing
     asked for — and worse, if what it changes is what the item observes, the item
-    marks itself done every time the nudge fires. `doit kit remind` has a `--peek`
-    for exactly this, and a `show:` needing a side effect to be useful is an
-    argument for a flag on that tool, not for relaxing this.
+    marks itself done every time the nudge fires. A `show:` needing a side effect
+    to be useful is an argument for a read-only flag on that tool, not for
+    relaxing this.
 
     A `show:` command must emit at most a couple of lines — it runs inside a
     nudge, so a command that prints its own full listing silently turns the nudge
@@ -370,8 +371,8 @@ def cmd_nudge() -> int:
         nudge_row(row['id'], status_label(row['overdue']), row['command'], width)
     if len(due) > len(shown):
         console.print(f'  +{len(due) - len(shown)} more  ·  [cyan]doit review due[/]')
-    # After the roster, expand any items carrying live content (e.g. the
-    # neglected tool `doit kit remind` picks) so the roster stays scannable.
+    # After the roster, expand any items carrying live content, so the roster
+    # stays scannable.
     console.print()
     for row in shown:
         run_show(row)

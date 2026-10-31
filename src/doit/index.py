@@ -1,7 +1,7 @@
 """The federated index: everything you own, in one searchable list.
 
 One row shape over every collection — `LENSES` is the roster. The tools
-registry, the workflow cards, Claude skills, annotated shell functions, aliases,
+registry, the workflow cards, annotated shell functions, aliases,
 git aliases, forgit's fzf shortcuts, the tmux keybindings parsed out of their own
 card, and the zsh keys your config binds. doit owns none of them — each row names
 where it came from and what to type, and rendering a subject is delegated back to
@@ -34,7 +34,6 @@ from doit import machine
 from doit.cards import first_heading
 from doit.cards import split_frontmatter
 from doit.paths import library_dir
-from doit.skills import load_skills
 from doit.tools import LEADING_KEYWORDS
 from doit.tools import invocation_head
 from doit.tools import load_registry
@@ -163,16 +162,6 @@ def index_workflows() -> list[Entry]:
             )
         )
     return entries
-
-
-def index_skills() -> list[Entry]:
-    """Claude skills, described by the first sentence of their description.
-
-    A skill description carries its trigger and output rules too, which are long
-    and inflate every fuzzy match. The first sentence is what identifies it, and
-    `doit claude skills list --full` is where the rest of it is readable.
-    """
-    return [Entry(source='skill', name=skill.name, invocation=f'/{skill.name}', description=skill.summary) for skill in load_skills()]
 
 
 def index_functions() -> list[Entry]:
@@ -520,7 +509,6 @@ def index_zsh_keys() -> list[Entry]:
 LENSES = {
     'tool': index_tools,
     'workflow': index_workflows,
-    'skill': index_skills,
     'func': index_functions,
     'alias': index_aliases,
     'git': index_git_aliases,
@@ -580,8 +568,8 @@ class Verdict(NamedTuple):
 def classify(entries: list[Entry] | None = None) -> Verdict:
     """Sort the rows this machine cannot run into wrong ones and missing ones.
 
-    Only the lenses whose rows are commands are checked. A workflow card, a
-    skill or a tmux keybinding is not a command and cannot be dead in this sense.
+    Only the lenses whose rows are commands are checked. A workflow card or a
+    tmux keybinding is not a command and cannot be dead in this sense.
     They are also the only ones built: reading sixty markdown cards and asking
     zsh for its keymap to answer a question about four lenses is most of what
     this costs, and the dashboard renders it on every draw.

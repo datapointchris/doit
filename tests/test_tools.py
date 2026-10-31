@@ -137,14 +137,6 @@ def test_the_function_card_shows_the_body_because_that_is_the_refresher(capsys):
     assert 'mkdir -p' in out
 
 
-def test_the_function_body_is_dropped_by_brief_rather_than_clipped(capsys):
-    tools.render_function('mkd', 'Create a directory and enter it', 'mkdir -p "$1"', brief=True)
-    out = capsys.readouterr().out
-
-    assert 'Create a directory' in out
-    assert 'mkdir -p' not in out
-
-
 def test_the_alias_card_shows_what_it_expands_to(capsys):
     tools.render_alias('ll', 'eza -l --git', 'list files')
     out = capsys.readouterr().out

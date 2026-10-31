@@ -19,8 +19,8 @@ one that also had to be maintained.
 
 Nothing here renders a subject itself. Each lens hands off to whatever owns it —
 `doit.tools` for anything out of the registry or the shell files, `doit workflows
-show` for a card, `bat` over a skill file — because a second renderer is a second
-thing to keep in step with the first. Whether that hand-off is an in-process call
+show` for a card — because a second renderer is a second thing to keep in step
+with the first. Whether that hand-off is an in-process call
 or a subprocess follows from where the owner lives, and is not a distinction this
 module makes.
 """
@@ -37,8 +37,6 @@ from rich.text import Text
 
 from doit import digest
 from doit import index
-from doit import rotate
-from doit import skills
 from doit import tools
 from doit import usage
 from doit.render import console
@@ -251,10 +249,6 @@ def cmd_show(subject: str) -> int:
     if 'workflow' in found:
         render_section('workflow — your reference card', 'cyan')
         delegate(['doit', 'workflows', 'show', subject])
-    if 'skill' in found:
-        render_section('skill — Claude skill', 'green')
-        if skill := skills.load_skill(subject):
-            skills.render_skill(skill, heading=False)
     for source in ('func', 'alias', 'git', 'forgit', 'zsh', 'tmux'):
         if source in found:
             console.print()
@@ -262,25 +256,25 @@ def cmd_show(subject: str) -> int:
     return 0
 
 
-def render_lens_card(entry: index.Entry, brief: bool = False) -> None:
+def render_lens_card(entry: index.Entry) -> None:
     """The card shape belonging to whichever shell collection this row came from.
 
     The fallback is the shape for a row that is not a command — a tmux keybinding
     is a key, so there is nothing for a `↳` line to carry.
     """
     if entry.source == 'func':
-        tools.render_function(entry.name, entry.description, entry.body, brief=brief)
+        tools.render_function(entry.name, entry.description, entry.body)
     elif entry.source == 'alias':
-        tools.render_alias(entry.name, entry.command, entry.description, brief=brief)
+        tools.render_alias(entry.name, entry.command, entry.description)
     elif entry.source == 'git':
-        tools.render_git_alias(entry.name, entry.command, brief=brief)
+        tools.render_git_alias(entry.name, entry.command)
     elif entry.source == 'forgit':
-        tools.render_forgit(entry.name, entry.command, brief=brief)
+        tools.render_forgit(entry.name, entry.command)
     elif entry.source == 'zsh':
-        tools.render_zsh_key(entry.name, entry.command, entry.description, brief=brief)
+        tools.render_zsh_key(entry.name, entry.command, entry.description)
     else:
         tools.card_title(entry.invocation, entry.source)
-        tools.card_detail(entry.description, brief)
+        tools.card_detail(entry.description, brief=False)
 
 
 def cmd_unresolved(as_json: bool) -> int:
@@ -396,11 +390,6 @@ def preview_command(source: Annotated[str, typer.Argument()], name: Annotated[st
         raise typer.Exit(0)
     if source == 'workflow':
         raise typer.Exit(0 if delegate(['doit', 'workflows', '__render', name]) else 1)
-    if source == 'skill':
-        skill = skills.load_skill(name)
-        if skill:
-            skills.render_skill(skill)
-        raise typer.Exit(0 if skill else 1)
     if source in index.LENSES and (entry := lens_sources(name, [source]).get(source)):
         render_lens_card(entry)
     raise typer.Exit(0)
@@ -559,35 +548,3 @@ def kit_unused_command(
 ) -> None:
     """What you own, can run, and never do."""
     raise typer.Exit(cmd_unused(as_json, source, days, minimum))
-
-
-def cmd_remind(lens: str, brief: bool, peek: bool) -> int:
-    """Surface one forgotten row of a lens, and advance that lens's rotation."""
-    if lens not in rotate.LENSES:
-        raise typer.BadParameter(f'unknown lens {lens}; rotations are kept for {", ".join(rotate.LENSES)}')
-    entry = rotate.next_up(lens)
-    if entry is None:
-        console.print(f'[green]✓[/] Nothing in the {lens} lens is due to resurface.')
-        return 0
-    if entry.source == 'tool':
-        tools.render_tool(entry.name, tools.load_registry().get(entry.name) or {}, brief=brief)
-    else:
-        render_lens_card(entry, brief=brief)
-    if not peek:
-        rotate.record(lens, entry)
-    return 0
-
-
-@kit_app.command('remind')
-def kit_remind_command(
-    lens: Annotated[str, typer.Option('--lens', help=f'Which collection to draw from: {", ".join(rotate.LENSES)}.')] = 'tool',
-    brief: Annotated[bool, typer.Option('--brief', help='A few lines, for a startup nudge.')] = False,
-    peek: Annotated[bool, typer.Option('--peek', help='Show it without advancing the rotation.')] = False,
-) -> None:
-    """Resurface something from one collection you have stopped reaching for.
-
-    Each lens keeps its own rotation, so a drill over the git aliases and a
-    reminder over the registry recur at whatever their own register item says
-    rather than at a rate the largest collection sets for all of them.
-    """
-    raise typer.Exit(cmd_remind(lens, brief, peek))

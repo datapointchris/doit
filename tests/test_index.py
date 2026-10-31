@@ -13,7 +13,6 @@ import pytest
 
 from doit import index
 from doit import machine
-from doit import skills
 from doit import tools
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures'
@@ -125,7 +124,6 @@ def collections(tmp_path, monkeypatch):
     registry.write_text(REGISTRY_YAML)
     monkeypatch.setattr(tools, 'REGISTRY', registry)
     monkeypatch.setattr(index, 'WORKFLOWS_DIR', FIXTURE_DIR / 'workflows')
-    monkeypatch.setattr(skills, 'SKILLS_DIR', tmp_path / 'no-skills')
     monkeypatch.setattr(index, 'FORGIT_PLUGIN', tmp_path / 'no-forgit')
     monkeypatch.setattr(index, 'SHELL_DIR', tmp_path / 'shell')
     (tmp_path / 'shell').mkdir()

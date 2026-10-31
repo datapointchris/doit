@@ -125,10 +125,10 @@ def test_observed_false_turns_observation_off(tmp_path, monkeypatch):
 
 
 def test_observed_takes_an_explicit_observer_over_the_command(tmp_path, monkeypatch):
-    write_history(tmp_path, monkeypatch, [(dt.date(2026, 1, 1), 'doit kit remind')])
+    write_history(tmp_path, monkeypatch, [(dt.date(2026, 1, 1), 'doit review due')])
     path = write_dates(tmp_path, 'reminders.json', {'jira': '2026-08-07'})
 
-    assert observe.observed({'newest-date-in': path}, 'doit kit remind').date == '2026-08-07'
+    assert observe.observed({'newest-date-in': path}, 'doit review due').date == '2026-08-07'
 
 
 def test_observed_reports_an_observer_it_does_not_recognize():
@@ -165,18 +165,18 @@ def test_history_entries_skips_lines_that_are_not_invocations(tmp_path, monkeypa
     """A multi-line command continues on unprefixed lines; a continuation is
     never the start of an invocation, so skipping it is correct."""
     history = tmp_path / 'history'
-    history.write_text(': 1786153106:0;doit kit remind \\\n  --brief\nplain junk\n')
+    history.write_text(': 1786153106:0;doit review due \\\n  --brief\nplain junk\n')
     monkeypatch.setattr(observe, 'HISTORY', history)
     observe.shell_history.cache_clear()
 
-    assert [entry.command for entry in observe.history_entries()] == ['doit kit remind \\']
+    assert [entry.command for entry in observe.history_entries()] == ['doit review due \\']
 
 
 def test_history_survives_undecodable_bytes(tmp_path, monkeypatch):
     """Years of a real history file will contain something that is not UTF-8, and
     losing every observation to it would be silent."""
     history = tmp_path / 'history'
-    history.write_bytes(b': 1786153106:0;doit kit remind\n: 1786153107:0;echo \xe9\xff\n')
+    history.write_bytes(b': 1786153106:0;doit review due\n: 1786153107:0;echo \xe9\xff\n')
     monkeypatch.setattr(observe, 'HISTORY', history)
     observe.shell_history.cache_clear()
 
@@ -187,9 +187,9 @@ def test_a_recent_run_clears_an_item_a_stale_stamp_left_overdue(tmp_path, monkey
     """The whole point, end to end: doing the thing is what marks it done."""
     stamped = (dt.date.today() - dt.timedelta(days=33)).isoformat()
     ran_today = dt.date.today()
-    write_history(tmp_path, monkeypatch, [(ran_today, 'doit kit remind')])
+    write_history(tmp_path, monkeypatch, [(ran_today, 'doit review due')])
 
-    assert observe.newest(stamped, observe.observed(None, 'doit kit remind').date) == ran_today.isoformat()
+    assert observe.newest(stamped, observe.observed(None, 'doit review due').date) == ran_today.isoformat()
 
 
 def stub_history(monkeypatch, entries: list[tuple[str, str, str]]) -> None:
@@ -258,10 +258,10 @@ def test_a_state_file_cannot_be_scoped_to_a_machine(tmp_path):
 
 def test_atuin_rows_are_parsed_with_host_and_date():
     """The command may contain the separator, so it takes the remainder."""
-    stdout = '2026-08-07 21:38:53|macmini.trusted|doit kit remind\n2026-07-01 09:00:00|archlinux|rg "a|b" .\nrubbish\n'
+    stdout = '2026-08-07 21:38:53|macmini.trusted|doit review due\n2026-07-01 09:00:00|archlinux|rg "a|b" .\nrubbish\n'
 
     assert observe.parse_atuin_rows(stdout) == (
-        observe.Invocation('2026-08-07', 'macmini', 'doit kit remind'),
+        observe.Invocation('2026-08-07', 'macmini', 'doit review due'),
         observe.Invocation('2026-07-01', 'archlinux', 'rg "a|b" .'),
     )
 
@@ -269,7 +269,7 @@ def test_atuin_rows_are_parsed_with_host_and_date():
 def test_atuin_host_is_canonicalized_to_the_recorded_form():
     """atuin reports the fully qualified name; a bare comparison would match no
     host at all and report that nothing ever ran anywhere."""
-    stdout = '2026-08-07 21:38:53|macmini.trusted|doit kit remind\n'
+    stdout = '2026-08-07 21:38:53|macmini.trusted|doit review due\n'
 
     assert observe.parse_atuin_rows(stdout)[0].host == 'macmini'
 

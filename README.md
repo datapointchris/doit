@@ -106,10 +106,9 @@ words because they are two things, and one word would make "did you update?" amb
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
 | What is due to revisit | `review due` | `register.yml` and shell history |
 | What is due to practice | `labs due` | the Labs in terminal-library, and `labs-state.json` |
-| How do I use this tool | `show`, `find`, `tools show` | the registry and cards in terminal-library, your shell's functions and aliases, your skills |
+| How do I use this tool | `show`, `find`, `tools show` | the registry and cards in terminal-library, your shell's functions and aliases |
 | What was that command | `choose` | the same index, ending on the invocation |
-| What do I own and never use | `kit unused`, `kit remind` | the same index, joined to shell history |
-| Which Claude skills are there, and when each fires | `claude skills list` | `~/.claude/skills/` |
+| What do I own and never use | `kit unused` | the same index, joined to shell history |
 | Which apps does doit ask | `sources list` | `sources.yml`, running each command |
 | Have I committed the card I wrote | `content status` | the terminal-library checkout |
 
@@ -355,13 +354,12 @@ doit choose                  # the same picker, printing the invocation instead 
 doit launch                  # doit's own areas, then every tool you own
 doit tools list              # the registry, grouped by category
 doit workflows show <card>   # one reference card
-doit claude skills list      # every Claude skill, and when each fires
 ```
 
 The index is one row shape over every collection you own: the tool registry, the workflow cards,
-Claude skills, annotated shell functions, aliases, git aliases, forgit's shortcuts, the tmux
-keybindings, and the zsh keys your config binds. `--source` narrows a search to one of `tool`,
-`workflow`, `skill`, `func`, `alias`, `git`, `forgit`, `tmux` or `zsh`.
+annotated shell functions, aliases, git aliases, forgit's shortcuts, the tmux keybindings, and the
+zsh keys your config binds. `--source` narrows a search to one of `tool`, `workflow`, `func`,
+`alias`, `git`, `forgit`, `tmux` or `zsh`.
 
 Every row carries its invocation, not only its name. A registry key is a package name as often as a
 command: `ripgrep` installs `rg`, and `git-delta` installs `delta`. A row keyed by name alone would
@@ -380,7 +378,6 @@ that lands the pick on the prompt. Bind it to a chord of your choosing, such as
 ```bash
 doit kit unused                # what you own, can run, and never do
 doit kit usage                 # how often you reach for each thing you own
-doit kit remind --lens alias   # resurface one alias you stopped using
 doit kit unresolved            # rows naming something this machine cannot run
 doit kit digest export         # write this machine's usage table where digest run reads it
 doit kit digest show           # the last reading, without spending another
@@ -390,10 +387,6 @@ Usage is shell history folded per row of the index: a count and a last-run date.
 that history for all of doit. `review` asks it when an item was last done, and `kit` folds the same
 read into counts. A second parser would answer a subtly different question, and then `review` and
 `kit` would disagree about whether you had used `rg`.
-
-`kit remind` keeps a rotation per lens. A drill over the git aliases and a reminder over the
-registry each recur at whatever their own review item says, rather than at a rate the largest
-collection sets for all of them.
 
 `kit unresolved` turns a row that goes nowhere into a list you can fix, rather than something you
 rediscover on every search. Shell integrations defined at runtime, such as `z` and `nvm`, appear on
