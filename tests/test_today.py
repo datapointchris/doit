@@ -210,7 +210,7 @@ def test_the_pursuits_owed_run_furthest_behind_first_and_carry_a_handle():
     lane = today.pursuits_due(pursuit_state(balances={'chore': 1.0, 'socialize': 4.0}), DAY)
 
     assert [row.label for row in lane.rows] == ['socialize', 'chore']
-    assert lane.rows[0].handle == 'doit log socialize'
+    assert lane.rows[0].handle == 'doit pursuits log socialize'
 
 
 def test_a_pursuit_that_is_current_is_not_owed():

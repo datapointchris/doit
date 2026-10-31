@@ -41,7 +41,7 @@ Three files, kept apart like the review register:
 The draw is fresh every run, not a queue — but cached for 15 minutes, because
 running it three times while deciding must not reshuffle the list underneath you.
 That cache also carries which concrete item each pursuit resolved to, which is what
-lets `doit log` write through to the CLI that owns it.
+lets `doit pursuits log` write through to the CLI that owns it.
 
 What a pursuit resolves to is never doit's business. It shells out to whoever owns
 that domain — `icb books` knows which book, `icb tasks` knows which chore — exactly
@@ -204,12 +204,12 @@ TEMPLATE = """\
 #
 #   cadence         one occurrence every so many days, in whole days: 3d, 9d
 #   weekly_minutes  this many minutes a week, which makes the pursuit measured in
-#                   time: `doit log` asks how long each sitting took
+#                   time: `doit pursuits log` asks how long each sitting took
 #
 # One declaring neither is tracked. It is never due and never drawn, so it takes
 # no weight. It is still logged, read from its evidence, and counted in `doit
 # today` and `drift`. That suits something you already do plenty of and want to
-# see the time of. `doit log --minutes` records how long a sitting took when you
+# see the time of. `doit pursuits log --minutes` records how long a sitting took when you
 # give it, and nothing asks.
 #
 #   until        optional end date; after it the pursuit pauses and says so
@@ -234,9 +234,9 @@ TEMPLATE = """\
 # and `items` when the list is nested inside the document.
 #
 # How many rows come back is the register saying whether it means one thing or
-# several. One row is a decision, so the draw shows it and `doit log` records it.
+# several. One row is a decision, so the draw shows it and `doit pursuits log` records it.
 # Several are choices: the draw shows the first three under the pursuit, and
-# `doit log` asks which one you did wherever `on_log` would act on it. Enter, or
+# `doit pursuits log` asks which one you did wherever `on_log` would act on it. Enter, or
 # nobody there to ask, names none — an hour of reading is not a claim about
 # which book. Narrow the command to one where you mean one.
 #
@@ -276,7 +276,7 @@ TEMPLATE = """\
 #
 # Evidence counts occurrences, so a cadence takes it and so does a tracked
 # pursuit. An app says which day something happened and never how long, so a
-# weekly_minutes pursuit is paid by `doit log --minutes` alone.
+# weekly_minutes pursuit is paid by `doit pursuits log --minutes` alone.
 #
 # Standing counts back to the zero point, so the command has to answer that far
 # back. A `--limit` on it drops the oldest days, and each one dropped is owed.
@@ -395,7 +395,9 @@ def load_pursuits(path: Path | None = None) -> dict:
         if minutes is not None and (not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0):
             raise RegisterError(f'{name}: weekly_minutes must be a positive whole number')
         if minutes is not None and (config.get('evidence') or config.get('evidence_files')):
-            raise RegisterError(f'{name}: weekly_minutes is paid by `doit log --minutes` only — an app reports days, never how long')
+            raise RegisterError(
+                f'{name}: weekly_minutes is paid by `doit pursuits log --minutes` only — an app reports days, never how long'
+            )
         if config.get('until') and not isinstance(config['until'], dt.date):
             raise RegisterError(f'{name}: until must be a date (YYYY-MM-DD)')
         if config.get('on_log') and not config.get('resolve'):
@@ -2003,7 +2005,7 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     try:
         if name is None:
             if not can_prompt():
-                error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit log <pursuit>[/]')
+                error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit pursuits log <pursuit>[/]')
                 return 1
             matched = prompt_for_pursuit(pursuits, offered)
         else:
@@ -2116,7 +2118,7 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
     try:
         if name is None:
             if not can_prompt():
-                error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit skip <pursuit>[/]')
+                error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit pursuits skip <pursuit>[/]')
                 return 1
             if not state['active']:
                 error_console.print('Nothing is in the draw to pass.')
@@ -2693,6 +2695,8 @@ def skip_command(
 
 
 app = typer.Typer(name='pursuits', no_args_is_help=True, help='What `doit next` draws from: each pursuit, its goal and its weight.')
+app.command('log')(log_command)
+app.command('skip')(skip_command)
 
 
 @app.command('list')

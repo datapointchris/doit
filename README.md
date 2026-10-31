@@ -51,7 +51,7 @@ doit dashboard               # every lane, each ordered by the app that owns it
 doit pursuits edit           # writes an annotated pursuits.yml, if none is there, then opens $EDITOR
 doit pursuits list           # proves the register parsed: each pursuit, its weight, its goal, when it is due
 doit next                    # everything owed, then the rest of the screen drawn by weight
-doit log                     # record one; whatever you leave out is asked for
+doit pursuits log            # record one; whatever you leave out is asked for
 
 doit review edit             # writes a one-item review register, if none is there, then opens $EDITOR
 doit review due              # what is due to revisit, most overdue first
@@ -121,22 +121,22 @@ the lanes, naming the pursuits that are behind.
 ## `next` — the one ranked list, because you declared the ranking
 
 ```bash
-doit next                            # everything owed, heaviest first, then the rest drawn by weight
-doit next --explain                  # the same draw with every number behind it
-doit log read-library --minutes 40   # record a 40-minute sitting of a timed pursuit
-doit skip chores --for 2w            # out of the draw until it expires, owing nothing meanwhile
-doit pursuits resume chores          # end that skip early
-doit pursuits reset chores           # move the zero point to now, which forgives what it owed
-doit pursuits drift                  # what each goal asked for against what got done
-doit forecast run                    # the register run forward through the real draw
-doit forecast trend                  # what earlier forecasts predicted, against what got logged
+doit next                                     # everything owed, heaviest first, then the rest drawn by weight
+doit next --explain                           # the same draw with every number behind it
+doit pursuits log read-library --minutes 40   # record a 40-minute sitting of a timed pursuit
+doit pursuits skip chores --for 2w            # out of the draw until it expires, owing nothing meanwhile
+doit pursuits resume chores                   # end that skip early
+doit pursuits reset chores                    # move the zero point to now, which forgives what it owed
+doit pursuits drift                           # what each goal asked for against what got done
+doit forecast run                             # the register run forward through the real draw
+doit forecast trend                           # what earlier forecasts predicted, against what got logged
 ```
 
 A pursuit is a strand of life you want to spend attention on. It declares two separate things:
 its pace, which is how much of it you want, and its weight, which is how much it matters against
 the others. The annotated `pursuits.yml` that `doit pursuits edit` writes explains every field.
 
-`doit log` writes through to the app that owns the item. It offers to run the pursuit's `on_log`
+`doit pursuits log` writes through to the app that owns the item. It offers to run the pursuit's `on_log`
 command, such as completing the task it resolved to. `--yes` runs it without asking, and
 `--no-write` logs only.
 
@@ -144,8 +144,8 @@ command, such as completing the task it resolved to. `--yes` runs it without ask
 
 A pursuit declares at most one pace. `cadence: 3d` asks for one occurrence every three days, in
 whole days only, so twice a week is `3d` or `4d`. `weekly_minutes: 240` asks for four hours a week
-and makes the pursuit measured in time. `doit log` asks a timed pursuit how long it took and never
-asks a counted one. `weekly_minutes:` is what a week asks for. `doit log --minutes` is how long one
+and makes the pursuit measured in time. `doit pursuits log` asks a timed pursuit how long it took and never
+asks a counted one. `weekly_minutes:` is what a week asks for. `doit pursuits log --minutes` is how long one
 sitting took. A timed pursuit is paid only by what is logged that way. An app reports which day
 something happened and never how long, so the register refuses `evidence` or `evidence_files` on a
 pursuit measured in minutes.
@@ -157,7 +157,7 @@ whatever the rest of the register weighs and however much else got logged that w
 A pursuit declaring no pace is tracked. It asks for nothing, so it is never due, never drawn, and
 takes no weight. Its logs and its app's evidence are read all the same, so `doit today` lists it as
 done and `doit pursuits drift` counts it. That suits something already done plenty of, whose time
-you want to see. `doit log --minutes` records how long a sitting took when given, and nothing asks
+you want to see. `doit pursuits log --minutes` records how long a sitting took when given, and nothing asks
 for it. A weight with no pace is refused, because a forgotten pace leaves exactly that shape.
 
 ### Standing is one balance, and the screen states it as a date
@@ -182,7 +182,7 @@ That balance is never the number on screen. Every view states standing as a date
 until it ends. `doit next --json` carries the raw balance, and `doit pursuits drift` sets what each
 goal asked for beside what got done.
 
-`doit skip` takes a pursuit out of the draw until the skip expires, and it owes nothing meanwhile.
+`doit pursuits skip` takes a pursuit out of the draw until the skip expires, and it owes nothing meanwhile.
 `doit pursuits reset` with no name moves every zero point, after confirming. The journal is
 append-only either way. A skip and a reset are markers written into it, never a rewrite of what
 happened.
@@ -200,7 +200,7 @@ walks top-down, and what `rank_offered` counts in a journal entry. The draw is c
 minutes, so running `next` again while deciding does not reshuffle the list underneath you.
 
 A pursuit whose `resolve` command matches several rows offers the first three, stacked under its
-name. One row is a decision the register made. Several are a choice you make, so `doit log` asks
+name. One row is a decision the register made. Several are a choice you make, so `doit pursuits log` asks
 which one wherever the pursuit's `on_log` would complete it. Enter names none, and so does a log
 with nobody there to ask.
 
@@ -309,7 +309,7 @@ keeps only the day lists its entries after that day's timed ones, with the hour 
 shown as midnight.
 
 Where a record says who did a thing, the entry says which of three: `by hand`, `session` for a
-Claude session someone drives, or `unattended` for a scheduled run. `doit log` stamps each journal
+Claude session someone drives, or `unattended` for a scheduled run. `doit pursuits log` stamps each journal
 entry the same way. An identity in a shape doit does not recognize reads `unknown`, and the line
 above the groups counts it. A group whose record keeps no actor has no actor column. `--json`
 carries the identity as recorded.

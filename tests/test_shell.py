@@ -57,7 +57,7 @@ def test_completion_reads_the_cache_rather_than_calling_doit():
 def test_completion_offers_a_pursuit_where_one_is_expected():
     script = shell.zsh_completion()
 
-    assert 'log|skip)' in script, 'the two verbs that take a pursuit'
+    assert "'pursuits log'|'pursuits skip')" in script, 'the two verbs that take a pursuit'
 
 
 def test_the_completion_offers_no_verb_the_cli_does_not_have():

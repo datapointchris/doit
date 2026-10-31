@@ -126,8 +126,6 @@ UPDATE_CONFIG = Config(tool='doit', owner='datapointchris')
 # The draw and the two things you do to what it just offered sit at the root:
 # they act on the answer, while `pursuits` manages the file that produced it.
 app.command('next')(pursuits.next_command)
-app.command('log')(pursuits.log_command)
-app.command('skip')(pursuits.skip_command)
 app.command('dashboard')(dashboard.dashboard_command)
 app.command('today')(today.today_command)
 app.command('happened')(happened.happened_command)

@@ -1147,7 +1147,7 @@ def test_a_pursuit_measured_in_minutes_refuses_an_app_source(tmp_path, monkeypat
     body = f'pursuits:\n  journal:\n    description: x\n    weight: 10\n    weekly_minutes: 60\n    {source}\n'
     monkeypatch.setattr(pursuits, 'REGISTER', write_register(tmp_path, body))
 
-    with pytest.raises(pursuits.RegisterError, match='journal: weekly_minutes is paid by `doit log --minutes` only'):
+    with pytest.raises(pursuits.RegisterError, match='journal: weekly_minutes is paid by `doit pursuits log --minutes` only'):
         pursuits.load_pursuits()
 
 
@@ -1813,7 +1813,7 @@ def test_minutes_on_a_counted_pursuit_is_a_usage_error(sandbox, monkeypatch):
     duration on one that is not has nothing to be a fraction of. A flag the run
     cannot honor exits 2, the way every other misuse of this verb does."""
     answers(monkeypatch)
-    ran = runner.invoke(cli_app, ['log', 'chores', '--minutes', '20', '--yes', '--no-write'])
+    ran = runner.invoke(cli_app, ['pursuits', 'log', 'chores', '--minutes', '20', '--yes', '--no-write'])
 
     assert ran.exit_code == 2
     assert journal.read_all(sandbox / 'state') == []
@@ -1842,7 +1842,7 @@ def test_a_timed_pursuit_with_nobody_to_ask_is_a_usage_error(sandbox, monkeypatc
     only run that gates a merge.
     """
     monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
-    ran = runner.invoke(cli_app, ['log', 'read-library', '--yes', '--no-write'])
+    ran = runner.invoke(cli_app, ['pursuits', 'log', 'read-library', '--yes', '--no-write'])
 
     assert ran.exit_code == 2
     assert journal.read_all(sandbox / 'state') == []
@@ -2428,7 +2428,7 @@ def test_an_unknown_key_in_a_sibling_block_is_refused(tmp_path):
 def test_a_negative_duration_never_reaches_the_journal(sandbox, monkeypatch):
     """`checkoff_equivalent` reads a non-positive duration as one whole checkoff,
     so `--minutes -5` credited 30 minutes and printed `+5m`."""
-    ran = runner.invoke(cli_app, ['log', 'read-library', '--minutes', '-5', '--yes', '--no-write'])
+    ran = runner.invoke(cli_app, ['pursuits', 'log', 'read-library', '--minutes', '-5', '--yes', '--no-write'])
 
     assert ran.exit_code == 2
     assert journal.read_all(sandbox / 'state') == []
@@ -2538,7 +2538,7 @@ def test_a_named_journal_directory_that_is_missing_stops_a_log_before_it_writes(
     monkeypatch.setattr(paths, 'JOURNAL_DIR', missing)
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
 
-    ran = runner.invoke(cli_app, ['log', 'chores', '--yes', '--no-write'])
+    ran = runner.invoke(cli_app, ['pursuits', 'log', 'chores', '--yes', '--no-write'])
 
     assert ran.exit_code == 1
     assert '$DOIT_JOURNAL_DIR' in ran.output

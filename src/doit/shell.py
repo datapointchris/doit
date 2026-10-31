@@ -85,9 +85,10 @@ _doit() {{
   local -a verbs
   verbs=(
     'next:What to do now, drawn from your weighted pursuits'
-    'log:Record having done one'
-    'skip:Pass on one — suppressed, weight untouched'
     'dashboard:Everything outstanding across your apps, in lanes'
+    'today:What today still wants, and what it has had'
+    'happened:What every record says happened over a window'
+    'forecast:What the register would have you do, run forward'
     'find:Search everything you own, and open what you pick'
     'choose:Pick one thing and print what you would type to run it'
     'launch:Your areas and every tool you own'
@@ -96,6 +97,7 @@ _doit() {{
     'review:What is due to revisit'
     'labs:Hands-on practice that is due now'
     'workflows:The reference cards'
+    'tools:The tool registry'
     'content:The cards and Labs checkout'
     'sources:Which apps doit asks for lanes'
     'kit:Everything you own, and what you actually reach for'
@@ -106,9 +108,9 @@ _doit() {{
     return
   fi
 
-  # `log` and `skip` both take a pursuit, and they are the two you type most.
-  case "$words[2]" in
-    log|skip) (( CURRENT == 3 )) && _doit_pursuits ;;
+  # `pursuits log` and `pursuits skip` both take a pursuit, and they are the two you type most.
+  case "$words[2] $words[3]" in
+    'pursuits log'|'pursuits skip') (( CURRENT == 4 )) && _doit_pursuits ;;
   esac
 }}
 

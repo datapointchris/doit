@@ -254,7 +254,7 @@ def pursuits_due(state: dict, bounds: Bounds) -> Lane:
             continue
         note = 'due today' if due_in is None or -1 < due_in <= 0 else f'{span_text(due_in)} overdue'
         described = state['active'][name].get('description', '')
-        rows.append(Row(name, described, note, Urgency.OVERDUE, f'doit log {name}'))
+        rows.append(Row(name, described, note, Urgency.OVERDUE, f'doit pursuits log {name}'))
     return Lane(name='pursuits', title='PURSUITS', rows=rows, total=len(rows), hints=['doit next --explain'])
 
 

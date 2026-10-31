@@ -467,7 +467,7 @@ def emit(reading: Reading) -> None:
         console.print(row)
 
     console.print(f'\n  {reading.unspent_minutes_per_day:.0f} min/day left unspent · {reading.replicates} runs')
-    console.print(f'  estimates: {source_summary(reading)} · [cyan]doit log --minutes[/] measures them')
+    console.print(f'  estimates: {source_summary(reading)} · [cyan]doit pursuits log --minutes[/] measures them')
 
 
 def emit_trend(verdicts: list[Verdict], days: int, readings: int) -> None:
