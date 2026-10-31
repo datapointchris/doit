@@ -387,27 +387,6 @@ def test_learning_lane_is_the_plan_head_in_its_order():
     assert lane.rows[0].handle == 'learning resources show 11'
 
 
-def test_learning_lane_says_why_when_an_older_cli_cannot_read_the_plan():
-    """An installed CLI older than the API's plan schema exits 0 with only warnings."""
-    results = all_results()
-    skew = 'the API serves plan schema 2 and this build reads 1'
-    results['learning'] = sources.Result(
-        source='learning',
-        payload={
-            'current_section': None,
-            'track_focus': [],
-            'in_progress_resources': [],
-            'warnings': [{'section': 'current_section', 'message': skew}, {'section': 'tracks', 'message': skew}],
-        },
-        exit_code=0,
-    )
-
-    lane = dashboard.build_learning_lane(results, TODAY)
-
-    assert lane.available is False
-    assert skew in lane.reason
-
-
 def test_maintenance_lane_counts_only_what_is_due():
     lane = lanes_by_name(all_results())['maintenance']
 

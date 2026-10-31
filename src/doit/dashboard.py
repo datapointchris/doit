@@ -83,8 +83,8 @@ ROW_CAP = 3
 FOCUSED_ROW_CAP = 10
 
 # Lanes whose useful unit is bigger than the default. Tasks is the list you
-# actually pick from; learning carries one row per stream (the current section
-# plus each track), so three would silently drop a whole stream.
+# actually pick from. The other rows a study plan's head, every started
+# resource and then what follows, which three rows would cut short.
 LANE_ROW_CAPS = {'tasks': 5, 'learning': 5}
 
 # The `icb overview` schema this build understands. A newer one is reported
