@@ -247,7 +247,7 @@ def build_tasks_lane(results: dict[str, sources.Result], today: dt.date) -> Lane
 def build_habits_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     payload, reason = icb_context(results, ('habits',))
     if payload is None:
-        return unavailable('habits', 'HABITS', reason)
+        return unavailable(lanemodel.HABITS, 'HABITS', reason)
 
     section = payload.get('habits') or {}
     due = section.get('due_today') or []
@@ -272,7 +272,7 @@ def build_habits_lane(results: dict[str, sources.Result], today: dt.date) -> Lan
     ]
 
     return LaneView(
-        name='habits',
+        name=lanemodel.HABITS,
         title='HABITS',
         meta=f'{len(done)} of {current_total} done today',
         grid=grid,
@@ -864,7 +864,7 @@ def day_urgency(due: str, today: dt.date) -> Urgency:
 # entry every time an app starts emitting lanes itself.
 ICB_LANES = (
     ('tasks', build_tasks_lane),
-    ('habits', build_habits_lane),
+    (lanemodel.HABITS, build_habits_lane),
     ('books', build_books_lane),
     ('articles', build_articles_lane),
     ('projects', build_projects_lane),

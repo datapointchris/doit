@@ -22,6 +22,7 @@ from doit import content
 from doit import dashboard
 from doit import find
 from doit import forecast
+from doit import happened
 from doit import labs
 from doit import pursuits
 from doit import review
@@ -48,6 +49,7 @@ Examples:
     doit dashboard     the spread: every lane, ranked across none of them
     doit next          be handed one thing, ranked by your pursuit weights
     doit today         only what the day can finish, above what it has had
+    doit happened      what every record says happened this past week
     doit review due    every review item due; the dashboard shows three
     doit labs due      every Labs exercise due to practice now
 
@@ -128,6 +130,7 @@ app.command('log')(pursuits.log_command)
 app.command('skip')(pursuits.skip_command)
 app.command('dashboard')(dashboard.dashboard_command)
 app.command('today')(today.today_command)
+app.command('happened')(happened.happened_command)
 app.command('find')(find.find_command)
 app.command('choose')(find.choose_command)
 app.command('launch')(find.launch_command)

@@ -13,6 +13,7 @@ from typer.testing import CliRunner
 
 from doit import lanes
 from doit import sources
+from doit.window import Bounds
 
 NOW = dt.datetime(2026, 8, 6, 12, 0, 0)
 
@@ -237,30 +238,14 @@ def test_a_block_that_is_not_a_mapping_names_itself(tmp_path):
     assert any('completions' in problem for problem in registry.problems)
 
 
-def test_today_replaces_a_whole_argv_part(tmp_path):
-    stamp = dt.date(2026, 8, 6)
+def test_the_window_ends_replace_whole_argv_parts_and_nothing_else():
+    """Equality rather than a substring replace, so a path or a title containing a token passes through untouched."""
+    zone = dt.timezone(dt.timedelta(hours=-4))
+    bounds = Bounds(dt.datetime(2026, 8, 6, 15, 0, tzinfo=zone), dt.datetime(2026, 8, 7, tzinfo=zone))
 
-    resolved = sources.resolved_command(['icb', 'tasks', '--since', '{today}', '--json'], stamp)
+    resolved = sources.resolved_command(['grep', 'due {since}', '--since', '{since}', '--until', '{until}'], bounds)
 
-    assert resolved == ['icb', 'tasks', '--since', '2026-08-06', '--json']
-
-
-def test_today_leaves_a_part_that_merely_contains_it_alone():
-    """Equality rather than a substring replace.
-
-    A backend takes the date as its own argument, so splicing it into a longer
-    string has no caller — and refusing that case means a path or a title
-    containing the token is passed through rather than silently rewritten.
-    """
-    resolved = sources.resolved_command(['grep', 'due {today}', '{today}'], dt.date(2026, 8, 6))
-
-    assert resolved == ['grep', 'due {today}', '2026-08-06']
-
-
-def test_a_command_with_no_token_is_unchanged():
-    command = ['icb', 'overview', '--json']
-
-    assert sources.resolved_command(command, dt.date(2026, 8, 6)) == command
+    assert resolved == ['grep', 'due {since}', '--since', '2026-08-06T15:00:00-04:00', '--until', '2026-08-07T00:00:00-04:00']
 
 
 def test_source_order_is_the_files_order(tmp_path):
@@ -271,14 +256,14 @@ def test_source_order_is_the_files_order(tmp_path):
 
 
 def test_a_missing_binary_names_itself():
-    result = sources.run(sources.Source(id='nope', command=['definitely-not-a-real-command']))
+    result = sources.fetch([sources.Source(id='nope', command=['definitely-not-a-real-command'])])['nope']
 
     assert result.failure is sources.Failure.NOT_INSTALLED
     assert sources.reason('nope', result) == 'nope is not installed on this machine'
 
 
 def test_output_that_is_not_json_is_reported_as_such():
-    result = sources.run(sources.Source(id='noise', command=['echo', 'not json']))
+    result = sources.fetch([sources.Source(id='noise', command=['echo', 'not json'])])['noise']
 
     assert result.failure is sources.Failure.UNREADABLE
     assert sources.reason('noise', result) == 'noise did not return JSON'
@@ -295,7 +280,7 @@ def test_an_adapter_brings_its_own_timeout_and_the_file_may_still_set_one(tmp_pa
 
 
 def test_a_timeout_reports_the_bound_it_actually_used():
-    result = sources.run(sources.Source(id='slow', command=['sleep', '5'], timeout=0.25))
+    result = sources.fetch([sources.Source(id='slow', command=['sleep', '5'], timeout=0.25)])['slow']
 
     assert result.failure is sources.Failure.TIMED_OUT
     assert sources.reason('slow', result) == 'slow timed out after 0.25s'
@@ -344,7 +329,7 @@ def test_list_json_carries_each_sources_block_and_verdict(tmp_path, monkeypatch)
     rows = {row['id']: row for row in json.loads(result.stdout)}
     assert rows['day']['block'] == 'outstanding'
     assert (rows['day']['answered'], rows['day']['lanes'], rows['day']['via']) == (True, 1, 'contract')
-    assert rows['gone']['block'] == 'today'
+    assert rows['gone']['block'] == 'happened'
     assert (rows['gone']['answered'], rows['gone']['failure'], rows['gone']['lanes']) == (False, 'not-installed', 0)
 
 

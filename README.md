@@ -60,6 +60,7 @@ eval "$(doit shell init zsh)"         # in .zshrc: a nudge about due items, gate
 eval "$(doit shell completion zsh)"   # in .zshrc: completion for the verbs and your pursuit names
 
 doit today                   # reads every file above at once: what the day still owes, and what it has had
+doit happened --since 7d     # what every record says happened over the week, and who did it
 ```
 
 The first run clones terminal-library into `$XDG_DATA_HOME/terminal-library/`. A command asking
@@ -100,6 +101,7 @@ words because they are two things, and one word would make "did you update?" amb
 | What should I do now | `next` | `pursuits.yml`, the journal, each pursuit's `resolve` and `evidence` commands |
 | What is outstanding anywhere | `dashboard` | every `sources:` entry in `sources.yml`, plus doit's own review, Labs and kit rows |
 | What does today still want, and what has it had | `today` | the same sources, every `completions:` entry, the journal, the review and Labs state |
+| What happened over a window, and who did it | `happened` | every `completions:` entry, the journal and the evidence cache, the review and Labs state |
 | Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered |
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
 | What is due to revisit | `review due` | `register.yml` and shell history |
@@ -273,21 +275,50 @@ other. The next line counts the habits, review and Labs as checklists. Under the
 beyond today, and how much more a day, in each unit, would clear it over each timescale worth
 showing.
 
-### Done is whatever record saw it
+### Done is the day's share of `happened`
 
-Habits come from `icb overview`, which already reports what was ticked. Pursuits come from the
-journal and the evidence cache together, so one satisfied inside its own CLI is listed without also
-being typed. Review items and Labs come from their own state files. Those are the records doit
-either owns or already reads.
+The done list is what `doit happened` reads, over the day. The section below says where each entry
+comes from. A group that could not be read is said once, in the due list.
 
-Each entry shows the hour its record kept. Review, Labs and meso record only the day, so their
-entries follow the timed ones with the hour left blank rather than shown as midnight.
+## `happened` — every record over one window
 
-Everything else is a `completions:` entry in `sources.yml`. It takes the same settings a lane source
-takes, and answers "what happened today" instead of "what is outstanding". An argv part written as
-`{today}` becomes the local ISO date, so a backend filters its own rows rather than shipping a
-backlog to be filtered here. Nothing is required. With the block absent, `doit today` prints the
-records above and says nothing about the rest.
+```bash
+doit happened                                     # the last 7 days, to now
+doit happened --since 2026-10-19 --until 2026-10-25
+doit happened --since 12h --json                  # each group in the lane contract's shape
+doit happened --until 2026-09-01                  # everything up to September
+```
+
+`--since` and `--until` each take a span, a day, or an RFC 3339 instant. `doit happened --help` lists
+the forms. `--until` alone runs from the earliest record.
+
+Pursuits come from the journal and the evidence cache together, so one satisfied inside its own CLI
+is listed without also being typed. Every journal entry in the window counts, whether or not the
+register still names its pursuit. Review items and Labs come from their own state files, which keep
+only each item's latest date. Everything else is a `completions:` entry in `sources.yml`, asked
+about the same window.
+
+A line above the groups names every record asked and how many answered. A group that answered with
+nothing prints nothing, so that line is what says it was asked. A group that could not be read
+always prints, with why. A backend that answered and still wrote to stderr, such as a list cut at
+its own limit, leaves its group partial: the rows print under what it said. The command exits 1
+when no record could be asked, and 0 otherwise.
+
+Each entry shows its day when the window spans several, and the hour its record kept. A record that
+keeps only the day lists its entries after that day's timed ones, with the hour blank rather than
+shown as midnight.
+
+Where a record says who did a thing, the entry says which of three: `by hand`, `session` for a
+Claude session someone drives, or `unattended` for a scheduled run. `doit log` stamps each journal
+entry the same way. An identity in a shape doit does not recognize reads `unknown`, and the line
+above the groups counts it. A group whose record keeps no actor has no actor column. `--json`
+carries the identity as recorded.
+
+A `completions:` entry takes the same settings a lane source takes, and answers "what happened"
+instead of "what is outstanding". An argv part written as `{since}` or `{until}` becomes that end of
+the window as an RFC 3339 instant, so a backend filters its own rows rather than shipping a backlog
+to be filtered here. Nothing is required. With the block absent, `doit happened` and `doit today`
+list doit's own records and say nothing about the rest.
 
 ## `review` and `labs` — due is observed, not declared
 

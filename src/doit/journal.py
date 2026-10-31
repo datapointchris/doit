@@ -126,6 +126,15 @@ def parse_time(value: str | None) -> dt.datetime | None:
         return None
 
 
+def occurred(record: dict) -> dt.datetime | None:
+    """When a record says the thing happened, falling back to when it was logged; None where neither parses.
+
+    Every reader of a record's time asks here, so a change to how that time is
+    read reaches the typed entry and the day it is matched against alike.
+    """
+    return parse_time(record.get('occurred_at') or record.get('logged_at'))
+
+
 def latest_occurrence(records: list[dict], event: str) -> dict[str, dt.datetime]:
     """Most recent time per pursuit for one event kind (``done``, ``skip``, …)."""
     latest: dict[str, dt.datetime] = {}
@@ -133,7 +142,7 @@ def latest_occurrence(records: list[dict], event: str) -> dict[str, dt.datetime]
         if record.get('event') != event:
             continue
         pursuit = record.get('pursuit')
-        when = parse_time(record.get('occurred_at') or record.get('logged_at'))
+        when = occurred(record)
         if not pursuit or when is None:
             continue
         if pursuit not in latest or when > latest[pursuit]:
@@ -149,7 +158,7 @@ def local_day(record: dict, now: dt.datetime) -> dt.date | None:
     Matching :func:`doit.evidence.dates_of`, or the same act would land on two
     different days depending which record carried it.
     """
-    when = parse_time(record.get('occurred_at') or record.get('logged_at'))
+    when = occurred(record)
     return None if when is None else when.astimezone(now.tzinfo).date()
 
 

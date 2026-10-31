@@ -68,6 +68,7 @@ import yaml
 from rich.table import Table
 from rich.text import Text
 
+from doit import actor
 from doit import evidence
 from doit import journal
 from doit.allocate import WEEK_DAYS
@@ -643,7 +644,7 @@ def pace_records(records: list[dict]) -> list[tuple[dt.datetime, dict]]:
     for record in records:
         if record.get('event') != journal.Event.PACE:
             continue
-        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        when = journal.occurred(record)
         if when is not None:
             stamped.append((when, record))
     stamped.sort(key=lambda item: item[0])
@@ -716,7 +717,7 @@ def zero_resets(records: list[dict]) -> dict[str, dt.datetime]:
         if record.get('event') != journal.Event.RESET or record.get('note') != FIRST_SEEN:
             continue
         name = record.get('pursuit')
-        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        when = journal.occurred(record)
         if name and when is not None and (name not in seen or when < seen[name]):
             seen[name] = when
     return {**seen, **ran}
@@ -759,7 +760,7 @@ def completed_since(records: list[dict], app_days: list[dt.date], now: dt.dateti
     typed_days = {journal.local_day(record, now) for record in typed}
     paid = 0.0
     for record in typed:
-        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        when = journal.occurred(record)
         if when is not None and when >= origin:
             paid += checkoff_equivalent(record, minutes) * size
     opened = origin.astimezone(now.tzinfo).date()
@@ -866,7 +867,7 @@ def skip_periods(records: list[dict], origin: dt.datetime) -> list[tuple[dt.date
     for record in records:
         if record.get('event') != journal.Event.SKIP:
             continue
-        start = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        start = journal.occurred(record)
         finish = journal.parse_time(record.get('expires_at'))
         if start is not None and finish is not None:
             stated.append((start, finish))
@@ -890,7 +891,7 @@ def skip_expiry(records: list[dict]) -> dt.datetime | None:
     for record in records:
         if record.get('event') != journal.Event.SKIP:
             continue
-        when = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+        when = journal.occurred(record)
         finish = journal.parse_time(record.get('expires_at'))
         if when is None or finish is None:
             continue
@@ -1949,6 +1950,7 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt
         'occurred_at': extra.pop('occurred_at', now.isoformat()),
         'tz': str(now.tzinfo),
         'machine': machine_name(),
+        'actor': actor.identity(),
         **extra,
     }
     if state is not None:
@@ -2375,7 +2377,7 @@ def drift_rows(pursuits: dict, state: dict, since: dt.datetime | None, until: dt
     records = state['records']
     evidence_days = state['evidence_days']
     if until:
-        records = [record for record in records if (when := record_time(record)) is None or when < until]
+        records = [record for record in records if (when := journal.occurred(record)) is None or when < until]
         evidence_days = {name: [day for day in days if first_instant(day) < until] for name, days in evidence_days.items()}
     cutoff = since or earliest(records, evidence_days) or end
     weekly = declared_minutes(pursuits)
@@ -2425,7 +2427,7 @@ def is_pass(record: dict) -> bool:
     """
     if record.get('event') != journal.Event.SKIP:
         return False
-    started = journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
+    started = journal.occurred(record)
     expires = journal.parse_time(record.get('expires_at'))
     return started is not None and expires is not None and expires > started
 
@@ -2452,18 +2454,13 @@ def in_window(record: dict, cutoff: dt.datetime) -> bool:
     :func:`completed_since` — one record read two ways inside one report would
     count toward the log tally and not toward the amount.
     """
-    when = record_time(record)
+    when = journal.occurred(record)
     return when is not None and when >= cutoff
-
-
-def record_time(record: dict) -> dt.datetime | None:
-    """When a record says it happened, or None where its timestamp will not parse."""
-    return journal.parse_time(record.get('occurred_at') or record.get('logged_at'))
 
 
 def earliest(records: list[dict], evidence_days: dict[str, list[dt.date]]) -> dt.datetime | None:
     """The first instant drift could read: the oldest record or app day."""
-    times = [when for record in records if (when := record_time(record))]
+    times = [when for record in records if (when := journal.occurred(record))]
     times += [first_instant(day) for days in evidence_days.values() for day in days]
     return min(times, default=None)
 

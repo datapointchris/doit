@@ -7,7 +7,8 @@
     "status": "completed",
     "repo": "ichrisbirch",
     "closed_ts": "2026-07-24T14:02:11.000000Z",
-    "updated_ts": "2026-07-24T14:02:11.000000Z"
+    "updated_ts": "2026-07-24T14:02:11.000000Z",
+    "closed_by": "claude-code/5d0f2c1e-6a4b-4e7d-9a3c-2b8f1e0d4c6a"
   },
   {
     "id": "01a0c53f-e5df-7308-bf37-45e17aee0102",
@@ -17,7 +18,8 @@
     "status": "completed",
     "repo": "toolchains",
     "closed_ts": "2026-07-24T09:15:00.000000Z",
-    "updated_ts": "2026-07-24T09:15:00.000000Z"
+    "updated_ts": "2026-07-24T09:15:00.000000Z",
+    "closed_by": "ada@laptop"
   },
   {
     "id": "01a0c53f-e5df-7308-bf37-45e17aee0103",
