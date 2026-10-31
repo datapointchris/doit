@@ -1170,6 +1170,20 @@ def test_an_escalation_without_a_question_is_a_pr_waiting_on_review() -> None:
     assert lane.rows[0].handle == 'fleet inbox show audit/incomplete-sweep'
 
 
+def test_a_distress_leads_the_lane_and_its_heading_above_every_escalation() -> None:
+    asked = question('Restart the runner?', 'Restart it', 'Leave it down')
+    result = inbox(
+        problem('runner-check', 'runner-check failed'),
+        problem('runner-down', 'runner is down', status='escalated', ask=asked),
+        problem('schedule/job-failed/sweep', 'sweep failed 3 times', status='distress'),
+    )
+
+    lane = dashboard.problems_adapter(result)[0]
+
+    assert [row.label for row in lane.rows] == ['distress', 'ask', 'today']
+    assert lane.meta == '1 distress · 1 escalated · 1 new'
+
+
 def test_an_untriaged_problem_says_how_long_ago_it_last_fired() -> None:
     three_days_ago = (dt.date.today() - dt.timedelta(days=3)).isoformat()
 

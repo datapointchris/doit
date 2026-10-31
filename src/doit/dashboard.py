@@ -994,7 +994,12 @@ IN_FLIGHT_STATUSES = ('fixing', 'verifying')
 DUPLICATE_STATUS = 'duplicate'
 ESCALATED_STATUS = 'escalated'
 NEW_STATUS = 'new'
-HEADING_STATUSES = ('escalated', 'new', 'fixing', 'verifying')
+# A distress is a part of the system failing over and over, which its keeper
+# pages at high priority, so it leads the escalations that wait on you.
+# `waiting_since` cannot rank them: a proposal waiting at new carries it too.
+DISTRESS_STATUS = 'distress'
+LEADING_STATUSES = (DISTRESS_STATUS, ESCALATED_STATUS)
+HEADING_STATUSES = (*LEADING_STATUSES, 'new', 'fixing', 'verifying')
 
 
 def problem_status(problem: dict) -> str:
@@ -1057,6 +1062,12 @@ def problem_row(problem: dict, today: dt.date) -> Row:
     return Row(label, clean(problem.get('title', '')), problem_where(problem), Urgency.OVERDUE, shown)
 
 
+def leading_rank(problem: dict) -> int:
+    """Where a row sorts: each leading status in its order, then every other."""
+    status = problem_status(problem)
+    return LEADING_STATUSES.index(status) if status in LEADING_STATUSES else len(LEADING_STATUSES)
+
+
 def problems_heading(statuses: list[str]) -> str:
     """How many open problems sit in each status, the ones waiting on you first.
 
@@ -1076,8 +1087,9 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
     declared in `sources.yml` like any other, so a machine without the producer
     simply does not have the line.
 
-    The rows are the problems nobody else is acting on: escalations first,
-    because each waits on you, then everything triage has not reached.
+    The rows are the problems nobody else is acting on: each distress, then
+    the escalations, because each waits on you, then everything triage has
+    not reached.
 
     Always one lane while the call succeeded, even with nothing open. Returning
     none would make `lanes_from` fall back to reporting the lane unavailable,
@@ -1099,7 +1111,7 @@ def problems_adapter(result: sources.Result) -> list[LaneView]:
     ]
     listed = [problem for problem in open_problems if problem_status(problem) not in IN_FLIGHT_STATUSES]
     # Stable, so fleet's most-recently-active order holds within each group.
-    listed.sort(key=lambda problem: problem_status(problem) != ESCALATED_STATUS)
+    listed.sort(key=leading_rank)
     today = dt.date.today()
     return [
         LaneView(
