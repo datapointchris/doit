@@ -425,10 +425,21 @@ def test_a_reading_that_cannot_be_stored_still_reaches_stdout(monkeypatch, tmp_p
 
 @pytest.fixture
 def scheduled(monkeypatch, tmp_path) -> Path:
-    """A run as fleet's scheduler starts one: the result path set, and nothing there yet."""
+    """A run as the scheduler starts one: the result path set, nothing there yet, and its writer on PATH."""
     result_file = tmp_path / 'run' / 'result.json'
     result_file.parent.mkdir()
     monkeypatch.setenv(digest.RESULT_FILE_ENV, str(result_file))
+    writer_bin = tmp_path / 'writer-bin'
+    writer_bin.mkdir()
+    writer = writer_bin / 'fleet'
+    writer.write_text(
+        '#!/bin/sh\n'
+        '[ "$*" = "machine result --payload-file -" ] || exit 2\n'
+        '[ -s "$FLEET_RESULT_FILE" ] && exit 1\n'
+        'cat > "$FLEET_RESULT_FILE"\n'
+    )
+    writer.chmod(0o755)
+    monkeypatch.setenv('PATH', str(writer_bin), prepend=os.pathsep)
     exported(tmp_path / 'state')
     monkeypatch.setattr(digest, 'machine_name', lambda: 'archlinux')
     return result_file

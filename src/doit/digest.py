@@ -761,15 +761,24 @@ def result_record(outcome: RunOutcome) -> dict[str, object]:
 def write_result(path: Path, outcome: RunOutcome) -> str:
     """Hand the scheduler the run's result, returning why it could not, or '' when it did.
 
-    Created exclusively, as fleet's own writer creates it. A file already there
-    was written by something else under this job, and writing beside it would
-    leave the scheduler two documents or the wrong one.
+    The scheduler's own writer checks it as the scheduler will read it, and
+    writes it. That writer refuses a file already holding a result, since
+    something else under this job wrote it, and writing beside it would leave
+    the scheduler two documents or the wrong one.
     """
-    try:
-        with path.open('x', encoding='utf-8') as handle:
-            handle.write(json.dumps(result_record(outcome)) + '\n')
-    except OSError as failure:
-        return f'Result not written to {path} — {failure}'
+    writer = shutil.which('fleet')
+    if writer is None:
+        return f"Result not written to {path} — the scheduler's writer is not on PATH"
+    done = subprocess.run(
+        [writer, 'machine', 'result', '--payload-file', '-'],
+        input=json.dumps(result_record(outcome)),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, RESULT_FILE_ENV: str(path)},
+    )
+    if done.returncode != 0:
+        return f"Result not written to {path} — the scheduler's writer exited {done.returncode}: {done.stderr.strip()}"
     return ''
 
 
