@@ -84,19 +84,26 @@ to the view module instead, one that takes its data rather than reading it.
 Every external effect the service has goes through one wrapper:
 
 - **The store** is `doit_api.store.Store`, the only module that writes SQL.
-- **An app** (icb, learning, meso) is read through `doit_api.readers.apps.App.get`, GitHub
-  through `readers.github.GitHub.call`, ClickHouse through `readers.clickhouse.checks`.
+- **An app** is read through `doit_api.readers.apps.App.get`, GitHub through
+  `readers.github.GitHub.call`, ClickHouse through `readers.clickhouse.checks`.
 - **A failed read** raises `ReadFailed`, and `readers.declared_reads` logs it at error as
   `source_failed` with the source's name. An alert is filed on that line, so keep its name and its
   `source` field.
 
-Two shapes that look wrong and are not:
+Shapes that look wrong and are not:
 
 - **The image's build context is the repository root**, with `api/Dockerfile.dockerignore`
   admitting only the root package and `api/`. A context of `api/` cannot reach the view code.
 - **A pursuit's `resolve` and `evidence` are a command on a desk and a read in the service**:
   `{app, path, query}`. The register's validator accepts either. The import rewrites one into the
   other, and the reader that runs it says which form it cannot run.
+- **`readers/icb.py` composes icb's overview itself.** icb serves one route per section and no
+  overview, so the module is a copy of icb's CLI composition: the focus project, the article
+  queue, the countdowns, and the rule that a refused credential refuses the whole document. A
+  change to that composition in icb is made here too, until icb serves the document.
+- **The desk-check lane reads every record the table keeps.** Each machine and check's newest
+  outcome stands, with no time window, so a failure stays until a later pass. A window would drop
+  a failure from a machine that went quiet before it was fixed.
 
 ## Generated config — never hand-edit
 

@@ -286,8 +286,8 @@ jobs:
 
 # > custom:after:all - the service's own project
   # api/ has its own lock and a web stack the root environment never installs,
-  # and the root pytest stops at tests/. So the service is linted, type-checked
-  # and tested here, in its own environment. The image release.yml builds is
+  # and the root pytest stops at tests/. So the service's lock, types and tests
+  # are checked here, in its own environment. The image release.yml builds is
   # this project, so a lock that has drifted from api/pyproject.toml fails here
   # rather than in the build.
   #

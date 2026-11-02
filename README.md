@@ -407,8 +407,9 @@ so.
 
 `api/` is doit as a service: a FastAPI app over one SQLite database. It holds the three
 documents a person edits — the pursuits, the review register and the sources — and the journal,
-the review completions, the offered counts and the forecast readings. Every view the CLI prints
-with `--json` has a route that answers the same document, computed by the same functions.
+the review completions, the offered counts and the forecast readings. Every pursuit, review,
+lane, forecast and source view the CLI prints with `--json` has a route that answers the same
+document, computed by the same functions.
 
 - **History is kept on every edit.** A document is stored as its text, comments included, and each
   entry in it is also a row of its own table. An update keeps the row it replaced, with when it
@@ -452,10 +453,10 @@ It reads its configuration from the environment and nowhere else:
 | --- | --- |
 | `DOIT_API_ISSUER` | The OIDC issuer whose tokens the API accepts. Required. |
 | `DOIT_API_PUBLIC_URL` | The URL clients reach the API at. Required. |
-| `DOIT_API_DATABASE` | The SQLite file. `/var/lib/doit-api/doit.db` in the image. |
+| `DOIT_API_DATABASE` | The SQLite file. The image sets it to a path on its data volume. |
 | `TZ` | The zone "today" is computed in: the person's own. |
-| `DOIT_API_FORECAST_INTERVAL` | How often a forecast is taken, like `4h`. `4h` by default. |
-| `DOIT_API_<APP>_URL`, `DOIT_API_<APP>_CLIENT_SECRET` | Each app read, for `ICB`, `LEARNING` and `MESO`. |
+| `DOIT_API_FORECAST_INTERVAL` | How often a forecast is taken, as a whole number and one of `m`, `h` or `d`. Optional. |
+| `DOIT_API_<APP>_URL`, `DOIT_API_<APP>_CLIENT_SECRET` | Each app the service reads, named as in `Settings.from_environment`. |
 | `DOIT_API_GITHUB_CLIENT_ID`, `DOIT_API_GITHUB_PRIVATE_KEY` | The GitHub App the pull request lane reads through. |
 | `DOIT_API_CLICKHOUSE_URL`, `_USER`, `_PASSWORD` | The account that reads desk check results. |
 
