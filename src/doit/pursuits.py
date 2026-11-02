@@ -977,6 +977,7 @@ def build_state(
         'today': today,
         'pursuits': pursuits,
         'active': active,
+        'term_ended': [name for name, config in pursuits.items() if term_ended(config, today)],
         # Read for what got done and never priced, so no view that ranks or
         # dates walks them.
         'tracked': tracked,
@@ -1437,7 +1438,7 @@ def why_unpriced(state: dict, name: str) -> str:
         return 'not in register'
     if config.get('paused'):
         return 'paused'
-    if term_ended(config, state['today']):
+    if name in state['term_ended']:
         return 'term ended'
     if not paced(config):
         return 'tracked'
@@ -1656,7 +1657,7 @@ def explain_payload(state: dict) -> dict:
         'pool': {name: round(value, 3) for name, value in state['pool'].items()},
         'probability': {name: round(value, 4) for name, value in state['probability'].items()},
         'paused': [name for name, config in state['pursuits'].items() if config.get('paused')],
-        'term_ended': [name for name, config in state['pursuits'].items() if term_ended(config, state['today'])],
+        'term_ended': state['term_ended'],
         'tracked': sorted(state['tracked']),
     }
 
@@ -1673,7 +1674,6 @@ def standing_from(payload: dict, register: dict, now: dt.datetime) -> dict:
     zero_points = payload.get('zero_points') or {}
     return {
         'now': now,
-        'today': now.date(),
         'pursuits': register,
         'active': {name: register.get(name) or {} for name in payload['active']},
         'term_ended': set(payload['term_ended']),

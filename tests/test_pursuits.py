@@ -1551,7 +1551,7 @@ def test_an_unpriced_row_says_which_reason_it_is():
     A drawn `socialize` set to `weight: 0` read `no schedule` while its register
     still said `cadence: 7d`."""
     state = {
-        'today': NOW.date(),
+        'term_ended': ['expired'],
         'pursuits': {
             'stopped': {'paused': True},
             'expired': {'until': NOW.date() - dt.timedelta(days=1)},
