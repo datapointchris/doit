@@ -14,7 +14,7 @@ because its other consumers render the same data completely differently.
 
 The adapter also carries the command it reads. The command and the shape are
 one contract with the tool, so they live together in code, where a sweep for a
-renamed flag finds them. A `sources.yml` entry names the adapter and says
+renamed flag finds them. An entry in the sources document names the adapter and says
 nothing of its command; one that restates it is told to delete the line.
 
 **Conforming** — the source emits a lane document (see `doit.lanes`) directly and
@@ -183,7 +183,7 @@ def parse_block(declared: object, block: str, problems: list[str]) -> dict[str, 
 
 
 def registry_from_document(document: dict) -> Registry:
-    """Both blocks of a parsed `sources.yml`.
+    """Both blocks of a parsed sources document.
 
     A block that is absent is an empty map rather than an error. A register
     with no `completions:` block gets `doit today` without the groups those

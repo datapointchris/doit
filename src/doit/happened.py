@@ -6,7 +6,7 @@ disagree about what a day held.
 
 **Every record that keeps a completion is asked.** doit's own are the pursuit
 journal with each app's evidence, and the registers. The rest are every
-`completions:` entry in `sources.yml`, each asked about the same window.
+`completions:` entry in the sources document, each asked about the same window.
 
 **Each row carries its source and its actor.** The source is the group it is
 listed under. The actor is whatever the record wrote, and is blank where the
@@ -231,7 +231,7 @@ def flat_adapter(
 
     Most of the completion sources are this shape and differ only in which
     field is the title, which the date and which the actor. A closure here
-    rather than more keys in `sources.yml`, because `lanes.py` rejects field
+    rather than more keys in the sources document, because `lanes.py` rejects field
     mappings in that file by name.
 
     The failure reason is asked for under the source id, never the lane name.
@@ -481,7 +481,7 @@ class Kept:
 
 
 def fold(registry: sources.Registry, results: dict[str, sources.Result], kept: Kept, bounds: Bounds, now: dt.datetime) -> list[Lane]:
-    """Every record's group over the window: doit's own, then each completion source in the order `sources.yml` lists it.
+    """Every record's group over the window: doit's own, then each completion source in the order the sources document lists it.
 
     A completion source that produced no group at all still gets one under its
     id. That is a conforming source declaring no `lanes:`. Failed, its group is

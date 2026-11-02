@@ -589,7 +589,7 @@ def performed_note(workout: dict, today: dt.date) -> str:
 
 def meso_adapter(result: sources.Result) -> list[LaneView]:
     """meso's cycle model, as one lane. Named for the source it reads, like every
-    other adapter, because `adapter:` in sources.yml answers "whose model is
+    other adapter, because `adapter:` in the sources document answers "whose model is
     this" — the lane it builds is named for its subject instead."""
     return [build_training_lane({'meso': result}, dt.date.today())]
 
@@ -966,11 +966,10 @@ def problems_heading(statuses: list[str]) -> str:
 def problems_adapter(result: sources.Result) -> list[LaneView]:
     """A problem inbox's open problems, as an alert lane.
 
-    Shaped for what `fleet inbox list --json` emits, and named for the shape
-    rather than for that binary: doit ships to boxes outside the fleet, where
-    nothing declares this source and the adapter is never reached. The lane is
-    declared in `sources.yml` like any other, so a machine without the producer
-    simply does not have the line.
+    Shaped for what a problem inbox's `list --json` emits, and named for the
+    shape rather than for the binary that emits it. The lane is declared in the
+    sources document like any other, so where nothing produces it the line is
+    simply absent.
 
     The rows are the problems nobody else is acting on: each distress, then
     the escalations, because each waits on you, then everything triage has
@@ -1037,14 +1036,14 @@ for adapter_id, command, adapter_fn, _ in SHIPPED_ADAPTERS:
     sources.register_adapter(adapter_id, command, adapter_fn)
 
 # Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
-# conforming source contributes lanes doit has never heard of, and a machine
-# whose sources.yml omits one of these is offered fewer. `--lane` is checked
-# against what actually came back rather than against this.
+# conforming source contributes lanes doit has never heard of, and a sources
+# document that omits one of these offers fewer. `--lane` is checked against
+# what actually came back rather than against this.
 LANE_NAMES = [*chain.from_iterable(declared for _, _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
 
 
 def source_lanes(registry: sources.Registry, results: dict[str, sources.Result]) -> list[LaneView]:
-    """The lanes the configured sources answered with, in the order `sources.yml` lists them.
+    """The lanes the configured sources answered with, in the order the sources document lists them.
 
     A source that failed and named no lanes is one unavailable lane under its id.
     """
