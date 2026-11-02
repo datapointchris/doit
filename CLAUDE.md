@@ -28,7 +28,7 @@ behind, the other when it comes due. Converting a counted checkoff into minutes,
 into points, would let the two be summed. Both conversions were weighed and rejected, because a
 checkoff has no length and a point is a quantity nobody declared.
 
-## Content, config, and state are three different things
+## Content is the machine's, and documents and records are the service's
 
 - **Content** — cards, Labs, and the tool registry (`cards/`, `labs/`, `tools/`). The
   `terminal-library` repo, cloned into `$XDG_DATA_HOME/terminal-library/`, updated by
@@ -39,17 +39,15 @@ checkoff has no length and a point is a quantity nobody declared.
   That path is resolved, never assumed to be a real directory: a machine that authors cards points
   it at a checkout kept where its git lives, so writing a card and reading it stay one file. Making
   that so is the installing layer's job — doit only ever opens the path it is given.
-- **Config** — `pursuits.yml`, the review register, `sources.yml`. `$XDG_CONFIG_HOME/doit/`,
-  hand-edited, and only ever *read* here so comments and layout survive. Never in either repo: it is
-  personal, and both repos are public.
-- **State** — `$XDG_STATE_HOME/doit/`, or `$DOIT_JOURNAL_DIR` where a box reads the share somewhere
-  else, resolved once by `paths.journal_dir()`. Per-machine wherever a sync layer would otherwise
-  have to merge concurrent writes, which it cannot.
-
-A path `$DOIT_JOURNAL_DIR` or `$DOIT_PURSUITS` names must exist, and doit refuses one that does not,
-naming the variable. A missing default is a fresh machine and reads as empty. A missing named path
-is a share that has not arrived. Read as empty, it lets a scheduled job run on no data and exit 0,
-writing into a directory that never syncs.
+- **Documents** — the pursuits, the review register and the sources. The service stores each as its
+  text, so comments and layout survive, and `service.edit_document` round-trips it through
+  `$EDITOR`. Never in either repo: it is personal, and both repos are public.
+- **Records** — the journal, review completions, offered counts, forecast readings and the nudge's
+  last showing, in the service's store. A command reaches them only through `doit.service`, the
+  one module that makes a request.
+- **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer, the
+  machine's client and `library_dir`. `$XDG_CACHE_HOME/doit/` holds the pursuit names and the
+  nudge interval, which the shell reads with no Python and no request.
 
 ## One renderer per collection, and `doit.tools` owns most of them
 
@@ -62,24 +60,31 @@ close a cycle.
 The registry's own path and loader live in `doit.tools` for the same reason — `index` and `labs`
 both read it, and a constant defined per reader is a constant that drifts.
 
-## Sources are configuration, not code
+## Which sources are asked is configuration, and how each is read is code
 
-`doit` must not know which apps supply *lanes*. Adding a source that prints the lane document is an
-edit to `sources.yml`, never a release. A source with an adapter is already code, and the adapter
-carries its command too. The command and the model it returns are one contract, and a copy of the
-command in `sources.yml` is one no sweep of the code finds when its tool renames a flag.
-A source that is not configured is silent; one configured but missing gets a single line; one that
-runs and fails shows its error. A lane is never silently dropped — a dashboard that quietly omits a
-lane reads as "nothing outstanding", which is the worst available failure.
+`doit` must not know which sources a person asks, so turning one on is an edit to the sources
+document, never a release. How a source is read is an adapter, and the adapter carries its read
+and its command too. The read and the model it returns are one contract, and a copy of either in
+the sources document is one no sweep of the code finds when the app changes.
+
+The service runs no command, so a source declared by `command` alone, printing the lane document,
+is shown as failed rather than read. An app with no adapter needs a release before doit can ask it.
+A source that is not configured is silent, and one that is configured and fails shows its error. A
+lane is never silently dropped — a dashboard that quietly omits a lane reads as "nothing
+outstanding", which is the worst available failure.
 
 ## The service runs the root package's view code, never a copy
 
 `api/` is its own project and depends on the root package by path. Each method of
-`doit_api.computed_views.Views` calls the function the matching CLI command calls, handing in
-what it read from the store where the command read a desk's file. A rule therefore lives in one
-module, and the service and a desk cannot disagree about it. A change that has `api/` compute a
-balance, a due date or a lane itself is the drift this arrangement exists to prevent: add a seam
-to the view module instead, one that takes its data rather than reading it.
+`doit_api.computed_views.Views` calls the root package's view function, handing in what it read
+from the store, and the CLI renders what the route answers. A rule therefore lives in one module,
+and nothing computes it twice. A change that has `api/` compute a balance, a due date or a lane
+itself is the drift this arrangement exists to prevent: add a seam to the view module instead, one
+that takes its data rather than reading it.
+
+The CLI and the service are tested together in `api/tests/test_cli_against_service.py`, which
+forwards each command's requests into the app in process. A shape changed on one side and not the
+other fails there.
 
 Every external effect the service has goes through one wrapper:
 
@@ -97,9 +102,9 @@ Shapes that look wrong and are not:
 - **`deploy/` names the image `doit-api` with no tag.** `release/pin-manifests` pins it by digest in
   the copy the release pushes, and `validate.yml` lints what that renders. kube-linter refuses the
   committed base, which is why it reads the rendered copy.
-- **A pursuit's `resolve` and `evidence` are a command on a desk and a read in the service**:
-  `{app, path, query}`. The register's validator accepts either. The import rewrites one into the
-  other, and the reader that runs it says which form it cannot run.
+- **The register's validator accepts a `resolve` or `evidence` written as a command** as well as
+  the read `{app, path, query}` the service runs. A desk's register arrives by import in the
+  command form, which the import rewrites into the read, and the reader names any it cannot run.
 - **`readers/icb.py` composes icb's overview itself.** icb serves one route per section and no
   overview, so the module is a copy of icb's CLI composition: the focus project, the article
   queue, the countdowns, and the rule that a refused credential refuses the whole document. A

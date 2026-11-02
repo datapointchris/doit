@@ -35,32 +35,40 @@ and `labs choose`.
 
 ## Starting from scratch
 
-doit runs on defaults alone. Every file it reads is optional, and a surface missing its file says so
-and names the command that starts one.
+The pursuits, the registers and every record live in doit's service, described under
+[The service](#the-service--one-store-and-every-view-computed-behind-it). A machine logs in to it
+once, and every command after that reads and writes there. The cards and the tool registry are the
+one thing a machine keeps itself.
 
 ```bash
+doit auth login https://doit.example.com   # once per machine: names the service and logs you in
+doit import                  # a machine that kept doit's files itself: hand them to the service, as often as it takes
+
 doit content status          # clones terminal-library on first use, then says where and which setting chose it
 doit labs list               # proves the cards arrived: every Lab in the checkout
 
-doit sources example         # an annotated sources.yml, printed, writing nothing
-doit sources edit            # writes that example where doit reads it, if no file is there, then opens $EDITOR
-doit sources list            # every configured source, and whether it answers
+doit sources example         # an annotated sources document, printed, writing nothing
+doit sources edit            # the sources in $EDITOR, starting from that example where none are written
+doit sources list            # every configured source, and whether the service's read of it answers
 doit dashboard               # every lane, each ordered by the app that owns it
 
-doit pursuits edit           # writes an annotated pursuits.yml, if none is there, then opens $EDITOR
+doit pursuits edit           # the pursuits in $EDITOR, starting from an annotated template where none are written
 doit pursuits list           # proves the register parsed: each pursuit, its weight, its goal, when it is due
 doit next                    # everything owed, then the rest of the screen drawn by weight
 doit pursuits log            # record one; whatever you leave out is asked for
 
-doit review edit             # writes a one-item review register, if none is there, then opens $EDITOR
+doit review edit             # the review register in $EDITOR, starting from a one-item template
 doit review due              # what is due to revisit, most overdue first
 
 eval "$(doit shell init zsh)"         # in .zshrc: a nudge about due items, gated by doit review nudge-every
 eval "$(doit shell completion zsh)"   # in .zshrc: completion for the verbs and your pursuit names
 
-doit today                   # reads every file above at once: what the day still owes, and what it has had
+doit today                   # every record at once: what the day still owes, and what it has had
 doit happened --since 7d     # what every record says happened over the week, and who did it
 ```
+
+A scheduled job has no one to log in. With `$DOIT_CLIENT_SECRET` set, the CLI authenticates as the
+client named in `~/.config/doit/config.toml` instead.
 
 The first run clones terminal-library into `$XDG_DATA_HOME/terminal-library/`. A command asking
 for `--help` clones nothing. doit refuses to clone into a directory that already holds files,
@@ -68,15 +76,10 @@ because deciding whose files win is not its call. A failed clone only warns, bec
 dashboard and the registers need no cards. With no checkout, `doit content sync` prints the
 `git clone` to run by hand.
 
-Each `edit` above writes its template only where no file exists, and never rewrites one.
-Everywhere else doit only reads its config, so your comments and layout survive. The templates name
-real commands as examples, such as `icb overview --json`. A configured source whose command is not
-installed costs one line on the dashboard, not the run.
-
-`$DOIT_JOURNAL_DIR` and `$DOIT_PURSUITS` must name a path that exists. doit refuses one that does
-not, naming the variable. A missing default is a fresh machine and reads as empty. A missing named
-path is a share that has not arrived, and reading it as empty would let a scheduled job run on no
-data and exit 0.
+Each `edit` opens the document the service holds, or its template where none is written yet. The
+service validates the whole text and stores nothing it refuses. A refusal names the first fault and
+reopens the editor on the text as you left it, so one typo never costs the edit. doit never
+rewrites a document itself, so your comments and layout survive.
 
 ## The grammar
 
@@ -97,17 +100,20 @@ words because they are two things, and one word would make "did you update?" amb
 
 | Ask | Surface | Reads |
 | --- | --- | --- |
-| What should I do now | `next` | `pursuits.yml`, the journal, each pursuit's `resolve` and `evidence` commands |
-| What is outstanding anywhere | `dashboard` | every `sources:` entry in `sources.yml`, plus doit's own review register |
-| What does today still want, and what has it had | `today` | the same sources, every `completions:` entry, the journal, the review state |
-| What happened over a window, and who did it | `happened` | every `completions:` entry, the journal and the evidence cache, the review state |
+| What should I do now | `next` | the pursuits, the journal, each pursuit's `resolve` and `evidence` reads |
+| What is outstanding anywhere | `dashboard` | every `sources:` entry, plus doit's own review register |
+| What does today still want, and what has it had | `today` | the same sources, every `completions:` entry, the journal, the review completions |
+| What happened over a window, and who did it | `happened` | every `completions:` entry, the journal and the evidence cache, the review completions |
 | Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered |
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
-| What is due to revisit or practice | `review due` | `register.yml` and the review state |
+| What is due to revisit or practice | `review due` | the review register and its completions |
 | How do I use this tool | `show`, `find`, `tools show` | the registry and cards in terminal-library, your shell's functions and aliases |
 | What was that command | `choose` | the same index, ending on the invocation |
-| Which apps does doit ask | `sources list` | `sources.yml`, running each command |
+| Which apps does doit ask | `sources list` | the sources, each read once by the service |
 | Have I committed the card I wrote | `content status` | the terminal-library checkout |
+
+Every row above the last three is answered by the service, which reads what the row names. The
+last three read this machine alone.
 
 `dashboard`, `today` and `next` are three densities over the same records, not three subjects.
 `dashboard` ranks across nothing. `next` ranks across everything, because you declared the
@@ -130,11 +136,12 @@ doit forecast trend                           # what earlier forecasts predicted
 
 A pursuit is a strand of life you want to spend attention on. It declares two separate things:
 its pace, which is how much of it you want, and its weight, which is how much it matters against
-the others. The annotated `pursuits.yml` that `doit pursuits edit` writes explains every field.
+the others. The annotated template `doit pursuits edit` starts from explains every field.
 
-`doit pursuits log` writes through to the app that owns the item. It offers to run the pursuit's `on_log`
-command, such as completing the task it resolved to. `--yes` runs it without asking, and
-`--no-write` logs only.
+`doit pursuits log` writes through to the app that owns the item. It offers to run the pursuit's
+`on_log` command on this machine, such as completing the task it resolved to. `--yes` runs it
+without asking, and `--no-write` logs only. The service records the log and what the command did,
+and never runs one itself.
 
 ### A pursuit declares its goal, and its weight only orders
 
@@ -195,7 +202,7 @@ was drawn follows, soonest due first. That one order is what the screen shows, w
 walks top-down, and what `rank_offered` counts in a journal entry. The draw is cached for fifteen
 minutes, so running `next` again while deciding does not reshuffle the list underneath you.
 
-A pursuit whose `resolve` command matches several rows offers the first three, stacked under its
+A pursuit whose `resolve` read matches several rows offers the first three, stacked under its
 name. One row is a decision the register made. Several are a choice you make, so `doit pursuits log` asks
 which one wherever the pursuit's `on_log` would complete it. Enter names none, and so does a log
 with nobody there to ask.
@@ -226,21 +233,17 @@ ordering over unlike things would be invented rather than meaningful, so the das
 none of them. A lane of rows shows three, and tasks and learning show five. Naming one lane with
 `--lane` shows ten. A grid such as the habits is a set only useful whole, so it is never cut.
 
-doit knows nothing about which apps exist. `$XDG_CONFIG_HOME/doit/sources.yml` declares which
-sources to ask and how each one's output becomes lanes. Every backend already speaks `--json`. A
-source that prints doit's lane document names its command and needs no adapter, so adding one is an
-edit, never a release. A source that prints its own model names an adapter in doit instead. The
-adapter carries the command as well as the shape, because the two are one contract with that tool.
-A `command` written beside an `adapter` is reported and ignored.
+The sources document declares which sources to ask, so turning one on or off is an edit, never a
+release. Each source names an adapter. The service reads the adapter's app over HTTP and the
+adapter shapes the answer into lanes. The adapter carries the read as well as the shape, because
+the two are one contract with that app. An app with no adapter needs a release before doit can ask
+it. A source declared with a `command` instead is shown as failed, saying the service runs no
+command.
 
-A source that is not configured is silent. One that is configured but missing gets a single line.
-One that runs and fails shows its error. A lane is never silently dropped, because a dashboard that
-quietly omits one reads as nothing outstanding. The command exits 0 whatever its lanes say. A script
-reading `--json` checks each lane's `status`.
-
-`doit sources list` exits 3 when an installed tool rejects a source's command as a usage error, and
-names the tool's own complaint. A tool that is absent, logged out or slow exits 0. A scheduled run
-of it therefore fails only on a break that needs a person.
+A source that is not configured is silent. One that is configured and fails shows its error on its
+lane. A lane is never silently dropped, because a dashboard that quietly omits one reads as nothing
+outstanding. The command exits 0 whatever its lanes say. A script reading `--json` checks each
+lane's `status`. `doit sources list` exits 0 too, and names each source whose read failed.
 
 The dashboard computes no schedule. It mirrors the `overdue` each backend emits, because the backend
 owns due-ness. The MAINTENANCE lane shows three rows of review and practice items, and there are
@@ -290,9 +293,8 @@ the forms. `--until` alone runs from the earliest record.
 
 Pursuits come from the journal and the evidence cache together, so one satisfied inside its own CLI
 is listed without also being typed. Every journal entry in the window counts, whether or not the
-register still names its pursuit. Review and practice items come from the review state file, which
-keeps only each item's latest date. Everything else is a `completions:` entry in `sources.yml`, asked
-about the same window.
+register still names its pursuit. Review and practice items come from their recorded completions.
+Everything else is a `completions:` entry in the sources, asked about the same window.
 
 A line above the groups names every record asked and how many answered. A group that answered with
 nothing prints nothing, so that line is what says it was asked. A group that could not be read
@@ -311,10 +313,10 @@ above the groups counts it. A group whose record keeps no actor has no actor col
 carries the identity as recorded.
 
 A `completions:` entry takes the same settings a lane source takes, and answers "what happened"
-instead of "what is outstanding". An argv part written as `{since}` or `{until}` becomes that end of
-the window as an RFC 3339 instant, so a backend filters its own rows rather than shipping a backlog
-to be filtered here. Nothing is required. With the block absent, `doit happened` and `doit today`
-list doit's own records and say nothing about the rest.
+instead of "what is outstanding". Its adapter asks the app for the window itself, so the app
+filters its own rows rather than shipping a backlog to be filtered here. Nothing is required. With
+the block absent, `doit happened` and `doit today` list doit's own records and say nothing about
+the rest.
 
 ## `review` — an entry is done when you record it
 
@@ -325,8 +327,8 @@ doit review nudge-every 8h   # how often the shell's startup nudge may print
 doit labs show <lab>         # open a Lab to read while you work in another pane
 ```
 
-The review register is `$XDG_CONFIG_HOME/doit/register.yml`. Each item declares what to revisit and
-a cadence such as `2w` or `1mo`. Its last-done date is the newest `doit review done` for it, and
+The review register is one of the service's documents, edited with `doit review edit`. Each item
+declares what to revisit and a cadence such as `2w` or `1mo`. Its last-done date is the newest `doit review done` for it, and
 nothing else. Running the command an item names does not mark it done.
 
 A Lab is one markdown file under `labs/` in terminal-library, and carries no schedule. The Labs you
@@ -411,6 +413,11 @@ the review completions, the offered counts and the forecast readings. Every purs
 lane, forecast and source view the CLI prints with `--json` has a route that answers the same
 document, computed by the same functions.
 
+The CLI is the service's client. A command that reads asks a route and renders what it answers,
+and a command that writes posts what it records, naming the machine and who ran it. A machine
+logged in anywhere sees the same draw, the same journal and the same nudge schedule, because there
+is one copy of each.
+
 - **History is kept on every edit.** A document is stored as its text, comments included, and each
   entry in it is also a row of its own table. An update keeps the row it replaced, with when it
   held, in the table's `_history` twin: the SQL:2011 system-versioned temporal-table pattern, done
@@ -431,8 +438,9 @@ document, computed by the same functions.
 
   A read that fails becomes the reason on its lane or row, and the service logs it at error as
   `source_failed` with the source's name.
-- **A desk's files are imported, as often as it takes.** `POST /api/v1/imports` takes the files of
-  `~/.config/doit/` and `~/.local/state/doit/`, each with its path under `config/` or `state/`.
+- **A desk's files are imported, as often as it takes.** `doit import` sends the files of
+  `~/.config/doit/` and `~/.local/state/doit/` to `POST /api/v1/imports`, each with its path under
+  `config/` or `state/`, and prints what the service merged and what it skipped.
   A second run adds only what the first lacked. A command in a pursuit's `resolve` or `evidence`
   is rewritten as the read it makes, and one with no known read is listed for rewriting by hand. A
   document edited on the service is never replaced by a later import.
@@ -495,17 +503,17 @@ cosign verify \
 
 ## Where it writes
 
-Content, config and state are three different things, kept in three places. A cache sits beside
-them, holding nothing a recompute cannot rebuild.
+The service holds the documents and every record. A machine keeps four things of its own, none of
+which the service needs.
 
 - **Content** is the terminal-library checkout. doit writes there when it pulls, and when you author
   a card or a Lab.
-- **Config** is `$XDG_CONFIG_HOME/doit/`: `pursuits.yml`, `register.yml`, `sources.yml` and the
-  optional `config.toml`. It is hand-edited and only read, apart from the template an `edit` writes
-  where no file exists. It is never in either repo, because it is personal and both repos are
-  public.
-- **State** is `$XDG_STATE_HOME/doit/`, or `$DOIT_JOURNAL_DIR` where a box reads a share somewhere
-  else. The journal, the offer counts and the forecast readings are one file per machine, named
-  for it, because a sync layer cannot merge two machines writing one file.
-- **Cache** is `$XDG_CACHE_HOME/doit/`. It holds the cached draw, and the pursuit names completion
-  reads without starting Python.
+- **Config** is `$XDG_CONFIG_HOME/doit/config.toml`. It names the service, its issuer and this
+  machine's client, which `doit auth login` writes, and the optional `library_dir`. The login's
+  tokens are in the system keychain. Neither is in either repo, because both are personal and both
+  repos are public.
+- **State** is `$XDG_STATE_HOME/doit/`. It holds the log of this machine's last background pull of
+  the cards, one file named for the machine.
+- **Cache** is `$XDG_CACHE_HOME/doit/`. It holds the pursuit names and the nudge interval, which the
+  shell's completion and startup gate read without starting Python or asking the service. A command
+  that fetches either rewrites it.
