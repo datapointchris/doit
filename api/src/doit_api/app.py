@@ -220,6 +220,11 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     def pursuit_offers(caller: Person) -> dict:
         return views.offer_counts()
 
+    @api.get('/pursuits/register')
+    def pursuit_register(caller: Person) -> dict:
+        """The pursuits as declared and what the standing draw offers. Asks no app, so a prompt can read it."""
+        return views.register()
+
     @api.get('/pursuits/{name}/item')
     def pursuit_item(name: str, caller: Person) -> dict:
         return views.item(name)

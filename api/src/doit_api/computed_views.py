@@ -162,7 +162,13 @@ class Views:
             self.store.bump_offers(machine, selection['offered'])
         else:
             selection = standing
-        return {**selection, 'state': pursuits.explain_payload(state), 'context': self.context(now)}
+        return {**selection, 'state': pursuits.explain_payload(state), 'context': self.context(now), 'pursuits': config.pursuits}
+
+    def register(self) -> dict:
+        """The pursuits as declared and what the standing draw offers, with no app asked."""
+        config, now = self.registered(), self.now()
+        standing = self.standing_draw(now) or {}
+        return {'pursuits': config.pursuits, 'offered': standing.get('offered', []), 'draw_id': standing.get('draw_id')}
 
     def context(self, now: dt.datetime) -> list[str]:
         """Today's events and the countdowns due within two weeks, which sit above the draw and take no part in it."""
@@ -318,7 +324,11 @@ class Views:
         except ValueError as error:
             raise BadRequest(str(error)) from error
         state = self.state(config, now)
-        rows = pursuits.drift_rows(config.pursuits, state, start, end)
+        counts: dict[str, int] = {}
+        for by_name in self.store.offer_counts().values():
+            for name, count in by_name.items():
+                counts[name] = counts.get(name, 0) + count
+        rows = pursuits.drift_rows(config.pursuits, state, start, end, counts)
         return {'since': start and start.isoformat(), 'until': (end or now).isoformat(), 'rows': rows}
 
     def dormant(self) -> dict:
@@ -375,7 +385,9 @@ class Views:
             raise BadRequest(f'day={done_on!r} is not a date (YYYY-MM-DD)') from None
         with self.store.write() as connection:
             added = self.store.add_completion(connection, entry, done_on, recorded_by, stamp(now))
-        return {'entry': entry, 'done_on': done_on, 'added': bool(added)}
+        rows = review.statuses_of(config.register, self.store.review_stamps(), now.date(), None)
+        status = next((row for row in rows if row['id'] == entry), None)
+        return {'entry': entry, 'done_on': done_on, 'added': bool(added), 'status': status}
 
     def nudge(self) -> dict:
         """The interval the shell nudge waits between showings, when it last showed, and the entries it would show now."""
@@ -412,7 +424,22 @@ class Views:
         config, now = self.config(), self.now()
         results = self.readers.results(list(config.registry.sources.values()), window.day_of(now), now)
         collected = dashboard.arranged([*dashboard.source_lanes(config.registry, results), self.maintenance_lane(config, now)], wanted)
-        return {**lanes.to_document(collected, now), 'problems': config.registry.problems}
+        return {
+            **lanes.to_document(collected, now),
+            'problems': config.registry.problems,
+            'configured': len(config.registry.sources),
+            'pursuit_standing': self.pursuit_standing(config, now),
+        }
+
+    def pursuit_standing(self, config: documents.Config, now: dt.datetime) -> dict | None:
+        """The dashboard's footer: which pursuits are behind, or why that could not be read. None when none owes anything."""
+        if not config.pursuits:
+            return None
+        try:
+            line = pursuits.standing_line(self.state(config, now))
+        except (OSError, ValueError) as error:
+            return {'text': f'pursuits unavailable — {error}', 'unavailable': True}
+        return {'text': line, 'unavailable': False} if line else None
 
     def today(self) -> dict:
         """`doit today --json`: what today still wants, and what it has had."""
@@ -464,8 +491,10 @@ class Views:
         everything = [*config.registry.sources.values(), *config.registry.completions.values()]
         results = self.readers.results(everything, bounds, now)
         return {
-            'sources': [sources.answer('sources', source, results[source.id]) for source in config.registry.sources.values()],
-            'completions': [sources.answer('completions', source, results[source.id]) for source in config.registry.completions.values()],
+            'answers': [
+                *(sources.answer('outstanding', source, results[source.id]) for source in config.registry.sources.values()),
+                *(sources.answer('happened', source, results[source.id]) for source in config.registry.completions.values()),
+            ],
             'problems': config.registry.problems,
         }
 

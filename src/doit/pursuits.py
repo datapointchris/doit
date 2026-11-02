@@ -2422,7 +2422,9 @@ def render_orphaned_counters(register: dict) -> None:
     console.print(f'  [cyan]{journal_dir()}[/]')
 
 
-def drift_rows(pursuits: dict, state: dict, since: dt.datetime | None, until: dt.datetime | None) -> list[dict]:
+def drift_rows(
+    pursuits: dict, state: dict, since: dt.datetime | None, until: dt.datetime | None, counts: dict[str, int] | None = None
+) -> list[dict]:
     """Every pursuit worth a row: what its goal asked for over the window, and what got done.
 
     Both sides run from the later of the window's start and the pursuit's last
@@ -2444,6 +2446,9 @@ def drift_rows(pursuits: dict, state: dict, since: dt.datetime | None, until: dt
 
     An ``until`` drops every record and app day after it, so the window reads as
     the journal stood then. ``since`` absent runs from the earliest of either.
+
+    ``counts`` is how often each pursuit was offered, summed over every machine.
+    It defaults to this desk's counter files.
     """
     end = until or state['now']
     records = state['records']
@@ -2456,7 +2461,7 @@ def drift_rows(pursuits: dict, state: dict, since: dt.datetime | None, until: dt
     tracked = state['tracked']
     mine = records_by_pursuit(records)
     reset_at = zero_resets(records)
-    counts = load_counts(journal_dir())
+    counts = load_counts(journal_dir()) if counts is None else counts
 
     rows = []
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
