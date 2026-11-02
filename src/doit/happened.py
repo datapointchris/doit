@@ -286,11 +286,11 @@ FLAT_COMPLETIONS: tuple[tuple[str, str, str, str, str, str, tuple[str, ...]], ..
     (
         'issues',
         'ISSUES',
-        'icb-issues',
+        'slate-issues',
         'title',
         'closed_ts',
         'closed_by',
-        ('icb', 'issues', 'list', '--status', 'completed', '--since', SINCE, '--until', UNTIL, '--json'),
+        ('slate', 'issues', 'list', '--status', 'completed', '--since', SINCE, '--until', UNTIL, '--json'),
     ),
     (
         'articles',
