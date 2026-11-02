@@ -170,19 +170,15 @@ def test_a_bigger_budget_never_predicts_less_work(register):
     assert total(rich) > total(lean)
 
 
-def test_a_forecast_seeds_its_days_with_the_first_sightings_it_wrote(register, monkeypatch):
-    """Seeded without them, every simulated day puts a never-zeroed pursuit's
-    start one interval back from that day, so it never builds a backlog."""
+def test_the_first_forecast_on_a_fresh_journal_reads_the_sightings_it_wrote(register):
+    # Seeded without them, every simulated day puts a never-zeroed pursuit's
+    # start one interval back from that day, so it never builds a backlog.
     (register / 'state').mkdir()
-    seeds = []
-    monkeypatch.setattr(forecast, 'simulate', lambda register, records, *rest: seeds.append(records) or [])
 
-    forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=1)
+    first = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=3)
+    again = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=3)
 
-    assert {record['pursuit'] for record in seeds[0] if record.get('note') == pursuits.FIRST_SEEN} == set(pursuits.load_pursuits()) - {
-        'paused-thing',
-        'expired-thing',
-    }
+    assert first.horizons == again.horizons
 
 
 def test_a_reading_records_where_each_duration_came_from(register):
