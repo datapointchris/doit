@@ -20,8 +20,6 @@ from conftest import stand_in
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
-from doit import dashboard
-from doit import forecast
 from doit import happened
 from doit import journal
 from doit import lanes
@@ -29,9 +27,14 @@ from doit import pursuits
 from doit import render
 from doit import review
 from doit import service
-from doit import sources
-from doit import today
 from doit.cli import app as cli_app
+from doit.service_commands import dashboard as dashboard_commands
+from doit.service_commands import forecast as forecast_commands
+from doit.service_commands import happened as happened_commands
+from doit.service_commands import pursuits as pursuit_commands
+from doit.service_commands import review as review_commands
+from doit.service_commands import sources as sources_commands
+from doit.service_commands import today as today_commands
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures'
 TASKS = [{'name': 'Face Mud', 'id': 501}, {'name': 'Return hoodies', 'id': 512}, {'name': 'Journal', 'id': 474}]
@@ -75,8 +78,14 @@ def connected(
     )
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     monkeypatch.setattr(pursuits, 'NAMES_CACHE', tmp_path / 'cache' / 'next-names.txt')
-    monkeypatch.setattr(review, 'NUDGE_INTERVAL', tmp_path / 'cache' / 'nudge-interval-minutes')
+    monkeypatch.setattr(review_commands, 'NUDGE_INTERVAL', tmp_path / 'cache' / 'nudge-interval-minutes')
     return client
+
+
+def at_terminal(monkeypatch, there: bool) -> None:
+    """Whether someone is at the terminal, for the commands and for the prompts they call."""
+    for module in (pursuits, pursuit_commands):
+        monkeypatch.setattr(module, 'can_prompt', lambda: there)
 
 
 def write(client: TestClient, name: str, fixture: str) -> None:
@@ -92,8 +101,9 @@ def answers(monkeypatch, *replies: str) -> list[str]:
         asked.append(prompt.strip())
         return queued.pop(0)
 
-    monkeypatch.setattr(pursuits, 'ask', reply)
-    monkeypatch.setattr(pursuits, 'can_prompt', lambda: True)
+    for module in (pursuits, pursuit_commands):
+        monkeypatch.setattr(module, 'ask', reply)
+    at_terminal(monkeypatch, True)
     return asked
 
 
@@ -112,7 +122,7 @@ def write_through(store, monkeypatch, tmp_path, answer: Callable[[], object], ar
 
 def test_a_command_before_any_pursuits_are_written_is_refused_as_not_found(api):
     with pytest.raises(service.ServiceFailed) as refused:
-        pursuits.cmd_next(explain=False, as_json=False, reroll=False)
+        pursuit_commands.cmd_next(explain=False, as_json=False, reroll=False)
     assert refused.value.status == 404
 
 
@@ -120,10 +130,10 @@ def test_next_gives_every_active_pursuit_a_row_from_the_register_the_service_hol
     write(api, 'pursuits', 'pursuits/pursuits.yml')
     monkeypatch.setattr(render.console, '_width', 10_000)
 
-    assert pursuits.cmd_next(explain=False, as_json=True, reroll=False) == 0
+    assert pursuit_commands.cmd_next(explain=False, as_json=True, reroll=False) == 0
     drawn = json.loads(capsys.readouterr().out)
-    assert pursuits.cmd_next(explain=False, as_json=False, reroll=False) == 0
-    assert pursuits.cmd_next(explain=True, as_json=False, reroll=False) == 0
+    assert pursuit_commands.cmd_next(explain=False, as_json=False, reroll=False) == 0
+    assert pursuit_commands.cmd_next(explain=True, as_json=False, reroll=False) == 0
 
     shown = capsys.readouterr().out
     assert drawn['offered'] and set(drawn['offered']) <= set(drawn['state']['weights'])
@@ -135,16 +145,16 @@ def test_next_gives_every_active_pursuit_a_row_from_the_register_the_service_hol
 def test_a_log_is_counted_by_the_list_drift_and_dormant_views_that_follow(api, capsys):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
 
-    assert pursuits.cmd_log('chores', ['swept'], None, None, assume_yes=True, no_write=True) == 0
+    assert pursuit_commands.cmd_log('chores', ['swept'], None, None, assume_yes=True, no_write=True) == 0
     assert 'Logged chores' in capsys.readouterr().out
 
-    assert pursuits.cmd_list(as_json=True) == 0
+    assert pursuit_commands.cmd_list(as_json=True) == 0
     assert json.loads(capsys.readouterr().out)['state']['done']['chores'] == 1.0
-    assert pursuits.cmd_list(as_json=False) == 0
-    assert pursuits.cmd_drift(None, None, as_json=False) == 0
+    assert pursuit_commands.cmd_list(as_json=False) == 0
+    assert pursuit_commands.cmd_drift(None, None, as_json=False) == 0
     assert any(line.startswith('chores') for line in capsys.readouterr().out.splitlines())
 
-    assert pursuits.cmd_dormant() == 0
+    assert pursuit_commands.cmd_dormant() == 0
     printed = capsys.readouterr().out
     cold = [line for line in printed.splitlines() if 'never' in line]
     assert len(cold) > 1 and len({line.index('never') for line in cold}) == 1, 'the rows align'
@@ -166,9 +176,9 @@ def test_a_log_asks_for_what_was_not_passed_and_minutes_only_of_a_timed_pursuit(
     write(api, 'pursuits', 'pursuits/pursuits.yml')
     asked = answers(monkeypatch, 'read-library', '', '45', '')
 
-    assert pursuits.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 0
-    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
-    assert pursuits.cmd_log('read-library', ['trimmed'], None, 20, assume_yes=True, no_write=True) == 0
+    assert pursuit_commands.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 0
+    assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
+    assert pursuit_commands.cmd_log('read-library', ['trimmed'], None, 20, assume_yes=True, no_write=True) == 0
 
     assert asked == ['pursuit:', 'note, or Enter to skip:', 'minutes:', 'note, or Enter to skip:']
     entries = [(record['pursuit'], record['duration_minutes'], record['note']) for record in logged(store)]
@@ -179,7 +189,7 @@ def test_a_log_asks_for_what_was_not_passed_and_minutes_only_of_a_timed_pursuit(
 def test_a_log_the_run_cannot_honor_is_a_usage_error_and_records_nothing(api, store, monkeypatch, arguments):
     """Minutes on a counted pursuit, a negative duration, and a timed pursuit with nobody to ask its minutes."""
     write(api, 'pursuits', 'pursuits/pursuits.yml')
-    monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
+    at_terminal(monkeypatch, False)
 
     ran = CliRunner().invoke(cli_app, ['pursuits', 'log', *arguments, '--yes', '--no-write'])
 
@@ -191,9 +201,9 @@ def test_a_log_the_run_cannot_honor_is_a_usage_error_and_records_nothing(api, st
 def test_a_log_naming_no_pursuit_records_nothing_until_one_is_chosen(api, store, monkeypatch, present):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
     answers(monkeypatch, '')
-    monkeypatch.setattr(pursuits, 'can_prompt', lambda: present)
+    at_terminal(monkeypatch, present)
 
-    assert pursuits.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 1
+    assert pursuit_commands.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 1
     assert logged(store) == []
 
 
@@ -203,9 +213,9 @@ def test_a_log_among_several_choices_completes_only_the_one_you_named(store, mon
     Enter, or nobody there to ask, completes nothing: a guess is a wrong completion in another app's data."""
     marker = write_through(store, monkeypatch, tmp_path, lambda: TASKS)
     answers(monkeypatch, answer)
-    monkeypatch.setattr(pursuits, 'can_prompt', lambda: present)
+    at_terminal(monkeypatch, present)
 
-    assert pursuits.cmd_log('chores', ['done'], None, None, assume_yes=True, no_write=False) == 0
+    assert pursuit_commands.cmd_log('chores', ['done'], None, None, assume_yes=True, no_write=False) == 0
 
     item = logged(store)[0]['item']
     found = (marker.read_text().strip(), item['label']) if marker.exists() else None
@@ -217,10 +227,10 @@ def test_a_log_resolves_again_past_a_draw_whose_read_failed(store, monkeypatch, 
     """A cached failure carries no id, so the write-through would complete nothing and nothing on screen would say so."""
     down = [True]
     marker = write_through(store, monkeypatch, tmp_path, lambda: httpx2.Response(500, json={'message': 'down'}) if down[0] else TASKS[:1])
-    assert pursuits.cmd_next(explain=False, as_json=False, reroll=False) == 0
+    assert pursuit_commands.cmd_next(explain=False, as_json=False, reroll=False) == 0
     down[0] = False
 
-    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+    assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
 
     assert marker.read_text().strip() == '501'
     assert logged(store)[0]['item']['label'] == 'Face Mud'
@@ -239,12 +249,12 @@ def test_a_log_whose_answer_was_lost_is_stored_once_and_one_never_taken_names_th
         return httpx2.Response(504)
 
     marker = write_through(store, monkeypatch, tmp_path, lambda: TASKS[:1], around)
-    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+    assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
     assert (len(logged(store)), marker.read_text().strip()) == (1, '501')
 
     outcomes.extend(['down'] * service.ATTEMPTS)
     with pytest.raises(service.NoAnswer):
-        pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False)
+        pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=False)
     assert len(logged(store)) == 1
     assert 'doit pursuits log chores --no-write' in capsys.readouterr().err
 
@@ -252,9 +262,9 @@ def test_a_log_whose_answer_was_lost_is_stored_once_and_one_never_taken_names_th
 def test_a_skip_says_when_the_pursuit_returns_and_how_to_bring_it_back_sooner(api, store, capsys):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
 
-    assert pursuits.cmd_skip('read-library', '3d') == 0
+    assert pursuit_commands.cmd_skip('read-library', '3d') == 0
     printed = capsys.readouterr().out
-    assert pursuits.cmd_resume('read-library') == 0
+    assert pursuit_commands.cmd_resume('read-library') == 0
 
     # The date comes from the record, so a run straddling midnight compares one clock reading with itself.
     expires = journal.parse_time(next(record for record in store.journal() if record['event'] == 'skip')['expires_at'])
@@ -266,10 +276,10 @@ def test_a_skip_says_when_the_pursuit_returns_and_how_to_bring_it_back_sooner(ap
 def test_zeroing_the_whole_register_is_refused_unattended_and_one_pursuit_goes_through(api, store, monkeypatch):
     """Every accrued balance goes at once and nothing the tool ships puts one back, so only the whole register is confirmed."""
     write(api, 'pursuits', 'pursuits/pursuits.yml')
-    monkeypatch.setattr(pursuits, 'can_prompt', lambda: False)
+    at_terminal(monkeypatch, False)
 
-    assert pursuits.cmd_reset(None, assume_yes=False) == 1
-    assert pursuits.cmd_reset('chores', assume_yes=False) == 0
+    assert pursuit_commands.cmd_reset(None, assume_yes=False) == 1
+    assert pursuit_commands.cmd_reset('chores', assume_yes=False) == 0
 
     resets = [record['pursuit'] for record in store.journal() if record['event'] == 'reset' and record.get('note') != pursuits.FIRST_SEEN]
     assert resets == ['chores']
@@ -278,22 +288,22 @@ def test_zeroing_the_whole_register_is_refused_unattended_and_one_pursuit_goes_t
 def test_the_review_nudge_shows_what_is_due_once_per_interval(api, capsys):
     write(api, 'review', 'review/register.yml')
 
-    assert review.cmd_nudge() == 0
+    assert review_commands.cmd_nudge() == 0
     lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
     assert any('never-done' in line for line in lines)
     assert any('echo overdue' in line for line in lines), 'the command a row carries is the point of the row'
 
-    assert review.cmd_nudge() == 0
+    assert review_commands.cmd_nudge() == 0
     assert capsys.readouterr().out == '', 'the service holds when it last showed, so a second shell stays quiet'
-    assert review.NUDGE_INTERVAL.read_text().strip() == str(review.DEFAULT_NUDGE_MINUTES)
+    assert review_commands.NUDGE_INTERVAL.read_text().strip() == str(review.DEFAULT_NUDGE_MINUTES)
 
 
 def test_marking_an_item_done_takes_it_off_the_due_list(api, capsys):
     write(api, 'review', 'review/register.yml')
 
-    assert review.cmd_done('never-done') == 0
+    assert review_commands.cmd_done('never-done') == 0
     capsys.readouterr()
-    assert review.cmd_list(as_json=True) == 0
+    assert review_commands.cmd_list(as_json=True) == 0
 
     rows = {row['id']: row for row in json.loads(capsys.readouterr().out)}
     assert rows['never-done']['due'] is False
@@ -303,13 +313,13 @@ def test_marking_an_item_done_takes_it_off_the_due_list(api, capsys):
 def test_a_forecast_taken_is_read_back_and_not_graded_before_its_window_closes(api, capsys):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
 
-    assert forecast.cmd_run(as_json=True, budget=45) == 0
+    assert forecast_commands.cmd_run(as_json=True, budget=45) == 0
     assert json.loads(capsys.readouterr().out)['budget_minutes'] == 45
-    assert forecast.cmd_show('', as_json=False) == 0
-    assert forecast.cmd_list(as_json=False) == 0
+    assert forecast_commands.cmd_show('', as_json=False) == 0
+    assert forecast_commands.cmd_list(as_json=False) == 0
     assert 'chores' in capsys.readouterr().out
 
-    assert forecast.cmd_trend(7, as_json=False) == 1
+    assert forecast_commands.cmd_trend(7, as_json=False) == 1
     captured = capsys.readouterr()
     assert captured.out == ''
 
@@ -318,24 +328,24 @@ def test_the_day_and_the_dashboard_render_without_any_source(api, capsys):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
     write(api, 'review', 'review/register.yml')
 
-    assert today.cmd_today(as_json=False) == 0
+    assert today_commands.cmd_today(as_json=False) == 0
     assert 'never-done' in capsys.readouterr().out
-    assert happened.cmd_happened(None, None, as_json=False) == 0
+    assert happened_commands.cmd_happened(None, None, as_json=False) == 0
     capsys.readouterr()
 
-    assert dashboard.cmd_dashboard(['nonsense'], as_json=True) == 0
+    assert dashboard_commands.cmd_dashboard(['nonsense'], as_json=True) == 0
     captured = capsys.readouterr()
     assert json.loads(captured.out)['lanes'] == [], 'what the dashboard says about itself stays off the document'
     assert 'No sources configured' in captured.err
     assert 'No lane named nonsense' in captured.err
 
-    listed = CliRunner().invoke(sources.app, ['list', '--json'])
+    listed = CliRunner().invoke(sources_commands.app, ['list', '--json'])
     assert listed.exit_code == 0
     assert json.loads(listed.output) == []
 
 
 def test_happened_with_only_an_end_reads_from_the_earliest_record_through_that_whole_day(api, capsys):
-    assert happened.cmd_happened(None, '2026-07-20', as_json=True) == 0
+    assert happened_commands.cmd_happened(None, '2026-07-20', as_json=True) == 0
     document = json.loads(capsys.readouterr().out)
 
     assert dt.datetime.fromisoformat(document['since']) == happened.EARLIEST

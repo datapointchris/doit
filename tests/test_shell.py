@@ -15,9 +15,9 @@ import pytest
 from typer.testing import CliRunner
 
 from doit import content
-from doit import review
 from doit import shell
 from doit.cli import app as cli_app
+from doit.service_commands import review as review_commands
 
 runner = CliRunner()
 needs_zsh = pytest.mark.skipif(not shutil.which('zsh'), reason='zsh is not installed')
@@ -41,7 +41,7 @@ def test_a_shell_never_waits_on_the_nudge_and_the_next_one_prints_what_it_found(
     (bin_dir / 'doit').write_text('#!/bin/sh\nsleep 1\necho "Review  prune-docker  never done"\n')
     (bin_dir / 'doit').chmod(0o755)
     for name, file in (('NUDGE_INTERVAL', 'nudge-interval-minutes'), ('NUDGE_MARKER', 'nudge'), ('NUDGE_SHOWING', 'nudge-showing.txt')):
-        monkeypatch.setattr(review, name, tmp_path / 'cache' / file)
+        monkeypatch.setattr(review_commands, name, tmp_path / 'cache' / file)
     block = shell.zsh_init()
     environment = {**os.environ, 'PATH': f'{bin_dir}{os.pathsep}{os.environ["PATH"]}'}
 
@@ -53,7 +53,7 @@ def test_a_shell_never_waits_on_the_nudge_and_the_next_one_prints_what_it_found(
     printed, took = open_shell()
     assert (printed, took < 0.5) == ('', True)
     deadline = time.monotonic() + 5
-    while not review.NUDGE_SHOWING.exists() and time.monotonic() < deadline:
+    while not review_commands.NUDGE_SHOWING.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
     assert 'prune-docker' in open_shell()[0]
     assert open_shell()[0] == '', 'a showing prints once, and the marker holds the next check off for the interval'

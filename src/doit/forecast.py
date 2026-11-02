@@ -51,22 +51,17 @@ would read a register and a journal that have since moved.
 
 import dataclasses as dc
 import datetime as dt
-import json
 import statistics
 from dataclasses import dataclass
 from dataclasses import field
-from typing import Annotated
 
-import typer
 from rich.text import Text
 
 from doit import journal
 from doit import pursuits
-from doit import service
 from doit.allocate import balance
 from doit.paths import machine_name
 from doit.render import console
-from doit.render import error_console
 
 # Horizons a reading reports. A week is the shortest span over which a weekly
 # goal can express itself at all, and a month is long enough for every cadence a
@@ -456,96 +451,3 @@ def emit_trend(verdicts: list[Verdict], days: int, readings: int) -> None:
         console.print(row)
     console.print(f'\n  averaged over {readings} readings whose {days}-day window has closed')
     console.print('  error is what the journal recorded minus what the forecast predicted')
-
-
-def cmd_run(as_json: bool, budget: int | None) -> int:
-    """Take a forecast and store it."""
-    taken = service.client().post('/forecasts', {'budget_minutes': budget})
-    if as_json:
-        print(json.dumps(taken, indent=2))
-    else:
-        emit(reading_from(taken))
-    return 0
-
-
-def cmd_show(handle: str, as_json: bool) -> int:
-    """The newest stored forecast, or the one a timestamp prefix names."""
-    held = service.client().get(f'/forecasts/{handle or "latest"}')
-    if as_json:
-        print(json.dumps(held, indent=2))
-    else:
-        emit(reading_from(held))
-    return 0
-
-
-def cmd_list(as_json: bool) -> int:
-    """Every stored forecast, oldest first."""
-    held = service.client().get('/forecasts')
-    if not held:
-        error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
-        return 1
-    if as_json:
-        print(json.dumps(held, indent=2))
-        return 0
-    stored = [reading_from(reading) for reading in held]
-    console.rule('[cyan]Forecasts', align='left')
-    for reading in stored:
-        row = Text('  ')
-        row.append(f'{reading.generated[:16].replace("T", " ")}  ', style='white')
-        row.append(f'{reading.machine:<10} {reading.budget_minutes:>4}m/day  ', style='dim')
-        row.append(source_summary(reading), style='dim')
-        console.print(row)
-    plural = '' if len(stored) == 1 else 's'
-    console.print(f'\n  {len(stored)} reading{plural} · [cyan]doit forecast trend[/] grades the matured ones')
-    return 0
-
-
-def cmd_trend(days: int, as_json: bool) -> int:
-    """What the forecasts predicted against what the journal went on to record."""
-    graded = service.client().get('/forecasts/trend', days=days)
-    if not graded['verdicts']:
-        error_console.print(f'No reading is {days} days old yet, so nothing can be graded:  [cyan]doit forecast run[/]')
-        return 1
-    if as_json:
-        print(json.dumps(graded, indent=2))
-        return 0
-    emit_trend([Verdict(**verdict) for verdict in graded['verdicts']], days, graded['readings'])
-    return 0
-
-
-app = typer.Typer(name='forecast', no_args_is_help=True, help='What the register would have you do, run forward.')
-
-JsonOption = Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')]
-
-
-@app.command('run')
-def run_command(
-    budget: Annotated[int | None, typer.Option('--budget', help='Minutes a day to spend, overriding the register.')] = None,
-    as_json: JsonOption = False,
-) -> None:
-    """Take a forecast from the register as it stands, and store it."""
-    pursuits.run(lambda: cmd_run(as_json, budget))
-
-
-@app.command('show')
-def show_command(
-    handle: Annotated[str, typer.Argument(help='Timestamp prefix; the newest when omitted.')] = '',
-    as_json: JsonOption = False,
-) -> None:
-    """Read a stored forecast back."""
-    pursuits.run(lambda: cmd_show(handle, as_json))
-
-
-@app.command('list')
-def list_command(as_json: JsonOption = False) -> None:
-    """Every forecast taken, oldest first."""
-    pursuits.run(lambda: cmd_list(as_json))
-
-
-@app.command('trend')
-def trend_command(
-    days: Annotated[int, typer.Option('--days', help='Which horizon to grade: 7, 14 or 30.')] = 7,
-    as_json: JsonOption = False,
-) -> None:
-    """Grade the forecasts whose window has closed against the journal."""
-    pursuits.run(lambda: cmd_trend(days, as_json))

@@ -21,22 +21,22 @@ from typer.core import TyperGroup
 
 from doit import __version__
 from doit import content
-from doit import dashboard
 from doit import desk_import
 from doit import find
-from doit import forecast
-from doit import happened
 from doit import labs
-from doit import pursuits
-from doit import review
 from doit import service
 from doit import shell
-from doit import sources
-from doit import today
 from doit import tools
 from doit import workflows
 from doit.render import error_console
 from doit.render import set_no_input
+from doit.service_commands import dashboard
+from doit.service_commands import forecast
+from doit.service_commands import happened
+from doit.service_commands import pursuits
+from doit.service_commands import review
+from doit.service_commands import sources
+from doit.service_commands import today
 
 TAGLINE = 'What to do now, and everything that decides it.'
 

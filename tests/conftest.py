@@ -18,8 +18,8 @@ import pytest
 
 from doit import index
 from doit import pursuits
-from doit import review
 from doit import service
+from doit.service_commands import review as review_commands
 
 
 @pytest.fixture(autouse=True)
@@ -49,4 +49,4 @@ def no_service(monkeypatch, tmp_path):
     monkeypatch.setattr(service, 'client', refused)
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     monkeypatch.setattr(pursuits, 'NAMES_CACHE', tmp_path / 'cache' / 'next-names.txt')
-    monkeypatch.setattr(review, 'NUDGE_INTERVAL', tmp_path / 'cache' / 'nudge-interval-minutes')
+    monkeypatch.setattr(review_commands, 'NUDGE_INTERVAL', tmp_path / 'cache' / 'nudge-interval-minutes')

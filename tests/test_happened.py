@@ -20,6 +20,7 @@ from doit import lanes
 from doit import sources
 from doit import window
 from doit.lanes import GridCell
+from doit.service_commands import happened as happened_commands
 from doit.window import Bounds
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'happened'
@@ -321,4 +322,4 @@ def test_the_verdict_names_every_record_asked_and_which_failed():
 
 
 def test_a_window_that_will_not_parse_is_refused_before_any_backend_is_asked():
-    assert happened.cmd_happened('6mo', None, as_json=False) == 2
+    assert happened_commands.cmd_happened('6mo', None, as_json=False) == 2

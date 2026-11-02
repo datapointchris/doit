@@ -34,29 +34,24 @@ a window is listed once, on the later day.
 """
 
 import datetime as dt
-import json
 import shlex
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
-from typing import Annotated
 from typing import NamedTuple
 
-import typer
 from rich.text import Text
 
 from doit import actor
 from doit import journal
 from doit import lanes
 from doit import review
-from doit import service
 from doit import sources
 from doit import window
 from doit.lanes import GridCell
 from doit.lanes import Lane
 from doit.render import console
-from doit.render import error_console
 from doit.render import fitted
 from doit.render import terminal_width
 from doit.window import Bounds
@@ -628,49 +623,3 @@ def render(groups: list[Lane], bounds: Bounds, open_ended: bool) -> None:
     if shown:
         console.print()
         render_groups(shown, terminal_width(), dated=bounds.days() > 1)
-
-
-def cmd_happened(since: str | None, until: str | None, as_json: bool) -> int:
-    now = dt.datetime.now().astimezone()
-    if since is None and until is None:
-        since = DEFAULT_SINCE
-    try:
-        start, stop = window.window(since, until, now)
-    except ValueError as error:
-        error_console.print(f'doit happened: {error}')
-        return 2
-    if start is not None and start >= (stop or now):
-        error_console.print(f'doit happened: --since {since} is not before {until or "now"}.')
-        return 2
-    answered = service.client().get('/happened', since=since, until=until)
-    for problem in answered.get('problems') or []:
-        error_console.print(f'sources: {problem}')
-    groups = [lanes.lane_from(lane) for lane in answered['groups']]
-    if as_json:
-        # Plain print, never the rich console: a Console soft-wraps at terminal
-        # width, which would put newlines inside JSON strings.
-        print(json.dumps(answered, indent=2))
-    else:
-        bounds = Bounds(dt.datetime.fromisoformat(answered['since']), dt.datetime.fromisoformat(answered['until']))
-        render(groups, bounds, open_ended=until is None)
-    # A read that asked some records exits 0 and names the rest in its verdict.
-    # One that could ask none exits 1, so a script can tell it from a quiet window.
-    return 1 if all(not lane.available for lane in groups) else 0
-
-
-def happened_command(
-    since: Annotated[
-        str | None,
-        typer.Option(
-            '--since',
-            help=f'Start of the window: {window.FORMS}. {DEFAULT_SINCE} ago where neither end is given, '
-            'the earliest record where only --until is.',
-        ),
-    ] = None,
-    until: Annotated[
-        str | None, typer.Option('--until', help='End of the window, in the same forms; a day includes all of itself. Now where omitted.')
-    ] = None,
-    as_json: Annotated[bool, typer.Option('--json', help='Output every group as JSON to stdout.')] = False,
-) -> None:
-    """What every record says happened over a window, and who did it where the record says."""
-    raise typer.Exit(cmd_happened(since, until, as_json))

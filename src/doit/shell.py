@@ -26,6 +26,7 @@ import typer
 
 from doit import review
 from doit.paths import xdg_cache_home
+from doit.service_commands import review as review_commands
 
 app = typer.Typer(name='shell', no_args_is_help=True, help='The blocks your shell loads from doit.')
 
@@ -42,7 +43,7 @@ def zsh_init() -> str:
     is one rolling one across every machine. A nudge that fails is shown the same
     way, because a broken nudge that stays quiet reads as a clear register.
     """
-    showing, waiting = review.NUDGE_SHOWING, f'{review.NUDGE_SHOWING}.next'
+    showing, waiting = review_commands.NUDGE_SHOWING, f'{review_commands.NUDGE_SHOWING}.next'
     return f"""\
 # doit — surface the review register's due items once per interval. The check
 # runs in the background, and the next shell prints what it found.
@@ -52,10 +53,10 @@ if (( $+commands[doit] )); then
     cat "{showing}"
     rm -f "{showing}"
   fi
-  _doit_mins="$(cat "{review.NUDGE_INTERVAL}" 2>/dev/null || echo {review.DEFAULT_NUDGE_MINUTES})"
-  if [[ ! -f "{review.NUDGE_MARKER}" || -n "$(find "{review.NUDGE_MARKER}" -mmin +"$_doit_mins" 2>/dev/null)" ]]; then
-    mkdir -p "{review.NUDGE_MARKER.parent}"
-    : >| "{review.NUDGE_MARKER}"
+  _doit_mins="$(cat "{review_commands.NUDGE_INTERVAL}" 2>/dev/null || echo {review.DEFAULT_NUDGE_MINUTES})"
+  if [[ ! -f "{review_commands.NUDGE_MARKER}" || -n "$(find "{review_commands.NUDGE_MARKER}" -mmin +"$_doit_mins" 2>/dev/null)" ]]; then
+    mkdir -p "{review_commands.NUDGE_MARKER.parent}"
+    : >| "{review_commands.NUDGE_MARKER}"
     (
       COLUMNS=$COLUMNS FORCE_COLOR=1 doit review nudge >| "{waiting}" 2>&1
       if [[ -s "{waiting}" ]]; then mv -f "{waiting}" "{showing}"; else rm -f "{waiting}"; fi

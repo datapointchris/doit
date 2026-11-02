@@ -16,9 +16,9 @@ from typer.testing import CliRunner
 import doit
 import doit.cli
 from doit import __version__
-from doit import pursuits
 from doit.cli import accepted_placements
 from doit.cli import app
+from doit.service_commands import pursuits as pursuit_commands
 
 runner = CliRunner()
 
@@ -66,7 +66,7 @@ def test_the_pursuits_help_lists_every_verb_registered_under_it():
     the visible ones — `pursuits names` feeds the shell completion and would be
     noise on a screen a person reads.
     """
-    registered = {command_name(command) for command in pursuits.app.registered_commands if not command.hidden}
+    registered = {command_name(command) for command in pursuit_commands.app.registered_commands if not command.hidden}
     result = runner.invoke(app, ['pursuits', '--help'])
 
     assert registered

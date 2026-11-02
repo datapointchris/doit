@@ -82,6 +82,12 @@ and nothing computes it twice. A change that has `api/` compute a balance, a due
 itself is the drift this arrangement exists to prevent: add a seam to the view module instead, one
 that takes its data rather than reading it.
 
+So a module the service imports holds rules and renderers, and never a command. The commands that
+ask the service live in `doit.service_commands`, one module beside each rule module, so the service
+never loads the client that calls it. A new command that asks the service goes there.
+`test_the_service_never_loads_the_client_that_calls_it` fails when a rule module imports
+`doit.service`.
+
 The CLI and the service are tested together in `api/tests/test_cli_against_service.py`, which
 forwards each command's requests into the app in process. A shape changed on one side and not the
 other fails there.
