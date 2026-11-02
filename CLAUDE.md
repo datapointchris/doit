@@ -59,7 +59,7 @@ would file every package-installed row as foreign and empty the report.
 
 ## Content, config, and state are three different things
 
-- **Content** — cards, Labs, and the tool registry (`workflows/`, `labs/`, `tools/`). The
+- **Content** — cards, Labs, and the tool registry (`cards/`, `labs/`, `tools/`). The
   `terminal-library` repo, cloned into `$XDG_DATA_HOME/terminal-library/`, updated by
   `doit content sync`. Authored often, so it must never need a release of this repo to change.
   Named for the library and not for doit, because doit is one reader of it. `paths.library_dir()`
@@ -98,8 +98,8 @@ edit to `sources.yml`, never a release. A source with an adapter is already code
 carries its command too. The command and the model it returns are one contract, and a copy of the
 command in `sources.yml` is one no sweep of the code finds when its tool renames a flag. That bounds
 the rule to the dashboard; `doit.machine` asks dotfiles a question no lane
-answers, and the tiers sanction it — doit is `experimental` above a `universal` tool, so when the one
-below moves, this is what changes.
+answers, and the tiers sanction it. doit is `experimental` and dotfiles is `fleet`, and an
+experimental tool may invoke either tier above it, so when the one below moves, this is what changes.
 A source that is not configured is silent; one configured but missing gets a single line; one that
 runs and fails shows its error. A lane is never silently dropped — a dashboard that quietly omits a
 lane reads as "nothing outstanding", which is the worst available failure.

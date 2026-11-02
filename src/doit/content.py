@@ -299,7 +299,7 @@ def edit_command(
     what: Annotated[str, typer.Argument(help='A card or Lab id.')],
 ) -> None:
     """Open a card or Lab in $EDITOR, wherever it lives."""
-    for subdir in ('workflows', 'labs'):
+    for subdir in ('cards', 'labs'):
         candidate = CONTENT_DIR / subdir / f'{what}.md'
         if candidate.exists():
             open_in_editor(candidate)

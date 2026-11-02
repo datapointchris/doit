@@ -12,8 +12,9 @@ needing the fleet clone that only some machines have — `$MACHINE` comes from
 ``~/.env``, which `dotfiles env apply` writes everywhere.
 
 Calling it from code rather than through ``sources.yml`` is the direction the
-tiers already sanction: doit is `experimental` and dotfiles is `universal`, so
-when the one below moves, this is what changes.
+tiers already sanction: doit is `experimental` and dotfiles is `fleet`, and an
+experimental tool may invoke either tier above it. When the one below moves,
+this is what changes.
 
 Unknown is a third state and not an empty set. A box without dotfiles, or one
 whose manifest cannot be read, must fall back to judging rows by PATH alone —
