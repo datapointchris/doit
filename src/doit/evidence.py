@@ -31,6 +31,7 @@ import datetime as dt
 import json
 import shlex
 import subprocess
+from collections.abc import Callable
 from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -291,6 +292,26 @@ def refresh(
     whole document.
     """
     payload = load(directory)
+    if refreshed(payload, register, now, read_one, force=force, ttl=ttl, ask=ask):
+        save(directory, payload)
+    return answered(payload, ask if ask is not None else declared(register))
+
+
+def refreshed(
+    payload: dict,
+    register: dict,
+    now: dt.datetime,
+    read: Callable[[str, dict, dt.datetime], tuple[str, dict]],
+    *,
+    force: bool = False,
+    ttl: float = REFRESH_TTL_SECONDS,
+    ask: Collection[str] | None = None,
+) -> bool:
+    """Bring ``payload`` up to date in place, asking ``read`` for each answer that aged out, and say whether it changed.
+
+    :func:`refresh` with the cache and the reader handed in, for a caller that
+    keeps the cache somewhere other than a file or asks apps some other way.
+    """
     entries = payload.setdefault('pursuits', {})
     declaring = declared(register)
 
@@ -308,11 +329,11 @@ def refresh(
         if force or stale(entries.get(name), now, ttl) or (entries.get(name) or {}).get('declaration') != declaration(config)
     }
     if not due and not dropped:
-        return answered(payload, candidates)
+        return False
 
     if due:
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-            answers = list(pool.map(lambda pair: read_one(pair[0], pair[1], now), due.items()))
+            answers = list(pool.map(lambda pair: read(pair[0], pair[1], now), due.items()))
         for name, entry in answers:
             previous = entries.get(name) or {}
             entry['declaration'] = declaration(due[name])
@@ -325,8 +346,7 @@ def refresh(
             entries[name] = entry
 
     payload['schema_version'] = SCHEMA_VERSION
-    save(directory, payload)
-    return answered(payload, candidates)
+    return True
 
 
 def answered(payload: dict, names: Collection[str]) -> dict:

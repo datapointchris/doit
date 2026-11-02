@@ -353,17 +353,27 @@ def load_pursuits(path: Path | None = None) -> dict:
     path = register_path() if path is None else path
     if not path.exists():
         return {}
+    return pursuits_from_document(parse_register(path.read_text(), path), path)
+
+
+def parse_register(text: str, where: object) -> dict:
+    """The register's YAML as a mapping, refused with ``where`` named where it is not one."""
     try:
-        document = yaml.safe_load(path.read_text()) or {}
+        document = yaml.safe_load(text) or {}
     except yaml.YAMLError as error:
         mark = getattr(error, 'problem_mark', None)
-        where = f' at line {mark.line + 1}, column {mark.column + 1}' if mark is not None else ''
-        raise RegisterError(f'{path}: not valid YAML{where}: {getattr(error, "problem", None) or error}') from error
+        at = f' at line {mark.line + 1}, column {mark.column + 1}' if mark is not None else ''
+        raise RegisterError(f'{where}: not valid YAML{at}: {getattr(error, "problem", None) or error}') from error
     if not isinstance(document, dict):
-        raise RegisterError(f'{path}: must be a mapping with a `pursuits` key, not {type(document).__name__}')
+        raise RegisterError(f'{where}: must be a mapping with a `pursuits` key, not {type(document).__name__}')
+    return document
+
+
+def pursuits_from_document(document: dict, where: object) -> dict:
+    """The `pursuits:` block of a parsed register, validated as :func:`load_pursuits` describes."""
     pursuits = document.get('pursuits') or {}
     if not isinstance(pursuits, dict):
-        raise RegisterError(f'{path}: `pursuits` must be a mapping of name to settings')
+        raise RegisterError(f'{where}: `pursuits` must be a mapping of name to settings')
 
     for name, config in pursuits.items():
         if not isinstance(config, dict):
@@ -425,22 +435,34 @@ def register_block(key: str, known: set[str], path: Path | None) -> dict:
     path = register_path() if path is None else path
     if not path.exists():
         return {}
-    document = yaml.safe_load(path.read_text()) or {}
+    return block_of(yaml.safe_load(path.read_text()) or {}, key, known, path)
+
+
+def block_of(document: dict, key: str, known: set[str], where: object) -> dict:
+    """One sibling block of a parsed register, validated as :func:`register_block` describes."""
     block = document.get(key) or {}
     if not isinstance(block, dict):
-        raise RegisterError(f'{path}: `{key}` must be a mapping of settings')
+        raise RegisterError(f'{where}: `{key}` must be a mapping of settings')
     unknown = set(block) - known
     if unknown:
-        raise RegisterError(f'{path}: {key} has unknown key(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(known))}')
+        raise RegisterError(f'{where}: {key} has unknown key(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(known))}')
     return block
 
 
 def load_settings(path: Path | None = None) -> dict:
     """The register's `forecast:` block — what a day is assumed to hold."""
-    settings = register_block('forecast', {'budget_minutes'}, path)
+    path = register_path() if path is None else path
+    if not path.exists():
+        return {}
+    return settings_from_document(yaml.safe_load(path.read_text()) or {}, path)
+
+
+def settings_from_document(document: dict, where: object) -> dict:
+    """The `forecast:` block of a parsed register, validated."""
+    settings = block_of(document, 'forecast', {'budget_minutes'}, where)
     budget = settings.get('budget_minutes')
     if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
-        raise RegisterError(f'{REGISTER if path is None else path}: forecast.budget_minutes must be a positive whole number')
+        raise RegisterError(f'{where}: forecast.budget_minutes must be a positive whole number')
     return settings
 
 
@@ -473,14 +495,18 @@ def load_cycles(pursuits: dict, path: Path | None = None) -> list[Cycle]:
     path = register_path() if path is None else path
     if not path.exists():
         return []
-    document = yaml.safe_load(path.read_text()) or {}
+    return cycles_from_document(yaml.safe_load(path.read_text()) or {}, pursuits, path)
+
+
+def cycles_from_document(document: dict, pursuits: dict, where: object) -> list[Cycle]:
+    """The `cycles:` list of a parsed register, validated as :func:`load_cycles` describes."""
     declared = document.get('cycles') or []
     if not isinstance(declared, list):
-        raise RegisterError(f'{path}: `cycles` must be a list, each entry with a name and an until date')
+        raise RegisterError(f'{where}: `cycles` must be a list, each entry with a name and an until date')
     cycles = []
     for entry in declared:
         if not isinstance(entry, dict) or not isinstance(entry.get('name'), str) or not entry['name']:
-            raise RegisterError(f'{path}: every cycle is a mapping with a name')
+            raise RegisterError(f'{where}: every cycle is a mapping with a name')
         name = entry['name']
         unknown = set(entry) - CYCLE_FIELDS
         if unknown:
@@ -604,8 +630,8 @@ def records_by_pursuit(records: list[dict]) -> dict[str, list[dict]]:
     return found
 
 
-def record_first_sightings(active: dict, records: list[dict], intervals: dict[str, float], now: dt.datetime) -> list[dict]:
-    """Write a reset for every active pursuit the journal has never zeroed, and return them.
+def first_sightings(active: dict, records: list[dict], intervals: dict[str, float], now: dt.datetime, machine: str) -> list[dict]:
+    """A reset for every active pursuit the journal has never zeroed, for the caller to write.
 
     Without a recorded start the origin is derived from now, moves with the
     clock, and asks for exactly one checkoff on every run — a pursuit that reads
@@ -614,14 +640,15 @@ def record_first_sightings(active: dict, records: list[dict], intervals: dict[st
     pursuit was declared because it is wanted, so it opens one checkoff owed.
     """
     zeroed = {record.get('pursuit') for record in records if record.get('event') == journal.Event.RESET}
-    written = []
+    found = []
     for name in active:
         if name in zeroed:
             continue
         interval = intervals[name]
         opened = now if math.isinf(interval) else now - dt.timedelta(days=interval)
-        written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': opened.isoformat(), 'note': FIRST_SEEN}, now=now))
-    return written
+        extra = {'occurred_at': opened.isoformat(), 'note': FIRST_SEEN}
+        found.append(new_record(journal.Event.RESET, name, None, extra, now=now, machine=machine))
+    return found
 
 
 class Pace(NamedTuple):
@@ -653,8 +680,8 @@ def pace_records(records: list[dict]) -> list[tuple[dt.datetime, dict]]:
     return stamped
 
 
-def record_pace_changes(pursuits: dict, active: dict, records: list[dict], now: dt.datetime) -> list[dict]:
-    """Write the pace each pursuit asks for wherever the journal last recorded another, and return the records.
+def pace_changes(pursuits: dict, active: dict, records: list[dict], now: dt.datetime, machine: str) -> list[dict]:
+    """The pace each pursuit asks for wherever the journal last recorded another, for the caller to write.
 
     The register says only what is asked from now on, so a pace read off it alone
     reprices every day back to the zero point whenever it is edited. Recording
@@ -672,8 +699,10 @@ def record_pace_changes(pursuits: dict, active: dict, records: list[dict], now: 
 
     Moving between counting occurrences and counting minutes also writes a reset.
     A balance in one unit cannot carry into the other.
+
+    ``machine`` is the writer the records will carry, which is what the second
+    test reads.
     """
-    machine = machine_name()
     newest: dict[str, Pace | None] = {}
     mine: dict[str, Pace | None] = {}
     counted: dict[str, Pace] = {}
@@ -697,11 +726,12 @@ def record_pace_changes(pursuits: dict, active: dict, records: list[dict], now: 
         elif current == newest[name] or (name in mine and current == mine[name]):
             continue
         if current is not None and name in counted and counted[name].timed != current.timed:
-            written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': now.isoformat(), 'note': UNIT_CHANGED}, now=now))
+            extra = {'occurred_at': now.isoformat(), 'note': UNIT_CHANGED}
+            written.append(new_record(journal.Event.RESET, name, None, extra, now=now, machine=machine))
         fields: dict[str, float | bool | None] = {'interval_days': None, 'checkoff_size': None, 'timed': None}
         if current is not None:
             fields = {'interval_days': current.interval, 'checkoff_size': current.size, 'timed': current.timed}
-        written.append(record_event(journal.Event.PACE, name, None, {'occurred_at': now.isoformat(), **fields}, now=now))
+        written.append(new_record(journal.Event.PACE, name, None, {'occurred_at': now.isoformat(), **fields}, now=now, machine=machine))
     return written
 
 
@@ -909,6 +939,10 @@ def build_state(
     observed: dict[str, dt.datetime] | None = None,
     evidence_days: dict[str, list[dt.date]] | None = None,
     cycles: list[Cycle] | None = None,
+    *,
+    append: Callable[[list[dict]], None] | None = None,
+    machine: str = '',
+    observations: dict | None = None,
 ) -> dict:
     """Everything the draw and every view need: intervals, balances, weights, the pool.
 
@@ -941,6 +975,11 @@ def build_state(
     ``now``'s date scale the weights and hold cadences tighter. The held cadence
     is what gets journaled as the pace, so the days a cycle runs are priced at
     it and the days after at the register's own.
+
+    A caller holding the journal somewhere other than this machine's files hands
+    in ``records`` with ``append``, which writes the sightings and paces this
+    build finds, and the ``machine`` they are written as. ``observations`` is an
+    evidence refresh it already made, which stands in for the live one.
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
@@ -954,16 +993,29 @@ def build_state(
     intervals = {name: interval for name, (interval, _) in paces.items()}
     sizes = {name: size for name, (_, size) in paces.items()}
 
-    directory = journal_dir() if records is None else None
     if records is None:
-        records = journal.read_all(directory) if directory and directory.exists() else []
-    if directory is not None and directory.exists():
-        records = [*records, *record_first_sightings(active, records, intervals, now)]
-        records = [*records, *record_pace_changes(pursuits, held, records, now)]
+        directory = journal_dir()
+        records = journal.read_all(directory) if directory.exists() else []
+        if directory.exists():
+            path = journal_path(directory, machine_name())
+            machine = machine_name()
+
+            def append(found: list[dict]) -> None:
+                for record in found:
+                    journal.append(path, record)
+
+    if append is not None:
+        sightings = first_sightings(active, records, intervals, now, machine)
+        append(sightings)
+        records = [*records, *sightings]
+        changed = pace_changes(pursuits, held, records, now, machine)
+        append(changed)
+        records = [*records, *changed]
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
-    observations = {} if observed is not None else evidence.refresh(pursuits, CACHE_DIR, now, ask=watching)
+    if observations is None:
+        observations = {} if observed is not None else evidence.refresh(pursuits, CACHE_DIR, now, ask=watching)
     seen = evidence.observed(observations) if observed is None else observed
     seen_days = evidence.occurrences(observations) if observed is None else (evidence_days or {})
     last_done = evidence.merged(latest_occurrence(records, journal.Event.DONE), seen)
@@ -1943,6 +1995,17 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt
     vector describes the whole register, so a run writing several records would
     otherwise put the same payload in each of them.
     """
+    return journal.append(journal_path(journal_dir(), machine_name()), new_record(event, name, state, extra, now))
+
+
+def new_record(
+    event: str, name: str, state: dict | None, extra: dict, now: dt.datetime | None = None, *, machine: str = '', identity: str = ''
+) -> dict:
+    """The journal entry :func:`record_event` writes, unwritten, from ``machine`` as ``identity``.
+
+    Each defaults to this process's own, so a caller writing on someone else's
+    behalf names both.
+    """
     now = now or (state['now'] if state else dt.datetime.now().astimezone())
     record = {
         'id': new_id(now),
@@ -1951,13 +2014,13 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt
         'logged_at': now.isoformat(),
         'occurred_at': extra.pop('occurred_at', now.isoformat()),
         'tz': str(now.tzinfo),
-        'machine': machine_name(),
-        'actor': actor.identity(),
+        'machine': machine or machine_name(),
+        'actor': identity or actor.identity(),
         **extra,
     }
     if state is not None:
         record['state_at_log'] = explain_payload(state)
-    return journal.append(journal_path(journal_dir(), machine_name()), record)
+    return record
 
 
 def restated_balance(state: dict, name: str, entry: dict) -> str:

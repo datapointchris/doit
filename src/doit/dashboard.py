@@ -1096,10 +1096,19 @@ def lanes_of(registry: sources.Registry, results: dict[str, sources.Result], wan
     alongside something else out of `sources.yml` pays for one concurrent round
     instead of two.
     """
+    return arranged([*source_lanes(registry, results), *local_lanes()], wanted)
+
+
+def source_lanes(registry: sources.Registry, results: dict[str, sources.Result]) -> list[LaneView]:
+    """The lanes the configured sources answered with, in the order `sources.yml` lists them."""
     collected: list[LaneView] = []
     for source in registry.sources.values():
         collected.extend(sources.lanes_from(source, results[source.id]))
-    collected.extend(local_lanes())
+    return collected
+
+
+def arranged(collected: list[LaneView], wanted: list[str] | None) -> list[LaneView]:
+    """``collected`` narrowed to ``wanted`` where given, with the alert lanes first."""
     if wanted:
         collected = [lane for lane in collected if lane.name in wanted]
     return sorted(collected, key=lambda lane: not lane.alert)

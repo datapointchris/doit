@@ -221,10 +221,14 @@ def load(path: Path | None = None) -> Registry:
     rather than theoretical.
     """
     path = SOURCES if path is None else path
-    registry = Registry()
     if not path.exists():
-        return registry
-    document = yaml.safe_load(path.read_text()) or {}
+        return Registry()
+    return registry_from_document(yaml.safe_load(path.read_text()) or {})
+
+
+def registry_from_document(document: dict) -> Registry:
+    """Both blocks of a parsed `sources.yml`, as :func:`load` describes."""
+    registry = Registry()
     registry.sources = parse_block(document.get('sources'), 'sources', registry.problems)
     registry.completions = parse_block(document.get('completions'), 'completions', registry.problems)
     for shared in sorted(set(registry.sources) & set(registry.completions)):
