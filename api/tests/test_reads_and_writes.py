@@ -175,6 +175,48 @@ def test_a_logged_pursuit_counts_toward_its_standing_and_names_who_logged_it(sto
     assert [record['event'] for record in store.journal()].count('done') == 1
 
 
+def test_the_standing_draw_retries_a_failed_resolve_and_drops_each_logged_pursuit_until_none_is_left(store):
+    """The draw holds still for its window, so a recovered app and a log both have to show through it."""
+    down = [True]
+    answer = [{'name': 'Trim Dingo Nails', 'id': 4}]
+    tasks = stand_in('icb', {'/tasks': lambda request: httpx2.Response(500, json={'message': 'down'}) if down[0] else answer})
+    client = client_for(store, apps={'icb': tasks})
+    register = 'pursuits:\n  chores:\n    weight: 5\n    cadence: 1d\n    resolve: {app: icb, path: /tasks}\n    label: name\n    id: id\n'
+    register += '  walk:\n    weight: 1\n    cadence: 1d\n'
+    client.put('/api/v1/documents/pursuits', json={'text': register})
+
+    first = client.get('/api/v1/next').json()
+    down[0] = False
+    again = client.get('/api/v1/next').json()
+    logged = client.post('/api/v1/journal/done', json={'pursuit': 'chores'}).json()['entry']
+    after = client.get('/api/v1/next').json()
+    client.post('/api/v1/journal/done', json={'pursuit': 'walk'})
+    spent = client.get('/api/v1/next').json()
+
+    assert first['resolved']['chores']['error']
+    assert again['draw_id'] == first['draw_id']
+    assert again['resolved']['chores']['choices'][0]['label'] == 'Trim Dingo Nails'
+    assert (logged['draw_id'], logged['was_offered'], logged['rank_offered']) == (
+        first['draw_id'],
+        True,
+        first['offered'].index('chores') + 1,
+    )
+    assert (after['draw_id'], after['offered']) == (first['draw_id'], ['walk'])
+    assert spent['draw_id'] != first['draw_id'], 'a draw with every pursuit logged is drawn again rather than shown empty'
+
+
+def test_an_offer_count_whose_pursuit_left_the_register_is_named_stranded(store):
+    """Counts are keyed by name, so a rename strands a total that drift, which walks the register, never shows again."""
+    client = client_for(store)
+    client.put('/api/v1/documents/pursuits', json={'text': 'pursuits:\n  walk:\n    weight: 1\n    cadence: 1d\n'})
+    client.get('/api/v1/next', params={'machine': 'desk'})
+    client.put('/api/v1/documents/pursuits', json={'text': 'pursuits:\n  run:\n    weight: 1\n    cadence: 1d\n'})
+
+    offers = client.get('/api/v1/pursuits/offers').json()
+
+    assert (offers['counts'], offers['stranded']) == ({'desk': {'walk': 1}}, ['walk'])
+
+
 def test_every_adapter_doit_registers_has_a_read_or_a_reason():
     readers = Readers({}, GitHub(GitHubSettings()), ClickHouseSettings())
 

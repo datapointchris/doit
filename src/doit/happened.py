@@ -49,8 +49,8 @@ from rich.text import Text
 from doit import actor
 from doit import journal
 from doit import lanes
-from doit import pursuits
 from doit import review
+from doit import service
 from doit import sources
 from doit import window
 from doit.lanes import GridCell
@@ -439,9 +439,6 @@ class Register(NamedTuple):
     block: str
     hint: str = 'doit review due'
 
-    def read(self) -> list[dict]:
-        return review.statuses(self.block)
-
     @staticmethod
     def describe(row: dict) -> str:
         return str(row.get('desc') or item_name(row))
@@ -470,34 +467,14 @@ class Kept:
 
     `state` is None where the register is empty or would not load, and
     `state_error` says which. A register that could not be read is absent from
-    `registers`, and `register_errors` says why.
+    `registers`, and `register_errors` says why, so a register that refuses to
+    load costs that record's group rather than the whole screen.
     """
 
     state: dict | None = None
     state_error: str = ''
     registers: dict[str, list[dict]] = field(default_factory=dict)
     register_errors: dict[str, str] = field(default_factory=dict)
-
-
-def read_kept(now: dt.datetime) -> Kept:
-    """The pursuit state and both registers, each failure kept to its own record.
-
-    A register that refuses to load is a real failure mode, and it must cost
-    that record's group rather than the whole screen.
-    """
-    kept = Kept()
-    try:
-        register = pursuits.load_pursuits()
-        if register:
-            kept.state = pursuits.build_state(register, now)
-    except (pursuits.RegisterError, OSError, ValueError) as error:
-        kept.state_error = str(error)
-    for entry in registers():
-        try:
-            kept.registers[entry.name] = entry.read()
-        except (OSError, ValueError) as error:
-            kept.register_errors[entry.name] = str(error)
-    return kept
 
 
 # --- the fold ------------------------------------------------------------------
@@ -532,12 +509,6 @@ def fold(registry: sources.Registry, results: dict[str, sources.Result], kept: K
             ]
         groups.extend(built)
     return groups
-
-
-def read(registry: sources.Registry, bounds: Bounds, now: dt.datetime) -> list[Lane]:
-    """The fold over `bounds`, from one round of every completion source."""
-    results = sources.fetch(list(registry.completions.values()), bounds)
-    return fold(registry, results, read_kept(now), bounds, now)
 
 
 # --- the screen ----------------------------------------------------------------
@@ -668,29 +639,19 @@ def cmd_happened(since: str | None, until: str | None, as_json: bool) -> int:
     except ValueError as error:
         error_console.print(f'doit happened: {error}')
         return 2
-    bounds = Bounds(start or EARLIEST, stop or now)
-    if bounds.start >= bounds.stop:
+    if start is not None and start >= (stop or now):
         error_console.print(f'doit happened: --since {since} is not before {until or "now"}.')
         return 2
-    registry = sources.load()
-    for problem in registry.problems:
-        error_console.print(f'sources.yml: {problem}')
-    groups = read(registry, bounds, now)
+    answered = service.client().get('/happened', since=since, until=until)
+    for problem in answered.get('problems') or []:
+        error_console.print(f'sources: {problem}')
+    groups = [lanes.lane_from(lane) for lane in answered['groups']]
     if as_json:
-        document = {
-            'schema_version': lanes.SCHEMA_VERSION,
-            'generated_at': lanes.timestamp(now),
-            'since': bounds.start.isoformat(timespec='seconds'),
-            'until': bounds.stop.isoformat(timespec='seconds'),
-            'asked': [lane.name for lane in groups],
-            'unavailable': [lane.name for lane in groups if not lane.available],
-            'partial': [lane.name for lane in groups if lane.available and lane.reason],
-            'groups': [lanes.lane_to_dict(lane) for lane in groups],
-        }
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
-        print(json.dumps(document, indent=2))
+        print(json.dumps(answered, indent=2))
     else:
+        bounds = Bounds(dt.datetime.fromisoformat(answered['since']), dt.datetime.fromisoformat(answered['until']))
         render(groups, bounds, open_ended=until is None)
     # A read that asked some records exits 0 and names the rest in its verdict.
     # One that could ask none exits 1, so a script can tell it from a quiet window.

@@ -64,8 +64,8 @@ from doit import happened
 from doit import lanes
 from doit import pursuits
 from doit import quota
+from doit import service
 from doit import sources
-from doit import window
 from doit.happened import GROUP_INDENT
 from doit.happened import HOUR_STYLE
 from doit.happened import ITEM_INDENT
@@ -166,7 +166,7 @@ def missing_done_halves(built: list[dashboard.LaneView], folded: list[Lane]) -> 
         if lane.name not in DAY_SET_LANES or not lane.available or lane.name in have:
             continue
         supplier = next((adapter_id for adapter_id, name in happened.COMPLETION_ADAPTERS if name == lane.name), lane.name)
-        missing.append(lanes.unavailable(lane.name, lane.title, f'no {supplier} entry under completions in sources.yml'))
+        missing.append(lanes.unavailable(lane.name, lane.title, f'no {supplier} entry under completions: add one with doit sources edit'))
     return missing
 
 
@@ -297,27 +297,6 @@ class Day(NamedTuple):
     figures: quota.Quota | None = None
 
 
-def build(registry: sources.Registry, now: dt.datetime) -> Day:
-    """Both lists, from one round of every configured source.
-
-    One `sources.fetch` over both blocks, so the command costs the slowest
-    single backend rather than the sum of two rounds.
-
-    The due groups run appointments, pursuits, registers, then sets. An
-    appointment keeps its hour whatever else is owed. A set you are part-way
-    through is the one thing here you can finish in a minute, so it sits at the
-    bottom where it does not push a commitment off the screen.
-
-    The done groups lead with the day sets, then run in the fold's order.
-    """
-    bounds = window.day_of(now)
-    lane_sources = list(registry.sources.values())
-    completion_sources = list(registry.completions.values())
-    results = sources.fetch(lane_sources + completion_sources, bounds)
-    built = dashboard.lanes_of(registry, results, None)
-    return assemble(registry, results, built, happened.read_kept(now), bounds, now)
-
-
 def assemble(
     registry: sources.Registry,
     results: dict[str, sources.Result],
@@ -326,7 +305,15 @@ def assemble(
     bounds: Bounds,
     now: dt.datetime,
 ) -> Day:
-    """Both lists from a round already fetched, the lanes it built and what doit keeps, as :func:`build` describes."""
+    """Both lists, from one round of every configured source, the lanes it built and what doit keeps.
+
+    The due groups run appointments, pursuits, registers, then sets. An
+    appointment keeps its hour whatever else is owed. A set you are part-way
+    through is the one thing here you can finish in a minute, so it sits at the
+    bottom where it does not push a commitment off the screen.
+
+    The done groups lead with the day sets, then run in the fold's order.
+    """
     folded = happened.fold(registry, results, kept, bounds, now)
     folded += missing_done_halves(built, folded)
 
@@ -488,25 +475,21 @@ def render_due(groups: list[Lane], width: int) -> None:
 
 
 def cmd_today(as_json: bool) -> int:
-    registry = sources.load()
-    for problem in registry.problems:
-        error_console.print(f'sources.yml: {problem}')
-    now = dt.datetime.now().astimezone()
-    day = build(registry, now)
-
+    answered = service.client().get('/today')
+    for problem in answered.get('problems') or []:
+        error_console.print(f'sources: {problem}')
     if as_json:
-        document = {
-            'schema_version': lanes.SCHEMA_VERSION,
-            'generated_at': lanes.timestamp(now),
-            'done': [lanes.lane_to_dict(lane) for lane in day.done],
-            'due': [lanes.lane_to_dict(lane) for lane in day.due],
-            'quota': None if day.figures is None else quota.to_dict(day.figures),
-        }
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
-        print(json.dumps(document, indent=2))
+        print(json.dumps(answered, indent=2))
     else:
-        render(day, now.date())
+        figures = answered.get('quota')
+        day = Day(
+            [lanes.lane_from(lane) for lane in answered['done']],
+            [lanes.lane_from(lane) for lane in answered['due']],
+            None if figures is None else quota.from_dict(figures),
+        )
+        render(day, dt.datetime.fromisoformat(answered['generated_at']).date())
     # A read-only glance always succeeds. Degradation is shown per group, and a
     # consumer of --json checks each lane's status rather than the exit code.
     return 0

@@ -4,9 +4,7 @@ The done list is `doit.happened`'s fold over the day, tested there. What is
 tested here is what today adds: what is still owed, and how the two lists sit
 together.
 
-`build` only ever runs here with every backend replaced. It shells out to every
-configured source, and a test that let it would be measuring whichever backends
-the machine running the suite happens to have authenticated.
+`assemble` runs here on a round already answered, as the service hands it one.
 """
 
 import datetime as dt
@@ -343,51 +341,48 @@ HABITS_SOURCE = sources.Source(id='icb-habits', command=['icb'], adapter='icb-ha
 
 
 @pytest.fixture
-def no_backends(monkeypatch):
-    """Everything `build` reads off this machine, answered with nothing but one habit done.
+def frozen(monkeypatch):
+    """The adapters read the wall clock, so it is pinned to the day under test."""
+    held = type('Frozen', (dt.datetime,), {'now': classmethod(lambda cls, tz=None: NOW)})
+    for module in (today, happened):
+        monkeypatch.setattr(module, 'dt', SimpleNamespace(**vars(dt) | {'datetime': held}))
 
-    `build` is asserted here and not only its parts. A unit test can satisfy
+
+HABITS_REGISTRY = sources.Registry(completions={'icb-habits': HABITS_SOURCE})
+
+
+def assembled(kept: happened.Kept, registry: sources.Registry = HABITS_REGISTRY) -> today.Day:
+    """The day from a round in which one habit was done, beside a dashboard holding the habits set and one appointment.
+
+    `assemble` is asserted here and not only its parts. A unit test can satisfy
     the sentence its own name makes while the composition above it breaks that
     same sentence.
     """
-    monkeypatch.setattr(today.sources, 'load', lambda: sources.Registry(completions={'icb-habits': HABITS_SOURCE}))
-    monkeypatch.setattr(
-        today.sources,
-        'fetch',
-        lambda asked, bounds: {
-            'icb-habits': sources.Result('icb-habits', [{'name': 'Water', 'complete_date': TODAY.isoformat()}], 0, bounds=bounds)
-        },
-    )
-    monkeypatch.setattr(today.dashboard, 'lanes_of', lambda registry, results, wanted: [habits_view(), upcoming_view(DENTIST)])
-    frozen = type('Frozen', (dt.datetime,), {'now': classmethod(lambda cls, tz=None: NOW)})
-    for module in (today, happened):
-        monkeypatch.setattr(module, 'dt', SimpleNamespace(**vars(dt) | {'datetime': frozen}))
+    results = {'icb-habits': sources.Result('icb-habits', [{'name': 'Water', 'complete_date': TODAY.isoformat()}], 0, bounds=DAY)}
+    return today.assemble(registry, results, [habits_view(), upcoming_view(DENTIST)], kept, DAY, NOW)
 
 
-def kept_with(state=None, **registers):
-    return lambda now: happened.Kept(state=state, registers={'review': [], 'practice': [], **registers})
+def kept_with(state=None, **registers) -> happened.Kept:
+    return happened.Kept(state=state, registers={'review': [], 'practice': [], **registers})
 
 
-def test_each_list_keeps_its_groups_in_one_order(no_backends, monkeypatch):
-    """`build` carries why the due list runs appointments, pursuits, registers,
+def test_each_list_keeps_its_groups_in_one_order(frozen):
+    """`assemble` carries why the due list runs appointments, pursuits, registers,
     then sets. The done list leads with the day sets, so finishing something
     never shuffles the rest."""
     state = pursuit_state(balances={'chore': 1.0})
     state['records'] = [done_record('chore', NOW)]
-    monkeypatch.setattr(happened, 'read_kept', kept_with(state))
 
-    day = today.build(today.sources.load(), NOW)
+    day = assembled(kept_with(state))
 
     assert [lane.name for lane in day.done] == ['habits', 'pursuits', 'review', 'practice']
     assert [lane.name for lane in day.due] == ['upcoming', 'pursuits', 'review', 'practice', 'habits']
     assert [cell.text for cell in day.done[0].grid] == ['Water'], 'the done habits are the fold, not the dashboard grid'
 
 
-def test_a_sources_yml_without_icb_habits_says_so_rather_than_losing_the_habit_done_today(no_backends, monkeypatch):
+def test_a_sources_yml_without_icb_habits_says_so_rather_than_losing_the_habit_done_today(frozen):
     """The set no longer owes a habit ticked today, so with no done half it would sit in neither list."""
-    monkeypatch.setattr(happened, 'read_kept', kept_with())
-
-    day = today.build(sources.Registry(), NOW)
+    day = assembled(kept_with(), sources.Registry())
 
     [done_half] = [lane for lane in day.done if lane.name == 'habits']
     assert not done_half.available
@@ -397,29 +392,23 @@ def test_a_sources_yml_without_icb_habits_says_so_rather_than_losing_the_habit_d
     assert [entry.unavailable for entry in day.figures.checklists if entry.name == 'habits'] == [done_half.reason]
 
 
-def test_a_group_that_could_not_be_read_is_said_once_in_the_due_list(no_backends, monkeypatch):
+def test_a_group_that_could_not_be_read_is_said_once_in_the_due_list(frozen):
     """The fold lists it as unavailable too, and the screen would print the same failure in both lists."""
-    monkeypatch.setattr(happened, 'read_kept', lambda now: happened.Kept(state_error='pursuits.yml: weight must be a number'))
-
-    day = today.build(today.sources.load(), NOW)
+    day = assembled(happened.Kept(state_error='pursuits.yml: weight must be a number'))
 
     assert 'pursuits' not in [lane.name for lane in day.done]
     assert [(lane.name, lane.available) for lane in day.due][:2] == [('upcoming', True), ('pursuits', False)]
 
 
-def test_the_json_carries_both_lists_with_each_lane_in_the_contract_shape(no_backends, monkeypatch, capsys):
+def test_both_lists_carry_each_lane_in_the_contract_shape(frozen):
     """Two lists, because a record appears in both under one name. Each lane
     reads back through the contract's own parser, so no consumer learns a second
     lane shape."""
     state = pursuit_state(balances={'chore': 1.0})
     state['records'] = [done_record('chore', NOW, actor='ada@laptop')]
-    monkeypatch.setattr(happened, 'read_kept', kept_with(state))
 
-    assert today.cmd_today(as_json=True) == 0
-    document = json.loads(capsys.readouterr().out)
+    day = assembled(kept_with(state))
 
-    assert document['schema_version'] == lanes.SCHEMA_VERSION
-    [_, moved, *_] = lanes.from_document({'lanes': document['done']})
+    [_, moved, *_] = lanes.from_document(json.loads(lanes.dumps(day.done, NOW)))
     assert [(cell.text, cell.actor, cell.done_on) for cell in moved.grid] == [('chore', 'ada@laptop', TODAY.isoformat())]
     assert dt.datetime.fromisoformat(moved.grid[0].done_at) == NOW
-    assert [lane['name'] for lane in document['due']] == ['upcoming', 'pursuits', 'review', 'practice', 'habits']

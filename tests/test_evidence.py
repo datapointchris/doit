@@ -8,59 +8,37 @@ journal, never silently report "never done".
 """
 
 import datetime as dt
-import json
-import os
-import shlex
-import sys
-from pathlib import Path
 
 from doit import evidence
 
 NOW = dt.datetime(2026, 8, 16, 12, 0, 0).astimezone()
 
 
-def emitting(document) -> str:
-    """A command printing one JSON document, with no shell involved."""
-    code = f'import json,sys; sys.stdout.write(json.dumps({document!r}))'
-    return f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}'
+class App:
+    """A stand-in for the service's evidence read: answers each pursuit with ``said``, or fails with it when it is text."""
+
+    def __init__(self, said: object) -> None:
+        self.said = said
+
+    def read(self, name: str, config: dict, now: dt.datetime) -> tuple[str, dict]:
+        if isinstance(self.said, str):
+            return name, {'checked_at': now.isoformat(), 'error': self.said}
+        return name, evidence.answer_from(self.said, config, now)
 
 
-def failing(message: str = 'not logged in') -> str:
-    code = f'import sys; sys.stderr.write({message!r}); sys.exit(1)'
-    return f'{shlex.quote(sys.executable)} -c {shlex.quote(code)}'
+def refresh(payload: dict, register: dict, app: App, now: dt.datetime = NOW, *, force: bool = False) -> dict:
+    evidence.refreshed(payload, register, now, app.read, force=force)
+    return payload
 
 
-def backend(answer: Path) -> str:
-    """A command printing what `answer` holds, or failing with what follows `FAIL `.
-
-    One command whose reply changes, so an app can go down while the pursuit
-    declares exactly what it did when the app last answered.
-    """
-    code = (
-        'import pathlib, sys\n'
-        'said = pathlib.Path(sys.argv[1]).read_text()\n'
-        "if said.startswith('FAIL '):\n"
-        '    sys.exit(said[5:])\n'
-        'sys.stdout.write(said)\n'
-    )
-    return f'{shlex.quote(sys.executable)} -c {shlex.quote(code)} {shlex.quote(str(answer))}'
-
-
-def test_an_app_that_saw_it_counts_as_done_with_nothing_typed(tmp_path):
+def test_an_app_that_saw_it_counts_as_done_with_nothing_typed():
     """The whole point, in one assertion.
 
     Nothing was logged by hand. The app answered, so the pursuit has a last-done.
     """
     yesterday = (NOW - dt.timedelta(days=1)).isoformat()
-    pursuits = {
-        'tasks': {
-            'weight': 25,
-            'evidence': emitting([{'complete_date': yesterday}]),
-            'evidence_time': 'complete_date',
-        }
-    }
-    payload = evidence.refresh(pursuits, tmp_path, NOW)
-    seen = evidence.observed(payload)
+    register = {'tasks': {'weight': 25, 'evidence': 'tasks', 'evidence_time': 'complete_date'}}
+    seen = evidence.observed(refresh({}, register, App([{'complete_date': yesterday}])))
     assert 'tasks' in seen
     assert evidence.merged({}, seen)['tasks'] == seen['tasks']
 
@@ -73,22 +51,16 @@ def test_the_later_of_typed_and_observed_wins():
     assert merged['connect'] == NOW - dt.timedelta(days=2), 'no app sees connect, so the log stands'
 
 
-def test_a_row_filter_picks_one_habit_out_of_the_call(tmp_path):
+def test_a_row_filter_picks_one_habit_out_of_the_call_and_bounds_its_days():
     """Twenty habits come back from one call and one of them is the pursuit."""
     rows = [
-        {'name': 'Read', 'complete_date': (NOW - dt.timedelta(days=1)).isoformat()},
+        {'name': 'Read', 'complete_date': (NOW - dt.timedelta(days=2)).isoformat()},
         {'name': 'Yoga', 'complete_date': NOW.isoformat()},
     ]
-    pursuits = {
-        'read': {
-            'weight': 25,
-            'evidence': emitting(rows),
-            'evidence_time': 'complete_date',
-            'evidence_where': {'name': 'Read'},
-        }
-    }
-    seen = evidence.observed(evidence.refresh(pursuits, tmp_path, NOW))
-    assert seen['read'] == NOW - dt.timedelta(days=1), 'Yoga today must not satisfy the reading pursuit'
+    config = {'evidence_time': 'complete_date', 'evidence_where': {'name': 'Read'}}
+    answer = evidence.answer_from(rows, config, NOW)
+    assert answer['last'] == (NOW - dt.timedelta(days=2)).isoformat(), 'Yoga today must not satisfy the reading pursuit'
+    assert answer['dates'] == [(NOW - dt.timedelta(days=2)).date().isoformat()]
 
 
 def test_the_most_recent_row_wins_not_the_first():
@@ -115,114 +87,78 @@ def test_nested_rows_and_a_lone_object_both_read():
     assert evidence.latest_in({'at': NOW.isoformat()}, {'evidence_time': 'at'}, NOW) == NOW
 
 
-def test_a_failed_read_keeps_the_previous_answer_and_says_why(tmp_path):
-    """A logged-out CLI degrades that pursuit to its journal, not to a wrong zero."""
-    yesterday = (NOW - dt.timedelta(days=1)).isoformat()
-    answer = tmp_path / 'answer.json'
-    answer.write_text(json.dumps([{'at': yesterday}]))
-    pursuits = {'train': {'weight': 25, 'evidence': backend(answer), 'evidence_time': 'at'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
+def test_a_failed_read_keeps_the_previous_answer_and_its_days_and_says_why():
+    """A logged-out app degrades that pursuit to its journal, not to a wrong zero."""
+    rows = [{'at': (NOW - dt.timedelta(days=1)).isoformat()}, {'at': (NOW - dt.timedelta(days=4)).isoformat()}]
+    register = {'train': {'weight': 25, 'evidence': 'train', 'evidence_time': 'at'}}
+    payload = refresh({}, register, App(rows))
 
-    answer.write_text('FAIL not logged in')
-    payload = evidence.refresh(pursuits, tmp_path, NOW, force=True)
+    refresh(payload, register, App('not logged in'), force=True)
 
-    assert evidence.observed(payload)['train'] == dt.datetime.fromisoformat(yesterday)
+    assert evidence.observed(payload)['train'] == NOW - dt.timedelta(days=1)
+    assert evidence.occurrences(payload)['train'] == [(NOW - dt.timedelta(days=4)).date(), (NOW - dt.timedelta(days=1)).date()]
     assert 'not logged in' in evidence.problems(payload)['train']
 
 
-def test_output_that_is_not_json_is_an_error_rather_than_a_crash(tmp_path):
-    pursuits = {'pr': {'weight': 25, 'evidence': f'{shlex.quote(sys.executable)} --version', 'evidence_time': 'at'}}
-    payload = evidence.refresh(pursuits, tmp_path, NOW, force=True)
-    assert 'pr' in evidence.problems(payload)
-    assert evidence.observed(payload) == {}
+def test_an_answer_is_asked_for_again_only_once_it_ages_out():
+    register = {'tasks': {'weight': 25, 'evidence': 'tasks', 'evidence_time': 'at'}}
+    payload = refresh({}, register, App([{'at': NOW.isoformat()}]))
 
-
-def test_a_fresh_answer_is_not_asked_for_again(tmp_path):
-    answer = tmp_path / 'answer.json'
-    answer.write_text(json.dumps([{'at': NOW.isoformat()}]))
-    pursuits = {'tasks': {'weight': 25, 'evidence': backend(answer), 'evidence_time': 'at'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
-
-    answer.write_text('FAIL should not run')
-    payload = evidence.refresh(pursuits, tmp_path, NOW + dt.timedelta(seconds=60))
+    refresh(payload, register, App('should not run'), NOW + dt.timedelta(seconds=60))
     assert evidence.problems(payload) == {}, 'inside the TTL the app is left alone'
 
-
-def test_an_aged_out_answer_is_asked_for_again(tmp_path):
-    answer = tmp_path / 'answer.json'
-    answer.write_text(json.dumps([{'at': NOW.isoformat()}]))
-    pursuits = {'tasks': {'weight': 25, 'evidence': backend(answer), 'evidence_time': 'at'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
-
-    answer.write_text('FAIL asked again')
-    later = NOW + dt.timedelta(seconds=evidence.REFRESH_TTL_SECONDS + 1)
-    payload = evidence.refresh(pursuits, tmp_path, later)
+    refresh(payload, register, App('asked again'), NOW + dt.timedelta(seconds=evidence.REFRESH_TTL_SECONDS + 1))
     assert 'asked again' in evidence.problems(payload)['tasks']
 
 
-def test_an_edited_declaration_is_asked_again_inside_the_ttl(tmp_path):
+def test_an_edited_declaration_is_asked_again_inside_the_ttl():
     """Narrowing a pursuit's evidence to one kind of closer kept the unfiltered
     answer, `last today`, until the cache aged out half an hour later."""
-    pursuits = {'build': {'evidence': emitting([{'closed_ts': NOW.isoformat()}]), 'evidence_time': 'closed_ts'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
+    register = {'build': {'evidence': 'closed', 'evidence_time': 'closed_ts'}}
+    payload = refresh({}, register, App([{'closed_ts': NOW.isoformat()}]))
 
-    pursuits['build']['evidence'] = emitting([])
-    payload = evidence.refresh(pursuits, tmp_path, NOW + dt.timedelta(seconds=60))
+    register['build']['evidence'] = 'closed by me'
+    refresh(payload, register, App([]), NOW + dt.timedelta(seconds=60))
 
     assert evidence.observed(payload) == {}
 
 
-def test_a_failed_read_keeps_no_answer_to_an_edited_declaration(tmp_path):
+def test_a_failed_read_keeps_no_answer_to_an_edited_declaration():
     """The cached answer was to a different question, so failing to ask the new one leaves none."""
-    pursuits = {'build': {'evidence': emitting([{'closed_ts': NOW.isoformat()}]), 'evidence_time': 'closed_ts'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
+    register = {'build': {'evidence': 'closed', 'evidence_time': 'closed_ts'}}
+    payload = refresh({}, register, App([{'closed_ts': NOW.isoformat()}]))
 
-    pursuits['build']['evidence'] = failing()
-    payload = evidence.refresh(pursuits, tmp_path, NOW + dt.timedelta(seconds=60))
+    register['build']['evidence'] = 'closed by me'
+    refresh(payload, register, App('not logged in'), NOW + dt.timedelta(seconds=60))
 
     assert evidence.observed(payload) == {}
     assert 'not logged in' in evidence.problems(payload)['build']
 
 
-def test_an_answer_cached_with_no_declaration_survives_a_failed_read(tmp_path):
+def test_an_answer_cached_with_no_declaration_survives_a_failed_read():
     """A cache written before answers carried their declaration degrades rather than empties."""
     yesterday = (NOW - dt.timedelta(days=1)).isoformat()
-    cached = {'checked_at': NOW.isoformat(), 'last': yesterday, 'dates': [yesterday[:10]]}
-    evidence.save(tmp_path, {'schema_version': evidence.SCHEMA_VERSION, 'pursuits': {'train': cached}})
+    payload = {'pursuits': {'train': {'checked_at': NOW.isoformat(), 'last': yesterday, 'dates': [yesterday[:10]]}}}
 
-    payload = evidence.refresh({'train': {'evidence': failing(), 'evidence_time': 'at'}}, tmp_path, NOW + dt.timedelta(seconds=60))
+    refresh(payload, {'train': {'evidence': 'train', 'evidence_time': 'at'}}, App('not logged in'), NOW + dt.timedelta(seconds=60))
 
     assert evidence.observed(payload)['train'] == dt.datetime.fromisoformat(yesterday)
 
 
-def test_dropping_evidence_from_a_pursuit_drops_its_answer(tmp_path):
+def test_dropping_evidence_from_a_pursuit_drops_its_answer():
     """A weight edit must not leave an old app's verdict alive."""
-    pursuits = {'tasks': {'weight': 25, 'evidence': emitting([{'at': NOW.isoformat()}]), 'evidence_time': 'at'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
+    payload = refresh({}, {'tasks': {'weight': 25, 'evidence': 'tasks', 'evidence_time': 'at'}}, App([{'at': NOW.isoformat()}]))
 
-    payload = evidence.refresh({'tasks': {'weight': 25}}, tmp_path, NOW, force=True)
+    refresh(payload, {'tasks': {'weight': 25}}, App('never asked'), force=True)
     assert evidence.observed(payload) == {}
 
 
-def test_a_command_without_a_time_field_is_not_evidence():
+def test_a_declaration_without_a_time_field_is_not_evidence():
     assert evidence.declared({'tasks': {'evidence': 'icb tasks list'}}) == {}
     assert evidence.declared({'tasks': {'evidence_time': 'complete_date'}}) == {}
 
 
-def test_an_unreadable_cache_costs_a_refresh_and_nothing_else(tmp_path):
-    evidence.cache_path(tmp_path).write_text('{ not json')
-    assert evidence.load(tmp_path) == {'schema_version': evidence.SCHEMA_VERSION, 'pursuits': {}}
-
-
-def test_the_cache_round_trips(tmp_path):
-    pursuits = {'tasks': {'weight': 25, 'evidence': emitting([{'at': NOW.isoformat()}]), 'evidence_time': 'at'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
-    written = json.loads(evidence.cache_path(tmp_path).read_text())
-    assert written['schema_version'] == evidence.SCHEMA_VERSION
-    assert written['pursuits']['tasks']['last']
-
-
-def test_every_day_the_app_reported_survives_the_read(tmp_path):
+def test_every_day_the_app_reported_survives_the_read():
     """The occurrences are what `latest_in` alone throws away."""
     rows = [
         {'at': (NOW - dt.timedelta(hours=1)).isoformat()},
@@ -230,8 +166,7 @@ def test_every_day_the_app_reported_survives_the_read(tmp_path):
         {'at': (NOW - dt.timedelta(days=3)).isoformat()},
         {'at': (NOW - dt.timedelta(days=11)).isoformat()},
     ]
-    pursuits = {'build': {'weight': 35, 'evidence': emitting(rows), 'evidence_time': 'at'}}
-    payload = evidence.refresh(pursuits, tmp_path, NOW)
+    payload = refresh({}, {'build': {'weight': 35, 'evidence': 'build', 'evidence_time': 'at'}}, App(rows))
 
     assert evidence.occurrences(payload)['build'] == [
         (NOW - dt.timedelta(days=11)).date(),
@@ -247,79 +182,25 @@ def test_a_day_the_backend_dated_ahead_of_now_is_dropped():
     assert evidence.dates_of([NOW], NOW) == [NOW.date().isoformat()]
 
 
-def test_the_row_filter_bounds_the_days_as_well_as_the_last_one(tmp_path):
-    """Yoga today must not put a day into the reading pursuit."""
-    rows = [
-        {'name': 'Read', 'complete_date': (NOW - dt.timedelta(days=2)).isoformat()},
-        {'name': 'Yoga', 'complete_date': NOW.isoformat()},
-    ]
-    pursuits = {
-        'read': {
-            'weight': 25,
-            'evidence': emitting(rows),
-            'evidence_time': 'complete_date',
-            'evidence_where': {'name': 'Read'},
-        }
-    }
-    payload = evidence.refresh(pursuits, tmp_path, NOW)
-    assert evidence.occurrences(payload)['read'] == [(NOW - dt.timedelta(days=2)).date()]
-
-
-def test_a_failed_read_keeps_the_previous_days(tmp_path):
-    """The same policy as `last`: an unreachable backend degrades, it does not empty."""
-    rows = [{'at': (NOW - dt.timedelta(days=1)).isoformat()}, {'at': (NOW - dt.timedelta(days=4)).isoformat()}]
-    answer = tmp_path / 'answer.json'
-    answer.write_text(json.dumps(rows))
-    pursuits = {'train': {'weight': 25, 'evidence': backend(answer), 'evidence_time': 'at'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
-
-    answer.write_text('FAIL not logged in')
-    payload = evidence.refresh(pursuits, tmp_path, NOW, force=True)
-
-    assert evidence.occurrences(payload)['train'] == [
-        (NOW - dt.timedelta(days=4)).date(),
-        (NOW - dt.timedelta(days=1)).date(),
-    ]
-    assert 'not logged in' in evidence.problems(payload)['train']
-
-
-def test_the_days_are_written_as_plain_dates(tmp_path):
-    pursuits = {'tasks': {'weight': 25, 'evidence': emitting([{'at': NOW.isoformat()}]), 'evidence_time': 'at'}}
-    evidence.refresh(pursuits, tmp_path, NOW)
-    written = json.loads(evidence.cache_path(tmp_path).read_text())
-    assert written['pursuits']['tasks']['dates'] == [NOW.date().isoformat()]
-
-
-def test_a_cache_from_either_side_of_this_still_reads(tmp_path):
+def test_a_cache_from_either_side_of_this_still_reads():
     """A cache is written by whichever doit ran last, and both must read it.
 
     An older one wrote no days, and reads as no occurrences rather than as damage.
     A newer one writes a field the older one never asks for, and answering `last`
     must not depend on knowing every key in the entry.
     """
-    older = {
-        'schema_version': evidence.SCHEMA_VERSION,
-        'pursuits': {'tasks': {'checked_at': NOW.isoformat(), 'last': (NOW - dt.timedelta(days=2)).isoformat()}},
-    }
-    evidence.save(tmp_path, older)
-    loaded = evidence.load(tmp_path)
-    assert loaded == older, 'a missing field is absence, not a malformed document'
-    assert evidence.observed(loaded)['tasks'] == NOW - dt.timedelta(days=2)
-    assert evidence.occurrences(loaded) == {}
+    older = {'pursuits': {'tasks': {'checked_at': NOW.isoformat(), 'last': (NOW - dt.timedelta(days=2)).isoformat()}}}
+    assert evidence.observed(older)['tasks'] == NOW - dt.timedelta(days=2)
+    assert evidence.occurrences(older) == {}
 
-    newer = evidence.load(tmp_path)
-    newer['pursuits']['tasks']['dates'] = [NOW.date().isoformat()]
-    newer['pursuits']['tasks']['something_later'] = 'a field this doit does not know'
-    evidence.save(tmp_path, newer)
-    reloaded = evidence.load(tmp_path)
-    assert evidence.observed(reloaded)['tasks'] == NOW - dt.timedelta(days=2)
-    assert evidence.occurrences(reloaded)['tasks'] == [NOW.date()]
-    assert evidence.problems(reloaded) == {}
+    newer = {'pursuits': {'tasks': {**older['pursuits']['tasks'], 'dates': [NOW.date().isoformat()], 'something_later': 'unknown'}}}
+    assert evidence.observed(newer)['tasks'] == NOW - dt.timedelta(days=2)
+    assert evidence.occurrences(newer)['tasks'] == [NOW.date()]
+    assert evidence.problems(newer) == {}
 
 
-def test_a_day_that_is_not_a_date_is_dropped_rather_than_fatal(tmp_path):
+def test_a_day_that_is_not_a_date_is_dropped_rather_than_fatal():
     payload = {
-        'schema_version': evidence.SCHEMA_VERSION,
         'pursuits': {
             'tasks': {'checked_at': NOW.isoformat(), 'dates': ['not a date', NOW.date().isoformat()]},
             'read': {'checked_at': NOW.isoformat(), 'dates': None},
@@ -327,100 +208,6 @@ def test_a_day_that_is_not_a_date_is_dropped_rather_than_fatal(tmp_path):
         },
     }
     assert evidence.occurrences(payload) == {'tasks': [NOW.date()]}
-
-
-def written(directory, name: str, days_ago: float) -> None:
-    """A file whose mtime is the moment that entry was written."""
-    path = directory / name
-    path.write_text('an entry')
-    when = (NOW - dt.timedelta(days=days_ago)).timestamp()
-    os.utime(path, (when, when))
-
-
-def test_a_directory_of_files_answers_when_the_practice_last_happened(tmp_path):
-    """The file is the record already. A second one you have to remember to make
-    is the thing that goes stale."""
-    written(tmp_path, '2026-07-01-in-love-with-a-boy.md', 3)
-    written(tmp_path, '2024-11-05-addictions.md', 40)
-
-    _, entry = evidence.read_files('journal', str(tmp_path), NOW)
-
-    assert entry['last'].startswith((NOW - dt.timedelta(days=3)).date().isoformat())
-    assert entry['dates'] == [(NOW - dt.timedelta(days=40)).date().isoformat(), (NOW - dt.timedelta(days=3)).date().isoformat()]
-
-
-def test_a_subdirectory_beside_the_entries_is_not_an_entry(tmp_path):
-    """Non-recursive, so a topics folder living with the journal does not read as
-    having journalled."""
-    written(tmp_path, 'entry.md', 5)
-    nested = tmp_path / 'topics'
-    nested.mkdir()
-    written(nested, 'something-to-write-about.md', 0)
-
-    _, entry = evidence.read_files('journal', str(tmp_path), NOW)
-
-    assert entry['dates'] == [(NOW - dt.timedelta(days=5)).date().isoformat()]
-
-
-def test_a_dotfile_is_not_an_entry(tmp_path):
-    written(tmp_path, '.stfolder-marker', 0)
-    written(tmp_path, 'entry.md', 5)
-
-    _, entry = evidence.read_files('journal', str(tmp_path), NOW)
-
-    assert entry['dates'] == [(NOW - dt.timedelta(days=5)).date().isoformat()]
-
-
-def test_an_empty_directory_reads_as_never_rather_than_broken(tmp_path):
-    """Nothing written yet is a true answer, and an error would keep the previous
-    one standing instead."""
-    _, entry = evidence.read_files('journal', str(tmp_path), NOW)
-
-    assert entry['last'] is None
-    assert entry['dates'] == []
-    assert 'error' not in entry
-
-
-def test_a_directory_that_is_not_there_is_an_error_not_a_crash(tmp_path):
-    _, entry = evidence.read_files('journal', str(tmp_path / 'nope'), NOW)
-
-    assert 'error' in entry
-    assert 'last' not in entry
-
-
-def test_the_path_is_read_the_way_it_is_written(tmp_path, monkeypatch):
-    """A config file says ~/notes/journal, and nothing expands it on the way in."""
-    monkeypatch.setenv('HOME', str(tmp_path))
-    written(tmp_path, 'entry.md', 2)
-
-    _, entry = evidence.read_files('journal', '~', NOW)
-
-    assert entry['dates'] == [(NOW - dt.timedelta(days=2)).date().isoformat()]
-
-
-def test_a_pursuit_naming_files_needs_no_timestamp_field():
-    """A file's own timestamp is the field, so pairing it with evidence_time
-    would be a second way to say the same thing."""
-    register = {
-        'journal': {'evidence_files': '~/notes/journal'},
-        'chore': {},
-        'half': {'evidence': 'icb tasks list --json'},
-    }
-
-    assert set(evidence.declared(register)) == {'journal'}
-
-
-def test_files_evidence_travels_through_the_cache_like_any_other(tmp_path):
-    """`refresh` is the only writer, so a form it cannot reach would answer once
-    and never be stored."""
-    entries = tmp_path / 'journal'
-    entries.mkdir()
-    written(entries, 'entry.md', 1)
-
-    payload = evidence.refresh({'journal': {'evidence_files': str(entries)}}, tmp_path / 'cache', NOW)
-
-    assert evidence.observed(payload)['journal'].date() == (NOW - dt.timedelta(days=1)).date()
-    assert evidence.occurrences(payload)['journal'] == [(NOW - dt.timedelta(days=1)).date()]
 
 
 def test_a_filter_matches_regardless_of_case():

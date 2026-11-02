@@ -29,23 +29,19 @@ character a reader skips. Every view states standing as a date instead, built by
 `allocate.projected_days_until_due`. The raw balance stays in `--json` and in
 every journal entry.
 
-Three files, kept apart like the review register:
-  - pursuits.yml    declarative config you hand-edit; only ever read here. Under
-                    the XDG config dir, never either doit repo — a life's
-                    intentions are personal and both repos are public.
-  - next-log-*.jsonl  the append-only journal, one file per machine, merged on
-                    read. See doit.journal for why per-machine.
-  - next-offers-*.json  how many times each pursuit has been offered, so `drift`
-                    can tell "never comes up" apart from "comes up and is ignored".
+doit's service keeps the register, the append-only journal, and how many times
+each pursuit has been offered, so `drift` can tell "never comes up" apart from
+"comes up and is ignored". The functions here compute every number from those,
+and the service runs them. The commands here ask the service and render what it
+answers.
 
-The draw is fresh every run, not a queue — but cached for 15 minutes, because
+The draw is fresh every run, not a queue — but it stands for 15 minutes, because
 running it three times while deciding must not reshuffle the list underneath you.
-That cache also carries which concrete item each pursuit resolved to, which is what
-lets `doit pursuits log` write through to the CLI that owns it.
+The standing draw also carries which concrete item each pursuit resolved to, which
+is what lets `doit pursuits log` write through to the CLI that owns it.
 
-What a pursuit resolves to is never doit's business. It shells out to whoever owns
-that domain — `icb books` knows which book, `icb tasks` knows which chore — exactly
-as the dashboard delegates its lanes.
+What a pursuit resolves to is never doit's business. The service reads it from
+whichever app owns that domain, exactly as the dashboard delegates its lanes.
 """
 
 import datetime as dt
@@ -58,7 +54,6 @@ import shlex
 import subprocess
 from collections.abc import Callable
 from collections.abc import Iterable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Annotated
 from typing import NamedTuple
@@ -71,6 +66,7 @@ from rich.text import Text
 from doit import actor
 from doit import evidence
 from doit import journal
+from doit import service
 from doit.allocate import WEEK_DAYS
 from doit.allocate import balance
 from doit.allocate import candidates
@@ -78,23 +74,12 @@ from doit.allocate import draw
 from doit.allocate import first_draw_probabilities
 from doit.allocate import projected_days_until_due
 from doit.cadence import parse_cadence
-from doit.editor import open_in_editor
-from doit.journal import bump_counts
 from doit.journal import checkoff_equivalent
-from doit.journal import counts_by_machine
-from doit.journal import counts_path
 from doit.journal import days_since
-from doit.journal import journal_path
 from doit.journal import latest_occurrence
-from doit.journal import load_counts
 from doit.journal import new_id
-from doit.paths import NamedPathMissing
-from doit.paths import env_path
-from doit.paths import journal_dir
 from doit.paths import machine_name
-from doit.paths import require_named
 from doit.paths import xdg_cache_home
-from doit.paths import xdg_config_home
 from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
@@ -107,10 +92,7 @@ from doit.window import first_instant
 from doit.window import span
 from doit.window import window
 
-REGISTER_ENV = 'DOIT_PURSUITS'
-REGISTER = env_path(REGISTER_ENV, xdg_config_home() / 'doit' / 'pursuits.yml')
 CACHE_DIR = Path(os.environ.get('DOIT_CACHE_DIR') or xdg_cache_home() / 'doit')
-DRAW_CACHE = CACHE_DIR / 'next-draw.json'
 NAMES_CACHE = CACHE_DIR / 'next-names.txt'
 
 # Long enough to survive deciding what to do, short enough that coming back after
@@ -161,10 +143,6 @@ MIN_CHOICE_WIDTH = 12
 # at a dozen characters names nothing, and the standing columns are only there
 # to explain a date the row already states.
 READABLE_CHOICE_WIDTH = 30
-
-# A resolver is one network call to a product CLI. They run concurrently and only
-# for what was actually drawn, so this is the whole wait, not a per-pursuit one.
-RESOLVE_TIMEOUT_SECONDS = 5.0
 
 # Fields a pursuit may declare. Anything else is a typo, and a typo in a weight
 # file is silent damage — it would allocate attention by a number nobody wrote.
@@ -221,7 +199,7 @@ TEMPLATE = """\
 #   until        optional end date; after it the pursuit pauses and says so
 #   paused       optional; keeps it in the file but out of the draw, and the days
 #                it spends paused ask for nothing
-#   resolve      optional command answering "specifically what?" — see below
+#   resolve      optional read answering "specifically what?" — see below
 #   on_log       optional command run after logging, e.g. completing the task
 #
 # Standing is one balance per pursuit: what its pace asked for since its zero
@@ -235,23 +213,25 @@ TEMPLATE = """\
 # moves it to now, which is the one way to forgive a debt, and with no name it
 # moves every one.
 #
-# resolve prints either plain lines (first line wins) or JSON. For JSON, name the
-# fields to read: `label` for what to show, `id` for what on_log substitutes into,
-# and `items` when the list is nested inside the document.
+# resolve is a read doit's service makes of an app it holds credentials for:
+# `{app: <name>, path: /<route>, query: {<parameter>: <value>}}` asks
+# `GET <app>/api/v1/<route>`. The app answers JSON, so name the fields to read:
+# `label` for what to show, `id` for what on_log substitutes into, and `items`
+# when the list is nested inside the document.
 #
 # How many rows come back is the register saying whether it means one thing or
 # several. One row is a decision, so the draw shows it and `doit pursuits log` records it.
 # Several are choices: the draw shows the first three under the pursuit, and
 # `doit pursuits log` asks which one you did wherever `on_log` would act on it. Enter, or
 # nobody there to ask, names none — an hour of reading is not a claim about
-# which book. Narrow the command to one where you mean one.
+# which book. Narrow the read to one where you mean one.
 #
-# No rows is shown in red, as `<backend>: matched nothing` followed by the
-# description. Either the command has drifted from its backend or there is
-# nothing to do the pursuit on yet, and the row cannot tell which.
+# No rows is shown in red, as `<app>: matched nothing` followed by the
+# description. Either the read has drifted from its app or there is nothing to
+# do the pursuit on yet, and the row cannot tell which.
 #
 #   resolve_where  optional field: value pairs keeping only the rows that are
-#                  this pursuit. Narrow the command itself where the backend can;
+#                  this pursuit. Narrow the read's query where the app can;
 #                  reach for this where it has no filter for the distinction.
 #
 # A title names an item without placing it, so `context` follows it on the same
@@ -273,19 +253,19 @@ TEMPLATE = """\
 # apps are asked on a timer rather than per command. `doit pursuits evidence`
 # asks them now and names any that could not be reached.
 #
-#   evidence        command printing JSON rows of what got done
+#   evidence        a read written as resolve's, answering rows of what got done
 #   evidence_time   the timestamp field on each row
 #   evidence_items  optional key holding the rows when they are nested
 #   evidence_where  optional field: value pairs selecting the rows that count
-#   evidence_files  a directory instead of a command, for a practice whose
-#                   output is files — the newest one is when it last happened
+#   evidence_files  a directory of files on a desk, which the service cannot
+#                   read, so it reports the pursuit's evidence as failed
 #
 # Evidence counts occurrences, so a cadence takes it and so does a tracked
 # pursuit. An app says which day something happened and never how long, so a
 # weekly_minutes pursuit is paid by `doit pursuits log --minutes` alone.
 #
-# Standing counts back to the zero point, so the command has to answer that far
-# back. A `--limit` on it drops the oldest days, and each one dropped is owed.
+# Standing counts back to the zero point, so the read has to answer that far
+# back. A limit in its query drops the oldest days, and each one dropped is owed.
 #
 # A cycle leans the draw for a stretch and lapses by itself after its until
 # date, so nothing has to be put back by hand. Cycles sit in a list beside
@@ -340,28 +320,6 @@ class RegisterError(Exception):
     """A pursuits file that cannot be trusted to allocate attention correctly."""
 
 
-def register_path() -> Path:
-    """The register, refused when `$DOIT_PURSUITS` names a file that is not there."""
-    return require_named(REGISTER_ENV, REGISTER)
-
-
-def load_pursuits(path: Path | None = None) -> dict:
-    """The register, validated. Raises rather than guessing at a malformed entry.
-
-    Every failure here is silent misallocation if it were tolerated: a missing
-    weight would default to something nobody chose, a misspelled field would be
-    ignored, and either way the tool would confidently offer the wrong things for
-    months. A weight file has to be right or refuse to run.
-
-    The default is read at call time rather than bound as a parameter default, so
-    a test repointing REGISTER is seen by everything that reads it.
-    """
-    path = register_path() if path is None else path
-    if not path.exists():
-        return {}
-    return pursuits_from_document(parse_register(path.read_text(), path), path)
-
-
 def parse_register(text: str, where: object) -> dict:
     """The register's YAML as a mapping, refused with ``where`` named where it is not one."""
     try:
@@ -376,7 +334,13 @@ def parse_register(text: str, where: object) -> dict:
 
 
 def pursuits_from_document(document: dict, where: object) -> dict:
-    """The `pursuits:` block of a parsed register, validated as :func:`load_pursuits` describes."""
+    """The `pursuits:` block of a parsed register, validated. Raises rather than guessing at a malformed entry.
+
+    Every failure here is silent misallocation if it were tolerated: a missing
+    weight would default to something nobody chose, a misspelled field would be
+    ignored, and either way the tool would confidently offer the wrong things for
+    months. A weight file has to be right or refuse to run.
+    """
     pursuits = document.get('pursuits') or {}
     if not isinstance(pursuits, dict):
         raise RegisterError(f'{where}: `pursuits` must be a mapping of name to settings')
@@ -425,12 +389,12 @@ def pursuits_from_document(document: dict, where: object) -> dict:
     return pursuits
 
 
-def register_block(key: str, known: set[str], path: Path | None) -> dict:
+def block_of(document: dict, key: str, known: set[str], where: object) -> dict:
     """One of the register's sibling blocks, validated against the keys it accepts.
 
     Siblings of `pursuits:` rather than keys on one, because each states a fact
-    about the person and not about any single strand. Read from the same file so
-    there is one thing to hand-edit and one thing to sync.
+    about the person and not about any single strand. Kept in the same document
+    so there is one thing to edit.
 
     An unknown key is refused here for the reason it is refused on a pursuit: a
     file that turns one typo away silently and refuses another teaches the reader
@@ -438,14 +402,6 @@ def register_block(key: str, known: set[str], path: Path | None) -> dict:
     90` reverting to a default nobody chose is the same silent misallocation a
     misspelled `weight` would be.
     """
-    path = register_path() if path is None else path
-    if not path.exists():
-        return {}
-    return block_of(yaml.safe_load(path.read_text()) or {}, key, known, path)
-
-
-def block_of(document: dict, key: str, known: set[str], where: object) -> dict:
-    """One sibling block of a parsed register, validated as :func:`register_block` describes."""
     block = document.get(key) or {}
     if not isinstance(block, dict):
         raise RegisterError(f'{where}: `{key}` must be a mapping of settings')
@@ -455,16 +411,8 @@ def block_of(document: dict, key: str, known: set[str], where: object) -> dict:
     return block
 
 
-def load_settings(path: Path | None = None) -> dict:
-    """The register's `forecast:` block — what a day is assumed to hold."""
-    path = register_path() if path is None else path
-    if not path.exists():
-        return {}
-    return settings_from_document(yaml.safe_load(path.read_text()) or {}, path)
-
-
 def settings_from_document(document: dict, where: object) -> dict:
-    """The `forecast:` block of a parsed register, validated."""
+    """The register's `forecast:` block — what a day is assumed to hold — validated."""
     settings = block_of(document, 'forecast', {'budget_minutes'}, where)
     budget = settings.get('budget_minutes')
     if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
@@ -485,7 +433,7 @@ class Cycle(NamedTuple):
     cadence: dict[str, str]
 
 
-def load_cycles(pursuits: dict, path: Path | None = None) -> list[Cycle]:
+def cycles_from_document(document: dict, pursuits: dict, where: object) -> list[Cycle]:
     """The register's `cycles:` list, validated against the pursuits it names.
 
     A cycle scales weights and tightens cadences until its `until` date, then
@@ -498,14 +446,6 @@ def load_cycles(pursuits: dict, path: Path | None = None) -> list[Cycle]:
     override needs a pursuit that already counts occurrences. Moving a timed
     pursuit onto a cadence changes its unit, and that restarts its balance.
     """
-    path = register_path() if path is None else path
-    if not path.exists():
-        return []
-    return cycles_from_document(yaml.safe_load(path.read_text()) or {}, pursuits, path)
-
-
-def cycles_from_document(document: dict, pursuits: dict, where: object) -> list[Cycle]:
-    """The `cycles:` list of a parsed register, validated as :func:`load_cycles` describes."""
     declared = document.get('cycles') or []
     if not isinstance(declared, list):
         raise RegisterError(f'{where}: `cycles` must be a list, each entry with a name and an until date')
@@ -569,10 +509,15 @@ def cycle_paced(name: str, config: dict, running: list[Cycle]) -> dict:
 
 
 def term_ended(config: dict, today: dt.date) -> bool:
-    """Whether a time-boxed pursuit is past its `until` date."""
+    """Whether a time-boxed pursuit is past its `until` date.
+
+    A date as YAML reads it, or the ISO text the service sends the register in.
+    """
     until = config.get('until')
     if not until:
         return False
+    if isinstance(until, str):
+        until = dt.date.fromisoformat(until)
     return bool(until < today)
 
 
@@ -965,33 +910,28 @@ def build_state(
     declares no pace, so its app is asked and its last occurrence found, and it
     gets no interval, balance or place in the pool.
 
-    ``records`` and ``observed`` default to the journal on disk and a live round
-    trip to every backend. Reading the journal from disk also writes the start of
-    any pursuit it has never zeroed, through :func:`record_first_sightings`, and
-    any pace the journal has not recorded, through :func:`record_pace_changes`;
-    handed-in records never write. ``evidence_days`` goes with ``observed``: the
-    days each app reported, which the live round trip would otherwise supply.
-    :mod:`doit.forecast` supplies all three instead, which is what lets a simulated
-    day run this function rather than a second copy of the model — a copy is the
+    ``records`` is the journal. ``append`` writes the start of any pursuit it has
+    never zeroed, through :func:`first_sightings`, and any pace it has not
+    recorded, through :func:`pace_changes`, as ``machine``. Without ``append``
+    nothing is written, which is how :mod:`doit.forecast` runs a simulated day
+    through this function rather than a second copy of the model — a copy is the
     only way the forecast could come to disagree with the draw it claims to
-    predict. Injecting them is also what keeps a thirty-day simulation from
-    making thirty evidence calls and thirty file reads per replicate.
+    predict.
 
-    ``cycles`` defaults to the register's `cycles:` list. Those running on
-    ``now``'s date scale the weights and hold cadences tighter. The held cadence
-    is what gets journaled as the pace, so the days a cycle runs are priced at
-    it and the days after at the register's own.
+    ``observations`` is an evidence refresh the caller already made.
+    ``observed`` and ``evidence_days`` stand in for one, as the days each app
+    reported, which keeps a thirty-day simulation from asking any app at all.
 
-    A caller holding the journal somewhere other than this machine's files hands
-    in ``records`` with ``append``, which writes the sightings and paces this
-    build finds, and the ``machine`` they are written as. ``observations`` is an
-    evidence refresh it already made, which stands in for the live one.
+    ``cycles`` are the register's `cycles:` list. Those running on ``now``'s date
+    scale the weights and hold cadences tighter. The held cadence is what gets
+    journaled as the pace, so the days a cycle runs are priced at it and the days
+    after at the register's own.
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
     watching = watched(pursuits, today)
     tracked = {name: config for name, config in watching.items() if name not in active}
-    running = running_cycles(load_cycles(pursuits) if cycles is None else cycles, today)
+    running = running_cycles(cycles or [], today)
     weights = {name: cycle_weight(name, config, running) for name, config in active.items()}
     weekly_minutes = declared_minutes(pursuits)
     held = {name: cycle_paced(name, config, running) for name, config in active.items()}
@@ -999,17 +939,7 @@ def build_state(
     intervals = {name: interval for name, (interval, _) in paces.items()}
     sizes = {name: size for name, (_, size) in paces.items()}
 
-    if records is None:
-        directory = journal_dir()
-        records = journal.read_all(directory) if directory.exists() else []
-        if directory.exists():
-            path = journal_path(directory, machine_name())
-            machine = machine_name()
-
-            def append(found: list[dict]) -> None:
-                for record in found:
-                    journal.append(path, record)
-
+    records = records or []
     if append is not None:
         sightings = first_sightings(active, records, intervals, now, machine)
         append(sightings)
@@ -1020,8 +950,7 @@ def build_state(
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
-    if observations is None:
-        observations = {} if observed is not None else evidence.refresh(pursuits, CACHE_DIR, now, ask=watching)
+    observations = observations or {}
     seen = evidence.observed(observations) if observed is None else observed
     seen_days = evidence.occurrences(observations) if observed is None else (evidence_days or {})
     last_done = evidence.merged(latest_occurrence(records, journal.Event.DONE), seen)
@@ -1160,42 +1089,6 @@ def compute_draw(state: dict, seed: int | None = None) -> dict:
     }
 
 
-def load_cached_draw(now: dt.datetime) -> dict | None:
-    """The draw from the last few minutes, or None once it has aged out.
-
-    A payload carrying no `offered` list is treated as expired. The cache holds a
-    quarter of an hour, so a shape it no longer speaks costs one fresh draw and is
-    cheaper than a reader anywhere downstream having to know two shapes.
-    """
-    if not DRAW_CACHE.exists():
-        return None
-    try:
-        cached = json.loads(DRAW_CACHE.read_text())
-    except json.JSONDecodeError:
-        return None
-    return cached if draw_stands(cached, now) else None
-
-
-def save_cached_draw(payload: dict) -> None:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    DRAW_CACHE.write_text(json.dumps(payload, indent=2) + '\n')
-
-
-def mark_logged(name: str, now: dt.datetime) -> None:
-    """Note that a pursuit has been done against the standing draw.
-
-    Marked rather than dropped, and the draw kept rather than discarded. A log
-    reads the offered list for `was_offered` and `rank_offered`, and the next log
-    in the same window takes its item from the resolved map instead of asking the
-    backend again — both need the draw to survive being partly done.
-    """
-    cached = load_cached_draw(now)
-    if cached is None:
-        return
-    cached['logged'] = sorted(set(cached.get('logged') or []) | {name})
-    save_cached_draw(cached)
-
-
 def draw_stands(draw: dict | None, now: dt.datetime) -> bool:
     """Whether a draw still answers `next`: made within CACHE_MINUTES, not retired, and in the shape read here.
 
@@ -1294,7 +1187,9 @@ def dormant_rows(state: dict) -> list[dict]:
     for name in state['active']:
         elapsed, interval = state['days_since'][name], state['intervals'][name]
         if not math.isinf(interval) and (elapsed is None or elapsed > interval * DORMANT_INTERVALS):
-            rows.append({'pursuit': name, 'days_since': elapsed, 'interval_days': round(interval, 2)})
+            rows.append(
+                {'pursuit': name, 'days_since': elapsed, 'interval_days': round(interval, 2), 'goal': goal_text(state['active'][name])}
+            )
     return sorted(rows, key=lambda row: -(math.inf if row['days_since'] is None else row['days_since']))
 
 
@@ -1366,52 +1261,6 @@ def dig(document, path: str):
             return None
         current = current[key]
     return current
-
-
-def resolve_one(name: str, config: dict) -> dict | None:
-    """Ask the owning CLI what this pursuit means right now.
-
-    Never `shell=True`: the command comes from a config file, and while that file
-    is yours, a tool that hands config text to a shell has a class of bug you
-    cannot audit away later.
-    """
-    command = config.get('resolve')
-    if not command:
-        return None
-    try:
-        result = subprocess.run(
-            shlex.split(command),
-            capture_output=True,
-            text=True,
-            timeout=RESOLVE_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        return {'pursuit': name, 'error': str(error), 'backend': shlex.split(command)[0]}
-    if result.returncode != 0:
-        # A backend can fail with nothing on either stream (`false`, a bare
-        # non-zero exit), so the status is the message of last resort — the row
-        # still has to say something rather than render an empty value.
-        said = (result.stderr or result.stdout).strip().splitlines()
-        return {
-            'pursuit': name,
-            'error': said[0] if said else f'exited {result.returncode}',
-            'backend': shlex.split(command)[0],
-        }
-
-    backend = shlex.split(command)[0]
-    label_field = config.get('label')
-    if not label_field:
-        first = next((line for line in result.stdout.splitlines() if line.strip()), '')
-        if not first:
-            return nothing_matched(name, backend)
-        return {'pursuit': name, 'candidates': 1, 'choices': [{'label': first.strip()}]}
-
-    try:
-        document = json.loads(result.stdout or 'null')
-    except json.JSONDecodeError:
-        return {'pursuit': name, 'error': 'resolve did not return JSON but names a label field'}
-    return choices_from(name, config, document, backend)
 
 
 def choices_from(name: str, config: dict, document: object, backend: str) -> dict:
@@ -1513,56 +1362,6 @@ def row_context(row: dict, paths) -> str:
     if isinstance(paths, str):
         paths = [paths]
     return join_context(dig(row, path) for path in paths or [])
-
-
-def resolve_all(names: list[str], pursuits: dict) -> dict[str, dict]:
-    """Resolve only what was drawn, concurrently. The rest is never asked."""
-    wanted = [name for name in names if pursuits.get(name, {}).get('resolve')]
-    if not wanted:
-        return {}
-    with ThreadPoolExecutor(max_workers=len(wanted)) as pool:
-        results = pool.map(lambda name: resolve_one(name, pursuits[name]), wanted)
-    return {name: result for name, result in zip(wanted, results, strict=True) if result}
-
-
-def retry_failed_resolves(selection: dict, pursuits: dict) -> None:
-    """Ask again for the rows whose backend failed, leaving the draw itself alone.
-
-    The draw is cached so that running it three times while deciding does not
-    reshuffle it. A failure is not an answer, though, so caching one pins a dead
-    message to the row for the rest of the window — a backend that came back, or a
-    register entry that was corrected, keeps showing the old error. Rerolling would
-    clear it and change the very thing the cache is protecting.
-    """
-    resolved = selection.get('resolved') or {}
-    failed = [name for name, detail in resolved.items() if isinstance(detail, dict) and detail.get('error')]
-    if not failed:
-        return
-    for name in failed:
-        resolved.pop(name)
-    resolved.update(resolve_all(failed, pursuits))
-    selection['resolved'] = resolved
-    save_cached_draw(selection)
-
-
-def todays_context() -> list[str]:
-    """Today's events and imminent countdowns — context, never candidates.
-
-    An event is something happening rather than something to choose, so it sits
-    above the draw as one line and takes no part in it.
-    """
-    try:
-        result = subprocess.run(
-            ['icb', 'overview', '--json'],
-            capture_output=True,
-            text=True,
-            timeout=RESOLVE_TIMEOUT_SECONDS,
-            check=False,
-        )
-        payload = json.loads(result.stdout or '{}')
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
-        return []
-    return context_lines(payload, dt.date.today())
 
 
 def format_elapsed(days: float | None) -> str:
@@ -1840,53 +1639,29 @@ def render_offers(offered: list[Offer], rest: list[Offer], width: int) -> None:
 
 
 def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
-    pursuits = load_pursuits()
-    if not pursuits:
-        console.print('No pursuits yet. Start one:  [cyan]doit pursuits edit[/]')
-        return 1
-    write_names_cache(pursuits)
-
-    now = dt.datetime.now().astimezone()
-    state = build_state(pursuits, now)
-    if not state['active']:
-        console.print('Nothing to draw: every pursuit is paused, past its term, or tracked.')
-        return 1
-
-    cached = None if reroll else load_cached_draw(now)
-    if cached is not None:
-        # Repaired against the whole draw, before anything is filtered out of it —
-        # this writes the payload back, and a filtered one would erase the record
-        # every later log reads its provenance from.
-        retry_failed_resolves(cached, pursuits)
-        cached = without_logged(cached)
-        # Nothing offered is still outstanding, so the standing draw has no answer
-        # left to give and the question earns a fresh one.
-        if not cached['offered']:
-            cached = None
-    if cached is None:
-        selection = compute_draw(state)
-        names = selection['offered']
-        selection['resolved'] = resolve_all(names, pursuits)
-        save_cached_draw(selection)
-        bump_counts(counts_path(journal_dir(), machine_name()), names)
-    else:
-        selection = cached
-        names = selection['offered']
-
+    """The service's draw: the one standing for this window, or a fresh one where none stands or ``reroll`` asks."""
+    selection = service.client().get('/next', machine=machine_name(), reroll=reroll or None)
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
-        print(json.dumps({**selection, 'state': explain_payload(state)}, indent=2, default=str))
+        print(json.dumps(selection, indent=2))
         return 0
 
+    now = dt.datetime.now().astimezone()
+    write_names_cache(selection['pursuits'])
+    state = standing_from(selection['state'], selection['pursuits'], now)
+    names = selection['offered']
     if explain:
         return render_explain(state, selection)
 
     width = terminal_width()
     console.rule(f'[cyan]What now[/] · {now:%a %d %b}', align='left')
     # One per line. Joined on one line, two dates read as one event.
-    for event in todays_context():
+    for event in selection.get('context') or []:
         console.print(Text(f'{" " * GUTTER}{event}', style='magenta'), no_wrap=True, overflow='ellipsis')
+    if selection.get('context_error'):
+        # Said rather than left blank, because a blank reads as a quiet day.
+        console.print(Text(f'{" " * GUTTER}events unavailable — {selection["context_error"]}', style='yellow'), soft_wrap=True)
 
     resolved = selection.get('resolved') or {}
     # The offered rows keep the order the draw gave them, never re-sorted here.
@@ -1913,6 +1688,8 @@ def explain_payload(state: dict) -> dict:
         # Projected through any skip still running, which the balance beside it
         # does not carry.
         'due': {name: None if value is None else round(value, 2) for name, value in state['due'].items()},
+        # One checkoff in the pursuit's own unit: a whole occasion, or so many minutes.
+        'checkoff_size': {name: round(value, 2) for name, value in state['checkoff_size'].items() if not math.isinf(value)},
         'weekly_minutes': state['weekly_minutes'],
         # Recorded beside the balance because a balance is only interpretable
         # against the moment it started counting from, and a later reset moves
@@ -1924,6 +1701,39 @@ def explain_payload(state: dict) -> dict:
         'paused': [name for name, config in state['pursuits'].items() if config.get('paused')],
         'term_ended': [name for name, config in state['pursuits'].items() if term_ended(config, state['today'])],
         'tracked': sorted(state['tracked']),
+    }
+
+
+def standing_from(payload: dict, register: dict, now: dt.datetime) -> dict:
+    """The state the renderers read, rebuilt from the explain payload the service sent and the register beside it.
+
+    The payload is the numbers :func:`build_state` computed. The active set is
+    every pursuit carrying a weight, and an interval the payload leaves out is
+    infinite, as :func:`explain_payload` drops it.
+    """
+    weights = payload.get('weights') or {}
+    intervals = payload.get('intervals') or {}
+    zero_points = payload.get('zero_points') or {}
+    return {
+        'now': now,
+        'today': now.date(),
+        'pursuits': register,
+        'active': {name: register.get(name) or {} for name in weights},
+        'tracked': set(payload.get('tracked') or []),
+        'cycles': payload.get('cycles') or [],
+        'weights': weights,
+        'intervals': {name: float(intervals.get(name, math.inf)) for name in weights},
+        'checkoff_size': payload.get('checkoff_size') or {},
+        'days_since': payload.get('days_since') or {},
+        'balance': payload.get('balance') or {},
+        'asked': payload.get('asked') or {},
+        'done': payload.get('done') or {},
+        'due': payload.get('due') or {},
+        'weekly_minutes': payload.get('weekly_minutes') or {},
+        'origins': {name: when for name, text in zero_points.items() if (when := journal.parse_time(text)) is not None},
+        'suppressed': payload.get('suppressed') or [],
+        'pool': payload.get('pool') or {},
+        'probability': payload.get('probability') or {},
     }
 
 
@@ -2104,8 +1914,10 @@ def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_
     return {'command': command, 'ran': True, 'exit_code': result.returncode}
 
 
-def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt.datetime | None = None) -> dict:
-    """Append one journal entry, carrying the state that produced it where there is one.
+def new_record(
+    event: str, name: str, state: dict | None, extra: dict, now: dt.datetime | None = None, *, machine: str = '', identity: str = ''
+) -> dict:
+    """One journal entry, carrying the state that produced it where there is one, from ``machine`` as ``identity``.
 
     The state vector is written into a record on purpose. Weights change, and
     once they do there is no way to reconstruct what the numbers were when a thing
@@ -2115,22 +1927,9 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt
     ``state`` is None where a record carries no numbers of its own to explain: the
     vector describes the whole register, so a run writing several records would
     otherwise put the same payload in each of them.
-    """
-    return written(new_record(event, name, state, extra, now))
 
-
-def written(record: dict) -> dict:
-    """Append one record to this machine's journal."""
-    return journal.append(journal_path(journal_dir(), machine_name()), record)
-
-
-def new_record(
-    event: str, name: str, state: dict | None, extra: dict, now: dt.datetime | None = None, *, machine: str = '', identity: str = ''
-) -> dict:
-    """The journal entry :func:`record_event` writes, unwritten, from ``machine`` as ``identity``.
-
-    Each defaults to this process's own, so a caller writing on someone else's
-    behalf names both.
+    ``machine`` and ``identity`` default to this process's own, so a caller
+    writing on someone else's behalf names both.
     """
     now = now or (state['now'] if state else dt.datetime.now().astimezone())
     record = {
@@ -2149,20 +1948,14 @@ def new_record(
     return record
 
 
-def restated_balance(state: dict, name: str, entry: dict) -> str:
-    """When the pursuit next comes due with this entry counted, or nothing where it has no schedule.
+def due_with(state: dict, name: str, entry: dict) -> float | None:
+    """When a pursuit next comes due with ``entry`` counted, or None where it has no schedule.
 
     The balance is recomputed from the model rather than by subtracting what was
     logged, because the two disagree exactly where it matters. An entry dated
     before the pursuit's zero point pays nothing off, and subtraction has no way
     to know — it prints a number the next command contradicts.
     """
-    days = due_with(state, name, entry)
-    return '' if days is None else f' · {format_due(days)}'
-
-
-def due_with(state: dict, name: str, entry: dict) -> float | None:
-    """When a pursuit next comes due with ``entry`` counted, or None where it has no schedule."""
     if name not in state['balance']:
         return None
     own = [*records_by_pursuit(state['records']).get(name, []), entry]
@@ -2185,17 +1978,11 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     measured in time — the duration, which is what the entry is made of there
     rather than an extra nobody discovers from a help screen they never open.
     """
-    pursuits = load_pursuits()
-    if not pursuits:
-        error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
-        return 1
-
-    now = dt.datetime.now().astimezone()
-    # Read before the prompt rather than after: this is a file read, where
-    # build_state is a round trip to every backend, and the question should
-    # appear at typing speed.
-    cached = load_cached_draw(now) or {}
-    offered = cached.get('offered', [])
+    client = service.client()
+    # The register and the standing draw rather than the whole state: this asks
+    # no app, so the question appears at typing speed.
+    standing = client.get('/pursuits/register')
+    pursuits, offered = standing['pursuits'], standing['offered']
 
     try:
         if name is None:
@@ -2221,26 +2008,17 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
         error_console.print('  Nothing logged.')
         return 1
 
-    state = build_state(pursuits, now)
-    occurred = now
+    occurred = dt.datetime.now().astimezone()
     if ago:
         delta = span(ago)
         if delta is None:
             raise typer.BadParameter(f'--ago takes a span such as 30s, 90m, 3h, 2d or 1w, not {ago!r}.')
-        occurred = now - delta
+        occurred -= delta
 
-    # The cached draw is what was on screen, so it already knows which concrete
-    # item this pursuit meant — no second resolve, and no chance of acting on
-    # something different from what was offered.
-    item = (cached.get('resolved') or {}).get(matched) or {}
-    # A cached failure is truthy and carries no id, so it satisfies the guard below
-    # and the write-through to the owning CLI is skipped without saying so. A cached
-    # empty result is the same, and an item made since the draw is still found.
-    if item.get('error') or item.get('candidates') == 0:
-        item = {}
-    if not item and pursuits[matched].get('resolve'):
-        item = resolve_one(matched, pursuits[matched]) or {}
-
+    # The standing draw's entry is what was on screen, so the service answers with
+    # the concrete item this pursuit meant, and resolves afresh only where the draw
+    # failed, matched nothing or never offered it.
+    item = client.get(f'/pursuits/{matched}/item')['resolved'] if pursuits[matched].get('resolve') else {}
     chosen = chosen_item(item, which_choice(item.get('choices') or [], bool(pursuits[matched].get('on_log'))))
 
     downstream = None
@@ -2254,25 +2032,20 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     acted = bool((downstream or {}).get('ran'))
     named = chosen if chosen and (int(item.get('candidates') or 1) == 1 or acted) else {}
 
-    entry = written(
-        done_record(matched, state, cached, occurred=occurred, note=' '.join(words), minutes=minutes, item=named, downstream=downstream)
-    )
-    # The draw outlives the log by up to a quarter of an hour, and re-offering
-    # something just done reads as the log having gone nowhere.
-    mark_logged(matched, now)
-
-    # Asked of the model over the records now in hand, never derived by
-    # subtracting what was logged. An entry dated before the pursuit's zero point
-    # pays nothing off, and arithmetic cannot see that — it would print a
-    # standing the very next command contradicts.
-    #
-    # Only the balance is recomputed, not the whole state: `completed_since` and
-    # `balance` are pure and read what is already here, where a second
-    # `build_state` would be another round trip to every backend.
-    standing = restated_balance(state, matched, entry)
+    # The service marks the pursuit logged on the standing draw, so it is not
+    # offered again inside the window, and says when it next comes due.
+    body = {
+        'pursuit': matched,
+        'occurred_at': occurred.isoformat(),
+        'note': ' '.join(words) or None,
+        'duration_minutes': minutes,
+        'item': named or None,
+        'downstream': downstream,
+    }
+    days = client.post('/journal/done', service.signed(body))['due_in_days']
     label = f' — {named["label"]}' if named.get('label') else ''
     logged = Text.from_markup('[green]Logged[/] ')
-    logged.append(f'{matched}{label}{standing}')
+    logged.append(f'{matched}{label}' + ('' if days is None else f' · {format_due(days)}'))
     console.print(logged)
     if downstream and downstream.get('ran'):
         ran = Text.from_markup('[green]Ran[/] ')
@@ -2282,22 +2055,21 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
 
 
 def cmd_skip(name: str | None, duration: str | None) -> int:
-    pursuits = load_pursuits()
-    if not pursuits:
-        error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
-        return 1
-    now = dt.datetime.now().astimezone()
-    cached = load_cached_draw(now) or {}
-    state = build_state(pursuits, now)
+    """Pass on a pursuit for a span. The service refuses one outside the draw, which drift would still count as a pass."""
+    client = service.client()
+    standing = client.get('/pursuits/register')
+    pursuits = standing['pursuits']
     try:
         if name is None:
             if not can_prompt():
                 error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit pursuits skip <pursuit>[/]')
                 return 1
-            if not state['active']:
+            today = dt.date.today()
+            drawn = {name: config for name, config in pursuits.items() if is_active(config, today)}
+            if not drawn:
                 error_console.print('Nothing is in the draw to pass.')
                 return 1
-            matched = prompt_for_pursuit(state['active'], cached.get('offered', []))
+            matched = prompt_for_pursuit(drawn, standing['offered'])
         else:
             matched = match_pursuit(name, pursuits) or ''
             if not matched:
@@ -2307,18 +2079,12 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
         error_console.print('  Nothing skipped.')
         return 1
 
-    # A SKIP for a pursuit outside the draw would still count as a pass in drift.
-    if refusal := outside_draw(state, matched):
-        error_console.print(f'{refusal}, so there is nothing to pass.')
-        return 1
-    days = skip_span(duration, state['intervals'][matched])
-    expires = now + dt.timedelta(days=days)
-    record_event(journal.Event.SKIP, matched, state, {'expires_at': expires.isoformat(), 'draw_id': cached.get('draw_id')})
-    # The pass only means something against a new draw, and the span it covers is
-    # already in the journal, so the stale cache goes.
-    DRAW_CACHE.unlink(missing_ok=True)
+    passed_for = client.post('/journal/skip', service.signed({'pursuit': matched, 'for': duration}))
+    until = dt.datetime.fromisoformat(passed_for['until'])
     passed = Text.from_markup('[yellow]Passed[/] ')
-    passed.append(f'{matched} — out of the draw for {days}d, until {expires:%d %b %Y}. Owes nothing meanwhile, weight untouched.')
+    passed.append(
+        f'{matched} — out of the draw for {passed_for["days"]}d, until {until:%d %b %Y}. Owes nothing meanwhile, weight untouched.'
+    )
     console.print(passed)
     console.print(f'  Back sooner:  [cyan]doit pursuits resume {matched}[/]')
     return 0
@@ -2328,37 +2094,16 @@ def cmd_resume(name: str | None) -> int:
     """End a standing skip now, so the pursuit returns to the next draw.
 
     The verb that retires the mark `skip` writes. Without one a mistyped span is
-    unreachable by any command the tool ships, on a file :mod:`doit.journal` calls
-    the record that cannot be reconstructed — the only remedy left is hand-editing
-    a synced `.jsonl`.
+    unreachable by any command the tool ships, in a journal nothing rewrites.
 
     Written as a skip that has already expired rather than as a deletion, because
     the journal is append-only and a pass that was made is still a fact about the
     week it was made in.
     """
-    pursuits = load_pursuits()
-    if not pursuits:
-        error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
-        return 1
-    now = dt.datetime.now().astimezone()
-    matched = None
-    if name is not None:
-        matched = match_pursuit(name, pursuits) or ''
-        if not matched:
-            error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
-            return 1
-    state = build_state(pursuits, now)
-    if matched and (refusal := outside_draw(state, matched)):
-        error_console.print(f'{refusal}, so there is nothing to return it to.')
-        return 1
-    chosen = resumed(state, matched)
+    chosen = service.client().post('/journal/resume', service.signed({'pursuit': name}))['resumed']
     if not chosen:
-        console.print(f'{matched} is not skipped, and is already in the draw.' if matched else 'Nothing is skipped.')
+        console.print(f'{name} is not skipped, and is already in the draw.' if name else 'Nothing is skipped.')
         return 0
-
-    for pursuit in chosen:
-        record_event(journal.Event.SKIP, pursuit, state, {'expires_at': now.isoformat()})
-    DRAW_CACHE.unlink(missing_ok=True)
     back = Text.from_markup('[green]Resumed[/] ')
     back.append(f'{", ".join(chosen)} — back in the next draw.')
     console.print(back)
@@ -2397,27 +2142,13 @@ def cmd_reset(name: str | None, assume_yes: bool) -> int:
     goes through unasked — that is one number, and the register says what it
     should be.
     """
-    pursuits = load_pursuits()
-    if not pursuits:
-        error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
-        return 1
+    client = service.client()
     if name is None:
-        chosen = sorted(pursuits)
-        if not assume_yes and not confirm_reset(chosen):
+        everything = sorted(client.get('/pursuits/register')['pursuits'])
+        if not assume_yes and not confirm_reset(everything):
             error_console.print('  Nothing reset.')
             return 1
-    else:
-        matched = match_pursuit(name, pursuits) or ''
-        if not matched:
-            error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
-            return 1
-        chosen = [matched]
-
-    now = dt.datetime.now().astimezone()
-    state = build_state(pursuits, now)
-    for record in reset_records(chosen, state, now):
-        written(record)
-    DRAW_CACHE.unlink(missing_ok=True)
+    chosen = client.post('/journal/reset', service.signed({'pursuits': None if name is None else [name]}))['reset']
     done = Text.from_markup('[green]Reset[/] ')
     done.append(f'{", ".join(chosen)} — {"each balance" if len(chosen) > 1 else "the balance"} starts again from now.')
     console.print(done)
@@ -2439,17 +2170,16 @@ def confirm_reset(chosen: list[str]) -> bool:
 
 
 def cmd_list(as_json: bool) -> int:
-    pursuits = load_pursuits()
-    if not pursuits:
-        console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
-        return 1
-    write_names_cache(pursuits)
-    state = build_state(pursuits, dt.datetime.now().astimezone())
-
+    client = service.client()
+    listed = client.get('/pursuits')
     if as_json:
         # See cmd_next: a Console would soft-wrap this into invalid JSON.
-        print(json.dumps({'pursuits': pursuits, 'state': explain_payload(state)}, indent=2, default=str))
+        print(json.dumps(listed, indent=2))
         return 0
+
+    pursuits = listed['pursuits']
+    write_names_cache(pursuits)
+    state = standing_from(listed['state'], pursuits, dt.datetime.now().astimezone())
 
     console.rule('[cyan]Pursuits', align='left')
     ordered = sorted(pursuits.items(), key=lambda row: -row[1].get('weight', 0))
@@ -2475,47 +2205,28 @@ def cmd_list(as_json: bool) -> int:
         console.print(line, no_wrap=True, overflow='ellipsis')
     tracking = ' · tracked is logged and never due' if not all(paced(config) for config in pursuits.values()) else ''
     console.print(f'\n  weight orders what is owed and draws the rest{tracking} · [cyan]doit pursuits edit[/]')
-    render_orphaned_counters(pursuits)
+    render_stranded_counts(client.get('/pursuits/offers'))
     return 0
 
 
-def orphaned_offer_counts(register: dict) -> list[str]:
-    """Offer counts whose pursuit is no longer in the register.
+def render_stranded_counts(offers: dict) -> None:
+    """Name any offer counts whose pursuit the register no longer holds, in the one view about the register itself.
 
-    The counter is keyed by name, so retiring or renaming a pursuit strands its
-    total. ``drift`` iterates the register, so the row never appears there again
-    and nothing else would ever mention it. The review deck has the same failure
-    and already warns about it; this is the other half of the pair.
-    """
-    return sorted(name for name in load_counts(journal_dir()) if name not in register)
-
-
-def render_orphaned_counters(register: dict) -> None:
-    """Name any stranded counts, in the one view that is about the register
-    itself rather than about what to do next.
-
-    ``next`` and the nudge stay silent, for the reason :func:`review.render_orphans`
-    gives: a misfiled record is not a task, and an interrupt that reports
+    The counts are keyed by name, so retiring or renaming a pursuit strands its
+    total. ``drift`` walks the register, so the row never appears there again
+    and nothing else would ever mention it. ``next`` and the nudge stay silent,
+    because a misfiled record is not a task, and an interrupt that reports
     bookkeeping is the kind you stop reading.
     """
-    orphans = orphaned_offer_counts(register)
-    if not orphans:
+    stranded = offers.get('stranded') or []
+    if not stranded:
         return
-    here = machine_name()
-    by_machine = counts_by_machine(journal_dir())
     console.print(Text('\n  Offer counts with no pursuit:', style='yellow'))
-    for name in orphans:
-        for machine, counts in sorted(by_machine.items()):
-            if name not in counts:
-                continue
-            # Every box writes its own counter file, so one this box did not write
-            # is not this box's to edit. Without saying so the warning reads as a
-            # repair you keep failing to make, and editing it anyway is what gives
-            # a synced file two writers.
-            whose = '' if machine == here else ' [dim](another box — clear it there)[/]'
-            console.print(f'    [yellow]{name}[/]  {counts[name]}  {machine}{whose}')
-    console.print('  Renaming a pursuit strands its total — rename the key in the counter to keep it.')
-    console.print(f'  [cyan]{journal_dir()}[/]')
+    for name in stranded:
+        for machine, counts in sorted((offers.get('counts') or {}).items()):
+            if name in counts:
+                console.print(f'    [yellow]{name}[/]  {counts[name]}  {machine}')
+    console.print('  Renaming a pursuit strands its total. Naming it back in the register picks the total up again.')
 
 
 def drift_rows(
@@ -2544,7 +2255,6 @@ def drift_rows(
     the journal stood then. ``since`` absent runs from the earliest of either.
 
     ``counts`` is how often each pursuit was offered, summed over every machine.
-    It defaults to this desk's counter files.
     """
     end = until or state['now']
     records = state['records']
@@ -2557,7 +2267,7 @@ def drift_rows(
     tracked = state['tracked']
     mine = records_by_pursuit(records)
     reset_at = zero_resets(records)
-    counts = load_counts(journal_dir()) if counts is None else counts
+    counts = counts or {}
 
     rows = []
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
@@ -2671,24 +2381,22 @@ def cmd_drift(since: str | None, until: str | None, as_json: bool) -> int:
     separate the two failures that look identical from the outside: a pursuit
     that never comes up, and one that comes up and gets ignored.
     """
-    pursuits = load_pursuits()
-    if not pursuits:
-        return 1
-    now = dt.datetime.now().astimezone()
+    # Checked here as well, so a mistyped window is a usage error before anything is asked.
     try:
-        start, end = window(since or (None if until else DRIFT_SINCE), until, now)
+        window(since or (None if until else DRIFT_SINCE), until, dt.datetime.now().astimezone())
     except ValueError as error:
         raise typer.BadParameter(str(error)) from None
-    state = build_state(pursuits, now)
-    rows = drift_rows(pursuits, state, start, end)
-
+    report = service.client().get('/pursuits/drift', since=since, until=until)
     if as_json:
         # See cmd_next: a Console would soft-wrap this into invalid JSON.
-        print(json.dumps({'since': start and start.isoformat(), 'until': (end or now).isoformat(), 'rows': rows}, indent=2))
+        print(json.dumps(report, indent=2))
         return 0
 
-    opened = 'the first record' if start is None else f'{start:%d %b %Y %H:%M}'
-    console.rule(f'[cyan]Drift · {opened} to {"now" if end is None else f"{end:%d %b %Y %H:%M}"}', align='left')
+    rows = report['rows']
+    start = report['since'] and dt.datetime.fromisoformat(report['since'])
+    opened = 'the first record' if not start else f'{start:%d %b %Y %H:%M}'
+    closed = 'now' if until is None else f'{dt.datetime.fromisoformat(report["until"]):%d %b %Y %H:%M}'
+    console.rule(f'[cyan]Drift · {opened} to {closed}', align='left')
     if not any(row['done'] for row in rows):
         console.print('Nothing recorded in the window yet — drift needs history before it can say anything.\n')
         return 0
@@ -2700,9 +2408,7 @@ def cmd_drift(since: str | None, until: str | None, as_json: bool) -> int:
 
 def cmd_dormant() -> int:
     """Pursuits gone quiet for more than three of their own intervals."""
-    pursuits = load_pursuits()
-    state = build_state(pursuits, dt.datetime.now().astimezone())
-    stale = dormant_rows(state)
+    stale = service.client().get('/pursuits/dormant')['dormant']
     console.rule('[cyan]Dormant', align='left')
     if not stale:
         console.print('Nothing is running cold.\n')
@@ -2711,7 +2417,7 @@ def cmd_dormant() -> int:
     for row in stale:
         line = Text('  ')
         line.append(f'{row["pursuit"]:<{width}}', style='white')
-        line.append(f'  {format_elapsed(row["days_since"])} · goal {goal_text(state["active"][row["pursuit"]])}')
+        line.append(f'  {format_elapsed(row["days_since"])} · goal {row["goal"]}')
         console.print(line)
     console.print('\n  Cold is the time since the last one.')
     console.print('  [cyan]doit pursuits list[/] shows it beside what each owes.\n')
@@ -2726,32 +2432,24 @@ def cmd_evidence(as_json: bool = False) -> int:
     done, which looks identical to genuinely never having done it — the two need
     to be told apart somewhere, and this is where.
     """
-    pursuits = load_pursuits()
-    if not pursuits:
-        return 1
-    now = dt.datetime.now().astimezone()
-    watching = watched(pursuits, now.date())
-    observations = evidence.refresh(pursuits, CACHE_DIR, now, force=True, ask=watching)
-    seen = evidence.observed(observations)
-    failed = evidence.problems(observations)
-    declared = evidence.declared(watching)
-
+    client = service.client()
+    answered = client.get('/pursuits/evidence')
     if as_json:
-        console.print_json(
-            data={
-                'observed': {name: when.isoformat() for name, when in seen.items()},
-                'errors': failed,
-                'undeclared': sorted(set(watching) - set(declared)),
-            }
-        )
+        print(json.dumps(answered, indent=2))
         return 0
+
+    now = dt.datetime.now().astimezone()
+    watching = watched(client.get('/pursuits/register')['pursuits'], now.date())
+    seen = {name: dt.datetime.fromisoformat(when) for name, when in answered['observed'].items()}
+    failed = answered['errors']
+    undeclared = set(answered['undeclared'])
 
     console.rule('[cyan]Evidence', align='left')
     width = max((len(name) for name in watching), default=0)
     for name in sorted(watching, key=lambda key: -watching[key].get('weight', 0)):
         line = Text('  ')
         line.append(f'{name:<{width}}  ', style='white')
-        if name not in declared:
+        if name in undeclared:
             line.append('no backend — logged by hand', style='yellow')
         elif name in failed:
             line.append(failed[name], style='red')
@@ -2766,33 +2464,16 @@ def cmd_evidence(as_json: bool = False) -> int:
 
 
 def cmd_edit() -> int:
-    """Open the register in $EDITOR, writing the template first where there is none.
-
-    A file `$DOIT_PURSUITS` names in a directory that exists is a register not
-    yet written, and writing it is this command's job. Only a missing directory
-    is refused, because that is the share the variable stands for.
-    """
-    try:
-        register = register_path()
-    except NamedPathMissing as missing:
-        if not missing.path.parent.is_dir():
-            raise
-        register = missing.path
-    if not register.exists():
-        register.parent.mkdir(parents=True, exist_ok=True)
-        register.write_text(TEMPLATE)
-    open_in_editor(register)
-    try:
-        write_names_cache(load_pursuits())
-    except RegisterError as error:
-        error_console.print(f'[yellow]Register not loadable:[/] {error}')
+    """Edit the register in $EDITOR, starting from the template where none is written yet."""
+    if not service.edit_document('pursuits', TEMPLATE):
         return 1
+    write_names_cache(service.client().get('/pursuits/register')['pursuits'])
     return 0
 
 
 def cmd_names() -> int:
     """Emit name<TAB>description for the shell completion, refreshing its cache."""
-    pursuits = load_pursuits()
+    pursuits = service.client().get('/pursuits/register')['pursuits']
     write_names_cache(pursuits)
     for name, config in sorted(pursuits.items()):
         print(f'{name}\t{config.get("description", "")}')
@@ -2800,27 +2481,12 @@ def cmd_names() -> int:
 
 
 def run(action: Callable[[], int]) -> None:
-    """Run a command body, turning an untrustworthy register into one message.
-
-    Every entry point loads the register, so without this each would need its own
-    try/except — and a RegisterError escaping as a traceback would bury the one
-    line saying which field is wrong. A path a variable names and nothing holds
-    is the same kind of refusal, and it gets the same one line.
-    """
-    try:
-        code = action()
-    except RegisterError as error:
-        error_console.print(f'[yellow]pursuits.yml:[/] {error}')
-        raise typer.Exit(1) from None
-    except NamedPathMissing as missing:
-        error_console.print(str(missing))
-        raise typer.Exit(1) from None
-    raise typer.Exit(code)
+    raise typer.Exit(action())
 
 
 def next_command(
     explain: Annotated[bool, typer.Option('--explain', help='The same draw with every number behind it.')] = False,
-    reroll: Annotated[bool, typer.Option('--reroll', help='Force a fresh draw before the cache expires.')] = False,
+    reroll: Annotated[bool, typer.Option('--reroll', help='Force a fresh draw before the standing one expires.')] = False,
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
     """What to do now, drawn from what you said matters."""
@@ -2927,7 +2593,7 @@ def evidence_command(
 
 @app.command('edit')
 def edit_command() -> None:
-    """Edit pursuits.yml in $EDITOR."""
+    """Edit the pursuits in $EDITOR, starting from an annotated template where none are written."""
     run(cmd_edit)
 
 

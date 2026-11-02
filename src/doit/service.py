@@ -10,16 +10,23 @@ sentence, or the login that would fix a refused token.
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import httpx2
 from pyclilogin import DEFAULT_SCOPES
 from pyclilogin import Product
 from pyclilogin import TokenRefused
+from rich.text import Text
 
 from doit import actor
 from doit import paths
+from doit.editor import open_in_editor
+from doit.render import can_prompt
+from doit.render import console
+from doit.render import error_console
 
 USER_AGENT = 'doit-cli (+https://github.com/datapointchris/doit)'
 PREFIX = '/api/v1'
@@ -124,3 +131,41 @@ def client() -> Service:
 def signed(body: dict) -> dict:
     """A journal write naming this machine and whoever is running the command."""
     return {**body, 'machine': paths.machine_name(), 'actor': actor.identity()}
+
+
+def edit_document(name: str, template: str) -> bool:
+    """Edit one of the service's documents in $EDITOR, starting from ``template`` where none is written yet.
+
+    The service validates the whole text and writes nothing it refuses. A refusal
+    names the first fault and reopens the edit with the text as it was left, so
+    the edit is never lost to one typo. Returns whether a document now stands.
+    """
+    doit = client()
+    stored = True
+    try:
+        text = doit.get(f'/documents/{name}')['text']
+    except ServiceFailed as missing:
+        if missing.status != 404:
+            raise
+        text, stored = template, False
+    original = text
+    with tempfile.TemporaryDirectory(prefix='doit-') as folder:
+        path = Path(folder) / f'{name}.yml'
+        while True:
+            path.write_text(text, encoding='utf-8')
+            open_in_editor(path)
+            text = path.read_text(encoding='utf-8')
+            if text == original and stored:
+                console.print(f'{name}: no change.')
+                return True
+            try:
+                doit.put(f'/documents/{name}', {'text': text})
+            except ServiceFailed as refused:
+                if refused.status != 422:
+                    raise
+                error_console.print(Text(f'{name}: {refused}', style='yellow'))
+                if not can_prompt() or console.input('  Edit again? [Y/n] ').strip().lower() in ('n', 'no'):
+                    return False
+                continue
+            console.print(f'{name}: saved.')
+            return True

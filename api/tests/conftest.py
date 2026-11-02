@@ -71,10 +71,16 @@ def store(tmp_path: Path) -> Store:
     return Store(tmp_path / 'doit.db')
 
 
-def client_for(store: Store, apps: dict[str, App] | None = None, github: GitHub | None = None) -> TestClient:
+def client_for(
+    store: Store,
+    apps: dict[str, App] | None = None,
+    github: GitHub | None = None,
+    clock: Callable[[], dt.datetime] | None = lambda: NOW,
+) -> TestClient:
+    """The service over `store`, at `NOW` unless handed another clock; None is the real one."""
     apps = {name: unconfigured(name) for name in ('icb', 'learning', 'meso')} | (apps or {})
     readers = Readers(apps, github or GitHub(GitHubSettings()), ClickHouseSettings())
-    views = Views(store, readers, clock=lambda: NOW)
+    views = Views(store, readers, clock=clock)
     settings = Settings(issuer='https://id.test', public_url='https://doit.test', database_path=store.path)
     client = TestClient(create_app(settings=settings, store=store, views=views, verifier=Verifier()))
     client.headers['Authorization'] = f'Bearer {TOKEN}'

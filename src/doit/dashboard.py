@@ -19,12 +19,13 @@ Every row names a thing you could act on. A lane that can only report structure
 (a track's current unit, a maintenance entry's slug) states it as context or
 resolves it to the underlying resource instead of spending a row on it.
 
-This is a renderer, nothing more. Every backend speaks `--json` and owns its own
-domain rules (which book is next, which habit is due today, when a review item is
-overdue); the dashboard only lays out what they return. That is why it knows no app's
-semantics. It reads doit's own review register in-process rather than shelling
-back out to itself — that returns the same rows its `--json` prints, so the
-backend still owns due-ness and nothing here re-derives a schedule.
+This is a renderer, nothing more. Every backend owns its own domain rules (which
+book is next, which habit is due today, when a review item is overdue); the
+dashboard only lays out what they return. That is why it knows no app's
+semantics. doit's service runs the functions here over each app's answer and
+over its own review register, whose rows are the ones `doit review list --json`
+prints, so the backend still owns due-ness and nothing here re-derives a
+schedule. The command renders the lanes the service sends.
 
 `is_due_row` below therefore mirrors `doit.cadence.is_due` rather than importing
 it. Inside one package that reads as removable duplication. It is not: backends
@@ -37,7 +38,6 @@ a coding session. Same plumbing, different audience.
 
 import datetime as dt
 import math
-from collections.abc import Callable
 from itertools import chain
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -47,7 +47,7 @@ from rich.text import Text
 
 from doit import lanes as lanemodel
 from doit import pursuits
-from doit import review
+from doit import service
 from doit import sources
 from doit.lanes import GridCell
 from doit.lanes import Lane as LaneView
@@ -56,6 +56,7 @@ from doit.lanes import Urgency
 from doit.lanes import unavailable
 from doit.render import column_width
 from doit.render import console
+from doit.render import error_console
 from doit.render import first_sentence
 from doit.render import fitted
 from doit.render import handle_column
@@ -64,16 +65,6 @@ from doit.render import print_handle_below
 from doit.render import terminal_width
 
 NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'}
-
-# doit's own lanes, read in-process. These are not sources: the source registry
-# exists so doit need not know which *other* apps are installed, and doit does
-# know its own modules. A subprocess would start an interpreter to read a local
-# YAML file already reachable from here. These functions return the exact rows
-# their `--json` prints, so the backend still owns due-ness and the dashboard
-# still never re-derives a cadence.
-LOCAL_BACKENDS: dict[str, Callable[[], object]] = {
-    'review': review.statuses,
-}
 
 # The dashboard is a glance: three rows a lane, or ten when you asked for that
 # one lane specifically. Grids are exempt — see LaneView.
@@ -1033,92 +1024,56 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
 #
 # meso is asked for cycles rather than sessions: the lane says what is
 # prescribed, and what was performed is the opposite of outstanding.
-#
-# pull-requests reads repos.json's `provider`, so one command answers on a box
-# whose forge is Bitbucket.
-#
-# dotfiles' `--limit` is a window over the run history every box shares, not a
-# row count. Boxes that check every few minutes fill a small window within the
-# hour, and a box off for longer than the window drops out of the fold.
-#
-# The last column is how long each tool may take, None for the default. `icb
-# overview` bounds its whole fan-out at 15 seconds, so doit waits longer and
-# icb's own deadline reports first. pull-requests asks the git host once per repo,
-# and dotfiles reads every box's runs from a shared directory.
 SHIPPED_ADAPTERS = (
-    ('icb', ('icb', 'overview', '--json'), icb_adapter, tuple(name for name, _ in ICB_LANES), 20.0),
-    ('problems', ('fleet', 'inbox', 'list', '--json'), problems_adapter, ('problems',), None),
-    ('learning', ('learning', 'overview', '--json'), learning_adapter, ('learning',), None),
-    ('meso', ('meso', 'cycles', 'list', '--json'), meso_adapter, ('training',), None),
-    ('prs', ('pull-requests',), prs_adapter, ('prs',), 15.0),
-    ('dotfiles', ('dotfiles', 'report', 'list', '--json', '--limit', '80'), dotfiles_adapter, ('dotfiles',), 10.0),
+    ('icb', ('icb', 'overview', '--json'), icb_adapter, tuple(name for name, _ in ICB_LANES)),
+    ('problems', ('fleet', 'inbox', 'list', '--json'), problems_adapter, ('problems',)),
+    ('learning', ('learning', 'overview', '--json'), learning_adapter, ('learning',)),
+    ('meso', ('meso', 'cycles', 'list', '--json'), meso_adapter, ('training',)),
+    ('prs', ('pull-requests',), prs_adapter, ('prs',)),
+    ('dotfiles', ('dotfiles', 'report', 'list', '--json', '--limit', '80'), dotfiles_adapter, ('dotfiles',)),
 )
 
-for adapter_id, command, adapter_fn, _, timeout in SHIPPED_ADAPTERS:
-    sources.register_adapter(adapter_id, command, adapter_fn, timeout)
+for adapter_id, command, adapter_fn, _ in SHIPPED_ADAPTERS:
+    sources.register_adapter(adapter_id, command, adapter_fn)
 
 # Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
 # conforming source contributes lanes doit has never heard of, and a machine
 # whose sources.yml omits one of these is offered fewer. `--lane` is checked
 # against what actually came back rather than against this.
-LANE_NAMES = [*chain.from_iterable(declared for _, _, _, declared, _ in SHIPPED_ADAPTERS), *LOCAL_LANES]
-
-
-def read_local(read: Callable[[], object]) -> sources.Result:
-    """One of doit's own lanes, without a round trip through a subprocess.
-
-    A raising backend degrades its lane rather than the snapshot, the same way a
-    failing subprocess does — the caller cannot tell the two apart.
-    """
-    try:
-        return sources.Result(source='local', payload=read(), exit_code=0)
-    except (OSError, ValueError) as error:
-        return sources.Result(source='local', exit_code=1, stderr=str(error), failure=sources.Failure.FAILED)
-
-
-def local_lanes() -> list[LaneView]:
-    """doit's own lanes. Always built: they read doit's own state, and a
-    dashboard that needs configuring before it can show your own register would
-    be configuration for its own sake."""
-    results = {name: read_local(read) for name, read in LOCAL_BACKENDS.items()}
-    return [build_maintenance_lane(results, dt.date.today())]
-
-
-def lanes_of(registry: sources.Registry, results: dict[str, sources.Result], wanted: list[str] | None) -> list[LaneView]:
-    """Every lane, in the order sources.yml declares its sources.
-
-    Order is config's, not a constant here — that is what makes it yours to
-    change. doit's own lanes come last because nothing in the file governs them.
-
-    Alert lanes are the one exception and they come first, because a problem you
-    scroll to is a problem you read after deciding what to do rather than before.
-    The sort is stable, so config still decides the order among them.
-
-    Takes the results rather than fetching them, so a caller wanting these lanes
-    alongside something else out of `sources.yml` pays for one concurrent round
-    instead of two.
-    """
-    return arranged([*source_lanes(registry, results), *local_lanes()], wanted)
+LANE_NAMES = [*chain.from_iterable(declared for _, _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
 
 
 def source_lanes(registry: sources.Registry, results: dict[str, sources.Result]) -> list[LaneView]:
-    """The lanes the configured sources answered with, in the order `sources.yml` lists them."""
+    """The lanes the configured sources answered with, in the order `sources.yml` lists them.
+
+    A source that failed and named no lanes is one unavailable lane under its id.
+    """
     collected: list[LaneView] = []
     for source in registry.sources.values():
-        collected.extend(sources.lanes_from(source, results[source.id]))
+        result = results[source.id]
+        built = sources.lanes_from(source, result)
+        if not built and result.failure is not None:
+            built = [lanemodel.unavailable(source.id, source.id.upper(), sources.reason(source.id, result))]
+        collected.extend(built)
     return collected
 
 
 def arranged(collected: list[LaneView], wanted: list[str] | None) -> list[LaneView]:
-    """``collected`` narrowed to ``wanted`` where given, with the alert lanes first."""
+    """``collected`` narrowed to ``wanted`` where given, with the alert lanes first.
+
+    Otherwise the order is the sources document's, not a constant here — that is
+    what makes it yours to change. doit's own maintenance lane comes last because
+    nothing in that document governs it, and it is always built: a dashboard
+    that needs configuring before it can show your own register would be
+    configuration for its own sake.
+
+    Alert lanes come first, because a problem you scroll to is a problem you read
+    after deciding what to do rather than before. The sort is stable, so the
+    document still decides the order among them.
+    """
     if wanted:
         collected = [lane for lane in collected if lane.name in wanted]
     return sorted(collected, key=lambda lane: not lane.alert)
-
-
-def collect(registry: sources.Registry, wanted: list[str] | None) -> list[LaneView]:
-    """Every lane, fetching the sources first."""
-    return lanes_of(registry, sources.fetch(list(registry.sources.values())), wanted)
 
 
 def clip(text: str, width: int) -> str:
@@ -1288,23 +1243,21 @@ def render_trailer(lane: LaneView) -> None:
 
 
 def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
-    registry = sources.load()
-    if registry.problems:
-        for problem in registry.problems:
-            console.print(Text(f'sources.yml: {problem}', style='yellow'))
-    if not registry.sources:
-        console.print(Text(f'No sources configured in {sources.SOURCES}.'))
-        console.print('Write one with [cyan]doit sources edit[/].')
+    answered = service.client().get('/dashboard')
+    for problem in answered.get('problems') or []:
+        error_console.print(Text(f'sources: {problem}', style='yellow'))
+    if not answered.get('configured'):
+        error_console.print('No sources configured. Write them with [cyan]doit sources edit[/].')
 
-    offered = collect(registry, None)
+    offered = lanemodel.from_document(answered)
     collected = [found for found in offered if found.name in lane] if lane else offered
     # `--lane` is not checked against a closed set: a conforming source
     # contributes lanes doit has never heard of, so the only honest check is
     # whether the name matched anything that actually came back.
     unmatched = [name for name in lane or [] if name not in {found.name for found in offered}]
     if unmatched:
-        console.print(Text(f'No lane named {", ".join(unmatched)}.', style='yellow'))
-        console.print(f'  Configured sources offered: {", ".join(found.name for found in offered) or "nothing"}')
+        error_console.print(Text(f'No lane named {", ".join(unmatched)}.', style='yellow'))
+        error_console.print(f'  Configured sources offered: {", ".join(found.name for found in offered) or "nothing"}')
 
     # Asking for one lane means you want to see it, not glance at it.
     row_cap = FOCUSED_ROW_CAP if lane else ROW_CAP
@@ -1312,34 +1265,19 @@ def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings.
-        print(lanemodel.dumps(collected, dt.datetime.now()))
+        print(lanemodel.dumps(collected, dt.datetime.fromisoformat(answered['generated_at'])))
     else:
         render_lanes(collected, dt.date.today(), row_cap)
-        standing = pursuit_standing()
-        if standing is not None:
+        # Which pursuits are behind, by name. A register that would not build
+        # costs this one line rather than the glance, said in red, because a
+        # missing line reads as nothing behind.
+        standing = answered.get('pursuit_standing')
+        if standing:
             # Soft-wrapped, because the line ends in a command to type.
-            console.print(standing, soft_wrap=True)
+            console.print(Text(f'  {standing["text"]}\n', style='red' if standing['unavailable'] else 'yellow'), soft_wrap=True)
     # A read-only glance always succeeds: degradation is shown per lane, and a
     # consumer of --json checks lanes[].status rather than the exit code.
     return 0
-
-
-def pursuit_standing() -> Text | None:
-    """Which pursuits are behind, by name, or None when none owes anything.
-
-    Guarded rather than trusted. A register that refuses to load is a real and
-    deliberate failure mode, and it must cost this one line rather than the whole
-    glance — the dashboard's own lanes have nothing to do with the weights. The
-    line then says so in red, because a missing line reads as nothing behind.
-    """
-    try:
-        register = pursuits.load_pursuits()
-        if not register:
-            return None
-        line = pursuits.standing_line(pursuits.build_state(register, dt.datetime.now().astimezone()))
-    except (pursuits.RegisterError, OSError, ValueError) as error:
-        return Text(f'  pursuits unavailable — {error}\n', style='red')
-    return Text(f'  {line}\n', style='yellow') if line else None
 
 
 def dashboard_command(

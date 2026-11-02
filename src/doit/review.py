@@ -2,13 +2,12 @@
 
 Answers "what should I revisit or run on a cadence?". Invoked as `doit review`.
 
-Two files, by design:
-  - a register            declarative config you hand-edit (description, cadence,
-                          optional command). This tool only ever reads it, so your
-                          comments and layout are never disturbed. Under the XDG
-                          config dir: it is personal, and doit's repos are public.
-  - a state file          the last-done date per item, written by `done`. Under
-                          the XDG state dir. Paths resolve via the constants below.
+Two records, by design, both kept by doit's service:
+  - a register            declarative config you hand-edit with `doit review
+                          edit` (description, cadence, optional command). It is
+                          kept as written, so your comments and layout are never
+                          disturbed.
+  - the done dates        the days `done` recorded per item.
 
 The due date is derived, never stored: next_due = last_done + cadence. A new item
 with no recorded done simply shows as never done. Storing only last_done means
@@ -22,50 +21,36 @@ reference. When you practice one is yours, so its schedule is kept here.
 import contextlib
 import datetime as dt
 import json
-import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable
-from pathlib import Path
 from typing import Annotated
 
 import typer
-import yaml
 from rich.text import Text
 
+from doit import service
 from doit.cadence import is_due
 from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
 from doit.cadence import status_label
-from doit.editor import open_in_editor
-from doit.paths import xdg_config_home
-from doit.paths import xdg_state_home
+from doit.paths import xdg_cache_home
 from doit.render import console
-from doit.render import error_console
 from doit.render import nudge_header
 from doit.render import nudge_row
 from doit.render import nudge_width
-from doit.state import load_state
-from doit.state import save_state
-
-REGISTER = Path(os.environ.get('DOIT_REGISTER') or xdg_config_home() / 'doit' / 'register.yml')
-STATE = Path(os.environ.get('DOIT_REVIEW_STATE') or xdg_state_home() / 'doit' / 'review-state.json')
 
 TEMPLATE = """\
 # Terminal-native review / cadence register, read by `doit review`.
 #
-# This file is declarative config — edit it freely; `doit review` only ever
-# reads it. The done state lives in review-state.json, which the tool writes.
+# This is declarative config — edit it freely with `doit review edit`. The done
+# dates are recorded by `doit review done <id>`, and on no other evidence.
 #
 #   description  what to revisit or run
 #   cadence      how often: <n>d / <n>w / <n>mo / <n>y  (e.g. 2w, 1mo)
 #   command      optional; shown so you know what to run (not auto-run)
 #   show         optional command the nudge runs to print a card inline, where
 #                the item's name alone does not say enough to act on
-#
-# An item is done when `doit review done <id>` records it, and on no other
-# evidence.
 #
 # `practice:` holds the Labs you work through on a schedule, with the same
 # fields, keyed by the Lab's id. An id names one item across both blocks.
@@ -83,10 +68,15 @@ practice: {}
 # bounded and the overflow points at the browse view instead of printing itself.
 NUDGE_MAX_ITEMS = 8
 
-# The nudge interval is stored as plain minutes in the synced state dir so the
-# shell gate can read it with a bare `cat` (no parsing) and the value is shared
-# across machines. This is the same file `doit shell init` emits a gate against.
-NUDGE_INTERVAL = xdg_state_home() / 'doit' / 'nudge-interval-minutes'
+# How long the nudge waits between showings where nobody set an interval. Four
+# hours means at most twice a working day, which is the point of a nudge rather
+# than a banner.
+DEFAULT_NUDGE_MINUTES = 240
+
+# The interval as plain minutes, so the shell gate reads it with a bare `cat`
+# and starts no process between showings. The service holds the interval; this
+# is the copy the last nudge left behind.
+NUDGE_INTERVAL = xdg_cache_home() / 'doit' / 'nudge-interval-minutes'
 
 
 # Fields a register item may declare: the ones the TEMPLATE header documents.
@@ -106,20 +96,13 @@ class RegisterError(ValueError):
     """
 
 
-def load_register() -> dict[str, dict] | None:
-    """Each block's items by id, or None if there is no register file yet.
+def register_from_document(data: dict) -> dict[str, dict]:
+    """A parsed register's blocks, each item by id.
 
     Raises RegisterError on an unknown block, an item that is not a mapping or
-    declares a field outside ITEM_FIELDS, or an id in both blocks. The state
-    file is keyed by id alone, so one id in two blocks would share a stamp.
+    declares a field outside ITEM_FIELDS, or an id in both blocks. The done
+    dates are keyed by id alone, so one id in two blocks would share a stamp.
     """
-    if not REGISTER.exists():
-        return None
-    return register_from_document(yaml.safe_load(REGISTER.read_text()) or {})
-
-
-def register_from_document(data: dict) -> dict[str, dict]:
-    """A parsed register's blocks, validated as :func:`load_register` describes."""
     if not isinstance(data, dict):
         raise RegisterError(f'must be a mapping of blocks, not {type(data).__name__}')
     # A misspelled block is ignored by every reader, so its items silently never
@@ -150,26 +133,13 @@ def check_item(item_id: str, meta: object) -> None:
         raise RegisterError(f'{item_id}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(ITEM_FIELDS))}')
 
 
-def load_items() -> dict | None:
-    """Every item in every block by id, or None if there is no register file yet."""
-    register = load_register()
-    if register is None:
-        return None
-    return {item_id: meta for items in register.values() for item_id, meta in items.items()}
-
-
-def statuses(block: str | None = None) -> list[dict]:
+def statuses_of(register: dict[str, dict], state: dict[str, str], today: dt.date, block: str | None = None) -> list[dict]:
     """Every item in one block, or in every block, with its derived overdue days, most urgent first.
 
-    overdue is the number of days past due (negative = not yet due); None means
-    the item has never been done, which sorts to the very top as most urgent.
-    Last-done is the date ``done`` last recorded.
+    ``state`` is each item's last done day by id. overdue is the number of days
+    past due (negative = not yet due); None means the item has never been done,
+    which sorts to the very top as most urgent.
     """
-    return statuses_of(load_register() or {}, load_state(STATE), dt.date.today(), block)
-
-
-def statuses_of(register: dict[str, dict], state: dict[str, str], today: dt.date, block: str | None = None) -> list[dict]:
-    """:func:`statuses` over a register and a ``{id: last_done}`` map handed in rather than read."""
     rows = []
     for name in [block] if block else list(BLOCKS):
         for item_id, meta in register.get(name, {}).items():
@@ -194,18 +164,6 @@ def statuses_of(register: dict[str, dict], state: dict[str, str], today: dt.date
     return rows
 
 
-def orphaned_state_ids() -> list[str]:
-    """Recorded done-dates whose register item no longer exists.
-
-    Renaming an item silently strands its history: ``statuses`` reads the state
-    by the register's ids, so the old key stops being consulted and the item
-    reads as never done. Nothing else would ever mention it, and "never done" is
-    exactly the state that looks like it needs attention most.
-    """
-    items = load_items() or {}
-    return sorted(key for key in load_state(STATE) if key not in items)
-
-
 def render_item(row: dict) -> None:
     meta = f'every {row["cadence"]}'
     if row['last']:
@@ -222,9 +180,8 @@ def render_item(row: dict) -> None:
     console.print()
 
 
-def warn_no_register() -> None:
-    console.print(Text(f'No review register at {REGISTER}.'))
-    console.print('Add items there, or create one with [cyan]doit review edit[/].')
+def warn_empty() -> None:
+    console.print('The review register has no items yet. Add some with [cyan]doit review edit[/].')
 
 
 # Each block's heading in the browse views. Practice prints after maintenance,
@@ -233,12 +190,9 @@ BLOCK_TITLES = {'items': 'Review', 'practice': 'Practice'}
 
 
 def cmd_due() -> int:
-    if load_items() is None:
-        warn_no_register()
-        return 0
-    rows = statuses()
+    rows = service.client().get('/review')['entries']
     if not rows:
-        console.print('The review register has no items yet.')
+        warn_empty()
         return 0
 
     due = [row for row in rows if is_due(row['overdue'])]
@@ -263,60 +217,50 @@ def cmd_due() -> int:
 
 
 def cmd_list(as_json: bool = False) -> int:
+    register = service.client().get('/review')
+    rows = register['entries']
     # --json emits every item with its derived status, due or not, so a consumer
     # filters on `due` or `overdue` itself and can say "2 due of 9". Each row
-    # names its `block`. A missing register is an empty list, not the prose hint:
-    # --json must always be parseable.
+    # names its `block`.
     if as_json:
         # Plain print, never the rich console: a Console soft-wraps at terminal
         # width, which would put newlines inside JSON strings and hand a consumer
         # a parse error instead of data.
-        print(json.dumps(statuses(), indent=2))
+        print(json.dumps(rows, indent=2))
         return 0
-    if load_items() is None:
-        warn_no_register()
-        return 0
+    if not rows:
+        warn_empty()
     for block, title in BLOCK_TITLES.items():
-        rows = statuses(block)
-        if rows or block == 'items':
+        in_block = [row for row in rows if row['block'] == block]
+        if in_block or block == 'items':
             console.rule(f'[cyan]{title} — full register', align='left')
-        for row in rows:
+        for row in in_block:
             render_item(row)
-    render_orphans()
+    render_stranded(register['stranded'])
     return 0
 
 
-def render_orphans() -> None:
-    """Name any stranded done-dates, in the one view that is about the register
-    itself rather than about what to do next. The nudge and `due` stay silent —
-    a misfiled record is not a task, and an interrupt that reports bookkeeping is
-    the kind you stop reading."""
-    orphans = orphaned_state_ids()
-    if not orphans:
+def render_stranded(stranded: list[str]) -> None:
+    """Name any recorded done dates whose item the register no longer holds.
+
+    Said in the one view that is about the register itself rather than about
+    what to do next. The nudge and `due` stay silent — a misfiled record is not
+    a task, and an interrupt that reports bookkeeping is the kind you stop
+    reading.
+    """
+    if not stranded:
         return
-    console.print(Text(f'Recorded done-dates with no register item: {", ".join(orphans)}', style='yellow'))
-    console.print('  Renaming an item strands its history — rename the key in the state file to keep it.')
-    console.print(f'  [cyan]{STATE}[/]')
+    console.print(Text(f'Recorded done dates with no register item: {", ".join(stranded)}', style='yellow'))
+    console.print('  Renaming an item strands its history. Naming it back in the register picks the history up again.')
 
 
 def cmd_done(item_id: str) -> int:
-    items = load_items()
-    if items is None:
-        warn_no_register()
-        return 1
-    if item_id not in items:
-        console.print(Text(f'No such item: {item_id}'))
-        console.print('See what is registered with [cyan]doit review list[/].')
-        return 1
-    today = dt.date.today().isoformat()
-    state = load_state(STATE)
-    state[item_id] = today
-    save_state(STATE, state)
-    days = parse_cadence(items[item_id].get('cadence', ''))
-    done = Text.from_markup('[green]✓[/] Marked ')
-    done.append(item_id, style='yellow')
-    done.append(f' done ({today}). Due again in {days}d.')
-    console.print(done)
+    done = service.client().post(f'/review/{item_id}/completions', {})
+    line = Text.from_markup('[green]✓[/] Marked ')
+    line.append(item_id, style='yellow')
+    days = (done.get('status') or {}).get('cadence_days')
+    line.append(f' done ({done["done_on"]}).' + (f' Due again in {days}d.' if days else ''))
+    console.print(line)
     return 0
 
 
@@ -351,6 +295,15 @@ def run_show(row: dict) -> None:
         subprocess.run(cmd, shell=True, timeout=10, check=False)  # nosec B602
 
 
+def nudge_due(held: dict, now: dt.datetime) -> bool:
+    """Whether the interval has passed since the nudge last showed on any machine."""
+    last = held.get('last_nudged_at')
+    if not last:
+        return True
+    interval = dt.timedelta(minutes=held.get('interval_minutes') or DEFAULT_NUDGE_MINUTES)
+    return now - dt.datetime.fromisoformat(last.replace('Z', '+00:00')) >= interval
+
+
 def cmd_nudge() -> int:
     """Startup nudge: print only what's due, and nothing at all when caught up.
 
@@ -360,40 +313,34 @@ def cmd_nudge() -> int:
     command to run. The description is browse-time information — at first shell
     you already know what your own register items mean.
 
-    The shell caller gates how often this fires (a cheap marker-mtime check
-    against the configured interval), so this stays a pure renderer — it never
-    throttles itself, it just shows due items or stays silent. Silence-when-
-    caught-up is the whole point: a nudge you don't notice on a clear day is a
-    nudge you'll still read on a busy one.
+    The shell gate starts this at most once per interval on each machine, and
+    the service's last showing holds the interval across every machine, so the
+    schedule is one rolling one. Maintenance only: a Lab is practice you sit
+    down for, not something to be interrupted with at the first shell.
     """
-    if load_items() is None:
+    doit = service.client()
+    held = doit.get('/review/nudge')
+    NUDGE_INTERVAL.parent.mkdir(parents=True, exist_ok=True)
+    NUDGE_INTERVAL.write_text(f'{held.get("interval_minutes") or DEFAULT_NUDGE_MINUTES}\n')
+    now = dt.datetime.now().astimezone()
+    if not nudge_due(held, now):
         return 0
-    # Maintenance only. A Lab is practice you sit down for, not something to be
-    # interrupted with at the first shell.
-    due = [row for row in statuses('items') if is_due(row['overdue'])]
+    doit.put('/review/nudge', {'last_nudged_at': now.isoformat()})
+    due = held['due']
     if not due:
         return 0
-    shown = due[:NUDGE_MAX_ITEMS]
-    nudge_header('Review', len(due))
-    width = nudge_width([row['id'] for row in shown])
-    for row in shown:
+    nudge_header('Review', held['due_total'])
+    width = nudge_width([row['id'] for row in due])
+    for row in due:
         nudge_row(row['id'], status_label(row['overdue']), row['command'], width)
-    if len(due) > len(shown):
-        console.print(f'  +{len(due) - len(shown)} more  ·  [cyan]doit review due[/]')
+    if held['due_total'] > len(due):
+        console.print(f'  +{held["due_total"] - len(due)} more  ·  [cyan]doit review due[/]')
     # After the roster, expand any items carrying live content, so the roster
     # stays scannable.
     console.print()
-    for row in shown:
+    for row in due:
         run_show(row)
     console.print('Done:  [cyan]doit review done <id>[/]')
-    return 0
-
-
-def cmd_edit() -> int:
-    if not REGISTER.exists():
-        REGISTER.parent.mkdir(parents=True, exist_ok=True)
-        REGISTER.write_text(TEMPLATE)
-    open_in_editor(REGISTER)
     return 0
 
 
@@ -407,26 +354,13 @@ def parse_duration_minutes(dur: str) -> int | None:
     return count * 60 if unit == 'h' else count
 
 
-def write_nudge_interval(minutes: int) -> int:
-    """Record how often the startup nudge may fire."""
+def cmd_nudge_every(minutes: int) -> int:
+    """Record how often the startup nudge may fire, on every machine."""
+    held = service.client().put('/review/nudge', {'interval_minutes': minutes})
     NUDGE_INTERVAL.parent.mkdir(parents=True, exist_ok=True)
-    NUDGE_INTERVAL.write_text(f'{minutes}\n')
-    console.print(f'Nudge interval set to {minutes} minutes.')
+    NUDGE_INTERVAL.write_text(f'{held["interval_minutes"]}\n')
+    console.print(f'Nudge interval set to {held["interval_minutes"]} minutes.')
     return 0
-
-
-def run(action: Callable[[], int]) -> None:
-    """Run a command body, turning an unreadable register into one line naming it.
-
-    Without this a RegisterError escapes as a traceback, burying the line that
-    says which field is wrong.
-    """
-    try:
-        code = action()
-    except RegisterError as error:
-        error_console.print(f'[yellow]{REGISTER}:[/] {error}')
-        raise typer.Exit(1) from None
-    raise typer.Exit(code)
 
 
 app = typer.Typer(name='review', no_args_is_help=True, help="What's due to revisit, on a cadence.")
@@ -435,7 +369,7 @@ app = typer.Typer(name='review', no_args_is_help=True, help="What's due to revis
 @app.command('due')
 def due_command() -> None:
     """What's due now, most overdue first."""
-    run(cmd_due)
+    raise typer.Exit(cmd_due())
 
 
 @app.command('list')
@@ -447,19 +381,19 @@ def list_command(
     In --json, `overdue` is days past due (negative is days until due) and null
     when the item was never done, which counts as due; `due` says so directly.
     """
-    run(lambda: cmd_list(as_json))
+    raise typer.Exit(cmd_list(as_json))
 
 
 @app.command('done')
 def done_command(item_id: Annotated[str, typer.Argument(help='The register id to mark done.')]) -> None:
     """Mark an item done, advancing its due date."""
-    run(lambda: cmd_done(item_id))
+    raise typer.Exit(cmd_done(item_id))
 
 
 @app.command('edit')
 def edit_command() -> None:
     """Edit the register in $EDITOR."""
-    raise typer.Exit(cmd_edit())
+    raise typer.Exit(0 if service.edit_document('review', TEMPLATE) else 1)
 
 
 @app.command('nudge-every')
@@ -470,10 +404,10 @@ def nudge_every_command(
     minutes = parse_duration_minutes(duration)
     if minutes is None or minutes <= 0:
         raise typer.BadParameter('expected a duration like 4h, 90m, or a bare number of hours')
-    raise typer.Exit(write_nudge_interval(minutes))
+    raise typer.Exit(cmd_nudge_every(minutes))
 
 
 @app.command('nudge', hidden=True)
 def nudge_command() -> None:
     """The startup nudge, called by the shell gate rather than by hand."""
-    run(cmd_nudge)
+    raise typer.Exit(cmd_nudge())

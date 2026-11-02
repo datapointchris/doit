@@ -8,20 +8,16 @@ know is exactly what you remembered to retype, and a pursuit you do constantly
 through its own CLI reads as never done.
 
 A pursuit declares its evidence the same way it declares `resolve`, and for the
-same reason: doit must not know which apps exist. `evidence` is the command,
+same reason: doit must not know which apps exist. `evidence` is the read,
 `evidence_time` names the timestamp field on each row, `evidence_items` names the
 key holding the rows when they are nested, and `evidence_where` filters rows to
 the ones that count. That last one is what makes a habit usable — twenty of them
 come back from one call and only one of them is the pursuit.
 
-`evidence_files` is the other form, for a practice whose output is files rather
-than rows in an app. It names a directory and reads the timestamps there, so no
-app has to exist and nothing has to be ticked off twice.
-
-Every read is a subprocess against a remote API, so answers are cached and
-refreshed on a TTL rather than gathered per render. A refresh that fails leaves
-the previous answer standing: evidence an hour stale costs a slightly worse draw,
-evidence missing costs a wrong one.
+Every read is a call to a remote API, so answers are cached and refreshed on a
+TTL rather than gathered per render. The service keeps the cache and makes the
+reads. A refresh that fails leaves the previous answer standing: evidence an
+hour stale costs a slightly worse draw, evidence missing costs a wrong one.
 
 Each answer keeps the dates it was built from as well as the latest of them, so a
 reader asking how often a pursuit happens has something to ask.
@@ -29,12 +25,9 @@ reader asking how often a pursuit happens has something to ask.
 
 import datetime as dt
 import json
-import shlex
-import subprocess
 from collections.abc import Callable
 from collections.abc import Collection
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 from doit.journal import parse_time
 
@@ -44,40 +37,7 @@ SCHEMA_VERSION = 1
 # that something finished over lunch is accounted for by the afternoon.
 REFRESH_TTL_SECONDS = 1800.0
 
-# Higher than a lane's, because these are authenticated calls to remote APIs
-# rather than local reads, and a pursuit dropping to "never" is worse than a
-# pause.
-TIMEOUT_SECONDS = 8.0
-
 MAX_WORKERS = 6
-
-
-def cache_path(directory: Path) -> Path:
-    """Derived, per-machine, and reproducible, so it lives in cache rather than state."""
-    return directory / 'evidence.json'
-
-
-def load(directory: Path) -> dict:
-    """The last answers, or an empty document when there are none yet.
-
-    A malformed or unreadable file reads as empty rather than fatal. This is an
-    optimization over asking the apps directly, so losing it must cost a refresh
-    and nothing else.
-    """
-    path = cache_path(directory)
-    try:
-        payload = json.loads(path.read_text(encoding='utf-8'))
-    except (OSError, json.JSONDecodeError):
-        return {'schema_version': SCHEMA_VERSION, 'pursuits': {}}
-    if not isinstance(payload, dict) or not isinstance(payload.get('pursuits'), dict):
-        return {'schema_version': SCHEMA_VERSION, 'pursuits': {}}
-    return payload
-
-
-def save(directory: Path, payload: dict) -> None:
-    path = cache_path(directory)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8')
 
 
 def answerable(config: dict) -> bool:
@@ -195,71 +155,10 @@ def dates_of(stamps: list[dt.datetime], now: dt.datetime) -> list[str]:
     return sorted(day.isoformat() for day in days if day <= today)
 
 
-def read_files(name: str, directory: str, now: dt.datetime) -> tuple[str, dict]:
-    """When a pursuit whose output is files last produced one.
-
-    For practices that write rather than tick something off in an app — a journal
-    of dated entries, a folder of drafts. The file is the record already, so a
-    second one you have to remember to make would be the thing that goes stale.
-
-    Top level only, and mtime rather than a date parsed out of the filename.
-    Non-recursive keeps a `topics/` beside the entries from counting as entries.
-    mtime means reworking an old piece counts as having done the thing, which is
-    true of writing and is why no filename convention is imposed.
-    """
-    entry: dict = {'checked_at': now.isoformat()}
-    root = Path(directory).expanduser()
-    try:
-        stamps = [
-            dt.datetime.fromtimestamp(child.stat().st_mtime).astimezone()
-            for child in root.iterdir()
-            if child.is_file() and not child.name.startswith('.')
-        ]
-    except OSError as error:
-        entry['error'] = str(error)
-        return name, entry
-    when = max(stamps) if stamps else None
-    entry['last'] = None if when is None else when.isoformat()
-    entry['dates'] = dates_of(stamps, now)
-    return name, entry
-
-
-def read_one(name: str, config: dict, now: dt.datetime) -> tuple[str, dict]:
-    """Ask one app when this pursuit last happened.
-
-    Never `shell=True`: the command comes from a config file, and a tool that
-    hands config text to a shell has a class of bug you cannot audit away later.
-    """
-    if config.get('evidence_files'):
-        return read_files(name, str(config['evidence_files']), now)
-    command = config['evidence']
-    entry: dict = {'checked_at': now.isoformat()}
-    try:
-        result = subprocess.run(
-            shlex.split(command),
-            capture_output=True,
-            text=True,
-            timeout=TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        entry['error'] = str(error)
-        return name, entry
-    if result.returncode != 0:
-        said = (result.stderr or result.stdout).strip().splitlines()
-        entry['error'] = said[0] if said else f'exited {result.returncode}'
-        return name, entry
-    try:
-        document = json.loads(result.stdout or 'null')
-    except json.JSONDecodeError:
-        entry['error'] = 'evidence did not return JSON'
-        return name, entry
-
+def answer_from(document: object, config: dict, now: dt.datetime) -> dict:
+    """One pursuit's cached answer, from what its app returned: the latest stamp and every day."""
     stamps = stamps_in(document, config, now)
-    when = max(stamps) if stamps else None
-    entry['last'] = None if when is None else when.isoformat()
-    entry['dates'] = dates_of(stamps, now)
-    return name, entry
+    return {'checked_at': now.isoformat(), 'last': max(stamps).isoformat() if stamps else None, 'dates': dates_of(stamps, now)}
 
 
 def stale(entry: dict | None, now: dt.datetime, ttl: float) -> bool:
@@ -269,32 +168,6 @@ def stale(entry: dict | None, now: dt.datetime, ttl: float) -> bool:
     if checked is None:
         return True
     return (now - checked).total_seconds() >= ttl
-
-
-def refresh(
-    register: dict,
-    directory: Path,
-    now: dt.datetime,
-    force: bool = False,
-    ttl: float = REFRESH_TTL_SECONDS,
-    *,
-    ask: Collection[str] | None = None,
-) -> dict:
-    """Bring the cache up to date, asking only the apps whose answer has aged out.
-
-    ``register`` is every pursuit, and it alone decides which cached answers
-    survive. ``ask`` names the pursuits to bring up to date, every one by default,
-    and only their answers come back. A caller asking fewer therefore leaves the
-    others' answers in the cache rather than deleting them.
-
-    A failed read keeps the previous `last` and its dates and records why, so one
-    logged-out CLI degrades that pursuit to its journal rather than emptying the
-    whole document.
-    """
-    payload = load(directory)
-    if refreshed(payload, register, now, read_one, force=force, ttl=ttl, ask=ask):
-        save(directory, payload)
-    return answered(payload, ask if ask is not None else declared(register))
 
 
 def refreshed(
@@ -309,8 +182,14 @@ def refreshed(
 ) -> bool:
     """Bring ``payload`` up to date in place, asking ``read`` for each answer that aged out, and say whether it changed.
 
-    :func:`refresh` with the cache and the reader handed in, for a caller that
-    keeps the cache somewhere other than a file or asks apps some other way.
+    ``register`` is every pursuit, and it alone decides which cached answers
+    survive. ``ask`` names the pursuits to bring up to date, every one by
+    default. A caller asking fewer therefore leaves the others' answers in the
+    cache rather than deleting them.
+
+    A failed read keeps the previous `last` and its dates and records why, so
+    one logged-out app degrades that pursuit to its journal rather than
+    emptying the whole document.
     """
     entries = payload.setdefault('pursuits', {})
     declaring = declared(register)

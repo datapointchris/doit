@@ -13,13 +13,11 @@ import json
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
 
 from doit import dashboard
 from doit import happened
 from doit import render
 from doit import sources
-from doit.cli import app as cli_app
 from doit.lanes import GridCell
 from doit.lanes import Lane
 from doit.lanes import Row
@@ -98,7 +96,7 @@ def test_every_shipped_adapter_names_the_lanes_it_declares():
     and the name is the word typed at `--lane`, so a reader who copies the header
     has to get a lane back.
     """
-    for adapter_id, _, adapter, declared, _ in dashboard.SHIPPED_ADAPTERS:
+    for adapter_id, _, adapter, declared in dashboard.SHIPPED_ADAPTERS:
         answered = sources.Result(source=adapter_id, payload=ADAPTER_PAYLOADS[adapter_id], exit_code=0)
         broke = sources.Result(source=adapter_id, exit_code=1, stderr='no', failure=sources.Failure.FAILED)
 
@@ -577,12 +575,12 @@ def test_totals_come_from_the_backend_not_the_row_count():
 
 def test_lane_is_unavailable_when_its_backend_is_missing():
     results = all_results()
-    results['icb'] = sources.Result(source='icb', failure=sources.Failure.NOT_INSTALLED)
+    results['icb'] = sources.Result(source='icb', stderr='icb did not answer within 15s', failure=sources.Failure.FAILED)
 
     lanes = lanes_by_name(results)
 
     assert lanes['tasks'].available is False
-    assert 'not installed' in lanes['tasks'].reason
+    assert 'did not answer' in lanes['tasks'].reason
     assert lanes['maintenance'].available is True, 'one dead backend must not cost the other lanes'
 
 
@@ -704,20 +702,6 @@ def test_describe_joins_a_title_to_the_gist_of_its_note():
 def test_clip():
     assert dashboard.clip('short', 10) == 'short'
     assert dashboard.clip('a much longer string', 10) == 'a much lo…'
-
-
-def test_an_unmatched_lane_is_reported(monkeypatch, tmp_path):
-    """`--lane` is not validated against a closed set.
-
-    A conforming source contributes lanes doit has never heard of, so rejecting
-    an unknown name would reject the whole point. An unmatched name is reported
-    instead.
-    """
-    monkeypatch.setattr(sources, 'SOURCES', tmp_path / 'none.yml')
-    result = CliRunner().invoke(cli_app, ['dashboard', '--lane', 'nonsense'])
-
-    assert result.exit_code == 0
-    assert 'nonsense' in result.output
 
 
 def test_a_due_note_renders_rather_than_raising(capsys):
@@ -1161,23 +1145,18 @@ def alert_lane(name: str = 'problems', rows: int = 1) -> dashboard.LaneView:
     return dashboard.LaneView(name=name, title=name.upper(), rows=made, total=rows, alert=True)
 
 
-def test_an_alert_lane_draws_before_every_work_lane(monkeypatch) -> None:
+def test_an_alert_lane_draws_before_every_work_lane() -> None:
     """A problem you scroll to is one you read after deciding what to do."""
     work = [dashboard.LaneView(name=n, title=n.upper()) for n in ('tasks', 'habits')]
-    monkeypatch.setattr(dashboard.sources, 'fetch', lambda _: {})
-    monkeypatch.setattr(dashboard, 'local_lanes', lambda: [*work, alert_lane()])
 
-    ordered = dashboard.collect(sources.Registry(), None)
+    ordered = dashboard.arranged([*work, alert_lane()], None)
 
     assert [lane.name for lane in ordered] == ['problems', 'tasks', 'habits']
 
 
-def test_config_still_decides_the_order_among_alert_lanes(monkeypatch) -> None:
+def test_config_still_decides_the_order_among_alert_lanes() -> None:
     """The sort is stable, so it lifts the alerts without reshuffling them."""
-    monkeypatch.setattr(dashboard.sources, 'fetch', lambda _: {})
-    monkeypatch.setattr(dashboard, 'local_lanes', lambda: [alert_lane('second'), alert_lane('first')])
-
-    assert [lane.name for lane in dashboard.collect(sources.Registry(), None)] == ['second', 'first']
+    assert [lane.name for lane in dashboard.arranged([alert_lane('second'), alert_lane('first')], None)] == ['second', 'first']
 
 
 def test_the_terminal_drops_an_alert_lane_with_nothing_open(capsys) -> None:

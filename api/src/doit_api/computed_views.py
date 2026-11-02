@@ -106,7 +106,7 @@ class Views:
     def registered(self) -> documents.Config:
         found = self.config()
         if not found.pursuits:
-            raise NotFound('no pursuits yet; write the pursuits document first')
+            raise NotFound("no pursuits yet: `doit pursuits edit` writes them, or `doit import` brings a desk's")
         return found
 
     def pursuit_list(self) -> dict:
@@ -362,7 +362,7 @@ class Views:
         return dashboard.build_maintenance_lane({'review': sources.Result(source='local', payload=rows, exit_code=0)}, now.date())
 
     def kept(self, config: documents.Config, now: dt.datetime) -> happened.Kept:
-        """What doit keeps itself, as `happened.read_kept` reads it from a desk's files."""
+        """What doit keeps itself: the pursuit state and both review registers."""
         found = happened.Kept()
         if config.pursuits:
             found.state = self.state(config, now)
@@ -466,8 +466,7 @@ class Views:
         return stored
 
     def readings(self) -> list[forecast.Reading]:
-        names = {entry.name for entry in dc.fields(forecast.Reading)}
-        return [forecast.Reading(**{key: value for key, value in held.items() if key in names}) for held in self.store.readings()]
+        return [forecast.reading_from(held) for held in self.store.readings()]
 
     def forecast_list(self) -> list[dict]:
         return [dc.asdict(reading) for reading in self.readings()]
