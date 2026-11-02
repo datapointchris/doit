@@ -2,8 +2,8 @@
 
 A forecast is a reading of the register run forward, kept so a later trend can
 grade it against what the journal went on to record. The service takes one
-every `interval` from the register as it stands, the way a desk's scheduled job
-did, and stores it as the service's machine.
+every `interval` from the register as it stands, and stores it as the service's
+machine.
 
 The first reading after a start waits out whatever remains of the interval since
 the service's newest reading, so a restart does not take one early. A reading

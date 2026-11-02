@@ -232,7 +232,10 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     @api.get('/next')
     def next_draw(
         caller: Person,
-        machine: Annotated[str, Query(description='The machine asking, whose offered counts a new draw adds to.')],
+        machine: Annotated[
+            str | None,
+            Query(description='The machine asking, whose offered counts a new draw adds to. The service names itself when omitted.'),
+        ] = None,
         reroll: Annotated[bool, Query(description='Draw again even while the last draw stands.')] = False,
     ) -> dict:
         return views.next(machine, reroll)

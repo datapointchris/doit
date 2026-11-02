@@ -37,8 +37,7 @@ USER_AGENT = 'doit-api (+https://github.com/datapointchris/doit)'
 # as its machine. The desks' records keep theirs.
 MACHINE = 'doit-service'
 
-# How often the service takes a forecast unless told otherwise. Four hours is
-# the interval the desk-side job ran at.
+# How often the service takes a forecast unless told otherwise.
 DEFAULT_FORECAST_INTERVAL = '4h'
 
 INTERVAL = re.compile(r'(\d+)([mhd])')
@@ -198,6 +197,6 @@ class Settings:
         )
 
 
-def listen_port() -> int:
-    """The port uvicorn binds inside the container."""
-    return int(optional_env('DOIT_API_PORT', '8080'))
+# Fixed rather than configurable, because the image's EXPOSE and HEALTHCHECK name it too.
+# The deployment chooses the published port.
+LISTEN_PORT = 8080

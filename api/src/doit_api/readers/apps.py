@@ -33,10 +33,12 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 class ReadFailed(RuntimeError):
     """An app could not answer a read, for a reason worth one sentence on the lane."""
 
-    def __init__(self, reason: str, *, timed_out: bool = False) -> None:
+    def __init__(self, reason: str, *, timed_out: bool = False, refused: bool = False) -> None:
         super().__init__(reason)
         self.reason = reason
         self.timed_out = timed_out
+        # The app turned the service's credential away: a 401, a 403, or a token it would not mint.
+        self.refused = refused
 
 
 def local_zone() -> str:
@@ -80,7 +82,7 @@ class App:
         try:
             token = self.tokens.token()
         except LoginError as error:
-            raise ReadFailed(f'{self.name}: {error}') from error
+            raise ReadFailed(f'{self.name}: {error}', refused=True) from error
         params = {key: value_text(value) for key, value in (query or {}).items() if value is not None}
         try:
             response = self.client.get(
@@ -95,7 +97,10 @@ class App:
             raise ReadFailed(f'{self.name} could not be reached for {asked}: {error}') from error
         if response.status_code >= 400:
             said = answer_message(response)
-            raise ReadFailed(f'{self.name} answered {response.status_code} to {asked}' + (f': {said}' if said else ''))
+            raise ReadFailed(
+                f'{self.name} answered {response.status_code} to {asked}' + (f': {said}' if said else ''),
+                refused=response.status_code in (401, 403),
+            )
         try:
             return response.json()
         except ValueError as error:

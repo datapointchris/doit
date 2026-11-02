@@ -6,11 +6,11 @@ so the container's command is one word and the drain settings live in code.
 ## Shutting down
 
 uvicorn closes the listener on SIGTERM, waits for in-flight requests and exits 0.
-`GRACEFUL_SHUTDOWN_SECONDS` bounds the wait. The slowest read is a dashboard or
-`today`, which waits on its slowest app, and every app read carries a deadline
-under twenty seconds. So twenty-five seconds drains every request a client is
-still waiting on, and stays under the thirty an orchestrator gives before
-SIGKILL. The forecast loop's thread is a daemon and stops with the process.
+`GRACEFUL_SHUTDOWN_SECONDS` bounds the wait, under the thirty an orchestrator
+gives before SIGKILL. Each app call carries its own deadline, but the GitHub read
+chains one call per installation and page, so a dashboard can outlast the drain.
+A request still open when it ends is cut off, and the client sees no answer. The
+forecast loop's thread is a daemon and stops with the process.
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ from .forecasting import ForecastLoop
 from .readers.apps import App
 from .readers.declared_reads import Readers
 from .readers.github import GitHub
+from .settings import LISTEN_PORT
 from .settings import USER_AGENT
 from .settings import Settings
-from .settings import listen_port
 from .store import Store
 
 GRACEFUL_SHUTDOWN_SECONDS = 25
@@ -65,7 +65,7 @@ def serve():
         # Every interface inside the container. The deployment decides what
         # the published port is reachable from.
         host='0.0.0.0',
-        port=listen_port(),
+        port=LISTEN_PORT,
         log_config=config,
         proxy_headers=True,
         forwarded_allow_ips='*',

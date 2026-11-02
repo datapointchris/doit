@@ -1,16 +1,15 @@
 """The three documents a person edits, and the configuration every view is computed from.
 
-`pursuits`, `register` and `sources` are each kept as the text they were written
-as, comments and layout included, because that text is what a person edits. The
-text is the authority: every view parses it with doit's own validators, the same
-ones a desk ran on its files, so the service and a desk cannot read one register
-two ways.
+`pursuits`, `review` and `sources` are each kept as the text they were written
+as, comments and layout included, because that text is what a person edits. On a
+desk they are `pursuits.yml`, `register.yml` and `sources.yml`. The text is the
+authority: every view parses it with doit's own validators, the same ones a desk
+runs on its files, so the service and a desk cannot read one document two ways.
 
 Each entry is also a row of its own versioned table, written in the same
-transaction as the text. Those tables are what a question about the register
-over time reads: when a pursuit's weight moved, what the sources were last
-month. A document that fails validation is refused whole, and nothing is
-written.
+transaction as the text. Those tables are what a question about a document over
+time reads: when a pursuit's weight moved, what the sources were last month. A
+document that fails validation is refused whole, and nothing is written.
 """
 
 from __future__ import annotations
@@ -32,7 +31,7 @@ from .errors import NotFound
 from .store import Store
 from .store import stamp
 
-NAMES = ('pursuits', 'register', 'sources')
+NAMES = ('pursuits', 'review', 'sources')
 
 
 @dataclass
@@ -42,7 +41,7 @@ class Config:
     pursuits: dict = field(default_factory=dict)
     forecast: dict = field(default_factory=dict)
     cycles: list[Cycle] = field(default_factory=list)
-    register: dict[str, dict] = field(default_factory=dict)
+    review: dict[str, dict] = field(default_factory=dict)
     registry: sources.Registry = field(default_factory=sources.Registry)
 
 
@@ -71,11 +70,11 @@ def parse_pursuits(text: str) -> tuple[dict, dict, dict, list[Cycle]]:
         raise BadRequest(f'pursuits: {error}') from error
 
 
-def parse_register(text: str) -> dict[str, dict]:
+def parse_review(text: str) -> dict[str, dict]:
     try:
-        return review.register_from_document(loaded(text, 'register'))
+        return review.register_from_document(loaded(text, 'review'))
     except review.RegisterError as error:
-        raise BadRequest(f'register: {error}') from error
+        raise BadRequest(f'review: {error}') from error
 
 
 def parse_sources(text: str) -> tuple[dict, sources.Registry]:
@@ -96,7 +95,7 @@ def projections(name: str, text: str) -> dict[str, dict[object, dict]]:
             'pursuit_cycles': {entry['name']: {'settings': as_json(entry)} for entry in document.get('cycles') or []},
             'forecast_settings': {1: {'budget_minutes': forecast.get('budget_minutes')}},
         }
-    if name == 'register':
+    if name == 'review':
         return {
             'review_entries': {
                 entry: {
@@ -106,7 +105,7 @@ def projections(name: str, text: str) -> dict[str, dict[object, dict]]:
                     'command': text_or_none((meta or {}).get('command')),
                     'show': text_or_none((meta or {}).get('show')),
                 }
-                for block, entries in parse_register(text).items()
+                for block, entries in parse_review(text).items()
                 for entry, meta in entries.items()
             }
         }
@@ -161,8 +160,8 @@ def config(store: Store) -> Config:
     held = {name: store.document(name) for name in NAMES}
     if held['pursuits'] is not None:
         _, found.pursuits, found.forecast, found.cycles = parse_pursuits(held['pursuits'].text)
-    if held['register'] is not None:
-        found.register = parse_register(held['register'].text)
+    if held['review'] is not None:
+        found.review = parse_review(held['review'].text)
     if held['sources'] is not None:
         _, found.registry = parse_sources(held['sources'].text)
     return found

@@ -810,6 +810,8 @@ def prs_adapter(result: sources.Result) -> list[LaneView]:
             rows=rows,
             total=len(payload),
             hints=['prs list'],
+            # A source that answered but said its list is cut is partial, never whole.
+            reason=sources.first_line(result.stderr),
         )
     ]
 

@@ -1,6 +1,6 @@
 """Bringing a desk's files into the store, as often as it takes.
 
-A desk kept its configuration in `~/.config/doit/` and its records in
+A desk keeps its configuration in `~/.config/doit/` and its records in
 `~/.local/state/doit/`. An import posts both folders' files in one request, each
 with its path under `config/` or `state/`, its text and when it was last
 modified, and merges them into the store in one transaction.
@@ -15,7 +15,7 @@ in doubt.
 **A document is replaced only while an import owns it.** A document no person
 has edited on the service since the last import is replaced by the desk's text.
 One edited on the service is kept, and the summary says so, so a late import of
-a stale desk cannot undo an edit made where the register now lives.
+a stale desk cannot undo an edit made on the service.
 
 **A pursuit's commands become reads.** The service reads apps over HTTP, so a
 `resolve` or `evidence` written as an app's CLI command is rewritten as the
@@ -40,6 +40,8 @@ from collections.abc import Callable
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
 
+from doit import journal
+
 from . import documents
 from .errors import BadRequest
 from .store import Store
@@ -51,7 +53,7 @@ IMPORT_AUTHOR = 'import:'
 JOURNAL = re.compile(r'state/next-log-(?P<machine>.+)\.jsonl')
 OFFERS = re.compile(r'state/next-offers-(?P<machine>.+)\.json')
 FORECASTS = re.compile(r'state/forecast-(?P<machine>.+)\.jsonl')
-DOCUMENT_FILES = {'config/pursuits.yml': 'pursuits', 'config/register.yml': 'register', 'config/sources.yml': 'sources'}
+DOCUMENT_FILES = {'config/pursuits.yml': 'pursuits', 'config/register.yml': 'review', 'config/sources.yml': 'sources'}
 
 # Why a file the store has no place for is skipped.
 SKIPPED = (
@@ -60,7 +62,7 @@ SKIPPED = (
     (re.compile(r'.+\.bak.*'), 'a backup copy'),
 )
 
-EVENTS = {'done', 'skip', 'reset', 'pace'}
+EVENTS = {event.value for event in journal.Event}
 
 # icb list commands and the collection each reads. Each flag becomes the query
 # parameter of the same name with `_` for `-`, which is how icb's CLI builds it.

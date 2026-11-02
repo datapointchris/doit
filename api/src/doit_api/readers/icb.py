@@ -5,6 +5,11 @@ read per section, so the service composes the same document from the same reads,
 for the sections doit's lanes use. The document keeps the CLI's shape and schema
 version, so the lanes read it exactly as they read the CLI's.
 
+This module is therefore a copy of the CLI's composition: which project is in
+focus, the order of the article queue, which countdowns show. A change to that
+composition in icb has to be made here too, until icb serves the document itself
+and this module becomes one read of it.
+
 A section whose read fails keeps its empty shape and adds a warning naming it,
 as the CLI does. Its lane degrades and the rest of the dashboard does not.
 """
@@ -15,16 +20,14 @@ import datetime as dt
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
+from doit.dashboard import ICB_SCHEMA_VERSION
 from doit.window import Bounds
 
 from .apps import App
 from .apps import ReadFailed
 from .apps import local_zone
 
-# The overview schema these sections follow. The dashboard refuses a newer one.
-OVERVIEW_SCHEMA_VERSION = 3
-
-# Rows per section, the CLI's default `--limit`.
+# Rows per section, matching what `icb overview` shows, so a lane reads the same from either.
 OVERVIEW_LIMIT = 10
 
 ARTICLE_READ_WINDOW = dt.timedelta(days=30)
@@ -145,8 +148,10 @@ OVERVIEW_READS: tuple[tuple[str, str, str, Callable[[], dict]], ...] = (
 def overview(icb: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
     """The overview document, composed from one read per section, with a warning for each read that failed.
 
-    Every read failing is a refusal of the whole document, as it is from the
-    CLI: an overview of nothing but warnings would draw every icb lane empty.
+    Two failures refuse the whole document, as they do from icb's CLI. One is
+    every read failing, since an overview of nothing but warnings would draw every
+    icb lane empty. The other is any section refusing the service's credential,
+    since a missing scope would otherwise draw that section as if it held nothing.
     """
 
     def read(entry: tuple[str, str, str, Callable[[], dict]]) -> object:
@@ -159,6 +164,9 @@ def overview(icb: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
     with ThreadPoolExecutor(max_workers=len(OVERVIEW_READS)) as pool:
         answers = list(pool.map(read, OVERVIEW_READS))
     failures = [(entry, answer) for entry, answer in zip(OVERVIEW_READS, answers, strict=True) if isinstance(answer, ReadFailed)]
+    refused = [failure for _, failure in failures if failure.refused]
+    if refused:
+        raise refused[0]
     if len(failures) == len(OVERVIEW_READS):
         raise failures[0][1]
     by_label = {
@@ -182,7 +190,7 @@ def overview(icb: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
     events = rows('events')
     next_up = [book for book in owned if book.get('progress') == 'unread']
     return {
-        'schema_version': OVERVIEW_SCHEMA_VERSION,
+        'schema_version': ICB_SCHEMA_VERSION,
         'generated_at': now.isoformat(),
         'tasks': {'items': capped(tasks, limit), 'total': len(tasks)},
         'habits': {

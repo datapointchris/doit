@@ -1,13 +1,20 @@
 import logging
 
 import httpx2
+import pytest
 from conftest import NOW
 from conftest import client_for
 from conftest import served
 from conftest import stand_in
 from doit_api.readers import icb
+from doit_api.readers.apps import ReadFailed
+from doit_api.readers.declared_reads import UNREAD_ADAPTERS
+from doit_api.readers.declared_reads import Readers
 from doit_api.readers.github import GitHub
+from doit_api.settings import ClickHouseSettings
 from doit_api.settings import GitHubSettings
+
+from doit import sources
 
 SOURCES = 'sources:\n  icb:\n    adapter: icb\n  prs:\n    adapter: prs\n'
 
@@ -79,11 +86,16 @@ def test_the_overview_is_composed_from_one_read_per_section_as_the_cli_composes_
     assert [countdown['name'] for countdown in document['countdowns']['items']] == ['Passport']
     assert document['warnings'] == []
 
+    forbidden = {**ICB_ROUTES, '/books': lambda request: httpx2.Response(403, json={'error': 'Forbidden', 'message': 'scope missing'})}
+    with pytest.raises(ReadFailed) as refused:
+        icb.overview(stand_in('icb', forbidden), NOW)
+    assert refused.value.refused
+
 
 def test_a_section_whose_read_fails_degrades_only_its_lane_and_logs_the_source(store, caplog):
     routes = {
         **ICB_ROUTES,
-        '/books': lambda request: httpx2.Response(403, json={'error': 'Forbidden', 'message': 'scope icb.books.read missing'}),
+        '/books': lambda request: httpx2.Response(503, json={'error': 'Unavailable', 'message': 'the book store is restarting'}),
     }
     client = client_for(store, apps={'icb': stand_in('icb', routes)})
     client.put('/api/v1/documents/sources', json={'text': 'sources:\n  icb:\n    adapter: icb\n  learning:\n    adapter: learning\n'})
@@ -92,7 +104,7 @@ def test_a_section_whose_read_fails_degrades_only_its_lane_and_logs_the_source(s
         lanes = {lane['name']: lane for lane in client.get('/api/v1/dashboard').json()['lanes']}
 
     assert lanes['tasks']['status'] == 'ok'
-    assert lanes['books']['reason'] == 'books: icb answered 403 to GET /books: scope icb.books.read missing'
+    assert lanes['books']['reason'] == 'books: icb answered 503 to GET /books: the book store is restarting'
     assert lanes['learning']['status'] == 'unavailable'
     assert (
         lanes['learning']['reason']
@@ -151,12 +163,19 @@ def test_a_logged_pursuit_counts_toward_its_standing_and_names_who_logged_it(sto
     register += '  run:\n    description: Run\n    weekly_minutes: 60\n    weight: 1\n'
     client.put('/api/v1/documents/pursuits', json={'text': register})
 
-    logged = client.post('/api/v1/journal/done', json={'pursuit': 'wa', 'note': 'around the block', 'machine': 'desk'})
-    refused = client.post('/api/v1/journal/done', json={'pursuit': 'run'})
+    logged = client.post('/api/v1/journal/done', json={'pursuit': 'wa', 'note': 'around the block', 'machine': 'Desk.local'})
+    unmeasured = client.post('/api/v1/journal/done', json={'pursuit': 'run'})
+    ahead = client.post('/api/v1/journal/done', json={'pursuit': 'walk', 'occurred_at': '2030-01-01T00:00:00Z'})
 
     assert logged.status_code == 201
     entry = logged.json()['entry']
     assert (entry['pursuit'], entry['machine'], entry['actor'], entry['note']) == ('walk', 'desk', 'chris', 'around the block')
     assert client.get('/api/v1/pursuits').json()['state']['done']['walk'] == 1
-    assert refused.json()['message'] == 'run is measured in minutes: send duration_minutes'
+    assert (unmeasured.status_code, ahead.status_code) == (422, 422)
     assert [record['event'] for record in store.journal()].count('done') == 1
+
+
+def test_every_adapter_doit_registers_has_a_read_or_a_reason():
+    readers = Readers({}, GitHub(GitHubSettings()), ClickHouseSettings())
+
+    assert set(sources.ADAPTERS) == set(readers.adapter_reads) | set(UNREAD_ADAPTERS)

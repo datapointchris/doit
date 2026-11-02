@@ -3,7 +3,7 @@
 Three kinds of table live here.
 
 **Config, versioned.** The three documents a person edits (`pursuits`,
-`register`, `sources`) are kept as their text in `documents`, comments and
+`review`, `sources`) are kept as their text in `documents`, comments and
 layout included, and each entry in them is a row of its own table. Every one of
 those tables follows the SQL:2011 system-versioned temporal-table pattern: a row
 carries `valid_from`, and a trigger copies the row an update or a delete replaced
@@ -52,7 +52,7 @@ VERSIONED: dict[str, tuple[str, tuple[str, ...]]] = {
     'sources': ('id', ('block', 'adapter', 'command', 'timeout', 'lanes')),
 }
 
-# A pursuit's settings are the mapping the register declares, held as JSON so a
+# A pursuit's settings are the mapping the pursuits document declares, held as JSON so a
 # pursuit reads back exactly as it was written. The facts a question about the
 # pursuits over time asks of are columns derived from it.
 PURSUIT_COLUMNS = """
@@ -72,7 +72,7 @@ CYCLE_COLUMNS = """
 
 TABLE_COLUMNS = {
     'documents': """
-        name TEXT PRIMARY KEY CHECK (name IN ('pursuits', 'register', 'sources')),
+        name TEXT PRIMARY KEY CHECK (name IN ('pursuits', 'review', 'sources')),
         text TEXT NOT NULL,
         edited_by TEXT NOT NULL,
     """,

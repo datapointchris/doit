@@ -7,16 +7,15 @@ due date or a lane. That is what keeps the service's answer and a desk's answer
 from drifting: there is one copy of each rule, and both run it.
 
 Writes go through the same functions. A journal entry is built by
-`pursuits.new_record`, and the sightings and paces a build finds are appended
-to the store through `build_state`'s `append`, as a desk appended them to its
-file.
+`pursuits.done_record` and its siblings, and the sightings and paces a build
+finds are appended to the store through `build_state`'s `append`, as a desk
+appends them to its file.
 """
 
 from __future__ import annotations
 
 import dataclasses as dc
 import datetime as dt
-import math
 from collections.abc import Callable
 
 import click
@@ -27,6 +26,7 @@ from doit import forecast
 from doit import happened
 from doit import journal
 from doit import lanes
+from doit import paths
 from doit import pursuits
 from doit import quota
 from doit import review
@@ -41,15 +41,13 @@ from .errors import Conflict
 from .errors import NotFound
 from .readers.apps import ReadFailed
 from .readers.declared_reads import Readers
+from .readers.declared_reads import source_failed
 from .settings import MACHINE
 from .store import Store
 from .store import stamp
 
-# How long a draw stands before the next `next` draws again, as on a desk.
-DRAW_MINUTES = pursuits.CACHE_MINUTES
-
-# How far ahead a countdown is named above the draw.
-CONTEXT_COUNTDOWN_DAYS = 14
+# How far past the service's clock a client's instant may run before it reads as the future.
+FUTURE_SKEW = dt.timedelta(minutes=1)
 
 
 def instant(text: str | None, name: str) -> dt.datetime | None:
@@ -126,19 +124,14 @@ class Views:
     def standing_draw(self, now: dt.datetime) -> dict | None:
         """The draw from the last few minutes, or None once it has aged out or nothing is left of it."""
         selection = self.store.newest_draw()
-        if selection is None:
-            return None
-        created = journal.parse_time(selection.get('created_at'))
-        if created is None or now - created > dt.timedelta(minutes=DRAW_MINUTES) or selection.get('retired'):
-            return None
-        return selection
+        return selection if pursuits.draw_stands(selection, now) else None
 
     def retire_draw(self, now: dt.datetime) -> None:
         standing = self.standing_draw(now)
         if standing is not None:
             self.store.save_draw({**standing, 'retired': True})
 
-    def next(self, machine: str, reroll: bool) -> dict:
+    def next(self, machine: str | None, reroll: bool) -> dict:
         """`doit next --json`: what to do now, the state behind the draw, and today's events above it."""
         config, now = self.registered(), self.now()
         state = self.state(config, now)
@@ -159,10 +152,17 @@ class Views:
             selection = pursuits.compute_draw(state)
             selection['resolved'] = self.readers.resolve_all(selection['offered'], config.pursuits)
             self.store.save_draw(selection)
-            self.store.bump_offers(machine, selection['offered'])
+            self.store.bump_offers(paths.canonical_machine(machine or MACHINE), selection['offered'])
         else:
             selection = standing
-        return {**selection, 'state': pursuits.explain_payload(state), 'context': self.context(now), 'pursuits': config.pursuits}
+        context, context_error = self.context(now)
+        return {
+            **selection,
+            'state': pursuits.explain_payload(state),
+            'context': context,
+            'context_error': context_error,
+            'pursuits': config.pursuits,
+        }
 
     def register(self) -> dict:
         """The pursuits as declared and what the standing draw offers, with no app asked."""
@@ -170,25 +170,14 @@ class Views:
         standing = self.standing_draw(now) or {}
         return {'pursuits': config.pursuits, 'offered': standing.get('offered', []), 'draw_id': standing.get('draw_id')}
 
-    def context(self, now: dt.datetime) -> list[str]:
-        """Today's events and the countdowns due within two weeks, which sit above the draw and take no part in it."""
+    def context(self, now: dt.datetime) -> tuple[list[str], str | None]:
+        """The lines above the draw, and why they could not be read where they could not, so a failed read never passes for a quiet day."""
         try:
             overview = self.readers.adapter_reads['icb'](window.day_of(now), now)[0]
-        except ReadFailed:
-            return []
-        lines = []
-        today_date = now.date()
-        for event in (overview.get('events') or {}).get('items') or [] if isinstance(overview, dict) else []:
-            when = journal.parse_time(event.get('date'))
-            if when and when.astimezone().date() == today_date:
-                lines.append(f'{event.get("name", "")} · {event.get("venue") or "today"}')
-        for countdown in (overview.get('countdowns') or {}).get('items') or [] if isinstance(overview, dict) else []:
-            due = countdown.get('due_date')
-            if due:
-                days = (dt.date.fromisoformat(str(due)[:10]) - today_date).days
-                if 0 <= days <= CONTEXT_COUNTDOWN_DAYS:
-                    lines.append(f'{countdown.get("name", "")} in {days}d')
-        return lines
+        except ReadFailed as error:
+            source_failed('next-context', 'icb', error.reason)
+            return [], error.reason
+        return pursuits.context_lines(overview, now.date()), None
 
     def item(self, needle: str) -> dict:
         """What a pursuit means right now: the standing draw's entry for it, or a fresh resolve."""
@@ -206,73 +195,47 @@ class Views:
         """Record having done a pursuit, as `doit pursuits log` records it, and say when it next comes due."""
         config, now = self.registered(), self.now()
         name = self.matched(str(body['pursuit']), config.pursuits)
-        settings = config.pursuits[name]
         minutes = body.get('duration_minutes')
-        timed = bool(settings.get('weekly_minutes'))
-        if minutes is not None and not timed and pursuits.paced(settings):
-            raise BadRequest(f'{name} is counted in completions, so duration_minutes has nothing to measure')
-        if timed and minutes is None:
-            raise BadRequest(f'{name} is measured in minutes: send duration_minutes')
+        if refusal := pursuits.minutes_refusal(name, config.pursuits[name], minutes):
+            raise BadRequest(refusal)
         occurred = instant(body.get('occurred_at'), 'occurred_at') or now
+        if occurred > now + FUTURE_SKEW:
+            raise BadRequest(f'occurred_at={body["occurred_at"]!r} is later than now, and a log records what has happened')
         state = self.state(config, now)
         standing = self.standing_draw(now)
-        offered = (standing or {}).get('offered', [])
-        entry = pursuits.new_record(
-            journal.Event.DONE,
+        entry = pursuits.done_record(
             name,
             state,
-            {
-                'occurred_at': occurred.isoformat(),
-                'note': body.get('note') or None,
-                'duration_minutes': minutes,
-                'item': body.get('item') or None,
-                'downstream': body.get('downstream'),
-                'draw_id': (standing or {}).get('draw_id'),
-                'was_offered': name in offered,
-                'rank_offered': offered.index(name) + 1 if name in offered else None,
-            },
-            now,
-            machine=str(body.get('machine') or MACHINE),
-            identity=str(body.get('actor') or recorded_by),
+            standing or {},
+            occurred=occurred,
+            note=body.get('note'),
+            minutes=minutes,
+            item=body.get('item'),
+            downstream=body.get('downstream'),
+            now=now,
+            **self.author(body, recorded_by),
         )
         self.store.append([entry], recorded_by, now)
         if standing is not None:
             standing['logged'] = sorted({*standing.get('logged', []), name})
             self.store.save_draw(standing)
-        return {'entry': entry, 'due_in_days': self.due_after(state, name, entry)}
-
-    @staticmethod
-    def due_after(state: dict, name: str, entry: dict) -> float | None:
-        """When the pursuit next comes due with this entry counted, from the model rather than by subtraction."""
-        if name not in state['balance']:
-            return None
-        own = [*pursuits.records_by_pursuit(state['records']).get(name, []), entry]
-        due = pursuits.standing(
-            own,
-            state['evidence_days'].get(name, []),
-            state['now'],
-            state['origins'][name],
-            (state['intervals'][name], state['checkoff_size'][name]),
-            state['weekly_minutes'].get(name),
-        ).due
-        return None if due is None else round(due, 2)
+        return {'entry': entry, 'due_in_days': pursuits.due_with(state, name, entry)}
 
     def skip(self, body: dict, recorded_by: str) -> dict:
         """Pass on a pursuit for a span, as `doit pursuits skip` does."""
         config, now = self.registered(), self.now()
         name = self.matched(str(body['pursuit']), config.pursuits)
         state = self.state(config, now)
-        if name not in state['active']:
-            raise Conflict(f'{name} is not in the draw ({pursuits.why_unpriced(state, name)}), so there is nothing to pass')
+        if refusal := pursuits.outside_draw(state, name):
+            raise Conflict(f'{refusal}, so there is nothing to pass')
         try:
             days = pursuits.skip_span(body.get('for'), state['intervals'][name])
         except click.BadParameter as error:
             raise BadRequest(str(error.message)) from error
         expires = now + dt.timedelta(days=days)
         standing = self.standing_draw(now) or {}
-        entry = self.written(
-            journal.Event.SKIP, name, state, {'expires_at': expires.isoformat(), 'draw_id': standing.get('draw_id')}, body, recorded_by, now
-        )
+        extra = {'expires_at': expires.isoformat(), 'draw_id': standing.get('draw_id')}
+        entry = pursuits.new_record(journal.Event.SKIP, name, state, extra, now, **self.author(body, recorded_by))
         self.store.append([entry], recorded_by, now)
         self.retire_draw(now)
         return {'entry': entry, 'days': days, 'until': expires.isoformat()}
@@ -281,15 +244,13 @@ class Views:
         """End a standing skip now, for one pursuit or every skipped one."""
         config, now = self.registered(), self.now()
         state = self.state(config, now)
-        if body.get('pursuit'):
-            name = self.matched(str(body['pursuit']), config.pursuits)
-            if name not in state['active']:
-                raise Conflict(f'{name} is not in the draw ({pursuits.why_unpriced(state, name)}), so there is nothing to return it to')
-            chosen = [name] if name in state['suppressed'] else []
-        else:
-            chosen = list(state['suppressed'])
+        name = self.matched(str(body['pursuit']), config.pursuits) if body.get('pursuit') else None
+        if name and (refusal := pursuits.outside_draw(state, name)):
+            raise Conflict(f'{refusal}, so there is nothing to return it to')
+        chosen = pursuits.resumed(state, name)
+        who = self.author(body, recorded_by)
         entries = [
-            self.written(journal.Event.SKIP, name, state, {'expires_at': now.isoformat()}, body, recorded_by, now) for name in chosen
+            pursuits.new_record(journal.Event.SKIP, pursuit, state, {'expires_at': now.isoformat()}, now, **who) for pursuit in chosen
         ]
         self.store.append(entries, recorded_by, now)
         if entries:
@@ -301,20 +262,15 @@ class Views:
         config, now = self.registered(), self.now()
         named = body.get('pursuits')
         chosen = sorted(config.pursuits) if not named else [self.matched(str(name), config.pursuits) for name in named]
-        state = self.state(config, now)
-        entries = [
-            self.written(journal.Event.RESET, name, state if index == 0 else None, {}, body, recorded_by, now)
-            for index, name in enumerate(chosen)
-        ]
+        entries = pursuits.reset_records(chosen, self.state(config, now), now, **self.author(body, recorded_by))
         self.store.append(entries, recorded_by, now)
         self.retire_draw(now)
         return {'reset': chosen, 'entries': entries}
 
     @staticmethod
-    def written(event: str, name: str, state: dict | None, extra: dict, body: dict, recorded_by: str, now: dt.datetime) -> dict:
-        return pursuits.new_record(
-            event, name, state, extra, now, machine=str(body.get('machine') or MACHINE), identity=str(body.get('actor') or recorded_by)
-        )
+    def author(body: dict, recorded_by: str) -> dict:
+        """The machine and actor a write is recorded as: the client's, its machine spelled as a desk spells its own."""
+        return {'machine': paths.canonical_machine(str(body.get('machine') or MACHINE)), 'identity': str(body.get('actor') or recorded_by)}
 
     def drift(self, since: str | None, until: str | None) -> dict:
         """`doit pursuits drift --json`: what each goal asked over a window, and what got done."""
@@ -332,15 +288,9 @@ class Views:
         return {'since': start and start.isoformat(), 'until': (end or now).isoformat(), 'rows': rows}
 
     def dormant(self) -> dict:
-        """Pursuits gone quiet for more than three of their own intervals."""
+        """`doit pursuits dormant`: pursuits gone quiet for several of their own intervals."""
         config, now = self.registered(), self.now()
-        state = self.state(config, now)
-        rows = []
-        for name in state['active']:
-            elapsed, interval = state['days_since'][name], state['intervals'][name]
-            if not math.isinf(interval) and (elapsed is None or elapsed > interval * 3):
-                rows.append({'pursuit': name, 'days_since': elapsed, 'interval_days': round(interval, 2)})
-        return {'dormant': sorted(rows, key=lambda row: -(row['days_since'] or 1e9))}
+        return {'dormant': pursuits.dormant_rows(self.state(config, now))}
 
     def evidence(self) -> dict:
         """`doit pursuits evidence --json`: what each app says was last done, asking every one now."""
@@ -368,24 +318,26 @@ class Views:
             raise BadRequest(f'no block named {block}; the blocks are {", ".join(review.BLOCKS)}')
         config, now = self.config(), self.now()
         stamps = self.store.review_stamps()
-        owned = {entry for entries in config.register.values() for entry in entries}
+        owned = {entry for entries in config.review.values() for entry in entries}
         return {
-            'entries': review.statuses_of(config.register, stamps, now.date(), block),
+            'entries': review.statuses_of(config.review, stamps, now.date(), block),
             'stranded': sorted(entry for entry in stamps if entry not in owned),
         }
 
     def complete_review(self, entry: str, day: str | None, recorded_by: str) -> dict:
         config, now = self.config(), self.now()
-        if not any(entry in entries for entries in config.register.values()):
+        if not any(entry in entries for entries in config.review.values()):
             raise NotFound(f'no review entry named {entry}')
         done_on = day or now.date().isoformat()
         try:
-            dt.date.fromisoformat(done_on)
+            done_day = dt.date.fromisoformat(done_on)
         except ValueError:
             raise BadRequest(f'day={done_on!r} is not a date (YYYY-MM-DD)') from None
+        if done_day > now.date():
+            raise BadRequest(f'day={done_on!r} is later than today, and a completion records what has happened')
         with self.store.write() as connection:
             added = self.store.add_completion(connection, entry, done_on, recorded_by, stamp(now))
-        rows = review.statuses_of(config.register, self.store.review_stamps(), now.date(), None)
+        rows = review.statuses_of(config.review, self.store.review_stamps(), now.date(), None)
         status = next((row for row in rows if row['id'] == entry), None)
         return {'entry': entry, 'done_on': done_on, 'added': bool(added), 'status': status}
 
@@ -406,7 +358,7 @@ class Views:
     # --- the lanes ------------------------------------------------------------
 
     def maintenance_lane(self, config: documents.Config, now: dt.datetime) -> lanes.Lane:
-        rows = review.statuses_of(config.register, self.store.review_stamps(), now.date())
+        rows = review.statuses_of(config.review, self.store.review_stamps(), now.date())
         return dashboard.build_maintenance_lane({'review': sources.Result(source='local', payload=rows, exit_code=0)}, now.date())
 
     def kept(self, config: documents.Config, now: dt.datetime) -> happened.Kept:
@@ -416,7 +368,7 @@ class Views:
             found.state = self.state(config, now)
         stamps = self.store.review_stamps()
         for entry in happened.registers():
-            found.registers[entry.name] = review.statuses_of(config.register, stamps, now.date(), entry.block)
+            found.registers[entry.name] = review.statuses_of(config.review, stamps, now.date(), entry.block)
         return found
 
     def dashboard(self, wanted: list[str] | None) -> dict:

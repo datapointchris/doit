@@ -6,7 +6,7 @@ from doit.window import Bounds
 
 from .apps import App
 
-# How many finished items one read returns. The CLI's default `--limit`.
+# How many finished items one read returns, matching what `learning completed` shows, so a lane reads the same from either.
 COMPLETED_LIMIT = 100
 
 

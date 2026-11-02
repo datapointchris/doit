@@ -176,4 +176,9 @@ def machine_name() -> str:
     (arch/archlinux, Macmini/macmini) and split one machine into several, so the
     bare name is recorded and any canonicalization happens at read time.
     """
-    return socket.gethostname().split('.')[0].strip().lower()
+    return canonical_machine(socket.gethostname())
+
+
+def canonical_machine(name: str) -> str:
+    """A hostname as a machine identity: its first label, stripped and lowercased."""
+    return name.split('.')[0].strip().lower()

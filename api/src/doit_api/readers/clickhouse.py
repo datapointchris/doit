@@ -6,9 +6,10 @@ the resource's `host.name`. A materialized view copies those records into
 `otel.desk_reports`, and the service's account is granted `SELECT` on that table
 alone.
 
-The lane is each machine's newest result for each check over the last
-`LOOKBACK_HOURS`. A machine with a failing check is a row naming the check and
-its summary. A machine whose checks all pass is counted and not listed, so the
+The lane is each machine's newest result for each check, over everything the
+table keeps. A failure therefore stays on the lane until a later pass on the same
+machine and check, however long the machine is silent in between. A machine
+with a failing check is a row naming the check and its summary. A machine whose checks all pass is counted and not listed, so the
 lane names only what needs a look.
 
 The answer is a lane document, which the dashboard draws with no adapter.
@@ -32,10 +33,6 @@ from .apps import ReadFailed
 
 TIMEOUT_SECONDS = 10.0
 
-# Long enough that a machine asleep overnight still reports what its last
-# checks said, short enough that one retired a while ago drops out.
-LOOKBACK_HOURS = 48
-
 # The newest outcome and summary per machine and check. Times cross as integer
 # milliseconds cast to text, because a DateTime64 in JSON carries no zone.
 QUERY = """
@@ -46,7 +43,7 @@ SELECT
     argMax(LogAttributes['fleet.check.summary'], Timestamp) AS summary,
     toString(toUnixTimestamp64Milli(max(Timestamp))) AS reported_ms
 FROM otel.desk_reports
-WHERE Kind = 'desk.check' AND InsertedAt > now64(6) - toIntervalHour({hours:UInt32})
+WHERE Kind = 'desk.check'
 GROUP BY machine, check_key
 ORDER BY machine, check_key
 FORMAT JSONEachRow
@@ -61,7 +58,6 @@ def checks(settings: ClickHouseSettings, client: httpx2.Client | None = None) ->
     try:
         response = http.post(
             settings.url + '/',
-            params={'param_hours': str(LOOKBACK_HOURS)},
             content=QUERY.encode(),
             headers={'X-ClickHouse-User': settings.user, 'X-ClickHouse-Key': settings.password, 'User-Agent': USER_AGENT},
             timeout=TIMEOUT_SECONDS,

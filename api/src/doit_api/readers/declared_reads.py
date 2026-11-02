@@ -48,6 +48,17 @@ from .github import GitHub
 
 log = logging.getLogger(__name__)
 
+# Adapters doit registers that the service has no read for, and the reason a source naming one shows.
+UNREAD_ADAPTERS = {
+    'problems': 'the problems source reads an inbox with no API the service holds a credential for',
+}
+
+
+def source_failed(source: str, adapter: str | None, reason: str, *, exc_info: bool = False) -> None:
+    """The one line an alert is filed on: a read the service could not make, with the source's name."""
+    log.error('source_failed', extra={'source': source, 'adapter': adapter, 'reason': reason}, exc_info=exc_info)
+
+
 READ_KEYS = {'app', 'path', 'query'}
 
 
@@ -84,7 +95,7 @@ class Readers:
             'icb': lambda bounds, now: (icb.overview(self.app('icb'), now), ''),
             'learning': lambda bounds, now: (learning.overview(self.app('learning')), ''),
             'meso': lambda bounds, now: (meso.cycles(self.app('meso')), ''),
-            'prs': lambda bounds, now: (self.github.open_pull_requests(now), ''),
+            'prs': lambda bounds, now: self.github.open_pull_requests(now),
             'dotfiles': lambda bounds, now: (clickhouse.desk_checks_document(self.clickhouse_settings, now, self.clickhouse_client), ''),
             'learning-completed': lambda bounds, now: learning.completed(self.app('learning'), bounds),
             'meso-review': lambda bounds, now: (meso.review(self.app('meso'), bounds), ''),
@@ -106,11 +117,16 @@ class Readers:
                 raise ReadFailed(f'{source.id} runs `{" ".join(source.command)}`, and the service reads apps over HTTP only')
             read = self.adapter_reads.get(source.adapter)
             if read is None:
-                raise ReadFailed(f'the service has no HTTP read for the {source.adapter} adapter')
+                raise ReadFailed(UNREAD_ADAPTERS.get(source.adapter) or f'the service has no HTTP read for the {source.adapter} adapter')
             payload, said = read(bounds, now)
         except ReadFailed as error:
-            log.error('source_failed', extra={'source': source.id, 'adapter': source.adapter, 'reason': error.reason})
+            source_failed(source.id, source.adapter, error.reason)
             return Result(source=source.id, stderr=error.reason, failure=Failure.FAILED, bounds=bounds)
+        except Exception as error:
+            # A reader's own fault costs its lane, never the view the other lanes are in.
+            reason = f'the {source.adapter} read failed: {type(error).__name__}: {error}'
+            source_failed(source.id, source.adapter, reason, exc_info=True)
+            return Result(source=source.id, stderr=reason, failure=Failure.FAILED, bounds=bounds)
         return Result(source=source.id, payload=payload, exit_code=0, stderr=said, bounds=bounds)
 
     def results(self, sources: list[Source], bounds: Bounds, now: dt.datetime) -> dict[str, Result]:
