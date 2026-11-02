@@ -25,20 +25,16 @@ or a subprocess follows from where the owner lives, and is not a distinction thi
 module makes.
 """
 
-import datetime as dt
 import json
 import shutil
 import subprocess
-from collections.abc import Callable
 from typing import Annotated
 
 import typer
 from rich.text import Text
 
-from doit import digest
 from doit import index
 from doit import tools
-from doit import usage
 from doit.render import console
 from doit.render import error_console
 
@@ -276,63 +272,7 @@ def render_lens_card(entry: index.Entry) -> None:
         tools.card_detail(entry.description, brief=False)
 
 
-def cmd_unresolved(as_json: bool) -> int:
-    """List rows naming something this machine cannot run."""
-    verdict = index.classify()
-    if as_json:
-        print(json.dumps(index.unresolved_rows(verdict.dead), indent=2))
-        return 0
-    if not verdict.dead and not verdict.absent and not verdict.foreign:
-        console.print('[green]✓[/] Every indexed row names something runnable.')
-        return 0
-
-    if verdict.dead:
-        console.rule('[cyan]Rows naming nothing runnable', align='left')
-        print_index_rows(verdict.dead, 'yellow')
-        console.print(f'\n  {len(verdict.dead)} rows name something not on PATH, nor a function, alias or forgit shortcut.')
-        console.print('  No `requires:` accounts for them, so either the entry is stale or it needs one.')
-
-    # A separate section, not a footnote on the one above. These are correct
-    # entries for software this box does not have, so counting them alongside
-    # rot is what trains you to stop reading the number.
-    if verdict.absent:
-        console.print()
-        console.rule('[cyan]Rows needing something this machine lacks', align='left')
-        print_index_rows(verdict.absent, 'cyan', note=lambda entry: f'needs {entry.requires}')
-        console.print(f'\n  {len(verdict.absent)} rows are fine and their prerequisite is not installed here.')
-
-    # Last and dimmest. These need nothing from you on this box, and the only
-    # reason to print them at all is so a row that vanished from the two sections
-    # above can be found rather than assumed deleted.
-    if verdict.foreign:
-        console.print()
-        console.rule('[cyan]Rows this machine never declared', align='left')
-        print_index_rows(verdict.foreign, 'bright_black', note=foreign_note)
-        console.print(f'\n  {len(verdict.foreign)} rows belong to a machine whose manifest declares them.')
-        console.print('  Nothing to repair here — `dotfiles machines show` is what says so.')
-    return 0
-
-
-def foreign_note(entry: index.Entry) -> str:
-    """Why a row is another machine's, in the terms its own entry used."""
-    return f'needs {entry.requires}' if entry.requires else f'installed via {entry.installed_via}'
-
-
-def print_index_rows(entries: list[index.Entry], style: str, note: Callable[[index.Entry], str] | None = None) -> None:
-    width = max(len(entry.name) for entry in entries)
-    for entry in entries:
-        line = Text('  ')
-        line.append(entry.name.ljust(width), style=style)
-        line.append(f'  {note(entry) if note else entry.invocation}')
-        console.print(line, no_wrap=True, overflow='ellipsis')
-
-
-kit_app = typer.Typer(name='kit', no_args_is_help=True, help='Everything you own, and what you actually reach for.')
-
-# The reading over the same table `usage` and `unused` count, so it belongs
-# beside them rather than at the root. Its own module because it is the one part
-# of `kit` that leaves the machine.
-kit_app.add_typer(digest.app, name='digest')
+kit_app = typer.Typer(name='kit', no_args_is_help=True, help='Everything you own.')
 
 
 TermArgument = Annotated[list[str] | None, typer.Argument(help='What to search for.')]
@@ -420,130 +360,3 @@ def index_list_command(
     for entry in entries:
         console.print(Text(entry.display()), no_wrap=True, overflow='ellipsis')
     raise typer.Exit(0)
-
-
-@kit_app.command('unresolved')
-def index_unresolved_command(
-    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
-) -> None:
-    """Rows naming something this machine cannot run."""
-    raise typer.Exit(cmd_unresolved(as_json))
-
-
-# Caps the handle column so one long usage string cannot indent every other row.
-HANDLE_WIDTH = 26
-
-SourceOption = Annotated[
-    list[str] | None,
-    typer.Option('--source', help=f'Limit to one collection (repeatable): {", ".join(usage.MEASURABLE)}'),
-]
-
-
-def measured(source: list[str] | None) -> list[usage.Row]:
-    """Every measurable row, optionally narrowed to one collection.
-
-    Only the collections shell history can see are offered. Naming `tmux` here
-    would return an empty list rather than an error, which reads as "you have
-    forgotten all of it" instead of "this cannot be measured".
-    """
-    unknown = [name for name in source or [] if name not in usage.MEASURABLE]
-    if unknown:
-        raise typer.BadParameter(f'unknown source(s) {", ".join(unknown)}; measurable sources are {", ".join(usage.MEASURABLE)}')
-    rows = usage.measure()
-    if source:
-        rows = [row for row in rows if set(row.sources) & set(source)]
-    return rows
-
-
-def emit_rows(rows: list[usage.Row], today: dt.date) -> None:
-    """The rows as JSON on stdout, which is the only thing that goes there."""
-    print(
-        json.dumps(
-            [
-                {
-                    'typed': row.typed,
-                    'sources': list(row.sources),
-                    'names': list(row.names),
-                    'count': row.count,
-                    'last': row.last or None,
-                    'days_since': row.days_since(today),
-                }
-                for row in rows
-            ],
-            indent=2,
-        )
-    )
-
-
-def render_rows(rows: list[usage.Row], today: dt.date) -> None:
-    """One line per thing you can type, with the handle first.
-
-    The handle column is capped rather than sized to the longest row: one
-    `typescript-language-server --stdio` would otherwise indent every other line
-    by fourteen columns of nothing.
-    """
-    width = min(max(len(row.typed) for row in rows), HANDLE_WIDTH)
-    for row in rows:
-        line = Text('  ')
-        line.append(row.typed.ljust(width), style='cyan' if row.count else 'yellow')
-        line.append(f'  {",".join(row.sources):14}')
-        line.append(f'{row.count:>5}×  ', style='' if row.count else 'yellow')
-        since = row.days_since(today)
-        line.append('never' if since is None else f'{row.last}  ({since}d)')
-        console.print(line, no_wrap=True, overflow='ellipsis')
-
-
-def cmd_usage(as_json: bool, source: list[str] | None) -> int:
-    """Rank everything you own by how often you reach for it."""
-    today = dt.date.today()
-    rows = usage.by_frequency(measured(source))
-    if as_json:
-        emit_rows(rows, today)
-        return 0
-    if not rows:
-        console.print('Nothing measurable in your kit.')
-        return 0
-    console.rule('[cyan]Kit usage', align='left')
-    render_rows(rows, today)
-    cold = len(usage.unused(rows, today=today))
-    # The trailer is the command that narrows to the rest, never a bare count.
-    if cold:
-        console.print(f'\n  {len(rows)} rows, {cold} of them unused — see them alone with [cyan]doit kit unused')
-    return 0
-
-
-def cmd_unused(as_json: bool, source: list[str] | None, days: int, minimum: int) -> int:
-    """List what you own, can run, and never do."""
-    today = dt.date.today()
-    rows = usage.by_staleness(usage.unused(measured(source), days=days, minimum=minimum, today=today))
-    if as_json:
-        emit_rows(rows, today)
-        return 0
-    if not rows:
-        console.print(f'[green]✓[/] Everything in your kit has run in the last {days} days.')
-        return 0
-    console.rule(f'[cyan]Unused for {days}+ days', align='left')
-    render_rows(rows, today)
-    console.print(f'\n  {len(rows)} rows you can run and do not.')
-    console.print('  Also in [cyan]doit kit unresolved[/]? Then it is stale, not forgotten.')
-    return 0
-
-
-@kit_app.command('usage')
-def kit_usage_command(
-    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
-    source: SourceOption = None,
-) -> None:
-    """How often you reach for each thing you own."""
-    raise typer.Exit(cmd_usage(as_json, source))
-
-
-@kit_app.command('unused')
-def kit_unused_command(
-    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
-    source: SourceOption = None,
-    days: Annotated[int, typer.Option('--days', help='Days without a run before a row counts as unused.')] = usage.DEFAULT_DAYS,
-    minimum: Annotated[int, typer.Option('--min', help='Runs below which a row counts as unused.')] = 1,
-) -> None:
-    """What you own, can run, and never do."""
-    raise typer.Exit(cmd_unused(as_json, source, days, minimum))

@@ -45,9 +45,8 @@ random process, rather than a distribution nobody chose dressed up as a
 confidence interval. The order within one offer does not vary, because it is
 derived from the balances that day.
 
-Readings live under the state directory for the reason :mod:`doit.digest` gives:
-a recompute cannot rebuild one, because it would read a register and a journal
-that have since moved. One append-only file per machine, one writer each.
+Readings live under the state directory because a recompute cannot rebuild one:
+it would read a register and a journal that have since moved. One append-only file per machine, one writer each.
 """
 
 import dataclasses as dc

@@ -13,27 +13,6 @@ mirrors the `overdue` field the review register already emits. Backends own due-
 `--json`; that is the contract, and it is what lets the dashboard need no dependencies. Inside one
 package it reads as removable duplication. Do not remove it.
 
-**The review lane shells out to atuin on every render.** The dashboard reads its own review
-register in-process on cost grounds, so a subprocess in a lane reads as a regression. It is not
-the same call: a subprocess for the register would spawn a Python interpreter to re-read a local
-file this process can already open, whereas atuin is the only source that knows which machine ran a
-command, which is what makes an `observe: {scope: machine}` item answerable at all. It is one query
-per process, shared by every item, and it falls back to this machine's zsh history whenever atuin
-cannot be asked.
-
-**That one read has one parser, and every consumer folds it.** `observe.shell_history` answers "when
-was this register item last done". `usage.measure` folds the same cached read into a count and a
-last-run date per row of your kit, and `doit kit digest export` folds it per host into the table the
-digest reads. A second parser would answer a subtly different question within a month, and then
-`review` and `kit` would disagree about whether you had used `rg`. Anything else needing history
-folds this, never re-reads it.
-
-**`doit kit digest run` reads no shell history at all.** It may run where no shell history is
-yours, so its own history would answer for the fleet and the run would still succeed. It reads the
-`usage-table-<machine>.json` files `export` writes into the journal directory instead. It takes each
-host once, from the table whose history for that host runs latest, and refuses before the request
-when a table will not read.
-
 **The journal records each pursuit's pace, though the register already declares it.** The
 register says only what is asked from now on. Standing counts back to the zero point, so a pace
 read off the register alone reprices every past day whenever it is edited, and bills a pause in
@@ -48,14 +27,6 @@ hours behind there while `doit next` still says `due in 3d`. Both are right: one
 behind, the other when it comes due. Converting a counted checkoff into minutes, or either unit
 into points, would let the two be summed. Both conversions were weighed and rejected, because a
 checkoff has no length and a point is a quantity nobody declared.
-
-**`doit.machine` calls `dotfiles` from code, not through `sources.yml`.** The registry is one flat
-file for the whole fleet, and everything it gets checked against is scoped to one box, so a row for
-another machine's tool has nowhere to be filed except rot. dotfiles holds the manifests, runs
-everywhere including the work box, and `machines show` resolves this machine from `$MACHINE` without
-the fleet clone that only some machines have. Unknown is a third state and not an empty set: a box
-that cannot be asked judges rows by PATH alone, because treating "declares nothing" as the answer
-would file every package-installed row as foreign and empty the report.
 
 ## Content, config, and state are three different things
 
@@ -96,10 +67,7 @@ both read it, and a constant defined per reader is a constant that drifts.
 `doit` must not know which apps supply *lanes*. Adding a source that prints the lane document is an
 edit to `sources.yml`, never a release. A source with an adapter is already code, and the adapter
 carries its command too. The command and the model it returns are one contract, and a copy of the
-command in `sources.yml` is one no sweep of the code finds when its tool renames a flag. That bounds
-the rule to the dashboard; `doit.machine` asks dotfiles a question no lane
-answers, and the tiers sanction it. doit is `experimental` and dotfiles is `fleet`, and an
-experimental tool may invoke either tier above it, so when the one below moves, this is what changes.
+command in `sources.yml` is one no sweep of the code finds when its tool renames a flag.
 A source that is not configured is silent; one configured but missing gets a single line; one that
 runs and fails shows its error. A lane is never silently dropped — a dashboard that quietly omits a
 lane reads as "nothing outstanding", which is the worst available failure.

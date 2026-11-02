@@ -100,7 +100,7 @@ _doit() {{
     'tools:The tool registry'
     'content:The cards and Labs checkout'
     'sources:Which apps doit asks for lanes'
-    'kit:Everything you own, and what you actually reach for'
+    'kit:Everything you own'
   )
 
   if (( CURRENT == 2 )); then

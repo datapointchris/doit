@@ -31,8 +31,7 @@ Every other command checks for a newer release at most once a day, and names one
 on stderr.
 
 uv fetches the Python doit needs. git clones the cards. fzf is the picker behind `find`, `choose`
-and `labs choose`. atuin is optional: without it, shell history comes from this machine's zsh
-history and answers only for this box.
+and `labs choose`.
 
 ## Starting from scratch
 
@@ -99,15 +98,14 @@ words because they are two things, and one word would make "did you update?" amb
 | Ask | Surface | Reads |
 | --- | --- | --- |
 | What should I do now | `next` | `pursuits.yml`, the journal, each pursuit's `resolve` and `evidence` commands |
-| What is outstanding anywhere | `dashboard` | every `sources:` entry in `sources.yml`, plus doit's own review register and kit rows |
+| What is outstanding anywhere | `dashboard` | every `sources:` entry in `sources.yml`, plus doit's own review register |
 | What does today still want, and what has it had | `today` | the same sources, every `completions:` entry, the journal, the review state |
 | What happened over a window, and who did it | `happened` | every `completions:` entry, the journal and the evidence cache, the review state |
 | Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered |
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
-| What is due to revisit or practice | `review due` | `register.yml`, the review state and shell history |
+| What is due to revisit or practice | `review due` | `register.yml` and the review state |
 | How do I use this tool | `show`, `find`, `tools show` | the registry and cards in terminal-library, your shell's functions and aliases |
 | What was that command | `choose` | the same index, ending on the invocation |
-| What do I own and never use | `kit unused` | the same index, joined to shell history |
 | Which apps does doit ask | `sources list` | `sources.yml`, running each command |
 | Have I committed the card I wrote | `content status` | the terminal-library checkout |
 
@@ -318,31 +316,22 @@ the window as an RFC 3339 instant, so a backend filters its own rows rather than
 to be filtered here. Nothing is required. With the block absent, `doit happened` and `doit today`
 list doit's own records and say nothing about the rest.
 
-## `review` — maintenance is observed, practice is declared
+## `review` — an entry is done when you record it
 
 ```bash
 doit review due              # what is due to revisit or practice, most overdue first
-doit review done <id>        # counts too, and the later of it and the observed date wins
+doit review done <id>        # record it done today
 doit review nudge-every 8h   # how often the shell's startup nudge may print
 doit labs show <lab>         # open a Lab to read while you work in another pane
 ```
 
 The review register is `$XDG_CONFIG_HOME/doit/register.yml`. Each item declares what to revisit and
-a cadence such as `2w` or `1mo`. An item is done when something shows it was done: the command it
-names appearing in shell history, or a date in another tool's state file. Nothing depends on
-remembering to type `doit review done`, because an item you did and never reported reads exactly
-like one you never did.
-
-History comes from atuin, which records the machine each command ran on and syncs between machines.
-So an item done at one desk counts at the other. Work that is per-machine declares
-`observe: {scope: machine}`, and only runs on that box answer it. A command that opens work rather
-than doing it, such as a picker, declares `observe: false`. Otherwise abandoning it halfway counts
-as having done it.
+a cadence such as `2w` or `1mo`. Its last-done date is the newest `doit review done` for it, and
+nothing else. Running the command an item names does not mark it done.
 
 A Lab is one markdown file under `labs/` in terminal-library, and carries no schedule. The Labs you
 work through on a schedule are items in the register's `practice:` block, keyed by the Lab's id.
-Opening a Lab is not practicing it, so a practice item observes nothing by default, and
-`doit review done <lab>` records it. The startup nudge leaves practice out. `doit today` counts it
+`doit review done <lab>` records one. The startup nudge leaves practice out. `doit today` counts it
 as its own checklist, so a deck of never-practiced Labs cannot bury the maintenance that is due.
 
 ```yaml
@@ -381,30 +370,12 @@ rebuilt.
 that lands the pick on the prompt. Bind it to a chord of your choosing, such as
 `bindkey '^X^D' doit-choose-widget`, because doit cannot see what your keymap already holds.
 
-## `kit` — what you own, against what you reach for
+## `kit` — everything you own, as one list
 
 ```bash
-doit kit unused                # what you own, can run, and never do
-doit kit usage                 # how often you reach for each thing you own
-doit kit unresolved            # rows naming something this machine cannot run
-doit kit digest export         # write this machine's usage table where digest run reads it
-doit kit digest show           # the last reading, without spending another
+doit kit list                  # every indexed row, as the picker sees it
+doit kit list --json           # the same rows, for a script
 ```
-
-Usage is shell history folded per row of the index: a count and a last-run date. One parser reads
-that history for all of doit. `review` asks it when an item was last done, and `kit` folds the same
-read into counts. A second parser would answer a subtly different question, and then `review` and
-`kit` would disagree about whether you had used `rg`.
-
-`kit unresolved` turns a row that goes nowhere into a list you can fix, rather than something you
-rediscover on every search. Shell integrations defined at runtime, such as `z` and `nvm`, appear on
-it without being rot.
-
-`doit kit digest run` reads every exported usage table with claude and stores what it says. It is
-one model request, and fleet's scheduler runs it. It sends the aggregated table and never a command
-line. It reads no shell history of its own, because it may run where no shell history is yours. It
-takes each host once, from the table whose history for that host runs latest, and a table that will
-not read stops the run before the request.
 
 ## `content` — the cards live in terminal-library, never in this repo
 
@@ -444,8 +415,7 @@ them, holding nothing a recompute cannot rebuild.
   where no file exists. It is never in either repo, because it is personal and both repos are
   public.
 - **State** is `$XDG_STATE_HOME/doit/`, or `$DOIT_JOURNAL_DIR` where a box reads a share somewhere
-  else. The journal, the offer counts, the usage tables and the forecast and digest readings are
-  one file per machine, named for it, because a sync layer cannot merge two machines writing one
-  file.
+  else. The journal, the offer counts and the forecast readings are one file per machine, named
+  for it, because a sync layer cannot merge two machines writing one file.
 - **Cache** is `$XDG_CACHE_HOME/doit/`. It holds the cached draw, and the pursuit names completion
   reads without starting Python.

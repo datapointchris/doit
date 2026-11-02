@@ -105,8 +105,8 @@ JOURNAL_DIR = env_path(JOURNAL_DIR_ENV, xdg_state_home() / 'doit')
 def journal_dir() -> Path:
     """The directory every per-machine file doit shares lives in.
 
-    The pursuits journal, the usage tables and the digest's readings all live
-    here, so this is the directory a box points at the share. It takes two
+    The pursuits journal and the forecast's readings live here, so this is the
+    directory a box points at the share. It takes two
     rungs, the variable and the default. A box that keeps the share elsewhere
     sets the variable. A directory the variable names that is not there
     raises :class:`NamedPathMissing`.
@@ -176,14 +176,4 @@ def machine_name() -> str:
     (arch/archlinux, Macmini/macmini) and split one machine into several, so the
     bare name is recorded and any canonicalization happens at read time.
     """
-    return canonical_host(socket.gethostname())
-
-
-def canonical_host(name: str) -> str:
-    """A hostname from anywhere, reduced to the form :func:`machine_name` records.
-
-    Other tools report the fully qualified name — atuin stores `macmini.trusted`
-    — so a comparison against a bare recorded name fails on every host and
-    quietly reports that nothing ever ran here.
-    """
-    return name.split('.')[0].strip().lower()
+    return socket.gethostname().split('.')[0].strip().lower()

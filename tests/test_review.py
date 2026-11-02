@@ -16,8 +16,6 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from doit import machine
-from doit import observe
 from doit import review
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'review'
@@ -52,9 +50,9 @@ def test_load_items_none_without_a_register(monkeypatch):
 
 
 def test_unknown_item_field_is_refused(tmp_path, monkeypatch):
-    """A misspelled field would otherwise drop the item's observer without a word."""
+    """A misspelled field would otherwise drop what the item declared without a word."""
     register_file = tmp_path / 'register.yml'
-    register_file.write_text('items:\n  typo:\n    cadence: 1w\n    obsrve: false\n')
+    register_file.write_text('items:\n  typo:\n    cadance: 1w\n')
     monkeypatch.setattr(review, 'REGISTER', register_file)
     with pytest.raises(review.RegisterError):
         review.load_items()
@@ -85,54 +83,6 @@ def test_statuses_orders_most_overdue_first(tmp_path, monkeypatch):
     assert rows[2]['overdue'] == -28  # done today, 28-day cadence
     assert rows[1]['due'] is True
     assert rows[2]['due'] is False
-
-
-def observe_history(tmp_path, monkeypatch, entries: dict) -> None:
-    """A shell history recording each command as last run on the given date."""
-    lines = [f': {int(dt.datetime.combine(when, dt.datetime.min.time()).timestamp())}:0;{command}' for command, when in entries.items()]
-    history = tmp_path / 'history'
-    history.write_text('\n'.join(lines) + '\n')
-    monkeypatch.setattr(observe, 'HISTORY', history)
-    observe.shell_history.cache_clear()
-
-
-def test_running_the_command_clears_an_item_a_stale_stamp_left_overdue(tmp_path, monkeypatch):
-    """Doing the thing is what marks it done. An item whose only record is one
-    you have to type reads as weeks overdue hours after it ran."""
-    today = dt.date.today()
-    write_state(tmp_path, monkeypatch, {'overdue-item': (today - dt.timedelta(days=30)).isoformat()})
-    observe_history(tmp_path, monkeypatch, {'echo overdue': today})
-
-    row = {row['id']: row for row in review.statuses()}['overdue-item']
-
-    assert row['last'] == today.isoformat()
-    assert row['overdue'] == -7, 'a 7-day cadence, done today'
-    assert row['observed'] is True, 'a date you never typed must not read as one you did'
-
-
-def test_a_stamp_still_wins_when_it_is_the_later_evidence(tmp_path, monkeypatch):
-    """Observation may only ever improve a date. A command run long ago cannot
-    undo `done`, or adding an observer would lose history."""
-    today = dt.date.today()
-    write_state(tmp_path, monkeypatch, {'overdue-item': today.isoformat()})
-    observe_history(tmp_path, monkeypatch, {'echo overdue': today - dt.timedelta(days=200)})
-
-    row = {row['id']: row for row in review.statuses()}['overdue-item']
-
-    assert row['last'] == today.isoformat()
-    assert row['observed'] is False
-
-
-def test_a_practice_item_is_done_only_when_you_say_so(tmp_path, monkeypatch):
-    """Opening a Lab is not practicing it, so its command in history leaves it never done."""
-    register_file = tmp_path / 'register.yml'
-    register_file.write_text('practice:\n  rg-lab:\n    cadence: 2w\n    command: doit labs show rg-lab\n')
-    monkeypatch.setattr(review, 'REGISTER', register_file)
-    observe_history(tmp_path, monkeypatch, {'doit labs show rg-lab': dt.date.today()})
-
-    [row] = review.statuses('practice')
-
-    assert (row['block'], row['last'], row['due']) == ('practice', None, True)
 
 
 def test_the_template_names_every_field_an_item_may_declare():
@@ -167,8 +117,6 @@ def test_list_json_emits_every_item_with_its_status(capsys):
         'last',
         'overdue',
         'due',
-        'observed',
-        'problem',
     }
     # Never done reads overdue: null, which a consumer cannot filter on as due.
     assert rows[0]['id'] == 'never-done'
@@ -260,63 +208,3 @@ def test_nudge_every_rejects_an_unparsable_duration():
 
     assert result.exit_code == 2
     assert 'expected a duration' in result.output
-
-
-REQUIRES_REGISTER = """\
-items:
-  needs-missing:
-    description: About software this box does not have
-    cadence: 1w
-    requires: long-gone-prerequisite
-  needs-present:
-    description: About software that is here
-    cadence: 1w
-    requires: sh
-  needs-nothing:
-    description: Applies everywhere
-    cadence: 1w
-"""
-
-
-@pytest.fixture
-def requires_register(tmp_path, monkeypatch):
-    path = tmp_path / 'register.yml'
-    path.write_text(REQUIRES_REGISTER)
-    monkeypatch.setattr(review, 'REGISTER', path)
-    return path
-
-
-def declaring(*names: str) -> machine.Declaration:
-    return machine.Declaration(frozenset(names), 'pacman', known=True)
-
-
-def test_an_item_about_software_this_machine_never_declared_is_hidden(requires_register, monkeypatch):
-    """`observe: {scope: machine}` means the other desk cannot clear it either, so
-    left in it counts overdue days forever against work nobody can do here."""
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg'))
-
-    assert {row['id'] for row in review.statuses()} == {'needs-present', 'needs-nothing'}
-
-
-def test_a_requirement_on_path_keeps_the_item(requires_register, monkeypatch):
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring())
-
-    assert 'needs-present' in {row['id'] for row in review.statuses()}
-
-
-def test_a_requirement_the_manifest_declares_keeps_the_item(requires_register, monkeypatch):
-    """Declared but not installed is still this machine's item — that is the reminder."""
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring('long-gone-prerequisite'))
-
-    assert 'needs-missing' in {row['id'] for row in review.statuses()}
-
-
-def test_an_unreadable_manifest_keeps_every_item(requires_register):
-    """A box that cannot say what it declares shows every item, never none."""
-    assert len(review.statuses()) == 3
-
-
-def test_an_item_with_no_requires_is_never_scoped_out(requires_register, monkeypatch):
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring())
-
-    assert 'needs-nothing' in {row['id'] for row in review.statuses()}

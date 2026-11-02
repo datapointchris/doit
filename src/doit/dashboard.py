@@ -45,7 +45,6 @@ from urllib.parse import urlsplit
 import typer
 from rich.text import Text
 
-from doit import index as indexmodel
 from doit import lanes as lanemodel
 from doit import pursuits
 from doit import review
@@ -74,7 +73,6 @@ NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'
 # still never re-derives a cadence.
 LOCAL_BACKENDS: dict[str, Callable[[], object]] = {
     'review': review.statuses,
-    'kit': indexmodel.unresolved_rows,
 }
 
 # The dashboard is a glance: three rows a lane, or ten when you asked for that
@@ -676,51 +674,6 @@ def maintenance_row(label: str, text: str, item: dict, handle: str) -> tuple[tup
     return (1, -overdue), Row(label, text, f'{overdue}d overdue', Urgency.OVERDUE, handle)
 
 
-def build_kit_lane(results: dict[str, sources.Result]) -> LaneView:
-    """The rows of your kit whose entry is wrong.
-
-    A standing condition rather than a schedule, which is why it is a lane and
-    not a register item. The register can only say "go and look every month";
-    this says what is wrong the moment it becomes wrong, and says nothing on a
-    machine whose index is clean.
-
-    Never the rows whose `requires:` names software this box does not have.
-    Those are correct entries and there is nothing here to repair, so a lane
-    counting them would be asking you to act on someone else's machine — and a
-    count you cannot act on is one you learn to stop reading.
-
-    What is left is a row this machine cannot run and nothing explains, which is
-    either a stale entry or one still owed a `requires:`. Both are repairs, and
-    both are made here.
-
-    The handle is `doit show`, because the act here is judging one entry rather
-    than running it — the row is on the list precisely because running it fails.
-    """
-    kit = results.get('kit')
-    payload = kit.payload if kit else None
-    if not isinstance(payload, list):
-        return unavailable('kit', 'KIT', sources.reason('doit kit', kit))
-
-    rows = [
-        Row(
-            entry.get('source', ''),
-            entry.get('name', ''),
-            entry.get('invocation', '') if entry.get('invocation') != entry.get('name') else '',
-            Urgency.NONE,
-            f'doit show {entry.get("name", "")}',
-        )
-        for entry in payload
-    ]
-    return LaneView(
-        name='kit',
-        title='KIT',
-        meta='every row resolves' if not rows else f'{plural(len(rows), "row")} pointing nowhere',
-        rows=rows,
-        total=len(rows),
-        hints=['doit kit unresolved'],
-    )
-
-
 def round_robin(*groups: list[Row]) -> list[Row]:
     """Order rows so every kind gets a slot before any kind gets a second one.
 
@@ -810,7 +763,7 @@ ICB_LANES = (
     ('upcoming', build_upcoming_lane),
 )
 
-LOCAL_LANES = ('maintenance', 'kit')
+LOCAL_LANES = ('maintenance',)
 
 
 def icb_adapter(result: sources.Result) -> list[LaneView]:
@@ -1126,7 +1079,7 @@ def local_lanes() -> list[LaneView]:
     dashboard that needs configuring before it can show your own register would
     be configuration for its own sake."""
     results = {name: read_local(read) for name, read in LOCAL_BACKENDS.items()}
-    return [build_maintenance_lane(results, dt.date.today()), build_kit_lane(results)]
+    return [build_maintenance_lane(results, dt.date.today())]
 
 
 def lanes_of(registry: sources.Registry, results: dict[str, sources.Result], wanted: list[str] | None) -> list[LaneView]:

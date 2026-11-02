@@ -24,7 +24,6 @@ import datetime as dt
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -35,14 +34,11 @@ import typer
 import yaml
 from rich.text import Text
 
-from doit import machine
 from doit.cadence import is_due
 from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
 from doit.cadence import status_label
 from doit.editor import open_in_editor
-from doit.observe import newest
-from doit.observe import observed
 from doit.paths import xdg_config_home
 from doit.paths import xdg_state_home
 from doit.render import console
@@ -67,24 +63,12 @@ TEMPLATE = """\
 #   command      optional; shown so you know what to run (not auto-run)
 #   show         optional command the nudge runs to print a card inline, where
 #                the item's name alone does not say enough to act on
-#   requires     optional; software the item is about. The item is hidden on a
-#                machine that has neither it on PATH nor a manifest declaring it,
-#                because one that cannot be done here counts overdue days forever
-#   observe      where "I did this" is observed from; default is the command
 #
-# Last-done is observed, not declared: an item is done when its `command` last
-# ran at a shell prompt, so most items need no `observe:`. Override it when the
-# trace lives elsewhere, and `doit review done` still counts if it is later.
-#
-#   observe: {newest-date-in: <path>}   newest date in a {name: date} JSON map
-#   observe: {history: <command>}       watch a different command than `command`
-#   observe: {scope: machine}           only runs on this machine count
-#   observe: false                      observe nothing; only `review done` counts
+# An item is done when `doit review done <id>` records it, and on no other
+# evidence.
 #
 # `practice:` holds the Labs you work through on a schedule, with the same
-# fields, keyed by the Lab's id. Opening a Lab is not practicing it, so a
-# practice item observes nothing unless it says otherwise, and `doit review
-# done <id>` is what records it. An id names one item across both blocks.
+# fields, keyed by the Lab's id. An id names one item across both blocks.
 
 items:
   prune-docker:
@@ -107,14 +91,11 @@ NUDGE_INTERVAL = xdg_state_home() / 'doit' / 'nudge-interval-minutes'
 
 # Fields a register item may declare: the ones the TEMPLATE header documents.
 # Anything else is a typo, and a typo here is silent damage. A misspelled
-# `observe:` is ignored, so the item loses its observer, reads as never done,
-# and counts overdue days forever with nothing printed.
-ITEM_FIELDS = {'description', 'cadence', 'command', 'show', 'requires', 'observe'}
+# `cadence:` is ignored, so the item loses its schedule with nothing printed.
+ITEM_FIELDS = {'description', 'cadence', 'command', 'show'}
 
-# The register's blocks, and what an item in each observes when it names no
-# observer. Maintenance is done when its command runs. Practice is done when you
-# say so, because the command that opens a Lab is not the practice.
-BLOCKS = {'items': None, 'practice': False}
+# The register's blocks: maintenance, then the Labs practiced on a schedule.
+BLOCKS = ('items', 'practice')
 
 
 class RegisterError(ValueError):
@@ -158,8 +139,8 @@ def check_item(item_id: str, meta: object) -> None:
         raise RegisterError(f'{item_id}: must be a mapping of fields, not {type(meta).__name__}')
     unknown = set(meta) - ITEM_FIELDS
     if unknown:
-        # The accepted set is named so a reader can see `observe` beside a
-        # misspelled `obsrve` and fix it without leaving the terminal.
+        # The accepted set is named so a reader can see `cadence` beside a
+        # misspelled `cadance` and fix it without leaving the terminal.
         raise RegisterError(f'{item_id}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(ITEM_FIELDS))}')
 
 
@@ -171,37 +152,12 @@ def load_items() -> dict | None:
     return {item_id: meta for items in register.values() for item_id, meta in items.items()}
 
 
-def applies_here(requires: str) -> bool:
-    """Whether an item's `requires:` is satisfiable on this machine.
-
-    An item scoped to software this box does not have can never be done here, and
-    `observe: {scope: machine}` means the other desk doing it cannot clear it
-    either. Left in, it counts overdue days forever against work nobody can do.
-
-    Two sources, and either is enough. PATH answers for anything installed, and
-    the machine manifest answers for what is declared but not on PATH — a package
-    manager is a coordinate rather than an item, so `brew` is never on the PATH of
-    the Mac it defines. An unreadable manifest keeps the item, because a machine
-    that cannot say what it declares should show every item rather than none.
-    """
-    if not requires:
-        return True
-    if shutil.which(requires):
-        return True
-    declared = machine.declaration()
-    return not declared.known or declared.declares(requires)
-
-
 def statuses(block: str | None = None) -> list[dict]:
     """Every item in one block, or in every block, with its derived overdue days, most urgent first.
 
     overdue is the number of days past due (negative = not yet due); None means
     the item has never been done, which sorts to the very top as most urgent.
-
-    Last-done is the newest of two kinds of evidence: what ``done`` recorded, and
-    what an observer saw happen (see :mod:`doit.observe`). Both are true reports
-    of the same act, so the later one wins and neither can move the date
-    backwards — an item stays done once anything at all can show it was done.
+    Last-done is the date ``done`` last recorded.
     """
     register = load_register() or {}
     state = load_state(STATE)
@@ -210,11 +166,7 @@ def statuses(block: str | None = None) -> list[dict]:
     for name in [block] if block else list(BLOCKS):
         for item_id, meta in register.get(name, {}).items():
             meta = meta or {}
-            if not applies_here(meta.get('requires', '') or ''):
-                continue
-            stamped = state.get(item_id)
-            seen = observed(meta.get('observe', BLOCKS[name]), meta.get('command', '') or '')
-            last = newest(stamped, seen.date)
+            last = state.get(item_id)
             overdue = overdue_days(last, meta.get('cadence', ''), today)
             rows.append(
                 {
@@ -228,8 +180,6 @@ def statuses(block: str | None = None) -> list[dict]:
                     'last': last,
                     'overdue': overdue,
                     'due': is_due(overdue),
-                    'observed': bool(seen.date) and last == seen.date,
-                    'problem': seen.problem,
                 }
             )
     rows.sort(key=lambda r: float('inf') if r['overdue'] is None else r['overdue'], reverse=True)
@@ -251,7 +201,7 @@ def orphaned_state_ids() -> list[str]:
 def render_item(row: dict) -> None:
     meta = f'every {row["cadence"]}'
     if row['last']:
-        meta += f' · last {row["last"]}{" (observed)" if row["observed"] else ""}'
+        meta += f' · last {row["last"]}'
     line = Text('  ')
     line.append(f'{row["id"]:<20}', style='yellow')
     line.append(f'  {status_label(row["overdue"])}  ·  {meta}')
@@ -261,8 +211,6 @@ def render_item(row: dict) -> None:
         command = Text('      ')
         command.append(f'↳ {row["command"]}', style='cyan')
         console.print(command)
-    if row['problem']:
-        console.print(Text(f'      observe: {row["problem"]}', style='yellow'))
     console.print()
 
 
@@ -374,10 +322,8 @@ def run_show(row: dict) -> None:
     shell startup.
 
     A `show:` command must be a read. Anything it changes is a change nothing
-    asked for — and worse, if what it changes is what the item observes, the item
-    marks itself done every time the nudge fires. A `show:` needing a side effect
-    to be useful is an argument for a read-only flag on that tool, not for
-    relaxing this.
+    asked for. A `show:` needing a side effect to be useful is an argument for a
+    read-only flag on that tool, not for relaxing this.
 
     A `show:` command must emit at most a couple of lines — it runs inside a
     nudge, so a command that prints its own full listing silently turns the nudge

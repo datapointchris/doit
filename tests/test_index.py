@@ -1,4 +1,4 @@
-"""Tests for doit.index — the federated index and the rot report.
+"""Tests for doit.index — the federated index.
 
 The lens parsers are covered against small fixtures rather than the real
 collections, which change under you. What is asserted hardest is the invocation,
@@ -6,13 +6,11 @@ because a registry key is a package name as often as a command and a row keyed
 by name names something you cannot type.
 """
 
-import os
 from pathlib import Path
 
 import pytest
 
 from doit import index
-from doit import machine
 from doit import tools
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures'
@@ -39,35 +37,6 @@ tools:
     description: The fleet orchestrator
     usage: "forge [command]"
     tags: [custom]
-  long-gone:
-    category: search
-    description: Removed two years ago
-    usage: "long-gone --flags"
-    tags: []
-  wrapped:
-    category: navigation
-    description: A shell wrapper a subprocess cannot see
-    usage: "wr [path]"
-    requires: rg
-    tags: []
-  needs-absent:
-    category: custom-tools
-    description: Real elsewhere; its prerequisite is not on this box
-    usage: "needs-absent"
-    requires: long-gone
-    tags: []
-  elsewhere:
-    category: custom-tools
-    description: A package manager installs it, on a machine that is not this one
-    installed_via: go
-    usage: "elsewhere run"
-    tags: []
-  repo-shipped:
-    category: custom-tools
-    description: The dotfiles repo ships it, so the deployed shell tree scopes it
-    installed_via: dotfiles
-    usage: "repo-shipped"
-    tags: []
 """
 
 
@@ -130,19 +99,6 @@ def collections(tmp_path, monkeypatch):
     (tmp_path / 'shell' / 'functions.sh').write_text('#@gwip\n#--> commit work in progress\ngwip() {\n  :\n}\n')
     (tmp_path / 'shell' / 'aliases.sh').write_text('# list files\nalias ll="eza -l"\n')
 
-    # Pointing the lenses at fixtures was not enough: `unresolved` resolves through
-    # `shutil.which`, which reads the real PATH, so the rot report depended on what
-    # the machine running the tests happened to have installed. CI has none of it,
-    # and called a fixture row dead. Prepended rather than replacing PATH, so
-    # `long-gone` still resolves to nothing and git stays runnable.
-    stubs = tmp_path / 'bin'
-    stubs.mkdir()
-    for command in ('rg', 'forge'):
-        stub = stubs / command
-        stub.write_text('#!/bin/sh\n')
-        stub.chmod(0o755)
-    monkeypatch.setenv('PATH', f'{stubs}{os.pathsep}{os.environ["PATH"]}')
-
 
 def by_name(entries: list[index.Entry]) -> dict[str, index.Entry]:
     return {entry.name: entry for entry in entries}
@@ -179,56 +135,6 @@ def test_invocation_head_is_the_word_you_actually_run(usage, expected):
     assert tools.invocation_head(usage) == expected
 
 
-def test_unresolved_finds_rot_and_nothing_else():
-    """`rg` and `git` resolve; `long-gone` does not, and that is the report."""
-    dead = [entry.name for entry in index.unresolved()]
-
-    assert 'long-gone' in dead
-    assert 'ripgrep' not in dead, 'resolved through its usage, not its key'
-    assert 'forge' not in dead
-    assert 'git-forgit-log' not in dead
-
-
-def test_a_present_prerequisite_resolves_a_wrapper_no_subprocess_can_see():
-    """`wr` is to `rg` what `br` is to broot: the binary is what proves the row."""
-    verdict = index.classify()
-
-    assert 'wrapped' not in [entry.name for entry in verdict.dead]
-    assert 'wrapped' not in [entry.name for entry in verdict.absent]
-
-
-def test_an_absent_prerequisite_is_reported_apart_from_a_wrong_entry():
-    """Two different facts: nobody can fix `needs-absent` from this machine."""
-    verdict = index.classify()
-
-    assert [entry.name for entry in verdict.absent] == ['needs-absent']
-    assert 'needs-absent' not in [entry.name for entry in verdict.dead]
-    assert 'long-gone' in [entry.name for entry in verdict.dead], 'the same name, checked the hard way, is still rot'
-
-
-def test_requires_is_checked_rather_than_taken_as_an_exemption(monkeypatch):
-    """Uninstall the prerequisite and the row moves, which a note could not do."""
-    real = index.shutil.which
-    monkeypatch.setattr(index.shutil, 'which', lambda name: None if name == 'rg' else real(name))
-
-    verdict = index.classify()
-
-    assert 'wrapped' in [entry.name for entry in verdict.absent]
-
-
-def test_unresolved_ignores_lenses_that_are_not_commands():
-    """A card, a skill or a keybinding cannot be a dead command."""
-    dead = index.unresolved()
-
-    assert {entry.source for entry in dead} <= {'tool', 'func', 'alias', 'forgit'}
-
-
-def test_a_shell_function_resolves_even_though_it_is_not_on_path():
-    """`which` cannot see a shell function, so the files are read directly."""
-    assert 'gwip' in index.resolvable_names()
-    assert 'll' in index.resolvable_names()
-
-
 def test_a_nested_package_file_is_read_like_the_shared_ones(monkeypatch, tmp_path):
     """A package manager's shortcuts sit under `pkg/<name>/`, not at the root."""
     shell = tmp_path / 'nested'
@@ -238,17 +144,15 @@ def test_a_nested_package_file_is_read_like_the_shared_ones(monkeypatch, tmp_pat
 
     assert by_name(index.index_functions())['pacup'].description == 'update everything'
     assert 'pacs' in by_name(index.index_aliases())
-    assert {'pacup', 'pacs'} <= index.resolvable_names()
 
 
-def test_an_unannotated_function_resolves_without_entering_the_index(monkeypatch, tmp_path):
-    """Whether the shell defines a name and whether the index offers it are two questions."""
+def test_an_unannotated_function_stays_out_of_the_index(monkeypatch, tmp_path):
+    """The shell defining a name is not the index offering it."""
     shell = tmp_path / 'unannotated'
     shell.mkdir()
     (shell / 'colors.sh').write_text('allcolors() {\n  :\n}\nfunction paint {\n  :\n}\n')
     monkeypatch.setattr(index, 'SHELL_DIR', shell)
 
-    assert {'allcolors', 'paint'} <= index.resolvable_names()
     assert index.index_functions() == []
 
 
@@ -420,11 +324,6 @@ def test_bulk_and_alias_bindings_never_become_rows():
     assert not any('gUU' in key for key in keys)
 
 
-def test_a_zsh_key_is_never_reported_as_rot():
-    """A keybinding is pressed, not typed, so PATH has nothing to say about it."""
-    assert not [entry for entry in index.unresolved() if entry.source == 'zsh']
-
-
 def test_a_machine_without_zsh_still_gets_every_other_lens(monkeypatch):
     monkeypatch.setattr(index, 'zsh_bindkeys', lambda interactive: '')
 
@@ -444,85 +343,3 @@ def test_a_missing_collection_is_silent_not_fatal(monkeypatch, tmp_path):
 
     assert index.index_tools() == []
     assert index.build_index(), 'the other collections still index'
-
-
-def declaring(*names: str, package_manager: str = 'pacman') -> machine.Declaration:
-    """A manifest that declares exactly these, as `machine.declaration` would."""
-    return machine.Declaration(frozenset(names), package_manager, known=True)
-
-
-def test_a_row_a_package_manager_installs_elsewhere_is_another_machines_not_rot(monkeypatch):
-    """`elsewhere` is a go tool, and the manifest for this box never names it."""
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', 'forge'))
-
-    verdict = index.classify()
-
-    assert 'elsewhere' in [entry.name for entry in verdict.foreign]
-    assert 'elsewhere' not in [entry.name for entry in verdict.dead]
-
-
-def test_a_row_this_machine_declares_and_lacks_is_still_rot(monkeypatch):
-    """Declared here and missing here is a failed install, which is anyone's to fix."""
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', 'forge', 'elsewhere'))
-
-    verdict = index.classify()
-
-    assert 'elsewhere' in [entry.name for entry in verdict.dead]
-    assert 'elsewhere' not in [entry.name for entry in verdict.foreign]
-
-
-def test_a_row_the_dotfiles_repo_ships_is_never_judged_by_the_manifest(monkeypatch):
-    """The deployed shell tree already scopes those, and no manifest lists them."""
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', 'forge'))
-
-    verdict = index.classify()
-
-    assert 'repo-shipped' in [entry.name for entry in verdict.dead]
-    assert 'repo-shipped' not in [entry.name for entry in verdict.foreign]
-
-
-def test_a_requirement_declared_as_the_package_manager_resolves_the_row(monkeypatch):
-    """`brew` is a coordinate rather than an item, so it is on no manifest's list."""
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', package_manager='long-gone'))
-
-    verdict = index.classify()
-
-    assert 'needs-absent' not in [entry.name for entry in verdict.foreign]
-    assert 'needs-absent' in [entry.name for entry in verdict.absent]
-
-
-def test_a_requirement_no_manifest_declares_makes_the_row_another_machines(monkeypatch):
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg'))
-
-    verdict = index.classify()
-
-    assert 'needs-absent' in [entry.name for entry in verdict.foreign]
-    assert verdict.absent == []
-
-
-def test_an_unreadable_manifest_leaves_every_row_where_it_was():
-    """A box that cannot say what it declares shows every row, never none."""
-    verdict = index.classify()
-
-    assert verdict.foreign == []
-    assert {'long-gone', 'elsewhere', 'repo-shipped'} <= {entry.name for entry in verdict.dead}
-
-
-def test_the_manifest_is_not_asked_when_every_row_resolves(monkeypatch):
-    """A clean index pays nothing, which is what keeps this off the dashboard's cost."""
-    asked = []
-    monkeypatch.setattr(machine, 'declaration', lambda: asked.append(1) or machine.UNKNOWN)
-
-    index.partition_foreign([], [])
-
-    assert asked == []
-
-
-def test_unresolved_rows_report_only_what_is_anyones_to_fix(monkeypatch):
-    """`doit kit unresolved --json` and the dashboard lane read this one fold."""
-    monkeypatch.setattr(machine, 'declaration', lambda: declaring('rg', 'forge'))
-
-    names = {row['name'] for row in index.unresolved_rows()}
-
-    assert 'elsewhere' not in names
-    assert 'long-gone' in names
