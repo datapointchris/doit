@@ -68,8 +68,11 @@ jobs:
   # The service's image, built from the repository root because it runs the
   # root package's view code. It is tagged by the last commit touching anything
   # it holds, so a release that changed none of it builds nothing.
+  #
+  # After `release`, so the version it bakes in is the tag this push cut rather
+  # than the one before it.
   api-image:
-    needs: validate
+    needs: [validate, release]
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -85,9 +88,16 @@ jobs:
 
       - name: Name the image by the last commit touching what it holds
         id: tag
+        env:
+          RELEASED: ${{ needs.release.outputs.released }}
+          RELEASED_TAG: ${{ needs.release.outputs.tag }}
         run: |
           echo "tag=sha-$(git log -1 --format=%H -- api/ src/ pyproject.toml | cut -c1-12)" >> "$GITHUB_OUTPUT"
-          version=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)
+          if [ "$RELEASED" = true ]; then
+            version=$RELEASED_TAG
+          else
+            version=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)
+          fi
           echo "version=${version#v}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
