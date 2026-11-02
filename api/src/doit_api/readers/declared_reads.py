@@ -42,6 +42,7 @@ from . import clickhouse
 from . import icb
 from . import learning
 from . import meso
+from . import slate
 from .apps import App
 from .apps import ReadFailed
 from .github import GitHub
@@ -99,11 +100,12 @@ class Readers:
             'dotfiles': lambda bounds, now: (clickhouse.desk_checks_document(self.clickhouse_settings, now, self.clickhouse_client), ''),
             'learning-completed': lambda bounds, now: learning.completed(self.app('learning'), bounds),
             'meso-review': lambda bounds, now: (meso.review(self.app('meso'), bounds), ''),
-            **{adapter: self.icb_completions(read) for adapter, read in icb.COMPLETIONS.items()},
+            **{adapter: self.completions('icb', read) for adapter, read in icb.COMPLETIONS.items()},
+            **{adapter: self.completions('slate', read) for adapter, read in slate.COMPLETIONS.items()},
         }
 
-    def icb_completions(self, read: Callable[[App, Bounds], object]) -> Callable[[Bounds, dt.datetime], tuple[object, str]]:
-        return lambda bounds, now: (read(self.app('icb'), bounds), '')
+    def completions(self, app: str, read: Callable[[App, Bounds], object]) -> Callable[[Bounds, dt.datetime], tuple[object, str]]:
+        return lambda bounds, now: (read(self.app(app), bounds), '')
 
     def app(self, name: str) -> App:
         if name not in self.apps:

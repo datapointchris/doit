@@ -237,7 +237,6 @@ COMPLETIONS: dict[str, Callable[[App, Bounds], object]] = {
     'icb-habits': lambda icb, bounds: icb.get('/habits/completed', window(bounds, zoned=True)),
     'icb-tasks': lambda icb, bounds: icb.get('/tasks', {'status': 'completed', **window(bounds)}),
     'icb-projects': lambda icb, bounds: icb.get('/project-items', {'status': 'completed', **window(bounds)}),
-    'icb-issues': lambda icb, bounds: icb.get('/issues', {'status': 'completed', **window(bounds, zoned=True)}),
     'icb-articles': lambda icb, bounds: icb.get('/articles', window(bounds)),
     'icb-books': lambda icb, bounds: icb.get('/books', window(bounds, zoned=True)),
 }

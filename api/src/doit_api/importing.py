@@ -64,16 +64,21 @@ SKIPPED = (
 
 EVENTS = {event.value for event in journal.Event}
 
-# icb list commands and the collection each reads. Each flag becomes the query
-# parameter of the same name with `_` for `-`, which is how icb's CLI builds it.
-ICB_COLLECTIONS: dict[tuple[str, ...], str] = {
-    ('tasks', 'list'): '/tasks',
-    ('books', 'list'): '/books',
-    ('issues', 'list'): '/issues',
-    ('articles', 'list'): '/articles',
-    ('projects', 'items', 'list'): '/project-items',
-    ('countdowns', 'list'): '/countdowns',
-    ('events', 'list'): '/events',
+# Each CLI's list commands and the collection each reads. Each flag becomes the
+# query parameter of the same name with `_` for `-`, which is how icb's and
+# slate's CLIs build it.
+COLLECTIONS: dict[str, dict[tuple[str, ...], str]] = {
+    'icb': {
+        ('tasks', 'list'): '/tasks',
+        ('books', 'list'): '/books',
+        ('articles', 'list'): '/articles',
+        ('projects', 'items', 'list'): '/project-items',
+        ('countdowns', 'list'): '/countdowns',
+        ('events', 'list'): '/events',
+    },
+    'slate': {
+        ('issues', 'list'): '/issues',
+    },
 }
 SHORT_FLAGS = {'-n': '--limit'}
 
@@ -110,11 +115,11 @@ def translated(command: str) -> tuple[dict, str | None] | None:
     if not words:
         return None
     program, rest = words[0], words[1:]
-    if program == 'icb':
-        for verbs, path in ICB_COLLECTIONS.items():
+    if program in COLLECTIONS:
+        for verbs, path in COLLECTIONS[program].items():
             if tuple(rest[: len(verbs)]) == verbs:
                 query = flag_query(rest[len(verbs) :])
-                return None if query is None else (read_of('icb', path, query), None)
+                return None if query is None else (read_of(program, path, query), None)
         return None
     if program == 'learning' and rest[:1] == ['plan']:
         # The plan's head is the overview's `plan_head`. The service's client
