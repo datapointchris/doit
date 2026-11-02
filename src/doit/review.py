@@ -70,13 +70,15 @@ NUDGE_MAX_ITEMS = 8
 
 # How long the nudge waits between showings where nobody set an interval. Four
 # hours means at most twice a working day, which is the point of a nudge rather
-# than a banner.
+# than a banner. The shell gate waits this long too, until a nudge has answered.
 DEFAULT_NUDGE_MINUTES = 240
 
-# The interval as plain minutes, so the shell gate reads it with a bare `cat`
-# and starts no process between showings. The service holds the interval; this
-# is the copy the last nudge left behind.
+# The shell gate's files, read with no Python and no request. The interval is the
+# service's, as plain minutes. The marker's mtime is when this machine last asked.
+# The showing is what the last nudge printed, waiting for the next shell.
 NUDGE_INTERVAL = xdg_cache_home() / 'doit' / 'nudge-interval-minutes'
+NUDGE_MARKER = xdg_cache_home() / 'doit' / 'nudge'
+NUDGE_SHOWING = xdg_cache_home() / 'doit' / 'nudge-showing.txt'
 
 
 # Fields a register item may declare: the ones the TEMPLATE header documents.
@@ -255,7 +257,9 @@ def render_stranded(stranded: list[str]) -> None:
 
 
 def cmd_done(item_id: str) -> int:
-    done = service.client().post(f'/review/{item_id}/completions', {})
+    # The desk's own day, because the service's clock may sit in another zone.
+    # One completion per item and day, so sending it again records nothing new.
+    done = service.client().post(f'/review/{item_id}/completions', {'day': dt.date.today().isoformat()}, repeatable=True)
     line = Text.from_markup('[green]✓[/] Marked ')
     line.append(item_id, style='yellow')
     days = (done.get('status') or {}).get('cadence_days')
@@ -313,19 +317,19 @@ def cmd_nudge() -> int:
     command to run. The description is browse-time information — at first shell
     you already know what your own register items mean.
 
-    The shell gate starts this at most once per interval on each machine, and
-    the service's last showing holds the interval across every machine, so the
-    schedule is one rolling one. Maintenance only: a Lab is practice you sit
-    down for, not something to be interrupted with at the first shell.
+    The shell gate starts this in the background at most once per interval on
+    each machine. The service says whether the interval has passed since the
+    nudge last showed anywhere, so the schedule is one rolling one. Maintenance
+    only: a Lab is practice you sit down for, not something to be interrupted
+    with at the first shell.
     """
     doit = service.client()
     held = doit.get('/review/nudge')
     NUDGE_INTERVAL.parent.mkdir(parents=True, exist_ok=True)
-    NUDGE_INTERVAL.write_text(f'{held.get("interval_minutes") or DEFAULT_NUDGE_MINUTES}\n')
-    now = dt.datetime.now().astimezone()
-    if not nudge_due(held, now):
+    NUDGE_INTERVAL.write_text(f'{held["interval_minutes"]}\n')
+    if not held['show']:
         return 0
-    doit.put('/review/nudge', {'last_nudged_at': now.isoformat()})
+    doit.put('/review/nudge', {'last_nudged_at': dt.datetime.now().astimezone().isoformat()})
     due = held['due']
     if not due:
         return 0

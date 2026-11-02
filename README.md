@@ -67,8 +67,10 @@ doit today                   # every record at once: what the day still owes, an
 doit happened --since 7d     # what every record says happened over the week, and who did it
 ```
 
-A scheduled job has no one to log in. With `$DOIT_CLIENT_SECRET` set, the CLI authenticates as the
-client named in `~/.config/doit/config.toml` instead.
+A scheduled job has no one to log in. Its `~/.config/doit/config.toml` names `api` and a
+`token_command`, the command that hands it a token, and the CLI sends what that command prints. A
+service client's token reaches one route, `doit review done`'s, and only while it holds
+`doit.review.write`.
 
 The first run clones terminal-library into `$XDG_DATA_HOME/terminal-library/`. A command asking
 for `--help` clones nothing. doit refuses to clone into a directory that already holds files,
@@ -78,8 +80,9 @@ dashboard and the registers need no cards. With no checkout, `doit content sync`
 
 Each `edit` opens the document the service holds, or its template where none is written yet. The
 service validates the whole text and stores nothing it refuses. A refusal names the first fault and
-reopens the editor on the text as you left it, so one typo never costs the edit. doit never
-rewrites a document itself, so your comments and layout survive.
+reopens the editor on the text as you left it, so one typo never costs the edit. A save that fails
+any other way keeps the text in `$XDG_STATE_HOME/doit/<name>-unsaved.yml`, and the next `edit`
+starts from it. doit never rewrites a document itself, so your comments and layout survive.
 
 ## The grammar
 
@@ -112,8 +115,8 @@ words because they are two things, and one word would make "did you update?" amb
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |
 | Have I committed the card I wrote | `content status` | the terminal-library checkout |
 
-Every row above the last three is answered by the service, which reads what the row names. The
-last three read this machine alone.
+`show`, `find`, `tools show`, `choose` and `content status` read this machine's checkout and
+shell. The service answers every other row, reading what the row names.
 
 `dashboard`, `today` and `next` are three densities over the same records, not three subjects.
 `dashboard` ranks across nothing. `next` ranks across everything, because you declared the
@@ -447,7 +450,9 @@ is one copy of each.
 - **A forecast is taken on an interval inside the process**, every `DOIT_API_FORECAST_INTERVAL`.
 
 Every `/api/v1` route answers a person's login, verified as an RFC 9068 access token from the
-issuer. `/health`, `/ready` and `/.well-known/oauth-protected-resource` answer anyone.
+issuer. `POST /api/v1/review/{entry}/completions` also admits a service client holding
+`doit.review.write`, so a scheduled run that finishes a review item records it. `/health`,
+`/ready` and `/.well-known/oauth-protected-resource` answer anyone.
 
 The image is built from the repository root, because the service runs the root package:
 
@@ -464,6 +469,7 @@ It reads its configuration from the environment and nowhere else:
 | `DOIT_API_DATABASE` | The SQLite file. The image sets it to a path on its data volume. |
 | `TZ` | The zone "today" is computed in: the person's own. |
 | `DOIT_API_FORECAST_INTERVAL` | How often a forecast is taken, as a whole number and one of `m`, `h` or `d`. Optional. |
+| `DOIT_API_DRAW_LIFETIME` | How long a draw keeps answering `doit next`, in the same form. `15m` when unset. |
 | `DOIT_API_<APP>_URL`, `DOIT_API_<APP>_CLIENT_SECRET` | Each app the service reads, named as in `Settings.from_environment`. |
 | `DOIT_API_GITHUB_CLIENT_ID`, `DOIT_API_GITHUB_PRIVATE_KEY` | The GitHub App the pull request lane reads through. |
 | `DOIT_API_CLICKHOUSE_URL`, `_USER`, `_PASSWORD` | The account that reads desk check results. |
@@ -503,8 +509,8 @@ cosign verify \
 
 ## Where it writes
 
-The service holds the documents and every record. A machine keeps four things of its own, none of
-which the service needs.
+The service holds the documents and every record. A machine keeps these of its own, and the service
+needs none of them.
 
 - **Content** is the terminal-library checkout. doit writes there when it pulls, and when you author
   a card or a Lab.
@@ -513,7 +519,7 @@ which the service needs.
   tokens are in the system keychain. Neither is in either repo, because both are personal and both
   repos are public.
 - **State** is `$XDG_STATE_HOME/doit/`. It holds the log of this machine's last background pull of
-  the cards, one file named for the machine.
-- **Cache** is `$XDG_CACHE_HOME/doit/`. It holds the pursuit names and the nudge interval, which the
-  shell's completion and startup gate read without starting Python or asking the service. A command
-  that fetches either rewrites it.
+  the cards, and any edit the service never took.
+- **Cache** is `$XDG_CACHE_HOME/doit/`. It holds what the shell's completion and startup gate read
+  without starting Python or asking the service. Each file is rewritten by the command that fetches
+  it.

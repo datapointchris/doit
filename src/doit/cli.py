@@ -6,6 +6,7 @@ tree is built this way. Each subcommand module owns its own `app`; this file
 only assembles them.
 """
 
+import os
 import sys
 from typing import Annotated
 from typing import Any
@@ -208,9 +209,37 @@ def root(
         notify(UPDATE_CONFIG)
 
 
+# Variables that chose which desk files doit read and wrote. The service holds
+# that data, so one still set names a target nothing reads, and is refused.
+RETIRED_VARIABLES = {
+    'DOIT_JOURNAL_DIR': '--state-dir',
+    'DOIT_REVIEW_STATE': '--state-dir',
+    'DOIT_PURSUITS': '--config-dir',
+    'DOIT_REGISTER': '--config-dir',
+    'DOIT_SOURCES': '--config-dir',
+}
+
+# What a command exits with when no answer came, the one failure the same command run later can outlast.
+NO_ANSWER_EXIT = 4
+
+
+def retired_variable_set() -> str:
+    """The refusal for the first retired variable still set, or '' where none is."""
+    for variable, flag in RETIRED_VARIABLES.items():
+        if os.environ.get(variable):
+            return (
+                f'${variable} is set, and doit reads its records from its service instead. '
+                f'Unset it, then hand the folder it names to `doit import {flag} <folder>` once.'
+            )
+    return ''
+
+
 def main() -> None:
+    if refusal := retired_variable_set():
+        error_console.print(f'doit: {refusal}', soft_wrap=True, markup=False)
+        raise SystemExit(2)
     try:
         app()
     except (service.ServiceFailed, LoginError) as failure:
         error_console.print(f'doit: {failure}', soft_wrap=True, markup=False)
-        raise SystemExit(1) from None
+        raise SystemExit(NO_ANSWER_EXIT if isinstance(failure, service.NoAnswer) else 1) from None

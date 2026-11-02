@@ -4,9 +4,11 @@ Every route parses its request, calls a view or a write, and returns what that
 returned. Nothing here computes a view, reads an app or opens the store itself.
 
 `/health`, `/ready` and the RFC 9728 metadata answer anyone. Everything under
-`/api/v1` answers a person's login and refuses a service client, because every
-route reads or writes one person's register and journal. A write records the
-caller as `recorded_by`, beside the machine and actor the client names.
+`/api/v1` answers a person's login, because every route reads or writes one
+person's register and journal. A review completion also admits a service client
+holding `doit.review.write`, so a scheduled run that finishes a review item
+records it. A write records the caller as `recorded_by`, beside the machine and
+actor the client names.
 
 `create_app` takes every collaborator as an argument. Production passes the ones
 `main` builds from the environment. A test passes a temporary store, stand-in
@@ -15,6 +17,7 @@ no network.
 """
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Annotated
@@ -27,6 +30,7 @@ from fastapi import Query
 from fastapi import Response
 from pyapiauth import Caller
 from pyapiauth.fastapi_dependencies import person_dependency
+from pyapiauth.fastapi_dependencies import person_or_scoped_service_dependency
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -49,6 +53,9 @@ log = logging.getLogger(__name__)
 # Where RFC 9728 puts the metadata of an API served at the root of its host.
 PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource'
 
+# The one scope a service client is admitted with, on the one route that takes it.
+REVIEW_WRITE_SCOPE = 'doit.review.write'
+
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra='forbid', populate_by_name=True)
@@ -65,7 +72,13 @@ class DocumentBody(Strict):
     text: str = Field(description='The whole document as YAML, comments included.')
 
 
-class DoneBody(Written):
+class Keyed(Written):
+    """A journal write the client can send again: one id names it however many times it arrives."""
+
+    id: uuid.UUID | None = Field(None, description='A UUIDv7 the client makes once per write. A write sent again with it is stored once.')
+
+
+class DoneBody(Keyed):
     pursuit: str = Field(description='A pursuit name, or a prefix only one name starts with.')
     note: str | None = None
     duration_minutes: int | None = Field(
@@ -76,7 +89,7 @@ class DoneBody(Written):
     downstream: dict[str, Any] | None = Field(None, description="What the pursuit's on_log command did on the desk.")
 
 
-class SkipBody(Written):
+class SkipBody(Keyed):
     pursuit: str
     span: str | None = Field(
         None, alias='for', description='How long to pass, in days or weeks such as 3d or 2w. One interval when omitted.'
@@ -160,6 +173,7 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
 
     api = APIRouter(prefix='/api/v1')
     Person = Annotated[Caller, Depends(person_dependency(verifier))]
+    ReviewWriter = Annotated[Caller, Depends(person_or_scoped_service_dependency(verifier, REVIEW_WRITE_SCOPE))]
 
     @api.get('/documents')
     def document_list(caller: Person) -> list[dict]:
@@ -281,7 +295,7 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
         return views.review(block)
 
     @api.post('/review/{entry}/completions', status_code=201)
-    def review_complete(entry: str, body: CompletionBody, caller: Person) -> dict:
+    def review_complete(entry: str, body: CompletionBody, caller: ReviewWriter) -> dict:
         return views.complete_review(entry, body.day, caller.who)
 
     @api.get('/review/nudge')

@@ -95,12 +95,6 @@ from doit.window import window
 CACHE_DIR = Path(os.environ.get('DOIT_CACHE_DIR') or xdg_cache_home() / 'doit')
 NAMES_CACHE = CACHE_DIR / 'next-names.txt'
 
-# Long enough to survive deciding what to do, short enough that coming back after
-# a task gives a fresh draw. Re-running inside the window is the common case —
-# glance, get interrupted, glance again — and a reshuffle there reads as the tool
-# having changed its mind.
-DRAW_STANDS_MINUTES = int(os.environ.get('DOIT_DRAW_STANDS_MINUTES') or 15)
-
 # How many of its own intervals a pursuit goes quiet for before it reads as dormant.
 DORMANT_INTERVALS = 3
 
@@ -1089,8 +1083,8 @@ def compute_draw(state: dict, seed: int | None = None) -> dict:
     }
 
 
-def draw_stands(draw: dict | None, now: dt.datetime) -> bool:
-    """Whether a draw still answers `next`: made within DRAW_STANDS_MINUTES, not retired, and in the shape read here.
+def draw_stands(draw: dict | None, now: dt.datetime, lifetime: dt.timedelta) -> bool:
+    """Whether a draw still answers `next`: made within ``lifetime``, not retired, and in the shape read here.
 
     A payload carrying no `offered` list is treated as expired. A shape no longer
     spoken costs one fresh draw, which is cheaper than every reader knowing two.
@@ -1098,7 +1092,7 @@ def draw_stands(draw: dict | None, now: dt.datetime) -> bool:
     if not isinstance(draw, dict) or draw.get('retired') or not isinstance(draw.get('offered'), list):
         return False
     created = journal.parse_time(draw.get('created_at'))
-    return created is not None and now - created <= dt.timedelta(minutes=DRAW_STANDS_MINUTES)
+    return created is not None and now - created <= lifetime
 
 
 def offer_provenance(draw: dict, name: str) -> dict:
@@ -1142,6 +1136,7 @@ def done_record(
     now: dt.datetime | None = None,
     machine: str = '',
     identity: str = '',
+    record_id: str = '',
 ) -> dict:
     """The DONE entry a log writes, carrying the state behind it and where the pursuit sat in the draw."""
     extra = {
@@ -1152,7 +1147,7 @@ def done_record(
         'downstream': downstream,
         **offer_provenance(draw, name),
     }
-    return new_record(journal.Event.DONE, name, state, extra, now, machine=machine, identity=identity)
+    return new_record(journal.Event.DONE, name, state, extra, now, machine=machine, identity=identity, record_id=record_id)
 
 
 def outside_draw(state: dict, name: str) -> str | None:
@@ -1679,6 +1674,7 @@ def explain_payload(state: dict) -> dict:
         # weights lets a past day be read under the cycles in force that day,
         # rather than under whatever the register declares when it is read.
         'cycles': state['cycles'],
+        'active': sorted(state['active']),
         'weights': state['weights'],
         'intervals': {name: round(value, 2) for name, value in state['intervals'].items() if not math.isinf(value)},
         'days_since': {name: None if value is None else round(value, 2) for name, value in state['days_since'].items()},
@@ -1707,9 +1703,9 @@ def explain_payload(state: dict) -> dict:
 def standing_from(payload: dict, register: dict, now: dt.datetime) -> dict:
     """The state the renderers read, rebuilt from the explain payload the service sent and the register beside it.
 
-    The payload is the numbers :func:`build_state` computed. The active set is
-    every pursuit carrying a weight, and an interval the payload leaves out is
-    infinite, as :func:`explain_payload` drops it.
+    The payload is what :func:`build_state` decided, membership included, so
+    nothing here decides which pursuits are active, tracked or ended. An interval
+    the payload leaves out is infinite, as :func:`explain_payload` drops it.
     """
     weights = payload.get('weights') or {}
     intervals = payload.get('intervals') or {}
@@ -1718,7 +1714,8 @@ def standing_from(payload: dict, register: dict, now: dt.datetime) -> dict:
         'now': now,
         'today': now.date(),
         'pursuits': register,
-        'active': {name: register.get(name) or {} for name in weights},
+        'active': {name: register.get(name) or {} for name in payload['active']},
+        'term_ended': set(payload['term_ended']),
         'tracked': set(payload.get('tracked') or []),
         'cycles': payload.get('cycles') or [],
         'weights': weights,
@@ -1915,7 +1912,15 @@ def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_
 
 
 def new_record(
-    event: str, name: str, state: dict | None, extra: dict, now: dt.datetime | None = None, *, machine: str = '', identity: str = ''
+    event: str,
+    name: str,
+    state: dict | None,
+    extra: dict,
+    now: dt.datetime | None = None,
+    *,
+    machine: str = '',
+    identity: str = '',
+    record_id: str = '',
 ) -> dict:
     """One journal entry, carrying the state that produced it where there is one, from ``machine`` as ``identity``.
 
@@ -1929,11 +1934,12 @@ def new_record(
     otherwise put the same payload in each of them.
 
     ``machine`` and ``identity`` default to this process's own, so a caller
-    writing on someone else's behalf names both.
+    writing on someone else's behalf names both. ``record_id`` is the id a
+    client made for the write, so the same write sent twice is one entry.
     """
     now = now or (state['now'] if state else dt.datetime.now().astimezone())
     record = {
-        'id': new_id(now),
+        'id': record_id or new_id(now),
         'pursuit': name,
         'event': event,
         'logged_at': now.isoformat(),
@@ -1955,10 +1961,14 @@ def due_with(state: dict, name: str, entry: dict) -> float | None:
     logged, because the two disagree exactly where it matters. An entry dated
     before the pursuit's zero point pays nothing off, and subtraction has no way
     to know — it prints a number the next command contradicts.
+
+    An entry the journal already holds by its id is counted once, so a write
+    sent again answers what the first one did.
     """
     if name not in state['balance']:
         return None
-    own = [*records_by_pursuit(state['records']).get(name, []), entry]
+    held = [record for record in records_by_pursuit(state['records']).get(name, []) if record.get('id') != entry.get('id')]
+    own = [*held, entry]
     days = standing(
         own,
         state['evidence_days'].get(name, []),
@@ -1968,6 +1978,16 @@ def due_with(state: dict, name: str, entry: dict) -> float | None:
         state['weekly_minutes'].get(name),
     ).due
     return None if days is None else round(days, 2)
+
+
+def unrecorded(name: str, words: list[str], minutes: int | None, occurred: dt.datetime, downstream: dict) -> None:
+    """Say that on_log ran and the entry did not land, and the log that records it without running on_log again."""
+    again = ['doit', 'pursuits', 'log', name, '--no-write', *(['--minutes', str(minutes)] if minutes else []), *words]
+    error_console.print(Text(f'  on_log already ran: {downstream.get("command")}', style='yellow'), soft_wrap=True)
+    error_console.print(
+        Text(f'  Record it without running on_log again, adding --ago for the time since {occurred:%H:%M}:  {shlex.join(again)}'),
+        soft_wrap=True,
+    )
 
 
 def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | None, assume_yes: bool, no_write: bool) -> int:
@@ -2035,6 +2055,7 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     # The service marks the pursuit logged on the standing draw, so it is not
     # offered again inside the window, and says when it next comes due.
     body = {
+        'id': new_id(dt.datetime.now().astimezone()),
         'pursuit': matched,
         'occurred_at': occurred.isoformat(),
         'note': ' '.join(words) or None,
@@ -2042,7 +2063,12 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
         'item': named or None,
         'downstream': downstream,
     }
-    days = client.post('/journal/done', service.signed(body))['due_in_days']
+    try:
+        days = client.post('/journal/done', service.signed(body), repeatable=True)['due_in_days']
+    except service.ServiceFailed:
+        if acted:
+            unrecorded(matched, words, minutes, occurred, downstream or {})
+        raise
     label = f' — {named["label"]}' if named.get('label') else ''
     logged = Text.from_markup('[green]Logged[/] ')
     logged.append(f'{matched}{label}' + ('' if days is None else f' · {format_due(days)}'))
@@ -2064,8 +2090,7 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
             if not can_prompt():
                 error_console.print('Which pursuit? Pass it as the argument:  [cyan]doit pursuits skip <pursuit>[/]')
                 return 1
-            today = dt.date.today()
-            drawn = {name: config for name, config in pursuits.items() if is_active(config, today)}
+            drawn = {name: pursuits[name] for name in standing['active']}
             if not drawn:
                 error_console.print('Nothing is in the draw to pass.')
                 return 1
@@ -2079,7 +2104,11 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
         error_console.print('  Nothing skipped.')
         return 1
 
-    passed_for = client.post('/journal/skip', service.signed({'pursuit': matched, 'for': duration}))
+    passed_for = client.post(
+        '/journal/skip',
+        service.signed({'id': new_id(dt.datetime.now().astimezone()), 'pursuit': matched, 'for': duration}),
+        repeatable=True,
+    )
     until = dt.datetime.fromisoformat(passed_for['until'])
     passed = Text.from_markup('[yellow]Passed[/] ')
     passed.append(
@@ -2198,7 +2227,7 @@ def cmd_list(as_json: bool) -> int:
             line.append(format_due(days), style=due_style(days))
         if config.get('paused'):
             line.append('  paused', style='yellow')
-        elif term_ended(config, state['today']):
+        elif name in state['term_ended']:
             line.append(f'  term ended {config["until"]}', style='yellow')
         elif name in state['suppressed']:
             line.append('  skipped', style='yellow')
@@ -2439,14 +2468,13 @@ def cmd_evidence(as_json: bool = False) -> int:
         return 0
 
     now = dt.datetime.now().astimezone()
-    watching = watched(client.get('/pursuits/register')['pursuits'], now.date())
     seen = {name: dt.datetime.fromisoformat(when) for name, when in answered['observed'].items()}
     failed = answered['errors']
     undeclared = set(answered['undeclared'])
 
     console.rule('[cyan]Evidence', align='left')
-    width = max((len(name) for name in watching), default=0)
-    for name in sorted(watching, key=lambda key: -watching[key].get('weight', 0)):
+    width = max((len(name) for name in answered['watched']), default=0)
+    for name in answered['watched']:
         line = Text('  ')
         line.append(f'{name:<{width}}  ', style='white')
         if name in undeclared:

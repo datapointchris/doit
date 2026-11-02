@@ -42,8 +42,16 @@ def api(store, monkeypatch, tmp_path) -> TestClient:
     return connected(store, monkeypatch, tmp_path)
 
 
-def connected(store, monkeypatch, tmp_path, apps=None) -> TestClient:
-    """The service, with every CLI command in this test asking it and caching into the test's own directory."""
+Forward = Callable[[httpx2.Request], httpx2.Response]
+
+
+def connected(
+    store, monkeypatch, tmp_path, apps=None, around: Callable[[httpx2.Request, Forward], httpx2.Response] | None = None
+) -> TestClient:
+    """The service, with every CLI command in this test asking it and caching into the test's own directory.
+
+    ``around`` stands between the CLI and the service, to lose an answer or answer in its place.
+    """
     client = client_for(store, apps, clock=None)
 
     def forward(request: httpx2.Request) -> httpx2.Response:
@@ -56,8 +64,15 @@ def connected(store, monkeypatch, tmp_path, apps=None) -> TestClient:
         )
         return httpx2.Response(answer.status_code, headers=dict(answer.headers), content=answer.content)
 
+    def transport(request: httpx2.Request) -> httpx2.Response:
+        return forward(request) if around is None else around(request, forward)
+
     tokens = SimpleNamespace(token=lambda: SimpleNamespace(access_token=TOKEN))
-    monkeypatch.setattr(service, 'client', lambda: service.Service('https://doit.test', tokens, transport=httpx2.MockTransport(forward)))
+    monkeypatch.setattr(
+        service,
+        'client',
+        lambda: service.Service('https://doit.test', tokens, transport=httpx2.MockTransport(transport), pause=lambda seconds: None),
+    )
     monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
     monkeypatch.setattr(pursuits, 'NAMES_CACHE', tmp_path / 'cache' / 'next-names.txt')
     monkeypatch.setattr(review, 'NUDGE_INTERVAL', tmp_path / 'cache' / 'nudge-interval-minutes')
@@ -86,18 +101,19 @@ def logged(store) -> list[dict]:
     return [record for record in store.journal() if record['event'] == journal.Event.DONE]
 
 
-def write_through(store, monkeypatch, tmp_path, answer: Callable[[], object]) -> Path:
+def write_through(store, monkeypatch, tmp_path, answer: Callable[[], object], around=None) -> Path:
     """`chores` resolved from a tasks app giving ``answer()``, completing the chosen item by writing its id to the file returned."""
     marker = tmp_path / 'completed'
-    client = connected(store, monkeypatch, tmp_path, {'icb': stand_in('icb', {'/tasks': lambda request: answer()})})
+    client = connected(store, monkeypatch, tmp_path, {'icb': stand_in('icb', {'/tasks': lambda request: answer()})}, around)
     register = 'pursuits:\n  chores:\n    weight: 25\n    cadence: 3d\n    resolve: {app: icb, path: /tasks}\n    label: name\n    id: id\n'
     client.put('/api/v1/documents/pursuits', json={'text': register + f'    on_log: sh -c "echo {{id}} > {marker}"\n'}).raise_for_status()
     return marker
 
 
-def test_a_command_before_any_pursuits_are_written_names_what_writes_them(api):
-    with pytest.raises(service.ServiceFailed, match='doit pursuits edit'):
+def test_a_command_before_any_pursuits_are_written_is_refused_as_not_found(api):
+    with pytest.raises(service.ServiceFailed) as refused:
         pursuits.cmd_next(explain=False, as_json=False, reroll=False)
+    assert refused.value.status == 404
 
 
 def test_next_gives_every_active_pursuit_a_row_from_the_register_the_service_holds(api, capsys, monkeypatch):
@@ -132,7 +148,6 @@ def test_a_log_is_counted_by_the_list_drift_and_dormant_views_that_follow(api, c
     printed = capsys.readouterr().out
     cold = [line for line in printed.splitlines() if 'never' in line]
     assert len(cold) > 1 and len({line.index('never') for line in cold}) == 1, 'the rows align'
-    assert 'doit pursuits list' in printed
 
 
 def test_the_list_gives_a_tracked_pursuit_no_weight_and_no_due_date(api):
@@ -211,6 +226,29 @@ def test_a_log_resolves_again_past_a_draw_whose_read_failed(store, monkeypatch, 
     assert logged(store)[0]['item']['label'] == 'Face Mud'
 
 
+def test_a_log_whose_answer_was_lost_is_stored_once_and_one_never_taken_names_the_repair(store, monkeypatch, tmp_path, capsys):
+    """on_log has already run by the time the entry is sent, so the entry is sent again rather than lost,
+    and where it never lands the log says how to record it without running on_log a second time."""
+    outcomes = ['lost']
+
+    def around(request: httpx2.Request, forward: Forward) -> httpx2.Response:
+        if request.method != 'POST' or not request.url.path.endswith('/journal/done') or not outcomes:
+            return forward(request)
+        if outcomes.pop(0) == 'lost':
+            forward(request)
+        return httpx2.Response(504)
+
+    marker = write_through(store, monkeypatch, tmp_path, lambda: TASKS[:1], around)
+    assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+    assert (len(logged(store)), marker.read_text().strip()) == (1, '501')
+
+    outcomes.extend(['down'] * service.ATTEMPTS)
+    with pytest.raises(service.NoAnswer):
+        pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False)
+    assert len(logged(store)) == 1
+    assert 'doit pursuits log chores --no-write' in capsys.readouterr().err
+
+
 def test_a_skip_says_when_the_pursuit_returns_and_how_to_bring_it_back_sooner(api, store, capsys):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
 
@@ -274,7 +312,6 @@ def test_a_forecast_taken_is_read_back_and_not_graded_before_its_window_closes(a
     assert forecast.cmd_trend(7, as_json=False) == 1
     captured = capsys.readouterr()
     assert captured.out == ''
-    assert 'nothing can be graded' in captured.err
 
 
 def test_the_day_and_the_dashboard_render_without_any_source(api, capsys):

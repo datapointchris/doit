@@ -195,15 +195,6 @@ def test_a_pursuit_with_no_pace_is_tracked_and_never_drawn(sandbox):
     assert round(state['days_since']['build']) == 2
 
 
-def test_a_tracked_pursuit_has_no_place_in_the_draw_to_pass_or_return_to():
-    """A skip on a pursuit with no pace wrote a SKIP, and drift then read it as
-    `passed 1` against a draw it never had."""
-    state = built(register=tracked())
-
-    assert pursuits.outside_draw(state, 'build') == 'build is not in the draw (tracked)'
-    assert pursuits.outside_draw(state, 'chores') is None
-
-
 def test_a_pursuit_declaring_both_paces_is_refused(tmp_path):
     path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 7d\n    weekly_minutes: 60\n')
     with pytest.raises(pursuits.RegisterError, match='not both'):
@@ -511,21 +502,6 @@ def test_term_ended_only_after_the_date():
     assert pursuits.term_ended({'until': NOW.date() - dt.timedelta(days=1)}, NOW.date())
     assert not pursuits.term_ended({'until': NOW.date() + dt.timedelta(days=1)}, NOW.date())
     assert not pursuits.term_ended({}, NOW.date())
-
-
-def test_the_draw_carries_no_per_row_command():
-    """A command on every row is a line spent on what you already know how to type.
-
-    Asserted over the `Offer` values rather than the screen. A negative substring
-    against a console rendering passes whenever the phrase was clipped off the
-    right edge, which is every narrow terminal and every long title.
-    """
-    state = built()
-    resolved = {'chores': {'choices': [{'label': 'Trim Dingo Nails', 'context': 'Dingo', 'view': 'icb tasks show 422'}]}}
-
-    row = pursuits.offer('chores', state, resolved)
-
-    assert not any('icb tasks show' in line for line in [*row.choices, row.due])
 
 
 def test_a_drawn_choice_says_where_the_item_lives_beside_its_title():

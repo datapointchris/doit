@@ -24,10 +24,18 @@ NOW = dt.datetime(2026, 11, 2, 12, 0, tzinfo=dt.timezone(dt.timedelta(hours=-5))
 TOKEN = 'person-token'
 
 
+SERVICE_TOKENS = {
+    'review-writer-token': frozenset({'doit.review.write'}),
+    'other-scope-token': frozenset({'doit.forecast.write'}),
+}
+
+
 class Verifier:
-    """Knows one person's token."""
+    """Knows one person's token, and a service client's token for each scope set in SERVICE_TOKENS."""
 
     def verify(self, token):
+        if token in SERVICE_TOKENS:
+            return Caller(subject='', client_id='doit-svc-runs', scopes=SERVICE_TOKENS[token], service=True)
         if token != TOKEN:
             raise Rejected('unknown token')
         return Caller(subject='person-1', client_id='doit-cli-desk', name='chris')

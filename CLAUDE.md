@@ -46,8 +46,8 @@ checkoff has no length and a point is a quantity nobody declared.
   last showing, in the service's store. A command reaches them only through `doit.service`, the
   one module that makes a request.
 - **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer, the
-  machine's client and `library_dir`. `$XDG_CACHE_HOME/doit/` holds the pursuit names and the
-  nudge interval, which the shell reads with no Python and no request.
+  machine's client and `library_dir`. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no
+  Python and no request, each file rewritten by the command that fetches it.
 
 ## One renderer per collection, and `doit.tools` owns most of them
 

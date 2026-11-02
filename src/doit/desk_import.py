@@ -1,8 +1,9 @@
 """`doit import`: hand this desk's config and state files to the service, which merges them.
 
 The service decides what each file is and what is new in it, so a second run adds
-nothing and this side never parses a file. Every file in the two folders goes up,
-and the report names each one the service skipped and why.
+nothing and this side never parses a file. Every top-level text file in the two
+folders goes up, except hidden ones and `config.toml`. The report names each file
+left behind here and each the service skipped, with why.
 """
 
 from __future__ import annotations
@@ -20,26 +21,38 @@ from doit import service
 from doit.render import console
 from doit.render import error_console
 
-# This CLI's own login settings, which are not doit's data.
+# This machine's own settings, which the service has no use for.
 NOT_DATA = frozenset({'config.toml'})
 
 
-def desk_files(config_dir: Path, state_dir: Path) -> list[dict]:
-    """Each file under the two folders as the service takes it, `config/` or `state/` before its name."""
-    found = []
+def desk_files(config_dir: Path, state_dir: Path) -> tuple[list[dict], list[dict]]:
+    """Each file under the two folders as the service takes it, and each left here with why.
+
+    A file goes up with `config/` or `state/` before its name. Hidden entries are
+    a sync tool's own bookkeeping, so they are passed over without a mention.
+    """
+    found, left = [], []
     for prefix, folder in (('config', config_dir), ('state', state_dir)):
         if not folder.is_dir():
             continue
         for path in sorted(folder.iterdir()):
-            if not path.is_file() or path.name.startswith('.') or path.name in NOT_DATA:
+            named = f'{prefix}/{path.name}'
+            if path.name.startswith('.'):
+                continue
+            if path.is_dir():
+                left.append({'path': named, 'reason': 'a folder, and only the files at the top are read'})
+                continue
+            if path.name in NOT_DATA:
+                left.append({'path': named, 'reason': "this machine's own settings"})
                 continue
             try:
                 text = path.read_text(encoding='utf-8')
             except UnicodeDecodeError:
+                left.append({'path': named, 'reason': 'not UTF-8 text'})
                 continue
             modified = dt.datetime.fromtimestamp(path.stat().st_mtime, tz=dt.UTC)
-            found.append({'path': f'{prefix}/{path.name}', 'text': text, 'modified_at': modified.isoformat()})
-    return found
+            found.append({'path': named, 'text': text, 'modified_at': modified.isoformat()})
+    return found, left
 
 
 def report_lines(summary: dict) -> list[Text]:
@@ -68,15 +81,19 @@ def report_lines(summary: dict) -> list[Text]:
         lines.append(Text(line, style='yellow'))
     for skipped in summary.get('skipped') or []:
         lines.append(Text(f'  skipped {skipped.get("path")}: {skipped.get("reason")}', style='dim'))
+    for left in summary.get('left_here') or []:
+        lines.append(Text(f'  not sent {left["path"]}: {left["reason"]}', style='dim'))
     return lines
 
 
 def cmd_import(config_dir: Path, state_dir: Path, as_json: bool) -> int:
-    files = desk_files(config_dir, state_dir)
+    files, left = desk_files(config_dir, state_dir)
     if not files:
         error_console.print(f'Nothing to import: no files in {config_dir} or {state_dir}.')
         return 1
-    summary = service.client().post('/imports', {'files': files}, timeout=service.IMPORT_TIMEOUT)
+    # An import adds only what the store lacks, so sending it again is safe.
+    merged = service.client().post('/imports', {'files': files}, repeatable=True, timeout=service.IMPORT_TIMEOUT)
+    summary = {**merged, 'left_here': left}
     if as_json:
         print(json.dumps(summary, indent=2))
         return 0

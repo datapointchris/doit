@@ -5,6 +5,7 @@ parse is the classic way this breaks, and it breaks at shell startup on every
 machine at once rather than where it was written.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ import pytest
 from typer.testing import CliRunner
 
 from doit import content
+from doit import review
 from doit import shell
 from doit.cli import app as cli_app
 
@@ -31,19 +33,30 @@ def test_the_generated_zsh_parses(generate):
     assert parses(generate())
 
 
-def test_the_init_block_gates_on_doit_being_installed():
-    """dotfiles used to test `-x ~/.local/bin/menu-review`, which broke the day
-    the binaries collapsed into one."""
+@needs_zsh
+def test_a_shell_never_waits_on_the_nudge_and_the_next_one_prints_what_it_found(tmp_path, monkeypatch):
+    """The nudge asks the service, and a shell that waited on it would hang wherever the service is out of reach."""
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    (bin_dir / 'doit').write_text('#!/bin/sh\nsleep 1\necho "Review  prune-docker  never done"\n')
+    (bin_dir / 'doit').chmod(0o755)
+    for name, file in (('NUDGE_INTERVAL', 'nudge-interval-minutes'), ('NUDGE_MARKER', 'nudge'), ('NUDGE_SHOWING', 'nudge-showing.txt')):
+        monkeypatch.setattr(review, name, tmp_path / 'cache' / file)
     block = shell.zsh_init()
+    environment = {**os.environ, 'PATH': f'{bin_dir}{os.pathsep}{os.environ["PATH"]}'}
 
-    assert '$+commands[doit]' in block
-    assert 'menu-review' not in block
+    def open_shell() -> tuple[str, float]:
+        started = time.monotonic()
+        opened = subprocess.run(['zsh', '-f', '-c', block], env=environment, capture_output=True, text=True, check=True, timeout=10)
+        return opened.stdout, time.monotonic() - started
 
-
-def test_the_init_block_reads_the_interval_from_shared_state():
-    """The schedule is rolling and shared, not once per machine."""
-    assert 'nudge-interval-minutes' in shell.zsh_init()
-    assert str(shell.DEFAULT_NUDGE_MINUTES) in shell.zsh_init()
+    printed, took = open_shell()
+    assert (printed, took < 0.5) == ('', True)
+    deadline = time.monotonic() + 5
+    while not review.NUDGE_SHOWING.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert 'prune-docker' in open_shell()[0]
+    assert open_shell()[0] == '', 'a showing prints once, and the marker holds the next check off for the interval'
 
 
 def test_completion_reads_the_cache_rather_than_calling_doit():
