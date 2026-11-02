@@ -1,0 +1,10 @@
+# The context is the repository root. Only the root package and api/ enter it.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!src/
+!api/pyproject.toml
+!api/uv.lock
+!api/src/
+**/__pycache__

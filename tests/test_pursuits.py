@@ -807,7 +807,7 @@ def test_logging_re_resolves_past_a_draw_that_matched_nothing(sandbox, tmp_path,
         f'    on_log: sh -c "echo {{id}} > {marker}"\n',
     )
     monkeypatch.setattr(pursuits, 'REGISTER', register)
-    stand_a_draw(['chores'], resolved={'chores': pursuits.nothing_matched('chores', f'cat {payload}')})
+    stand_a_draw(['chores'], resolved={'chores': pursuits.nothing_matched('chores', 'cat')})
 
     assert pursuits.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
     assert marker.read_text().strip() == '422'
@@ -1013,7 +1013,7 @@ def test_a_resolve_that_matched_nothing_is_flagged_beside_the_description():
     """The description alone reads as the item, so a pursuit pointed at a project
     kind that no longer held anything looked like a real thing to go and do."""
     state = pursuits.build_state(pursuits.load_pursuits(), NOW)
-    resolved = {'chores': pursuits.nothing_matched('chores', 'tracker next --json')}
+    resolved = {'chores': pursuits.nothing_matched('chores', 'tracker')}
 
     row = pursuits.offer('chores', state, resolved)
 

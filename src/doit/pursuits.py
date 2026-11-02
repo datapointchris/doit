@@ -1271,17 +1271,24 @@ def resolve_one(name: str, config: dict) -> dict | None:
             'backend': shlex.split(command)[0],
         }
 
+    backend = shlex.split(command)[0]
     label_field = config.get('label')
     if not label_field:
         first = next((line for line in result.stdout.splitlines() if line.strip()), '')
         if not first:
-            return nothing_matched(name, command)
+            return nothing_matched(name, backend)
         return {'pursuit': name, 'candidates': 1, 'choices': [{'label': first.strip()}]}
 
     try:
         document = json.loads(result.stdout or 'null')
     except json.JSONDecodeError:
         return {'pursuit': name, 'error': 'resolve did not return JSON but names a label field'}
+    return choices_from(name, config, document, backend)
+
+
+def choices_from(name: str, config: dict, document: object, backend: str) -> dict:
+    """What a resolve's JSON answer offers, read through the pursuit's `items`, `resolve_where` and `label`."""
+    label_field = config['label']
     rows = dig(document, config['items']) if config.get('items') else document
     # A backend that already picked the one thing returns an object, not a list of
     # one — `icb overview` does exactly this for the next project item. Treating it
@@ -1289,14 +1296,14 @@ def resolve_one(name: str, config: dict) -> dict | None:
     if isinstance(rows, dict):
         rows = [rows]
     if not isinstance(rows, list) or not rows:
-        return nothing_matched(name, command)
+        return nothing_matched(name, backend)
     # The counterpart to `evidence_where`, for the same reason: a backend with no
     # filter for the distinction you are drawing returns everything and only some
     # of it is the pursuit. Narrow the command first where the API can — this is
     # what is left when it cannot.
     rows = evidence.matching(rows, config.get('resolve_where'))
     if not rows:
-        return nothing_matched(name, command)
+        return nothing_matched(name, backend)
     return {
         'pursuit': name,
         # How many rows the backend matched, not how many are shown. A resolve
@@ -1304,19 +1311,19 @@ def resolve_one(name: str, config: dict) -> dict | None:
         # equally in progress are candidates, and the first is not the answer to
         # anything. Everything downstream reads this before claiming a pick.
         'candidates': len(rows),
-        'backend': shlex.split(config['resolve'])[0],
+        'backend': backend,
         'choices': [one_choice(row, config, label_field) for row in rows[:CANDIDATE_ROWS]],
     }
 
 
-def nothing_matched(name: str, command: str) -> dict:
+def nothing_matched(name: str, backend: str) -> dict:
     """A resolve that ran cleanly and matched no rows.
 
     An entry rather than an absence, because an absent entry is what a pursuit
     with no resolve has, and the row would then show the description as though it
     were the item.
     """
-    return {'pursuit': name, 'candidates': 0, 'backend': shlex.split(command)[0], 'choices': []}
+    return {'pursuit': name, 'candidates': 0, 'backend': backend, 'choices': []}
 
 
 def one_choice(row, config: dict, label_field: str) -> dict:
