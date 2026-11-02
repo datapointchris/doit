@@ -8,6 +8,7 @@ clock, because the CLI stamps a log with the desk's.
 import datetime as dt
 import json
 import re
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from conftest import stand_in
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
+from doit import cli
 from doit import happened
 from doit import journal
 from doit import lanes
@@ -120,10 +122,20 @@ def write_through(store, monkeypatch, tmp_path, answer: Callable[[], object], ar
     return marker
 
 
-def test_a_command_before_any_pursuits_are_written_is_refused_as_not_found(api):
-    with pytest.raises(service.ServiceFailed) as refused:
-        pursuit_commands.cmd_next(explain=False, as_json=False, reroll=False)
-    assert refused.value.status == 404
+def test_a_refusal_exits_1_with_the_services_sentence_and_a_service_that_never_answers_exits_4(store, monkeypatch, tmp_path, capsys):
+    down = [False]
+    client = connected(store, monkeypatch, tmp_path, around=lambda request, forward: httpx2.Response(503) if down[0] else forward(request))
+    monkeypatch.setattr(sys, 'argv', ['doit', 'next'])
+
+    with pytest.raises(SystemExit) as refused:
+        cli.main()
+    assert refused.value.code == 1
+    assert capsys.readouterr().err.split() == f'doit: {client.get("/api/v1/next").json()["message"]}'.split()
+
+    down[0] = True
+    with pytest.raises(SystemExit) as unanswered:
+        cli.main()
+    assert unanswered.value.code == cli.NO_ANSWER_EXIT
 
 
 def test_next_gives_every_active_pursuit_a_row_from_the_register_the_service_holds(api, capsys, monkeypatch):
