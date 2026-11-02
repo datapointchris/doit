@@ -99,7 +99,7 @@ NAMES_CACHE = CACHE_DIR / 'next-names.txt'
 # a task gives a fresh draw. Re-running inside the window is the common case —
 # glance, get interrupted, glance again — and a reshuffle there reads as the tool
 # having changed its mind.
-CACHE_MINUTES = int(os.environ.get('DOIT_CACHE_MINUTES') or 15)
+DRAW_STANDS_MINUTES = int(os.environ.get('DOIT_DRAW_STANDS_MINUTES') or 15)
 
 # How many of its own intervals a pursuit goes quiet for before it reads as dormant.
 DORMANT_INTERVALS = 3
@@ -1090,7 +1090,7 @@ def compute_draw(state: dict, seed: int | None = None) -> dict:
 
 
 def draw_stands(draw: dict | None, now: dt.datetime) -> bool:
-    """Whether a draw still answers `next`: made within CACHE_MINUTES, not retired, and in the shape read here.
+    """Whether a draw still answers `next`: made within DRAW_STANDS_MINUTES, not retired, and in the shape read here.
 
     A payload carrying no `offered` list is treated as expired. A shape no longer
     spoken costs one fresh draw, which is cheaper than every reader knowing two.
@@ -1098,7 +1098,7 @@ def draw_stands(draw: dict | None, now: dt.datetime) -> bool:
     if not isinstance(draw, dict) or draw.get('retired') or not isinstance(draw.get('offered'), list):
         return False
     created = journal.parse_time(draw.get('created_at'))
-    return created is not None and now - created <= dt.timedelta(minutes=CACHE_MINUTES)
+    return created is not None and now - created <= dt.timedelta(minutes=DRAW_STANDS_MINUTES)
 
 
 def offer_provenance(draw: dict, name: str) -> dict:
