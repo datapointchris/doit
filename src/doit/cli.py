@@ -11,6 +11,8 @@ from typing import Annotated
 from typing import Any
 
 import typer
+from pyclilogin import LoginError
+from pyclilogin.typercmd import add_auth_commands
 from pyselfupdate import Config
 from pyselfupdate import notify
 from pyselfupdate.typercmd import add_update_command
@@ -19,17 +21,20 @@ from typer.core import TyperGroup
 from doit import __version__
 from doit import content
 from doit import dashboard
+from doit import desk_import
 from doit import find
 from doit import forecast
 from doit import happened
 from doit import labs
 from doit import pursuits
 from doit import review
+from doit import service
 from doit import shell
 from doit import sources
 from doit import today
 from doit import tools
 from doit import workflows
+from doit.render import error_console
 from doit.render import set_no_input
 
 TAGLINE = 'What to do now, and everything that decides it.'
@@ -52,6 +57,9 @@ Examples:
     doit review due    every review and practice item due; the dashboard shows three
 
 **next** and **dashboard** are separate systems. They meet only on the dashboard.
+
+doit's service holds your pursuits and computes every view, so a new machine runs
+`doit auth login <url>` once.
 """
 
 
@@ -147,6 +155,8 @@ app.add_typer(find.kit_app, name='kit')
 app.add_typer(shell.app, name='shell')
 app.add_typer(sources.app, name='sources')
 app.add_typer(content.app, name='content')
+app.command('import')(desk_import.import_command)
+add_auth_commands(app, service.LOGIN)
 
 
 def version_callback(asked: bool) -> None:
@@ -199,4 +209,8 @@ def root(
 
 
 def main() -> None:
-    app()
+    try:
+        app()
+    except (service.ServiceFailed, LoginError) as failure:
+        error_console.print(f'doit: {failure}', soft_wrap=True, markup=False)
+        raise SystemExit(1) from None
