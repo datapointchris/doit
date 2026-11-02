@@ -403,6 +403,66 @@ them at a checkout kept where its git lives, so writing a card and reading it st
 `config.toml` is optional, and a machine keeping the library at the default needs no file saying
 so.
 
+## The service — one store, and every view computed behind it
+
+`api/` is doit as a service: a FastAPI app over one SQLite database. It holds the three
+documents a person edits — the pursuits, the review register and the sources — and the journal,
+the review completions, the offered counts and the forecast readings. Every pursuit, review,
+lane, forecast and source view the CLI prints with `--json` has a route that answers the same
+document, computed by the same functions.
+
+- **History is kept on every edit.** A document is stored as its text, comments included, and each
+  entry in it is also a row of its own table. An update keeps the row it replaced, with when it
+  held, in the table's `_history` twin: the SQL:2011 system-versioned temporal-table pattern, done
+  with triggers. `GET /api/v1/history/pursuits?key=read` is every weight the pursuit ever had.
+- **The journal is an event log, and the views are read models of it.** A write appends an entry
+  and never edits one. Every view replays the log as the CLI does.
+- **Apps are read over HTTP, with the service's own credential.** Each app is asked as a
+  client-credentials client holding read scopes only. A source names an adapter, and the adapter
+  name selects the HTTP read that returns what its CLI command printed. A pursuit's `resolve` and
+  `evidence` name an app, a path and a query:
+
+  ```yaml
+  resolve:
+    app: icb
+    path: /tasks
+    query: {limit: 3}
+  ```
+
+  A read that fails becomes the reason on its lane or row, and the service logs it at error as
+  `source_failed` with the source's name.
+- **A desk's files are imported, as often as it takes.** `POST /api/v1/imports` takes the files of
+  `~/.config/doit/` and `~/.local/state/doit/`, each with its path under `config/` or `state/`.
+  A second run adds only what the first lacked. A command in a pursuit's `resolve` or `evidence`
+  is rewritten as the read it makes, and one with no known read is listed for rewriting by hand. A
+  document edited on the service is never replaced by a later import.
+- **A forecast is taken on an interval inside the process**, every `DOIT_API_FORECAST_INTERVAL`.
+
+Every `/api/v1` route answers a person's login, verified as an RFC 9068 access token from the
+issuer. `/health`, `/ready` and `/.well-known/oauth-protected-resource` answer anyone.
+
+The image is built from the repository root, because the service runs the root package:
+
+```bash
+docker build -f api/Dockerfile -t doit-api .
+```
+
+It reads its configuration from the environment and nowhere else:
+
+| Variable | Holds |
+| --- | --- |
+| `DOIT_API_ISSUER` | The OIDC issuer whose tokens the API accepts. Required. |
+| `DOIT_API_PUBLIC_URL` | The URL clients reach the API at. Required. |
+| `DOIT_API_DATABASE` | The SQLite file. The image sets it to a path on its data volume. |
+| `TZ` | The zone "today" is computed in: the person's own. |
+| `DOIT_API_FORECAST_INTERVAL` | How often a forecast is taken, as a whole number and one of `m`, `h` or `d`. Optional. |
+| `DOIT_API_<APP>_URL`, `DOIT_API_<APP>_CLIENT_SECRET` | Each app the service reads, named as in `Settings.from_environment`. |
+| `DOIT_API_GITHUB_CLIENT_ID`, `DOIT_API_GITHUB_PRIVATE_KEY` | The GitHub App the pull request lane reads through. |
+| `DOIT_API_CLICKHOUSE_URL`, `_USER`, `_PASSWORD` | The account that reads desk check results. |
+
+An app, GitHub or ClickHouse left unset is not an error at startup. Its lanes say which variable
+is missing, so the service runs while a credential is on its way.
+
 ## Where it writes
 
 Content, config and state are three different things, kept in three places. A cache sits beside

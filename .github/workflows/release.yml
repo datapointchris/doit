@@ -64,3 +64,70 @@ jobs:
         env:
           UV_PUBLISH_USERNAME: ${{ secrets.PYPI_ICB_USERNAME }}
           UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_ICB_PASSWORD }}
+
+  # The service's image, built from the repository root because it runs the
+  # root package's view code. It is tagged by the last commit touching anything
+  # it holds, so a release that changed none of it builds nothing.
+  #
+  # After `release`, so the version it bakes in is the tag this push cut rather
+  # than the one before it.
+  api-image:
+    needs: [validate, release]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/doit-api
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The tag and the version are properties of the history, which a
+          # one-commit clone does not hold.
+          fetch-depth: 0
+
+      - name: Name the image by the last commit touching what it holds
+        id: tag
+        env:
+          RELEASED: ${{ needs.release.outputs.released }}
+          RELEASED_TAG: ${{ needs.release.outputs.tag }}
+        run: |
+          echo "tag=sha-$(git log -1 --format=%H -- api/ src/ pyproject.toml | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          if [ "$RELEASED" = true ]; then
+            version=$RELEASED_TAG
+          else
+            version=$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)
+          fi
+          echo "version=${version#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check whether that image is already published
+        id: published
+        run: |
+          if docker manifest inspect "$IMAGE:${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$IMAGE:${{ steps.tag.outputs.tag }} is already published; nothing it holds changed"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.published.outputs.exists == 'false'
+
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        if: steps.published.outputs.exists == 'false'
+        with:
+          context: .
+          file: api/Dockerfile
+          build-args: DOIT_VERSION=${{ steps.tag.outputs.version }}
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha,scope=doit-api
+          cache-to: type=gha,mode=max,scope=doit-api

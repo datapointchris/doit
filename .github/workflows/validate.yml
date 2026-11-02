@@ -283,3 +283,29 @@ jobs:
             uvx --python 3.13 pre-commit run "$hook" "${scope[@]}" --show-diff-on-failure || status=1
           done
           exit "$status"
+
+# > custom:after:all - the service's own project
+  # api/ has its own lock and a web stack the root environment never installs,
+  # and the root pytest stops at tests/. So the service's lock, types and tests
+  # are checked here, in its own environment. The image release.yml builds is
+  # this project, so a lock that has drifted from api/pyproject.toml fails here
+  # rather than in the build.
+  #
+  # TZ is the zone the service computes "today" in, as its deployment sets it.
+  api:
+    runs-on: ubuntu-26.04
+    env:
+      TZ: America/New_York
+    steps:
+
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.24"
+
+      - run: uv lock --check --directory api
+
+      - run: uv run --directory api --with mypy mypy --config-file ../pyproject.toml src
+
+      - run: uv run --directory api pytest

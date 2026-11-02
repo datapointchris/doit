@@ -72,6 +72,39 @@ A source that is not configured is silent; one configured but missing gets a sin
 runs and fails shows its error. A lane is never silently dropped — a dashboard that quietly omits a
 lane reads as "nothing outstanding", which is the worst available failure.
 
+## The service runs the root package's view code, never a copy
+
+`api/` is its own project and depends on the root package by path. Each method of
+`doit_api.computed_views.Views` calls the function the matching CLI command calls, handing in
+what it read from the store where the command read a desk's file. A rule therefore lives in one
+module, and the service and a desk cannot disagree about it. A change that has `api/` compute a
+balance, a due date or a lane itself is the drift this arrangement exists to prevent: add a seam
+to the view module instead, one that takes its data rather than reading it.
+
+Every external effect the service has goes through one wrapper:
+
+- **The store** is `doit_api.store.Store`, the only module that writes SQL.
+- **An app** is read through `doit_api.readers.apps.App.get`, GitHub through
+  `readers.github.GitHub.call`, ClickHouse through `readers.clickhouse.checks`.
+- **A failed read** raises `ReadFailed`, and `readers.declared_reads` logs it at error as
+  `source_failed` with the source's name. An alert is filed on that line, so keep its name and its
+  `source` field.
+
+Shapes that look wrong and are not:
+
+- **The image's build context is the repository root**, with `api/Dockerfile.dockerignore`
+  admitting only the root package and `api/`. A context of `api/` cannot reach the view code.
+- **A pursuit's `resolve` and `evidence` are a command on a desk and a read in the service**:
+  `{app, path, query}`. The register's validator accepts either. The import rewrites one into the
+  other, and the reader that runs it says which form it cannot run.
+- **`readers/icb.py` composes icb's overview itself.** icb serves one route per section and no
+  overview, so the module is a copy of icb's CLI composition: the focus project, the article
+  queue, the countdowns, and the rule that a refused credential refuses the whole document. A
+  change to that composition in icb is made here too, until icb serves the document.
+- **The desk-check lane reads every record the table keeps.** Each machine and check's newest
+  outcome stands, with no time window, so a failure stays until a later pass. A window would drop
+  a failure from a machine that went quiet before it was fixed.
+
 ## Generated config — never hand-edit
 
 `.pre-commit-config.yaml`, `.github/workflows/validate.yml`, `.editorconfig`, `.markdownlint.yaml`

@@ -1,0 +1,50 @@
+# doit's service: the store that holds the register, the review register, the
+# sources and the journal, and the API every view is computed behind.
+#
+# Its own project and lock, beside the CLI at the repo root, because the server
+# imports a web stack the CLI never needs and the CLI ships to every desk. It
+# runs the root package's view code rather than a copy of it, so a view and the
+# service's answer for it cannot drift.
+[project]
+name = "doit-api"
+version = "0.1.0"
+description = "Holds doit's register and journal with their history, and computes every view behind an API"
+requires-python = ">=3.13"
+dependencies = [
+    "doit",
+    "fastapi>=0.120",
+    "uvicorn>=0.38",
+    # Verifies the RFC 9068 access token on every request, with the FastAPI
+    # dependencies each route admits a caller through.
+    "pyapiauth[fastapi]>=0.1.0",
+    # The client-credentials token the service presents to each app it reads.
+    "pyclilogin>=0.1.1",
+    # Every request the service makes.
+    "httpx2>=2.9.1",
+    # Signing the GitHub App's assertion. `crypto` is what signs RS256.
+    "pyjwt[crypto]>=2.10",
+    "pyyaml>=6.0",
+    # Rewrites a document's values in place, so an imported register keeps the
+    # comments and layout it was written with.
+    "ruamel.yaml>=0.18",
+]
+
+[project.scripts]
+doit-api = "doit_api.main:serve"
+
+[tool.uv.sources]
+doit = { path = "..", editable = true }
+
+[build-system]
+requires = ["uv_build>=0.9,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+verbosity_assertions = 2

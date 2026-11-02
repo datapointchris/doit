@@ -119,6 +119,12 @@ NAMES_CACHE = CACHE_DIR / 'next-names.txt'
 # having changed its mind.
 CACHE_MINUTES = int(os.environ.get('DOIT_CACHE_MINUTES') or 15)
 
+# How many of its own intervals a pursuit goes quiet for before it reads as dormant.
+DORMANT_INTERVALS = 3
+
+# How far ahead a countdown is named above the draw.
+CONTEXT_COUNTDOWN_DAYS = 14
+
 DRAW_SIZE = 5
 
 # The note on a reset doit wrote itself the first time it read a pursuit, which
@@ -353,17 +359,27 @@ def load_pursuits(path: Path | None = None) -> dict:
     path = register_path() if path is None else path
     if not path.exists():
         return {}
+    return pursuits_from_document(parse_register(path.read_text(), path), path)
+
+
+def parse_register(text: str, where: object) -> dict:
+    """The register's YAML as a mapping, refused with ``where`` named where it is not one."""
     try:
-        document = yaml.safe_load(path.read_text()) or {}
+        document = yaml.safe_load(text) or {}
     except yaml.YAMLError as error:
         mark = getattr(error, 'problem_mark', None)
-        where = f' at line {mark.line + 1}, column {mark.column + 1}' if mark is not None else ''
-        raise RegisterError(f'{path}: not valid YAML{where}: {getattr(error, "problem", None) or error}') from error
+        at = f' at line {mark.line + 1}, column {mark.column + 1}' if mark is not None else ''
+        raise RegisterError(f'{where}: not valid YAML{at}: {getattr(error, "problem", None) or error}') from error
     if not isinstance(document, dict):
-        raise RegisterError(f'{path}: must be a mapping with a `pursuits` key, not {type(document).__name__}')
+        raise RegisterError(f'{where}: must be a mapping with a `pursuits` key, not {type(document).__name__}')
+    return document
+
+
+def pursuits_from_document(document: dict, where: object) -> dict:
+    """The `pursuits:` block of a parsed register, validated as :func:`load_pursuits` describes."""
     pursuits = document.get('pursuits') or {}
     if not isinstance(pursuits, dict):
-        raise RegisterError(f'{path}: `pursuits` must be a mapping of name to settings')
+        raise RegisterError(f'{where}: `pursuits` must be a mapping of name to settings')
 
     for name, config in pursuits.items():
         if not isinstance(config, dict):
@@ -425,22 +441,34 @@ def register_block(key: str, known: set[str], path: Path | None) -> dict:
     path = register_path() if path is None else path
     if not path.exists():
         return {}
-    document = yaml.safe_load(path.read_text()) or {}
+    return block_of(yaml.safe_load(path.read_text()) or {}, key, known, path)
+
+
+def block_of(document: dict, key: str, known: set[str], where: object) -> dict:
+    """One sibling block of a parsed register, validated as :func:`register_block` describes."""
     block = document.get(key) or {}
     if not isinstance(block, dict):
-        raise RegisterError(f'{path}: `{key}` must be a mapping of settings')
+        raise RegisterError(f'{where}: `{key}` must be a mapping of settings')
     unknown = set(block) - known
     if unknown:
-        raise RegisterError(f'{path}: {key} has unknown key(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(known))}')
+        raise RegisterError(f'{where}: {key} has unknown key(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(known))}')
     return block
 
 
 def load_settings(path: Path | None = None) -> dict:
     """The register's `forecast:` block — what a day is assumed to hold."""
-    settings = register_block('forecast', {'budget_minutes'}, path)
+    path = register_path() if path is None else path
+    if not path.exists():
+        return {}
+    return settings_from_document(yaml.safe_load(path.read_text()) or {}, path)
+
+
+def settings_from_document(document: dict, where: object) -> dict:
+    """The `forecast:` block of a parsed register, validated."""
+    settings = block_of(document, 'forecast', {'budget_minutes'}, where)
     budget = settings.get('budget_minutes')
     if budget is not None and (not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0):
-        raise RegisterError(f'{REGISTER if path is None else path}: forecast.budget_minutes must be a positive whole number')
+        raise RegisterError(f'{where}: forecast.budget_minutes must be a positive whole number')
     return settings
 
 
@@ -473,14 +501,18 @@ def load_cycles(pursuits: dict, path: Path | None = None) -> list[Cycle]:
     path = register_path() if path is None else path
     if not path.exists():
         return []
-    document = yaml.safe_load(path.read_text()) or {}
+    return cycles_from_document(yaml.safe_load(path.read_text()) or {}, pursuits, path)
+
+
+def cycles_from_document(document: dict, pursuits: dict, where: object) -> list[Cycle]:
+    """The `cycles:` list of a parsed register, validated as :func:`load_cycles` describes."""
     declared = document.get('cycles') or []
     if not isinstance(declared, list):
-        raise RegisterError(f'{path}: `cycles` must be a list, each entry with a name and an until date')
+        raise RegisterError(f'{where}: `cycles` must be a list, each entry with a name and an until date')
     cycles = []
     for entry in declared:
         if not isinstance(entry, dict) or not isinstance(entry.get('name'), str) or not entry['name']:
-            raise RegisterError(f'{path}: every cycle is a mapping with a name')
+            raise RegisterError(f'{where}: every cycle is a mapping with a name')
         name = entry['name']
         unknown = set(entry) - CYCLE_FIELDS
         if unknown:
@@ -604,8 +636,8 @@ def records_by_pursuit(records: list[dict]) -> dict[str, list[dict]]:
     return found
 
 
-def record_first_sightings(active: dict, records: list[dict], intervals: dict[str, float], now: dt.datetime) -> list[dict]:
-    """Write a reset for every active pursuit the journal has never zeroed, and return them.
+def first_sightings(active: dict, records: list[dict], intervals: dict[str, float], now: dt.datetime, machine: str) -> list[dict]:
+    """A reset for every active pursuit the journal has never zeroed, for the caller to write.
 
     Without a recorded start the origin is derived from now, moves with the
     clock, and asks for exactly one checkoff on every run — a pursuit that reads
@@ -614,14 +646,15 @@ def record_first_sightings(active: dict, records: list[dict], intervals: dict[st
     pursuit was declared because it is wanted, so it opens one checkoff owed.
     """
     zeroed = {record.get('pursuit') for record in records if record.get('event') == journal.Event.RESET}
-    written = []
+    found = []
     for name in active:
         if name in zeroed:
             continue
         interval = intervals[name]
         opened = now if math.isinf(interval) else now - dt.timedelta(days=interval)
-        written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': opened.isoformat(), 'note': FIRST_SEEN}, now=now))
-    return written
+        extra = {'occurred_at': opened.isoformat(), 'note': FIRST_SEEN}
+        found.append(new_record(journal.Event.RESET, name, None, extra, now=now, machine=machine))
+    return found
 
 
 class Pace(NamedTuple):
@@ -653,8 +686,8 @@ def pace_records(records: list[dict]) -> list[tuple[dt.datetime, dict]]:
     return stamped
 
 
-def record_pace_changes(pursuits: dict, active: dict, records: list[dict], now: dt.datetime) -> list[dict]:
-    """Write the pace each pursuit asks for wherever the journal last recorded another, and return the records.
+def pace_changes(pursuits: dict, active: dict, records: list[dict], now: dt.datetime, machine: str) -> list[dict]:
+    """The pace each pursuit asks for wherever the journal last recorded another, for the caller to write.
 
     The register says only what is asked from now on, so a pace read off it alone
     reprices every day back to the zero point whenever it is edited. Recording
@@ -672,8 +705,10 @@ def record_pace_changes(pursuits: dict, active: dict, records: list[dict], now: 
 
     Moving between counting occurrences and counting minutes also writes a reset.
     A balance in one unit cannot carry into the other.
+
+    ``machine`` is the writer the records will carry, which is what the second
+    test reads.
     """
-    machine = machine_name()
     newest: dict[str, Pace | None] = {}
     mine: dict[str, Pace | None] = {}
     counted: dict[str, Pace] = {}
@@ -697,11 +732,12 @@ def record_pace_changes(pursuits: dict, active: dict, records: list[dict], now: 
         elif current == newest[name] or (name in mine and current == mine[name]):
             continue
         if current is not None and name in counted and counted[name].timed != current.timed:
-            written.append(record_event(journal.Event.RESET, name, None, {'occurred_at': now.isoformat(), 'note': UNIT_CHANGED}, now=now))
+            extra = {'occurred_at': now.isoformat(), 'note': UNIT_CHANGED}
+            written.append(new_record(journal.Event.RESET, name, None, extra, now=now, machine=machine))
         fields: dict[str, float | bool | None] = {'interval_days': None, 'checkoff_size': None, 'timed': None}
         if current is not None:
             fields = {'interval_days': current.interval, 'checkoff_size': current.size, 'timed': current.timed}
-        written.append(record_event(journal.Event.PACE, name, None, {'occurred_at': now.isoformat(), **fields}, now=now))
+        written.append(new_record(journal.Event.PACE, name, None, {'occurred_at': now.isoformat(), **fields}, now=now, machine=machine))
     return written
 
 
@@ -909,6 +945,10 @@ def build_state(
     observed: dict[str, dt.datetime] | None = None,
     evidence_days: dict[str, list[dt.date]] | None = None,
     cycles: list[Cycle] | None = None,
+    *,
+    append: Callable[[list[dict]], None] | None = None,
+    machine: str = '',
+    observations: dict | None = None,
 ) -> dict:
     """Everything the draw and every view need: intervals, balances, weights, the pool.
 
@@ -941,6 +981,11 @@ def build_state(
     ``now``'s date scale the weights and hold cadences tighter. The held cadence
     is what gets journaled as the pace, so the days a cycle runs are priced at
     it and the days after at the register's own.
+
+    A caller holding the journal somewhere other than this machine's files hands
+    in ``records`` with ``append``, which writes the sightings and paces this
+    build finds, and the ``machine`` they are written as. ``observations`` is an
+    evidence refresh it already made, which stands in for the live one.
     """
     today = now.date()
     active = {name: config for name, config in pursuits.items() if is_active(config, today)}
@@ -954,16 +999,29 @@ def build_state(
     intervals = {name: interval for name, (interval, _) in paces.items()}
     sizes = {name: size for name, (_, size) in paces.items()}
 
-    directory = journal_dir() if records is None else None
     if records is None:
-        records = journal.read_all(directory) if directory and directory.exists() else []
-    if directory is not None and directory.exists():
-        records = [*records, *record_first_sightings(active, records, intervals, now)]
-        records = [*records, *record_pace_changes(pursuits, held, records, now)]
+        directory = journal_dir()
+        records = journal.read_all(directory) if directory.exists() else []
+        if directory.exists():
+            path = journal_path(directory, machine_name())
+            machine = machine_name()
+
+            def append(found: list[dict]) -> None:
+                for record in found:
+                    journal.append(path, record)
+
+    if append is not None:
+        sightings = first_sightings(active, records, intervals, now, machine)
+        append(sightings)
+        records = [*records, *sightings]
+        changed = pace_changes(pursuits, held, records, now, machine)
+        append(changed)
+        records = [*records, *changed]
 
     # The apps are asked before the draw is weighed, so a pursuit satisfied in its
     # own CLI stops being offered without anyone retyping it here.
-    observations = {} if observed is not None else evidence.refresh(pursuits, CACHE_DIR, now, ask=watching)
+    if observations is None:
+        observations = {} if observed is not None else evidence.refresh(pursuits, CACHE_DIR, now, ask=watching)
     seen = evidence.observed(observations) if observed is None else observed
     seen_days = evidence.occurrences(observations) if observed is None else (evidence_days or {})
     last_done = evidence.merged(latest_occurrence(records, journal.Event.DONE), seen)
@@ -1115,10 +1173,7 @@ def load_cached_draw(now: dt.datetime) -> dict | None:
         cached = json.loads(DRAW_CACHE.read_text())
     except json.JSONDecodeError:
         return None
-    created = journal.parse_time(cached.get('created_at'))
-    if created is None or now - created > dt.timedelta(minutes=CACHE_MINUTES):
-        return None
-    return cached if isinstance(cached.get('offered'), list) else None
+    return cached if draw_stands(cached, now) else None
 
 
 def save_cached_draw(payload: dict) -> None:
@@ -1139,6 +1194,131 @@ def mark_logged(name: str, now: dt.datetime) -> None:
         return
     cached['logged'] = sorted(set(cached.get('logged') or []) | {name})
     save_cached_draw(cached)
+
+
+def draw_stands(draw: dict | None, now: dt.datetime) -> bool:
+    """Whether a draw still answers `next`: made within CACHE_MINUTES, not retired, and in the shape read here.
+
+    A payload carrying no `offered` list is treated as expired. A shape no longer
+    spoken costs one fresh draw, which is cheaper than every reader knowing two.
+    """
+    if not isinstance(draw, dict) or draw.get('retired') or not isinstance(draw.get('offered'), list):
+        return False
+    created = journal.parse_time(draw.get('created_at'))
+    return created is not None and now - created <= dt.timedelta(minutes=CACHE_MINUTES)
+
+
+def offer_provenance(draw: dict, name: str) -> dict:
+    """Where a pursuit sat in the standing draw when it was logged."""
+    offered = draw.get('offered', [])
+    return {
+        'draw_id': draw.get('draw_id'),
+        'was_offered': name in offered,
+        # Named for the list it indexes: every row that was on screen, pins
+        # among them. A field naming the draw instead would read as a rank
+        # among the sampled half, which is not a list anything displays.
+        'rank_offered': offered.index(name) + 1 if name in offered else None,
+    }
+
+
+def minutes_refusal(name: str, config: dict, minutes: int | None) -> str | None:
+    """Why a log's minutes do not fit its pursuit, or None where they do.
+
+    Declaring weekly minutes is the only thing that makes a pursuit measured in
+    time. A tracked pursuit is measured against nothing, so it keeps what it is
+    given and needs none.
+    """
+    timed = bool(config.get('weekly_minutes'))
+    if minutes is not None and not timed and paced(config):
+        return f'{name} is counted in completions, so minutes have nothing to measure'
+    if timed and minutes is None:
+        return f'{name} is measured in minutes, so its log needs them'
+    return None
+
+
+def done_record(
+    name: str,
+    state: dict,
+    draw: dict,
+    *,
+    occurred: dt.datetime,
+    note: str | None,
+    minutes: int | None,
+    item: dict | None,
+    downstream: dict | None,
+    now: dt.datetime | None = None,
+    machine: str = '',
+    identity: str = '',
+) -> dict:
+    """The DONE entry a log writes, carrying the state behind it and where the pursuit sat in the draw."""
+    extra = {
+        'occurred_at': occurred.isoformat(),
+        'note': note or None,
+        'duration_minutes': minutes,
+        'item': item or None,
+        'downstream': downstream,
+        **offer_provenance(draw, name),
+    }
+    return new_record(journal.Event.DONE, name, state, extra, now, machine=machine, identity=identity)
+
+
+def outside_draw(state: dict, name: str) -> str | None:
+    """Why a pursuit has no place in the draw to pass or return to, or None where it has one."""
+    if name in state['active']:
+        return None
+    return f'{name} is not in the draw ({why_unpriced(state, name)})'
+
+
+def resumed(state: dict, name: str | None) -> list[str]:
+    """The pursuits a resume brings back: the one named where it is skipped, else every skipped one."""
+    if name is None:
+        return sorted(state['suppressed'])
+    return [name] if name in state['suppressed'] else []
+
+
+def reset_records(names: list[str], state: dict, now: dt.datetime | None = None, *, machine: str = '', identity: str = '') -> list[dict]:
+    """One RESET per pursuit, the state vector on the first alone.
+
+    The vector describes the register rather than the pursuit being zeroed, so
+    one copy per name would write the same payload N times into the journal.
+    """
+    return [
+        new_record(journal.Event.RESET, name, state if index == 0 else None, {}, now, machine=machine, identity=identity)
+        for index, name in enumerate(names)
+    ]
+
+
+def dormant_rows(state: dict) -> list[dict]:
+    """Pursuits gone quiet for more than DORMANT_INTERVALS of their own intervals, coldest first."""
+    rows = []
+    for name in state['active']:
+        elapsed, interval = state['days_since'][name], state['intervals'][name]
+        if not math.isinf(interval) and (elapsed is None or elapsed > interval * DORMANT_INTERVALS):
+            rows.append({'pursuit': name, 'days_since': elapsed, 'interval_days': round(interval, 2)})
+    return sorted(rows, key=lambda row: -(math.inf if row['days_since'] is None else row['days_since']))
+
+
+def context_lines(overview: object, today: dt.date) -> list[str]:
+    """Today's events and the countdowns due within CONTEXT_COUNTDOWN_DAYS, from icb's overview.
+
+    An event is something happening rather than something to choose, so it sits
+    above the draw as one line and takes no part in it.
+    """
+    if not isinstance(overview, dict):
+        return []
+    lines = []
+    for event in (overview.get('events') or {}).get('items') or []:
+        when = journal.parse_time(event.get('date'))
+        if when and when.astimezone().date() == today:
+            lines.append(f'{event.get("name", "")} · {event.get("venue") or "today"}')
+    for countdown in (overview.get('countdowns') or {}).get('items') or []:
+        due = countdown.get('due_date')
+        if not due:
+            continue
+        days = (dt.date.fromisoformat(str(due)[:10]) - today).days
+        if 0 <= days <= CONTEXT_COUNTDOWN_DAYS:
+            lines.append(f'{countdown.get("name", "")} in {days}d')
+    return lines
 
 
 def without_logged(selection: dict) -> dict:
@@ -1219,17 +1399,24 @@ def resolve_one(name: str, config: dict) -> dict | None:
             'backend': shlex.split(command)[0],
         }
 
+    backend = shlex.split(command)[0]
     label_field = config.get('label')
     if not label_field:
         first = next((line for line in result.stdout.splitlines() if line.strip()), '')
         if not first:
-            return nothing_matched(name, command)
+            return nothing_matched(name, backend)
         return {'pursuit': name, 'candidates': 1, 'choices': [{'label': first.strip()}]}
 
     try:
         document = json.loads(result.stdout or 'null')
     except json.JSONDecodeError:
         return {'pursuit': name, 'error': 'resolve did not return JSON but names a label field'}
+    return choices_from(name, config, document, backend)
+
+
+def choices_from(name: str, config: dict, document: object, backend: str) -> dict:
+    """What a resolve's JSON answer offers, read through the pursuit's `items`, `resolve_where` and `label`."""
+    label_field = config['label']
     rows = dig(document, config['items']) if config.get('items') else document
     # A backend that already picked the one thing returns an object, not a list of
     # one — `icb overview` does exactly this for the next project item. Treating it
@@ -1237,14 +1424,14 @@ def resolve_one(name: str, config: dict) -> dict | None:
     if isinstance(rows, dict):
         rows = [rows]
     if not isinstance(rows, list) or not rows:
-        return nothing_matched(name, command)
+        return nothing_matched(name, backend)
     # The counterpart to `evidence_where`, for the same reason: a backend with no
     # filter for the distinction you are drawing returns everything and only some
     # of it is the pursuit. Narrow the command first where the API can — this is
     # what is left when it cannot.
     rows = evidence.matching(rows, config.get('resolve_where'))
     if not rows:
-        return nothing_matched(name, command)
+        return nothing_matched(name, backend)
     return {
         'pursuit': name,
         # How many rows the backend matched, not how many are shown. A resolve
@@ -1252,19 +1439,19 @@ def resolve_one(name: str, config: dict) -> dict | None:
         # equally in progress are candidates, and the first is not the answer to
         # anything. Everything downstream reads this before claiming a pick.
         'candidates': len(rows),
-        'backend': shlex.split(config['resolve'])[0],
+        'backend': backend,
         'choices': [one_choice(row, config, label_field) for row in rows[:CANDIDATE_ROWS]],
     }
 
 
-def nothing_matched(name: str, command: str) -> dict:
+def nothing_matched(name: str, backend: str) -> dict:
     """A resolve that ran cleanly and matched no rows.
 
     An entry rather than an absence, because an absent entry is what a pursuit
     with no resolve has, and the row would then show the description as though it
     were the item.
     """
-    return {'pursuit': name, 'candidates': 0, 'backend': shlex.split(command)[0], 'choices': []}
+    return {'pursuit': name, 'candidates': 0, 'backend': backend, 'choices': []}
 
 
 def one_choice(row, config: dict, label_field: str) -> dict:
@@ -1375,21 +1562,7 @@ def todays_context() -> list[str]:
         payload = json.loads(result.stdout or '{}')
     except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
         return []
-
-    today = dt.date.today()
-    lines = []
-    for event in (payload.get('events') or {}).get('items') or []:
-        when = journal.parse_time(event.get('date'))
-        if when and when.date() == today:
-            lines.append(f'{event.get("name", "")} · {event.get("venue") or "today"}')
-    for countdown in (payload.get('countdowns') or {}).get('items') or []:
-        due = countdown.get('due_date')
-        if not due:
-            continue
-        days = (dt.date.fromisoformat(due) - today).days
-        if 0 <= days <= 14:
-            lines.append(f'{countdown.get("name", "")} in {days}d')
-    return lines
+    return context_lines(payload, dt.date.today())
 
 
 def format_elapsed(days: float | None) -> str:
@@ -1943,6 +2116,22 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt
     vector describes the whole register, so a run writing several records would
     otherwise put the same payload in each of them.
     """
+    return written(new_record(event, name, state, extra, now))
+
+
+def written(record: dict) -> dict:
+    """Append one record to this machine's journal."""
+    return journal.append(journal_path(journal_dir(), machine_name()), record)
+
+
+def new_record(
+    event: str, name: str, state: dict | None, extra: dict, now: dt.datetime | None = None, *, machine: str = '', identity: str = ''
+) -> dict:
+    """The journal entry :func:`record_event` writes, unwritten, from ``machine`` as ``identity``.
+
+    Each defaults to this process's own, so a caller writing on someone else's
+    behalf names both.
+    """
     now = now or (state['now'] if state else dt.datetime.now().astimezone())
     record = {
         'id': new_id(now),
@@ -1951,13 +2140,13 @@ def record_event(event: str, name: str, state: dict | None, extra: dict, now: dt
         'logged_at': now.isoformat(),
         'occurred_at': extra.pop('occurred_at', now.isoformat()),
         'tz': str(now.tzinfo),
-        'machine': machine_name(),
-        'actor': actor.identity(),
+        'machine': machine or machine_name(),
+        'actor': identity or actor.identity(),
         **extra,
     }
     if state is not None:
         record['state_at_log'] = explain_payload(state)
-    return journal.append(journal_path(journal_dir(), machine_name()), record)
+    return record
 
 
 def restated_balance(state: dict, name: str, entry: dict) -> str:
@@ -1968,8 +2157,14 @@ def restated_balance(state: dict, name: str, entry: dict) -> str:
     before the pursuit's zero point pays nothing off, and subtraction has no way
     to know — it prints a number the next command contradicts.
     """
+    days = due_with(state, name, entry)
+    return '' if days is None else f' · {format_due(days)}'
+
+
+def due_with(state: dict, name: str, entry: dict) -> float | None:
+    """When a pursuit next comes due with ``entry`` counted, or None where it has no schedule."""
     if name not in state['balance']:
-        return ''
+        return None
     own = [*records_by_pursuit(state['records']).get(name, []), entry]
     days = standing(
         own,
@@ -1979,7 +2174,7 @@ def restated_balance(state: dict, name: str, entry: dict) -> str:
         (state['intervals'][name], state['checkoff_size'][name]),
         state['weekly_minutes'].get(name),
     ).due
-    return '' if days is None else f' · {format_due(days)}'
+    return None if days is None else round(days, 2)
 
 
 def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | None, assume_yes: bool, no_write: bool) -> int:
@@ -2013,20 +2208,14 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
             if not matched:
                 error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
                 return 1
-        # Declaring weekly minutes is the only thing that makes a pursuit measured
-        # in time, so the register decides this and nothing here keeps a list of
-        # which kind each one is. `--minutes` is the measurement against it. A
-        # tracked pursuit is measured against nothing, so it keeps what it is
-        # given and asks for none.
-        timed = bool(pursuits[matched].get('weekly_minutes'))
-        if minutes is not None and not timed and paced(pursuits[matched]):
-            raise typer.BadParameter(f'{matched} is counted in completions, so --minutes has nothing to measure')
+        if minutes is not None and (refusal := minutes_refusal(matched, pursuits[matched], minutes)):
+            raise typer.BadParameter(refusal)
         if not words and can_prompt():
             answer = ask('  note, or Enter to skip: ')
             words = answer.split() if answer else []
-        if timed and minutes is None:
+        if minutes is None and (refusal := minutes_refusal(matched, pursuits[matched], None)):
             if not can_prompt():
-                raise typer.BadParameter(f'{matched} is measured in minutes: pass --minutes <n>')
+                raise typer.BadParameter(f'{refusal}: pass --minutes <n>')
             minutes = prompt_for_minutes()
     except Abandoned:
         error_console.print('  Nothing logged.')
@@ -2065,23 +2254,8 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
     acted = bool((downstream or {}).get('ran'))
     named = chosen if chosen and (int(item.get('candidates') or 1) == 1 or acted) else {}
 
-    entry = record_event(
-        journal.Event.DONE,
-        matched,
-        state,
-        {
-            'occurred_at': occurred.isoformat(),
-            'note': ' '.join(words) or None,
-            'duration_minutes': minutes,
-            'item': named or None,
-            'downstream': downstream,
-            'draw_id': cached.get('draw_id'),
-            'was_offered': matched in cached.get('offered', []),
-            # Named for the list it indexes: every row that was on screen, pins
-            # among them. A field naming the draw instead would read as a rank
-            # among the sampled half, which is not a list anything displays.
-            'rank_offered': (cached.get('offered', []).index(matched) + 1) if matched in cached.get('offered', []) else None,
-        },
+    entry = written(
+        done_record(matched, state, cached, occurred=occurred, note=' '.join(words), minutes=minutes, item=named, downstream=downstream)
     )
     # The draw outlives the log by up to a quarter of an hour, and re-offering
     # something just done reads as the log having gone nowhere.
@@ -2134,8 +2308,8 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
         return 1
 
     # A SKIP for a pursuit outside the draw would still count as a pass in drift.
-    if matched not in state['active']:
-        error_console.print(f'{matched} is not in the draw ({why_unpriced(state, matched)}), so there is nothing to pass.')
+    if refusal := outside_draw(state, matched):
+        error_console.print(f'{refusal}, so there is nothing to pass.')
         return 1
     days = skip_span(duration, state['intervals'][matched])
     expires = now + dt.timedelta(days=days)
@@ -2167,25 +2341,20 @@ def cmd_resume(name: str | None) -> int:
         error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
         return 1
     now = dt.datetime.now().astimezone()
-    if name is None:
-        state = build_state(pursuits, now)
-        chosen = list(state['suppressed'])
-        if not chosen:
-            console.print('Nothing is skipped.')
-            return 0
-    else:
+    matched = None
+    if name is not None:
         matched = match_pursuit(name, pursuits) or ''
         if not matched:
             error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
             return 1
-        state = build_state(pursuits, now)
-        if matched not in state['active']:
-            error_console.print(f'{matched} is not in the draw ({why_unpriced(state, matched)}), so there is nothing to return it to.')
-            return 1
-        if matched not in state['suppressed']:
-            console.print(f'{matched} is not skipped, and is already in the draw.')
-            return 0
-        chosen = [matched]
+    state = build_state(pursuits, now)
+    if matched and (refusal := outside_draw(state, matched)):
+        error_console.print(f'{refusal}, so there is nothing to return it to.')
+        return 1
+    chosen = resumed(state, matched)
+    if not chosen:
+        console.print(f'{matched} is not skipped, and is already in the draw.' if matched else 'Nothing is skipped.')
+        return 0
 
     for pursuit in chosen:
         record_event(journal.Event.SKIP, pursuit, state, {'expires_at': now.isoformat()})
@@ -2246,11 +2415,8 @@ def cmd_reset(name: str | None, assume_yes: bool) -> int:
 
     now = dt.datetime.now().astimezone()
     state = build_state(pursuits, now)
-    for index, pursuit in enumerate(chosen):
-        # The state vector goes on the first record of the run only. It describes
-        # the register rather than the pursuit being zeroed, so one copy per name
-        # writes the same payload N times into an append-only synced file.
-        record_event(journal.Event.RESET, pursuit, state if index == 0 else None, {})
+    for record in reset_records(chosen, state, now):
+        written(record)
     DRAW_CACHE.unlink(missing_ok=True)
     done = Text.from_markup('[green]Reset[/] ')
     done.append(f'{", ".join(chosen)} — {"each balance" if len(chosen) > 1 else "the balance"} starts again from now.')
@@ -2352,7 +2518,9 @@ def render_orphaned_counters(register: dict) -> None:
     console.print(f'  [cyan]{journal_dir()}[/]')
 
 
-def drift_rows(pursuits: dict, state: dict, since: dt.datetime | None, until: dt.datetime | None) -> list[dict]:
+def drift_rows(
+    pursuits: dict, state: dict, since: dt.datetime | None, until: dt.datetime | None, counts: dict[str, int] | None = None
+) -> list[dict]:
     """Every pursuit worth a row: what its goal asked for over the window, and what got done.
 
     Both sides run from the later of the window's start and the pursuit's last
@@ -2374,6 +2542,9 @@ def drift_rows(pursuits: dict, state: dict, since: dt.datetime | None, until: dt
 
     An ``until`` drops every record and app day after it, so the window reads as
     the journal stood then. ``since`` absent runs from the earliest of either.
+
+    ``counts`` is how often each pursuit was offered, summed over every machine.
+    It defaults to this desk's counter files.
     """
     end = until or state['now']
     records = state['records']
@@ -2386,7 +2557,7 @@ def drift_rows(pursuits: dict, state: dict, since: dt.datetime | None, until: dt
     tracked = state['tracked']
     mine = records_by_pursuit(records)
     reset_at = zero_resets(records)
-    counts = load_counts(journal_dir())
+    counts = load_counts(journal_dir()) if counts is None else counts
 
     rows = []
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
@@ -2531,23 +2702,16 @@ def cmd_dormant() -> int:
     """Pursuits gone quiet for more than three of their own intervals."""
     pursuits = load_pursuits()
     state = build_state(pursuits, dt.datetime.now().astimezone())
-    stale = []
-    for name in state['active']:
-        elapsed = state['days_since'][name]
-        interval = state['intervals'][name]
-        if math.isinf(interval):
-            continue
-        if elapsed is None or elapsed > interval * 3:
-            stale.append((name, elapsed, interval))
+    stale = dormant_rows(state)
     console.rule('[cyan]Dormant', align='left')
     if not stale:
         console.print('Nothing is running cold.\n')
         return 0
-    width = max(len(name) for name, _, _ in stale)
-    for name, elapsed, _ in sorted(stale, key=lambda row: -(row[1] or 1e9)):
+    width = max(len(row['pursuit']) for row in stale)
+    for row in stale:
         line = Text('  ')
-        line.append(f'{name:<{width}}', style='white')
-        line.append(f'  {format_elapsed(elapsed)} · goal {goal_text(state["active"][name])}')
+        line.append(f'{row["pursuit"]:<{width}}', style='white')
+        line.append(f'  {format_elapsed(row["days_since"])} · goal {goal_text(state["active"][row["pursuit"]])}')
         console.print(line)
     console.print('\n  Cold is the time since the last one.')
     console.print('  [cyan]doit pursuits list[/] shows it beside what each owes.\n')

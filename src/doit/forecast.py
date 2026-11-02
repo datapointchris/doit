@@ -256,6 +256,20 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
     cycles = pursuits.load_cycles(register)
     live = pursuits.build_state(register, now, cycles=cycles)
     records = journal.read_all(directory) if directory.exists() else []
+    return forecast_from(register, now, budget, live, records, cycles, replicates)
+
+
+def forecast_from(
+    register: dict,
+    now: dt.datetime,
+    budget: float,
+    live: dict,
+    records: list[dict],
+    cycles: list[pursuits.Cycle],
+    replicates: int = REPLICATES,
+    machine: str = '',
+) -> Reading:
+    """:func:`forecast` from a live state, the journal and the cycles a caller already holds, stored as ``machine``."""
     active = live['active']
     cost = durations(active, records)
     horizon = max(HORIZONS)
@@ -297,7 +311,7 @@ def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = 
     spent_per_day = statistics.mean(sum(minutes for _, _, minutes in run) / horizon for run in runs)
     return Reading(
         generated=now.isoformat(),
-        machine=machine_name(),
+        machine=machine or machine_name(),
         budget_minutes=int(budget),
         replicates=replicates,
         weights=dict(live['weights']),

@@ -94,6 +94,9 @@ pretty = true
 ignore_missing_imports = true
 check_untyped_defs = false
 warn_return_any = false
+# api/ is its own project, with its own environment and lock. CI type-checks it
+# there, where its web stack is installed.
+exclude = ['^api/']
 
 [tool.pyright]
 typeCheckingMode = "standard"

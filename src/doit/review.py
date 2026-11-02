@@ -115,7 +115,13 @@ def load_register() -> dict[str, dict] | None:
     """
     if not REGISTER.exists():
         return None
-    data = yaml.safe_load(REGISTER.read_text()) or {}
+    return register_from_document(yaml.safe_load(REGISTER.read_text()) or {})
+
+
+def register_from_document(data: dict) -> dict[str, dict]:
+    """A parsed register's blocks, validated as :func:`load_register` describes."""
+    if not isinstance(data, dict):
+        raise RegisterError(f'must be a mapping of blocks, not {type(data).__name__}')
     # A misspelled block is ignored by every reader, so its items silently never
     # come due. Refused here, it is one line naming the blocks that exist.
     unknown_blocks = set(data) - set(BLOCKS)
@@ -159,9 +165,11 @@ def statuses(block: str | None = None) -> list[dict]:
     the item has never been done, which sorts to the very top as most urgent.
     Last-done is the date ``done`` last recorded.
     """
-    register = load_register() or {}
-    state = load_state(STATE)
-    today = dt.date.today()
+    return statuses_of(load_register() or {}, load_state(STATE), dt.date.today(), block)
+
+
+def statuses_of(register: dict[str, dict], state: dict[str, str], today: dt.date, block: str | None = None) -> list[dict]:
+    """:func:`statuses` over a register and a ``{id: last_done}`` map handed in rather than read."""
     rows = []
     for name in [block] if block else list(BLOCKS):
         for item_id, meta in register.get(name, {}).items():

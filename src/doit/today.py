@@ -315,7 +315,18 @@ def build(registry: sources.Registry, now: dt.datetime) -> Day:
     completion_sources = list(registry.completions.values())
     results = sources.fetch(lane_sources + completion_sources, bounds)
     built = dashboard.lanes_of(registry, results, None)
-    kept = happened.read_kept(now)
+    return assemble(registry, results, built, happened.read_kept(now), bounds, now)
+
+
+def assemble(
+    registry: sources.Registry,
+    results: dict[str, sources.Result],
+    built: list[dashboard.LaneView],
+    kept: happened.Kept,
+    bounds: Bounds,
+    now: dt.datetime,
+) -> Day:
+    """Both lists from a round already fetched, the lanes it built and what doit keeps, as :func:`build` describes."""
     folded = happened.fold(registry, results, kept, bounds, now)
     folded += missing_done_halves(built, folded)
 
