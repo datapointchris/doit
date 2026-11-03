@@ -71,14 +71,25 @@ jobs:
   #
   # After `release`, so the version it bakes in is the tag this push cut rather
   # than the one before it.
+  #
+  # A push that cut a release also publishes deploy/ with that image pinned by
+  # digest, as manifests:<version>. A cluster following the manifests by semver
+  # deploys the release with no other step.
   api-image:
     needs: [validate, release]
     runs-on: ubuntu-26.04
+    # A named bash runs with pipefail.
+    defaults:
+      run:
+        shell: bash
     permissions:
       contents: read
       packages: write
+      # The OIDC token cosign trades for a signing certificate naming this workflow.
+      id-token: write
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/doit-api
+      MANIFESTS: ghcr.io/${{ github.repository }}/manifests
     steps:
       - uses: actions/checkout@v7
         with:
@@ -117,9 +128,9 @@ jobs:
           fi
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        if: steps.published.outputs.exists == 'false'
 
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
         if: steps.published.outputs.exists == 'false'
         with:
           context: .
@@ -131,3 +142,60 @@ jobs:
             ${{ env.IMAGE }}:latest
           cache-from: type=gha,scope=doit-api
           cache-to: type=gha,mode=max,scope=doit-api
+
+      # A release that built nothing reads the published image's digest.
+      - name: Name the image by its digest
+        id: image
+        if: needs.release.outputs.released == 'true'
+        env:
+          BUILT: ${{ steps.build.outputs.digest }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          pinned=$BUILT
+          if [ -z "$pinned" ]; then
+            pinned=$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest}}' | jq -r .digest)
+          fi
+          [[ $pinned == sha256:* ]] || { echo "no digest for $IMAGE:$TAG: '$pinned'" >&2; exit 1; }
+          echo "ref=$IMAGE@$pinned" >>"$GITHUB_OUTPUT"
+          echo "Image \`$IMAGE@$pinned\`" >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Install flux, kustomize and cosign
+        if: needs.release.outputs.released == 'true'
+        run: |
+          release/install-tools "$RUNNER_TEMP/bin" flux kustomize cosign
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+
+      # Pushed as manifests:<version>. --reproducible makes a re-run send the
+      # same bytes for the same digest. The source and revision travel in the
+      # artifact, and Flux reports them beside what it applied.
+      - name: Push the manifests
+        id: manifests
+        if: needs.release.outputs.released == 'true'
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          work=$RUNNER_TEMP/manifests
+          release/pin-manifests --image "$IMAGE_REF" --version "$VERSION" --out "$work"
+          pushed=$(flux push artifact "oci://$MANIFESTS:$VERSION" --path="$work" \
+            --source="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --revision="$VERSION@sha1:$GITHUB_SHA" \
+            --reproducible --output=json | jq -r .digest)
+          [[ $pushed == sha256:* ]] || { echo "flux push named no digest: '$pushed'" >&2; exit 1; }
+          echo "ref=$MANIFESTS@$pushed" >>"$GITHUB_OUTPUT"
+          echo "Manifests \`$MANIFESTS:$VERSION\` as \`$MANIFESTS@$pushed\`" >>"$GITHUB_STEP_SUMMARY"
+
+      # Keyless, so the signing certificate names this workflow on this ref and
+      # no key exists to keep. A deployment verifies the artifact against that
+      # identity before applying it. A re-run signs again, and either signature
+      # verifies.
+      - name: Sign the image and the manifests
+        if: needs.release.outputs.released == 'true'
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          MANIFESTS_REF: ${{ steps.manifests.outputs.ref }}
+        run: |
+          cosign sign --yes "$IMAGE_REF"
+          cosign sign --yes "$MANIFESTS_REF"
+          cosign verify --certificate-identity "$GITHUB_SERVER_URL/$GITHUB_WORKFLOW_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE_REF" "$MANIFESTS_REF" >/dev/null

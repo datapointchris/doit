@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Copies deploy/ with the image pinned and the version labeled, and builds it.
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: pin-manifests --image <name@sha256:...> --version <version> --out <directory>
+
+Copies deploy/ into <directory>, which must be empty or absent. Names the image
+doit-api as --image, and labels every object and pod template
+app.kubernetes.io/version: --version. Then builds it, so a base that will not
+build fails here.
+
+The release pushes <directory> as the manifests artifact. validate.yml checks
+what this renders.
+USAGE
+}
+
+die() {
+  printf 'pin-manifests: %s\n' "$*" >&2
+  exit 1
+}
+
+usage_error() {
+  printf 'pin-manifests: %s\n\n' "$1" >&2
+  usage >&2
+  exit 2
+}
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 0
+fi
+
+image='' version='' out=''
+while [ $# -gt 0 ]; do
+  case $1 in
+    --image | --version | --out)
+      [ $# -ge 2 ] || usage_error "$1 needs a value"
+      printf -v "${1#--}" '%s' "$2"
+      shift 2
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *) usage_error "unknown argument $1" ;;
+  esac
+done
+for name in image version out; do
+  [ -n "${!name}" ] || usage_error "--$name is required"
+done
+[[ $image == *@sha256:* ]] || usage_error "--image names no digest: $image"
+
+deploy=$(cd "$(dirname "${BASH_SOURCE[0]}")/../deploy" && pwd)
+mkdir -p "$out"
+[ -z "$(find "$out" -mindepth 1 -print -quit)" ] || die "$out is not empty"
+cp -R "$deploy/." "$out/"
+(
+  cd "$out"
+  kustomize edit set image "doit-api=$image"
+  kustomize edit add label --without-selector --include-templates "app.kubernetes.io/version:$version"
+)
+kustomize build "$out" >/dev/null

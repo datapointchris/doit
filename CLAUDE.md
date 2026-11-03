@@ -94,6 +94,9 @@ Shapes that look wrong and are not:
 
 - **The image's build context is the repository root**, with `api/Dockerfile.dockerignore`
   admitting only the root package and `api/`. A context of `api/` cannot reach the view code.
+- **`deploy/` names the image `doit-api` with no tag.** `release/pin-manifests` pins it by digest in
+  the copy the release pushes, and `validate.yml` lints what that renders. kube-linter refuses the
+  committed base, which is why it reads the rendered copy.
 - **A pursuit's `resolve` and `evidence` are a command on a desk and a read in the service**:
   `{app, path, query}`. The register's validator accepts either. The import rewrites one into the
   other, and the reader that runs it says which form it cannot run.

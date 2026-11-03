@@ -1,0 +1,143 @@
+# doit's service: one process over one SQLite file, behind a Service.
+#
+# The cluster supplies what this directory does not create:
+#
+# - A ConfigMap and a Secret, both named doit-api-settings, holding the
+#   variables README.md lists. Each credential goes in the Secret. The pod reads
+#   both, so any other setting may sit in either.
+# - A Secret named doit-api-github-app, holding the two DOIT_API_GITHUB_*
+#   variables. It is optional. Without it the GitHub lane says what is unset, and
+#   a pod started before it exists reads it once restarted.
+# - A route to the Service reaching /.well-known/oauth-protected-resource as well
+#   as /api/v1, since `doit auth login` reads the first to find the issuer.
+#   DOIT_API_PUBLIC_URL names the address that route serves.
+# - Each NetworkPolicy the pod reaches the issuer and its sources through.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: doit-api
+  labels:
+    app.kubernetes.io/instance: doit-api
+    app.kubernetes.io/component: api
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: doit-api
+  labels:
+    app.kubernetes.io/instance: doit-api
+    app.kubernetes.io/component: api
+spec:
+  selector:
+    app.kubernetes.io/name: doit
+    app.kubernetes.io/instance: doit-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# A StatefulSet of one, because a SQLite file takes one writer. A Deployment
+# replaces a deleted pod while the old one is still terminating, and
+# ReadWriteOnce lets both mount the volume on one node.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: doit-api
+  labels:
+    app.kubernetes.io/instance: doit-api
+    app.kubernetes.io/component: api
+  annotations:
+    kubernetes.io/description: doit's HTTP API, holding its documents and journal in SQLite and computing every view
+spec:
+  replicas: 1
+  serviceName: doit-api
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: doit
+      app.kubernetes.io/instance: doit-api
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: doit-api
+        app.kubernetes.io/component: api
+    spec:
+      serviceAccountName: doit-api
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # The image's USER is a name, so runAsNonRoot needs the uid written here.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        # The volume's own directory already carries the group once the first
+        # start sets it, so the kubelet walks nothing after that.
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      # Above the 25 seconds main.py gives uvicorn to drain.
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          image: doit-api
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: doit-api-settings
+            - secretRef:
+                name: doit-api-settings
+            - secretRef:
+                name: doit-api-github-app
+                optional: true
+          # /ready answers 503 while the store does not. An app the service reads
+          # being down costs its lane, never the pod.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/doit-api
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: state
+        labels:
+          app.kubernetes.io/name: doit
+          app.kubernetes.io/instance: doit-api
+          app.kubernetes.io/component: api
+          app.kubernetes.io/part-of: doit
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi

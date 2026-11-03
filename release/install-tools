@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Installs the tools the release and the manifest check run, each at a pinned version and SHA-256.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: install-tools <directory> <tool>...
+
+Downloads each tool's linux/amd64 release into <directory>, checks it against
+the SHA-256 pinned here, and leaves an executable named for the tool. The
+tools are kustomize, kubeconform, kube-linter, flux and cosign.
+
+A bump edits a tool's version and its SHA-256 together.
+EOF
+}
+
+die() {
+  printf 'install-tools: %s\n' "$*" >&2
+  exit 1
+}
+
+if [ $# -lt 2 ]; then
+  usage >&2
+  exit 2
+fi
+directory=$1
+shift
+
+# Sets version, sha256, url, and member: the file to take from a tarball, or
+# empty where the asset is the binary itself.
+pin() {
+  case $1 in
+    kustomize)
+      version=5.8.3
+      sha256=cb9e31198d3f63b44848bd0afc4c8efc56e6cfef9c93a4a39a211940e6decd61
+      url=https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv$version/kustomize_v${version}_linux_amd64.tar.gz
+      member=kustomize
+      ;;
+    kubeconform)
+      version=0.8.0
+      sha256=9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+      url=https://github.com/yannh/kubeconform/releases/download/v$version/kubeconform-linux-amd64.tar.gz
+      member=kubeconform
+      ;;
+    # kube-linter publishes no checksum file. This is the digest its release's
+    # sigstore bundle signs, which Rekor's log records.
+    kube-linter)
+      version=0.8.3
+      sha256=618d299a3e2839c8ca9d86fce0db617be0fba41f0fecbbbfb7fbf1c04299fae1
+      url=https://github.com/stackrox/kube-linter/releases/download/v$version/kube-linter-linux
+      member=
+      ;;
+    flux)
+      version=2.9.6
+      sha256=b4d22673e9246cbd628881f1a9ef3b090085dced291e42d804555cee8e8d42c5
+      url=https://github.com/fluxcd/flux2/releases/download/v$version/flux_${version}_linux_amd64.tar.gz
+      member=flux
+      ;;
+    cosign)
+      version=3.1.4
+      sha256=424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+      url=https://github.com/sigstore/cosign/releases/download/v$version/cosign-linux-amd64
+      member=
+      ;;
+    *) die "no pin for $1" ;;
+  esac
+}
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+mkdir -p "$directory"
+for tool in "$@"; do
+  pin "$tool"
+  asset=$work/$tool.download
+  curl -fsSL --retry 3 -o "$asset" "$url"
+  printf '%s  %s\n' "$sha256" "$asset" | sha256sum -c --quiet - \
+    || die "$tool $version does not match its pinned SHA-256"
+  if [ -n "$member" ]; then
+    tar -xzf "$asset" -C "$work" "$member"
+    install -m 0755 "$work/$member" "$directory/$tool"
+  else
+    install -m 0755 "$asset" "$directory/$tool"
+  fi
+  echo "installed $tool $version"
+done

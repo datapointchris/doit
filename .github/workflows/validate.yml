@@ -309,3 +309,45 @@ jobs:
       - run: uv run --directory api --with mypy mypy --config-file ../pyproject.toml src
 
       - run: uv run --directory api pytest
+
+  # The release publishes deploy/ as the base a cluster applies, and calls this
+  # workflow as its gate, so a base that fails here is never pushed.
+  deploy-manifests:
+    name: Kubernetes manifests
+    runs-on: ubuntu-26.04
+    # A named bash runs with pipefail.
+    defaults:
+      run:
+        shell: bash
+    steps:
+
+      - uses: actions/checkout@v7
+
+      - name: Install kustomize, kubeconform and kube-linter
+        run: |
+          release/install-tools "$RUNNER_TEMP/bin" kustomize kubeconform kube-linter
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+
+      # release/pin-manifests pins and labels the base as the release does, with
+      # the image named by a digest of zeros. kube-linter refuses an image with
+      # no tag or digest, which the committed base carries until the release
+      # pins it.
+      #
+      # kubeconform -strict also refuses a field the schema does not know. Its
+      # schemas are read at a fixed commit of kubeconform's own schema
+      # repository, for the Kubernetes release named. Given that commit's root,
+      # kubeconform appends the path of each kind's strict schema itself.
+      - name: Render and check the base
+        env:
+          KUBERNETES_VERSION: 1.36.5
+          SCHEMAS: https://raw.githubusercontent.com/yannh/kubernetes-json-schema/f7d855e49c34b039c9ef2196444910275e31e09e
+        run: |
+          zeros=$(printf '0%.0s' {1..64})
+          release/pin-manifests --image "ghcr.io/${GITHUB_REPOSITORY_OWNER}/doit-api@sha256:$zeros" --version 0.0.0 \
+            --out "$RUNNER_TEMP/manifests"
+          kustomize build "$RUNNER_TEMP/manifests" >"$RUNNER_TEMP/rendered.yaml"
+          status=0
+          kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" \
+            -schema-location "$SCHEMAS" "$RUNNER_TEMP/rendered.yaml" || status=1
+          kube-linter lint "$RUNNER_TEMP/rendered.yaml" || status=1
+          exit "$status"

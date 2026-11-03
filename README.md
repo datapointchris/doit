@@ -463,6 +463,36 @@ It reads its configuration from the environment and nowhere else:
 An app, GitHub or ClickHouse left unset is not an error at startup. Its lanes say which variable
 is missing, so the service runs while a credential is on its way.
 
+### On Kubernetes
+
+Each release pushes `deploy/` to `oci://ghcr.io/datapointchris/doit/manifests:<version>`, with the
+image named by digest. It runs the API as a StatefulSet of one behind the Service `doit-api`,
+because a SQLite file takes one writer. Its claim `state-doit-api-0` asks the cluster's default
+storage class for 1 GiB.
+
+The cluster supplies what the base leaves out:
+
+- A ConfigMap and a Secret, both named `doit-api-settings`, holding the variables above. Each
+  credential goes in the Secret.
+- A Secret named `doit-api-github-app`, holding the two `DOIT_API_GITHUB_*` variables. It is
+  optional. A pod started before it exists reads it once restarted.
+- A route to `doit-api` reaching `/.well-known/oauth-protected-resource` as well as `/api/v1`, at
+  the address `DOIT_API_PUBLIC_URL` names.
+- Each NetworkPolicy the pod needs to reach the issuer and its sources.
+
+The pod runs as uid 10001 under the restricted Pod Security profile, on a read-only root
+filesystem.
+
+The release signs the image and the manifests with Sigstore, as this repository's release workflow
+on `main`. Check a version before applying it:
+
+```bash
+cosign verify \
+  --certificate-identity https://github.com/datapointchris/doit/.github/workflows/release.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/datapointchris/doit/manifests:<version>
+```
+
 ## Where it writes
 
 Content, config and state are three different things, kept in three places. A cache sits beside
