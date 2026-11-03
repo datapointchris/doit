@@ -1,6 +1,6 @@
 """Who did a thing: the identity a record is stamped with, and which kind of actor it names.
 
-The identity is spelled the way an icb issue's `closed_by` is, so a journal
+The identity is spelled the way a slate issue's `closed_by` is, so a journal
 entry and an issue close read alike and one `kind` sorts both.
 """
 
@@ -9,7 +9,7 @@ import re
 import socket
 
 # Set by the scheduler on every job it runs, as `<job>@<machine>`.
-SCHEDULED_JOB_ENV = 'ICB_ACTOR'
+SCHEDULED_JOB_ENV = 'SLATE_ACTOR'
 
 BY_HAND = 'by hand'
 SESSION = 'session'

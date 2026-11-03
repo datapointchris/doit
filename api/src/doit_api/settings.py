@@ -151,11 +151,11 @@ ICB_SCOPES = (
     'icb.tasks.read',
     'icb.articles.read',
     'icb.books.read',
-    'icb.issues.read',
     'icb.project-items.read',
 )
 LEARNING_SCOPES = ('learning.overview.read', 'learning.completed.read')
 MESO_SCOPES = ('meso.cycles.read', 'meso.review.read')
+SLATE_SCOPES = ('slate.records.read',)
 
 
 @dataclass(frozen=True)
@@ -192,6 +192,7 @@ class Settings:
                 'icb': app_settings('icb', 'icb-svc-doit', ICB_SCOPES),
                 'learning': app_settings('learning', 'learning-svc-doit', LEARNING_SCOPES),
                 'meso': app_settings('meso', 'meso-svc-doit', MESO_SCOPES),
+                'slate': app_settings('slate', 'slate-svc-doit', SLATE_SCOPES),
             },
             github=GitHubSettings(
                 client_id=optional_env('DOIT_API_GITHUB_CLIENT_ID'),

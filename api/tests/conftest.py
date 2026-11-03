@@ -78,7 +78,7 @@ def client_for(
     clock: Callable[[], dt.datetime] | None = lambda: NOW,
 ) -> TestClient:
     """The service over `store`, at `NOW` unless handed another clock; None is the real one."""
-    apps = {name: unconfigured(name) for name in ('icb', 'learning', 'meso')} | (apps or {})
+    apps = {name: unconfigured(name) for name in ('icb', 'learning', 'meso', 'slate')} | (apps or {})
     readers = Readers(apps, github or GitHub(GitHubSettings()), ClickHouseSettings())
     views = Views(store, readers, clock=clock)
     settings = Settings(issuer='https://id.test', public_url='https://doit.test', database_path=store.path)

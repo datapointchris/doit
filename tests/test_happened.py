@@ -91,7 +91,7 @@ def test_project_items_are_listed_by_when_they_were_completed_not_touched():
 
 
 def test_an_issue_carries_who_closed_it():
-    [lane] = adapter_for('icb-issues')(ok('icb-issues', fixture('icb-issues-completed')))
+    [lane] = adapter_for('slate-issues')(ok('slate-issues', fixture('slate-issues-completed')))
 
     assert [(cell.text, actor.kind(cell.actor)) for cell in lane.grid] == [
         ('toolchains asks PATH for rustc', actor.BY_HAND),
@@ -101,12 +101,12 @@ def test_an_issue_carries_who_closed_it():
 
 def test_a_wider_window_reaches_further_back_and_says_so_in_its_hint():
     """The hint is the command over the same window, so running it lists what the group read."""
-    [lane] = adapter_for('icb-issues')(ok('icb-issues', fixture('icb-issues-completed'), WEEK))
+    [lane] = adapter_for('slate-issues')(ok('slate-issues', fixture('slate-issues-completed'), WEEK))
 
     since, until = (end.isoformat(timespec='seconds') for end in WEEK)
 
     assert len(lane.grid) == 3
-    assert lane.hints == [f'icb issues list --status completed --since {since} --until {until}']
+    assert lane.hints == [f'slate issues list --status completed --since {since} --until {until}']
 
 
 def test_a_window_holding_more_than_the_backend_returns_is_partial_rather_than_answered_whole():

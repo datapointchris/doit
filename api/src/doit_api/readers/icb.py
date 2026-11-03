@@ -129,8 +129,7 @@ def upcoming_countdowns(countdowns: list[dict], now: dt.datetime) -> list[dict]:
 
 
 # Each read the overview makes: its section, the label a warning names it by,
-# and the request. The same table the CLI fans out over, less the issues
-# section, which no lane reads.
+# and the request. The same table the CLI fans out over.
 OVERVIEW_READS: tuple[tuple[str, str, str, Callable[[], dict]], ...] = (
     ('tasks', 'tasks', '/tasks', lambda: {'status': 'open'}),
     ('habits', 'habits', '/habits/day', lambda: {'timezone': local_zone()}),
@@ -237,7 +236,6 @@ COMPLETIONS: dict[str, Callable[[App, Bounds], object]] = {
     'icb-habits': lambda icb, bounds: icb.get('/habits/completed', window(bounds, zoned=True)),
     'icb-tasks': lambda icb, bounds: icb.get('/tasks', {'status': 'completed', **window(bounds)}),
     'icb-projects': lambda icb, bounds: icb.get('/project-items', {'status': 'completed', **window(bounds)}),
-    'icb-issues': lambda icb, bounds: icb.get('/issues', {'status': 'completed', **window(bounds, zoned=True)}),
     'icb-articles': lambda icb, bounds: icb.get('/articles', window(bounds)),
     'icb-books': lambda icb, bounds: icb.get('/books', window(bounds, zoned=True)),
 }
