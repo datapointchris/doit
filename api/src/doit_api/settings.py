@@ -40,6 +40,12 @@ MACHINE = 'doit-service'
 # How often the service takes a forecast unless told otherwise.
 DEFAULT_FORECAST_INTERVAL = '4h'
 
+# How long a draw keeps answering `next`. Long enough to survive deciding what to
+# do, short enough that coming back after a task gives a fresh draw. Re-running
+# inside it is the common case, and a reshuffle there reads as the tool having
+# changed its mind.
+DEFAULT_DRAW_LIFETIME = '15m'
+
 INTERVAL = re.compile(r'(\d+)([mhd])')
 INTERVAL_UNITS = {'m': 'minutes', 'h': 'hours', 'd': 'days'}
 
@@ -165,6 +171,7 @@ class Settings:
     public_url: str
     database_path: Path
     forecast_interval: dt.timedelta = dt.timedelta(hours=4)
+    draw_lifetime: dt.timedelta = dt.timedelta(minutes=15)
     apps: dict[str, AppSettings] = field(default_factory=dict)
     github: GitHubSettings = GitHubSettings()
     clickhouse: ClickHouseSettings = ClickHouseSettings()
@@ -180,6 +187,7 @@ class Settings:
             forecast_interval=parse_interval(
                 'DOIT_API_FORECAST_INTERVAL', optional_env('DOIT_API_FORECAST_INTERVAL', DEFAULT_FORECAST_INTERVAL)
             ),
+            draw_lifetime=parse_interval('DOIT_API_DRAW_LIFETIME', optional_env('DOIT_API_DRAW_LIFETIME', DEFAULT_DRAW_LIFETIME)),
             apps={
                 'icb': app_settings('icb', 'icb-svc-doit', ICB_SCOPES),
                 'learning': app_settings('learning', 'learning-svc-doit', LEARNING_SCOPES),

@@ -45,31 +45,23 @@ random process, rather than a distribution nobody chose dressed up as a
 confidence interval. The order within one offer does not vary, because it is
 derived from the balances that day.
 
-Readings live under the state directory because a recompute cannot rebuild one:
-it would read a register and a journal that have since moved. One append-only file per machine, one writer each.
+The service keeps every reading, because a recompute cannot rebuild one: it
+would read a register and a journal that have since moved.
 """
 
 import dataclasses as dc
 import datetime as dt
-import json
 import statistics
 from dataclasses import dataclass
 from dataclasses import field
-from pathlib import Path
-from typing import Annotated
 
-import typer
 from rich.text import Text
 
 from doit import journal
 from doit import pursuits
 from doit.allocate import balance
-from doit.paths import journal_dir
 from doit.paths import machine_name
 from doit.render import console
-from doit.render import error_console
-
-SCHEMA_VERSION = 1
 
 # Horizons a reading reports. A week is the shortest span over which a weekly
 # goal can express itself at all, and a month is long enough for every cadence a
@@ -247,18 +239,6 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
-def forecast(register: dict, now: dt.datetime, budget: float, replicates: int = REPLICATES) -> Reading:
-    """Run every replicate and fold them into one reading."""
-    directory = journal_dir()
-    # Read after the live state, which writes a first sighting for any pursuit the
-    # journal has never zeroed. Seeded without one, every simulated day would put
-    # that pursuit's start one interval back from the day itself.
-    cycles = pursuits.load_cycles(register)
-    live = pursuits.build_state(register, now, cycles=cycles)
-    records = journal.read_all(directory) if directory.exists() else []
-    return forecast_from(register, now, budget, live, records, cycles, replicates)
-
-
 def forecast_from(
     register: dict,
     now: dt.datetime,
@@ -269,7 +249,13 @@ def forecast_from(
     replicates: int = REPLICATES,
     machine: str = '',
 ) -> Reading:
-    """:func:`forecast` from a live state, the journal and the cycles a caller already holds, stored as ``machine``."""
+    """Every replicate folded into one reading, taken as ``machine``.
+
+    ``records`` is the journal read after ``live`` was built. Building the state
+    writes a first sighting for any pursuit the journal has never zeroed. Seeded
+    without one, every simulated day would put that pursuit's start one interval
+    back from the day itself.
+    """
     active = live['active']
     cost = durations(active, records)
     horizon = max(HORIZONS)
@@ -322,41 +308,10 @@ def forecast_from(
     )
 
 
-def reading_path(directory: Path, machine: str) -> Path:
-    """This machine's readings. One writer per file is the whole sync story."""
-    return directory / f'forecast-{machine}.jsonl'
-
-
-def append(path: Path, reading: Reading) -> Reading:
-    record = {'schema_version': SCHEMA_VERSION, **dc.asdict(reading)}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('a', encoding='utf-8') as handle:
-        handle.write(json.dumps(record) + '\n')
-    return reading
-
-
-def read_all(directory: Path) -> list[Reading]:
-    """Every machine's readings, merged and ordered oldest first.
-
-    A malformed line is skipped rather than fatal, for the reason the journal
-    gives: one half-synced line must not make the rest of the record unreadable.
-    """
-    stored: list[Reading] = []
-    if not directory.exists():
-        return stored
-    for path in sorted(directory.glob('forecast-*.jsonl')):
-        for line in path.read_text(encoding='utf-8').splitlines():
-            if not line.strip():
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            names = {entry.name for entry in dc.fields(Reading)}
-            fields = {name: value for name, value in record.items() if name in names}
-            if fields.get('generated'):
-                stored.append(Reading(**fields))
-    return sorted(stored, key=lambda reading: reading.generated)
+def reading_from(held: dict) -> Reading:
+    """A stored reading, ignoring any field a later version added."""
+    names = {entry.name for entry in dc.fields(Reading)}
+    return Reading(**{key: value for key, value in held.items() if key in names})
 
 
 def select(stored: list[Reading], handle: str = '') -> Reading | None:
@@ -496,118 +451,3 @@ def emit_trend(verdicts: list[Verdict], days: int, readings: int) -> None:
         console.print(row)
     console.print(f'\n  averaged over {readings} readings whose {days}-day window has closed')
     console.print('  error is what the journal recorded minus what the forecast predicted')
-
-
-def cmd_run(as_json: bool, budget: int | None, directory: Path) -> int:
-    """Take a forecast and store it."""
-    register = pursuits.load_pursuits()
-    if not register:
-        error_console.print('No pursuits yet:  [cyan]doit pursuits edit[/]')
-        return 1
-    settings = pursuits.load_settings()
-    minutes = budget or settings.get('budget_minutes') or DEFAULT_BUDGET_MINUTES
-    reading = forecast(register, dt.datetime.now().astimezone(), float(minutes))
-    stored = True
-    try:
-        append(reading_path(directory, machine_name()), reading)
-    except OSError as failure:
-        error_console.print(f'Forecast taken but not stored at {directory} — {failure}')
-        stored = False
-    if as_json:
-        print(json.dumps(dc.asdict(reading), indent=2))
-    else:
-        emit(reading)
-    return 0 if stored else 1
-
-
-def cmd_show(handle: str, as_json: bool, directory: Path) -> int:
-    """The newest stored forecast, or the one a timestamp prefix names."""
-    stored = read_all(directory)
-    reading = select(stored, handle)
-    if reading is None:
-        error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
-        return 1
-    if as_json:
-        print(json.dumps(dc.asdict(reading), indent=2))
-    else:
-        emit(reading)
-    return 0
-
-
-def cmd_list(as_json: bool, directory: Path) -> int:
-    """Every stored forecast, oldest first."""
-    stored = read_all(directory)
-    if not stored:
-        error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
-        return 1
-    if as_json:
-        print(json.dumps([dc.asdict(reading) for reading in stored], indent=2))
-        return 0
-    console.rule('[cyan]Forecasts', align='left')
-    for reading in stored:
-        row = Text('  ')
-        row.append(f'{reading.generated[:16].replace("T", " ")}  ', style='white')
-        row.append(f'{reading.machine:<10} {reading.budget_minutes:>4}m/day  ', style='dim')
-        row.append(source_summary(reading), style='dim')
-        console.print(row)
-    plural = '' if len(stored) == 1 else 's'
-    console.print(f'\n  {len(stored)} reading{plural} · [cyan]doit forecast trend[/] grades the matured ones')
-    return 0
-
-
-def cmd_trend(days: int, as_json: bool, directory: Path) -> int:
-    """What the forecasts predicted against what the journal went on to record."""
-    stored = read_all(directory)
-    if not stored:
-        error_console.print('No forecast stored yet:  [cyan]doit forecast run[/]')
-        return 1
-    journal_directory = journal_dir()
-    records = journal.read_all(journal_directory) if journal_directory.exists() else []
-    now = dt.datetime.now().astimezone()
-    verdicts = grade(stored, records, now, days)
-    if not verdicts:
-        error_console.print(f'No reading is {days} days old yet, so nothing can be graded:  [cyan]doit forecast run[/]')
-        return 1
-    if as_json:
-        print(json.dumps({'days': days, 'verdicts': [dc.asdict(v) for v in verdicts]}, indent=2))
-        return 0
-    emit_trend(verdicts, days, len(matured(stored, now, days)))
-    return 0
-
-
-app = typer.Typer(name='forecast', no_args_is_help=True, help='What the register would have you do, run forward.')
-
-JsonOption = Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')]
-
-
-@app.command('run')
-def run_command(
-    budget: Annotated[int | None, typer.Option('--budget', help='Minutes a day to spend, overriding the register.')] = None,
-    as_json: JsonOption = False,
-) -> None:
-    """Take a forecast from the register as it stands, and store it."""
-    pursuits.run(lambda: cmd_run(as_json, budget, journal_dir()))
-
-
-@app.command('show')
-def show_command(
-    handle: Annotated[str, typer.Argument(help='Timestamp prefix; the newest when omitted.')] = '',
-    as_json: JsonOption = False,
-) -> None:
-    """Read a stored forecast back."""
-    pursuits.run(lambda: cmd_show(handle, as_json, journal_dir()))
-
-
-@app.command('list')
-def list_command(as_json: JsonOption = False) -> None:
-    """Every forecast taken, oldest first."""
-    pursuits.run(lambda: cmd_list(as_json, journal_dir()))
-
-
-@app.command('trend')
-def trend_command(
-    days: Annotated[int, typer.Option('--days', help='Which horizon to grade: 7, 14 or 30.')] = 7,
-    as_json: JsonOption = False,
-) -> None:
-    """Grade the forecasts whose window has closed against the journal."""
-    pursuits.run(lambda: cmd_trend(days, as_json, journal_dir()))

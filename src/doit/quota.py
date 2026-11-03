@@ -220,3 +220,28 @@ def to_dict(figures: Quota) -> dict:
         ],
         'unavailable': figures.unavailable,
     }
+
+
+def from_dict(payload: dict) -> Quota:
+    """The figures :func:`to_dict` wrote, read back for a screen that renders them."""
+
+    def unit(found: dict | None) -> Unit | None:
+        return None if found is None else Unit(found['pace'], found['need'], found['done'], found['behind'], found['asked_of'])
+
+    return Quota(
+        minutes=unit(payload.get('minutes')),
+        checkoffs=unit(payload.get('checkoffs')),
+        pursuits=[
+            PursuitDay(day['name'], day['unit'] == 'minutes', day['pace'], day['need'], day['done'], day['behind'])
+            for day in payload.get('pursuits') or []
+        ],
+        catch_up=[
+            CatchUp(entry['days'], entry['label'], entry['minutes_per_day'], entry['checkoffs_per_day'], entry['shown'])
+            for entry in payload.get('catch_up') or []
+        ],
+        checklists=[
+            Checklist(entry['name'], entry.get('done'), entry.get('total'), entry.get('unavailable') or '')
+            for entry in payload.get('checklists') or []
+        ],
+        unavailable=payload.get('unavailable') or '',
+    )

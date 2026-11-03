@@ -163,17 +163,12 @@ class Readers:
         return {name: entry for name, entry in zip(wanted, found, strict=True) if entry}
 
     def evidence(self, name: str, config: dict, now: dt.datetime) -> tuple[str, dict]:
-        """When a pursuit last happened, by its app: the same entry the desk's evidence read builds."""
-        entry: dict = {'checked_at': now.isoformat()}
+        """When a pursuit last happened, by its app, as the entry `evidence.refreshed` caches."""
         try:
             if config.get('evidence_files'):
                 raise ReadFailed('evidence_files names a directory on a desk, which the service cannot read')
             document = self.declared(config.get('evidence'), 'evidence')
         except ReadFailed as error:
             log.error('source_failed', extra={'source': f'{name}.evidence', 'reason': error.reason})
-            entry['error'] = error.reason
-            return name, entry
-        stamps = evidence_reads.stamps_in(document, config, now)
-        entry['last'] = max(stamps).isoformat() if stamps else None
-        entry['dates'] = evidence_reads.dates_of(stamps, now)
-        return name, entry
+            return name, {'checked_at': now.isoformat(), 'error': error.reason}
+        return name, evidence_reads.answer_from(document, config, now)

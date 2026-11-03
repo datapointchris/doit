@@ -20,6 +20,7 @@ from doit import lanes
 from doit import sources
 from doit import window
 from doit.lanes import GridCell
+from doit.service_commands import happened as happened_commands
 from doit.window import Bounds
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'happened'
@@ -146,14 +147,6 @@ def test_an_expired_login_answering_an_error_with_exit_zero_is_unavailable_and_s
     assert (lane.name, lane.available, lane.reason) == (lane_name, False, f'{adapter_id} answered with an error: auth expired')
 
 
-@pytest.mark.parametrize(('adapter_id', 'lane_name'), happened.COMPLETION_ADAPTERS)
-def test_a_missing_binary_is_named_by_its_source_id_not_its_lane(adapter_id, lane_name):
-    """`reason` looks the argv back up by source id, so a lane name would print `books is not installed` for a missing `icb`."""
-    [lane] = adapter_for(adapter_id)(sources.Result(source=adapter_id, failure=sources.Failure.NOT_INSTALLED))
-
-    assert lane.reason == f'{adapter_id} is not installed on this machine'
-
-
 # --- a done group --------------------------------------------------------------
 
 
@@ -264,7 +257,7 @@ def test_a_source_that_produced_no_group_is_still_counted_among_those_asked():
     registry = sources.Registry(completions={'quiet': quiet, 'broken': broken})
     results = {
         'quiet': ok('quiet', {'lanes': []}),
-        'broken': sources.Result(source='broken', failure=sources.Failure.NOT_INSTALLED),
+        'broken': sources.Result(source='broken', stderr='broken did not answer', failure=sources.Failure.FAILED),
     }
 
     groups = happened.fold(registry, results, happened.Kept(), DAY, NOW)
@@ -329,36 +322,4 @@ def test_the_verdict_names_every_record_asked_and_which_failed():
 
 
 def test_a_window_that_will_not_parse_is_refused_before_any_backend_is_asked():
-    assert happened.cmd_happened('6mo', None, as_json=False) == 2
-
-
-@pytest.fixture
-def no_sources(monkeypatch):
-    monkeypatch.setattr(happened.sources, 'load', sources.Registry)
-    monkeypatch.setattr(happened, 'read_kept', lambda now: happened.Kept(registers={'review': [], 'practice': []}))
-
-
-def test_until_alone_asks_what_happened_up_to_a_past_date_from_the_earliest_record(no_sources, capsys):
-    assert happened.cmd_happened(None, '2026-07-20', as_json=True) == 0
-    document = json.loads(capsys.readouterr().out)
-
-    assert dt.datetime.fromisoformat(document['since']) == happened.EARLIEST
-    assert document['until'][:10] == '2026-07-21'
-
-
-def test_a_scripted_caller_reads_exit_1_when_no_record_could_be_asked(no_sources, monkeypatch):
-    """Exit 0 there could not be told from a window where nothing happened."""
-    failing = happened.Kept(state_error='pursuits.yml: unreadable', register_errors={'review': 'unreadable', 'practice': 'unreadable'})
-    monkeypatch.setattr(happened, 'read_kept', lambda now: failing)
-
-    assert happened.cmd_happened(None, None, as_json=True) == 1
-
-
-def test_the_json_names_the_window_the_records_asked_and_each_group_in_the_contract_shape(no_sources, capsys):
-    assert happened.cmd_happened('2026-07-20', '2026-07-23', as_json=True) == 0
-    document = json.loads(capsys.readouterr().out)
-
-    assert (document['since'][:10], document['until'][:10]) == ('2026-07-20', '2026-07-24')
-    assert document['asked'] == ['review', 'practice']
-    assert document['unavailable'] == []
-    assert [lane.name for lane in lanes.from_document({'lanes': document['groups']})] == ['review', 'practice']
+    assert happened_commands.cmd_happened('6mo', None, as_json=False) == 2

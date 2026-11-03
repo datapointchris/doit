@@ -4,9 +4,9 @@ Every route parses its request, calls a view or a write, and returns what that
 returned. Nothing here computes a view, reads an app or opens the store itself.
 
 `/health`, `/ready` and the RFC 9728 metadata answer anyone. Everything under
-`/api/v1` answers a person's login and refuses a service client, because every
-route reads or writes one person's register and journal. A write records the
-caller as `recorded_by`, beside the machine and actor the client names.
+`/api/v1` answers a person's login, because every route reads or writes one
+person's register and journal. A write records the caller as `recorded_by`,
+beside the machine and actor the client names.
 
 `create_app` takes every collaborator as an argument. Production passes the ones
 `main` builds from the environment. A test passes a temporary store, stand-in
@@ -15,6 +15,7 @@ no network.
 """
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from typing import Annotated
@@ -65,7 +66,13 @@ class DocumentBody(Strict):
     text: str = Field(description='The whole document as YAML, comments included.')
 
 
-class DoneBody(Written):
+class Keyed(Written):
+    """A journal write the client can send again: one id names it however many times it arrives."""
+
+    id: uuid.UUID | None = Field(None, description='A UUIDv7 the client makes once per write. A write sent again with it is stored once.')
+
+
+class DoneBody(Keyed):
     pursuit: str = Field(description='A pursuit name, or a prefix only one name starts with.')
     note: str | None = None
     duration_minutes: int | None = Field(
@@ -76,7 +83,7 @@ class DoneBody(Written):
     downstream: dict[str, Any] | None = Field(None, description="What the pursuit's on_log command did on the desk.")
 
 
-class SkipBody(Written):
+class SkipBody(Keyed):
     pursuit: str
     span: str | None = Field(
         None, alias='for', description='How long to pass, in days or weeks such as 3d or 2w. One interval when omitted.'

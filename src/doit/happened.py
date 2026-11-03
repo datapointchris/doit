@@ -6,7 +6,7 @@ disagree about what a day held.
 
 **Every record that keeps a completion is asked.** doit's own are the pursuit
 journal with each app's evidence, and the registers. The rest are every
-`completions:` entry in `sources.yml`, each asked about the same window.
+`completions:` entry in the sources document, each asked about the same window.
 
 **Each row carries its source and its actor.** The source is the group it is
 listed under. The actor is whatever the record wrote, and is blank where the
@@ -34,29 +34,24 @@ a window is listed once, on the later day.
 """
 
 import datetime as dt
-import json
 import shlex
 import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
-from typing import Annotated
 from typing import NamedTuple
 
-import typer
 from rich.text import Text
 
 from doit import actor
 from doit import journal
 from doit import lanes
-from doit import pursuits
 from doit import review
 from doit import sources
 from doit import window
 from doit.lanes import GridCell
 from doit.lanes import Lane
 from doit.render import console
-from doit.render import error_console
 from doit.render import fitted
 from doit.render import terminal_width
 from doit.window import Bounds
@@ -231,7 +226,7 @@ def flat_adapter(
 
     Most of the completion sources are this shape and differ only in which
     field is the title, which the date and which the actor. A closure here
-    rather than more keys in `sources.yml`, because `lanes.py` rejects field
+    rather than more keys in the sources document, because `lanes.py` rejects field
     mappings in that file by name.
 
     The failure reason is asked for under the source id, never the lane name.
@@ -439,9 +434,6 @@ class Register(NamedTuple):
     block: str
     hint: str = 'doit review due'
 
-    def read(self) -> list[dict]:
-        return review.statuses(self.block)
-
     @staticmethod
     def describe(row: dict) -> str:
         return str(row.get('desc') or item_name(row))
@@ -470,7 +462,8 @@ class Kept:
 
     `state` is None where the register is empty or would not load, and
     `state_error` says which. A register that could not be read is absent from
-    `registers`, and `register_errors` says why.
+    `registers`, and `register_errors` says why, so a register that refuses to
+    load costs that record's group rather than the whole screen.
     """
 
     state: dict | None = None
@@ -479,32 +472,11 @@ class Kept:
     register_errors: dict[str, str] = field(default_factory=dict)
 
 
-def read_kept(now: dt.datetime) -> Kept:
-    """The pursuit state and both registers, each failure kept to its own record.
-
-    A register that refuses to load is a real failure mode, and it must cost
-    that record's group rather than the whole screen.
-    """
-    kept = Kept()
-    try:
-        register = pursuits.load_pursuits()
-        if register:
-            kept.state = pursuits.build_state(register, now)
-    except (pursuits.RegisterError, OSError, ValueError) as error:
-        kept.state_error = str(error)
-    for entry in registers():
-        try:
-            kept.registers[entry.name] = entry.read()
-        except (OSError, ValueError) as error:
-            kept.register_errors[entry.name] = str(error)
-    return kept
-
-
 # --- the fold ------------------------------------------------------------------
 
 
 def fold(registry: sources.Registry, results: dict[str, sources.Result], kept: Kept, bounds: Bounds, now: dt.datetime) -> list[Lane]:
-    """Every record's group over the window: doit's own, then each completion source in the order `sources.yml` lists it.
+    """Every record's group over the window: doit's own, then each completion source in the order the sources document lists it.
 
     A completion source that produced no group at all still gets one under its
     id. That is a conforming source declaring no `lanes:`. Failed, its group is
@@ -532,12 +504,6 @@ def fold(registry: sources.Registry, results: dict[str, sources.Result], kept: K
             ]
         groups.extend(built)
     return groups
-
-
-def read(registry: sources.Registry, bounds: Bounds, now: dt.datetime) -> list[Lane]:
-    """The fold over `bounds`, from one round of every completion source."""
-    results = sources.fetch(list(registry.completions.values()), bounds)
-    return fold(registry, results, read_kept(now), bounds, now)
 
 
 # --- the screen ----------------------------------------------------------------
@@ -657,59 +623,3 @@ def render(groups: list[Lane], bounds: Bounds, open_ended: bool) -> None:
     if shown:
         console.print()
         render_groups(shown, terminal_width(), dated=bounds.days() > 1)
-
-
-def cmd_happened(since: str | None, until: str | None, as_json: bool) -> int:
-    now = dt.datetime.now().astimezone()
-    if since is None and until is None:
-        since = DEFAULT_SINCE
-    try:
-        start, stop = window.window(since, until, now)
-    except ValueError as error:
-        error_console.print(f'doit happened: {error}')
-        return 2
-    bounds = Bounds(start or EARLIEST, stop or now)
-    if bounds.start >= bounds.stop:
-        error_console.print(f'doit happened: --since {since} is not before {until or "now"}.')
-        return 2
-    registry = sources.load()
-    for problem in registry.problems:
-        error_console.print(f'sources.yml: {problem}')
-    groups = read(registry, bounds, now)
-    if as_json:
-        document = {
-            'schema_version': lanes.SCHEMA_VERSION,
-            'generated_at': lanes.timestamp(now),
-            'since': bounds.start.isoformat(timespec='seconds'),
-            'until': bounds.stop.isoformat(timespec='seconds'),
-            'asked': [lane.name for lane in groups],
-            'unavailable': [lane.name for lane in groups if not lane.available],
-            'partial': [lane.name for lane in groups if lane.available and lane.reason],
-            'groups': [lanes.lane_to_dict(lane) for lane in groups],
-        }
-        # Plain print, never the rich console: a Console soft-wraps at terminal
-        # width, which would put newlines inside JSON strings.
-        print(json.dumps(document, indent=2))
-    else:
-        render(groups, bounds, open_ended=until is None)
-    # A read that asked some records exits 0 and names the rest in its verdict.
-    # One that could ask none exits 1, so a script can tell it from a quiet window.
-    return 1 if all(not lane.available for lane in groups) else 0
-
-
-def happened_command(
-    since: Annotated[
-        str | None,
-        typer.Option(
-            '--since',
-            help=f'Start of the window: {window.FORMS}. {DEFAULT_SINCE} ago where neither end is given, '
-            'the earliest record where only --until is.',
-        ),
-    ] = None,
-    until: Annotated[
-        str | None, typer.Option('--until', help='End of the window, in the same forms; a day includes all of itself. Now where omitted.')
-    ] = None,
-    as_json: Annotated[bool, typer.Option('--json', help='Output every group as JSON to stdout.')] = False,
-) -> None:
-    """What every record says happened over a window, and who did it where the record says."""
-    raise typer.Exit(cmd_happened(since, until, as_json))

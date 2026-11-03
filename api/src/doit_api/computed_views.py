@@ -49,6 +49,10 @@ from .store import stamp
 # How far past the service's clock a client's instant may run before it reads as the future.
 FUTURE_SKEW = dt.timedelta(minutes=1)
 
+# The zone furthest ahead of UTC. A client's day reads as the future only past its
+# date there, because a desk in any zone may already be on it.
+FURTHEST_AHEAD_ZONE = dt.timezone(dt.timedelta(hours=14))
+
 
 def instant(text: str | None, name: str) -> dt.datetime | None:
     """An ISO 8601 instant with its offset, or a refusal naming the field."""
@@ -66,10 +70,17 @@ def instant(text: str | None, name: str) -> dt.datetime | None:
 class Views:
     """The store and the apps, and every view computed from them."""
 
-    def __init__(self, store: Store, readers: Readers, clock: Callable[[], dt.datetime] | None = None) -> None:
+    def __init__(
+        self,
+        store: Store,
+        readers: Readers,
+        clock: Callable[[], dt.datetime] | None = None,
+        draw_lifetime: dt.timedelta = dt.timedelta(minutes=15),
+    ) -> None:
         self.store = store
         self.readers = readers
         self.clock = clock or (lambda: dt.datetime.now().astimezone())
+        self.draw_lifetime = draw_lifetime
 
     def now(self) -> dt.datetime:
         return self.clock()
@@ -106,7 +117,7 @@ class Views:
     def registered(self) -> documents.Config:
         found = self.config()
         if not found.pursuits:
-            raise NotFound('no pursuits yet; write the pursuits document first')
+            raise NotFound("no pursuits yet: `doit pursuits edit` writes them, or `doit import` brings a desk's")
         return found
 
     def pursuit_list(self) -> dict:
@@ -124,7 +135,7 @@ class Views:
     def standing_draw(self, now: dt.datetime) -> dict | None:
         """The draw from the last few minutes, or None once it has aged out or nothing is left of it."""
         selection = self.store.newest_draw()
-        return selection if pursuits.draw_stands(selection, now) else None
+        return selection if pursuits.draw_stands(selection, now, self.draw_lifetime) else None
 
     def retire_draw(self, now: dt.datetime) -> None:
         standing = self.standing_draw(now)
@@ -165,10 +176,15 @@ class Views:
         }
 
     def register(self) -> dict:
-        """The pursuits as declared and what the standing draw offers, with no app asked."""
+        """The pursuits as declared, which of them are in the draw, and what the standing draw offers, with no app asked."""
         config, now = self.registered(), self.now()
         standing = self.standing_draw(now) or {}
-        return {'pursuits': config.pursuits, 'offered': standing.get('offered', []), 'draw_id': standing.get('draw_id')}
+        return {
+            'pursuits': config.pursuits,
+            'active': sorted(name for name, declared in config.pursuits.items() if pursuits.is_active(declared, now.date())),
+            'offered': standing.get('offered', []),
+            'draw_id': standing.get('draw_id'),
+        }
 
     def context(self, now: dt.datetime) -> tuple[list[str], str | None]:
         """The lines above the draw, and why they could not be read where they could not, so a failed read never passes for a quiet day."""
@@ -213,6 +229,7 @@ class Views:
             item=body.get('item'),
             downstream=body.get('downstream'),
             now=now,
+            record_id=self.keyed(body),
             **self.author(body, recorded_by),
         )
         self.store.append([entry], recorded_by, now)
@@ -235,7 +252,9 @@ class Views:
         expires = now + dt.timedelta(days=days)
         standing = self.standing_draw(now) or {}
         extra = {'expires_at': expires.isoformat(), 'draw_id': standing.get('draw_id')}
-        entry = pursuits.new_record(journal.Event.SKIP, name, state, extra, now, **self.author(body, recorded_by))
+        entry = pursuits.new_record(
+            journal.Event.SKIP, name, state, extra, now, record_id=self.keyed(body), **self.author(body, recorded_by)
+        )
         self.store.append([entry], recorded_by, now)
         self.retire_draw(now)
         return {'entry': entry, 'days': days, 'until': expires.isoformat()}
@@ -272,6 +291,11 @@ class Views:
         """The machine and actor a write is recorded as: the client's, its machine spelled as a desk spells its own."""
         return {'machine': paths.canonical_machine(str(body.get('machine') or MACHINE)), 'identity': str(body.get('actor') or recorded_by)}
 
+    @staticmethod
+    def keyed(body: dict) -> str:
+        """The id the client made for this write, so a write sent again is stored once."""
+        return str(body['id']) if body.get('id') else ''
+
     def drift(self, since: str | None, until: str | None) -> dict:
         """`doit pursuits drift --json`: what each goal asked over a window, and what got done."""
         config, now = self.registered(), self.now()
@@ -298,6 +322,7 @@ class Views:
         watching = pursuits.watched(config.pursuits, now.date())
         observations = self.observations(config.pursuits, now, force=True)
         return {
+            'watched': sorted(watching, key=lambda name: -watching[name].get('weight', 0)),
             'observed': {name: when.isoformat() for name, when in evidence.observed(observations).items()},
             'errors': evidence.problems(observations),
             'undeclared': sorted(set(watching) - set(evidence.declared(watching))),
@@ -333,8 +358,8 @@ class Views:
             done_day = dt.date.fromisoformat(done_on)
         except ValueError:
             raise BadRequest(f'day={done_on!r} is not a date (YYYY-MM-DD)') from None
-        if done_day > now.date():
-            raise BadRequest(f'day={done_on!r} is later than today, and a completion records what has happened')
+        if done_day > now.astimezone(FURTHEST_AHEAD_ZONE).date():
+            raise BadRequest(f'day={done_on!r} is later than today anywhere, and a completion records what has happened')
         with self.store.write() as connection:
             added = self.store.add_completion(connection, entry, done_on, recorded_by, stamp(now))
         rows = review.statuses_of(config.review, self.store.review_stamps(), now.date(), None)
@@ -342,10 +367,16 @@ class Views:
         return {'entry': entry, 'done_on': done_on, 'added': bool(added), 'status': status}
 
     def nudge(self) -> dict:
-        """The interval the shell nudge waits between showings, when it last showed, and the entries it would show now."""
+        """Whether the shell nudge shows now, the interval it waits between showings, and the entries it would show."""
         held = self.store.nudge()
         due = [row for row in self.review('items')['entries'] if review.is_due(row['overdue'])]
-        return {**held, 'due': due[: review.NUDGE_MAX_ITEMS], 'due_total': len(due)}
+        return {
+            'interval_minutes': held.get('interval_minutes') or review.DEFAULT_NUDGE_MINUTES,
+            'last_nudged_at': held.get('last_nudged_at'),
+            'show': review.nudge_due(held, self.now()),
+            'due': due[: review.NUDGE_MAX_ITEMS],
+            'due_total': len(due),
+        }
 
     def set_nudge(self, interval_minutes: int | None, nudged_at: str | None) -> dict:
         if interval_minutes is not None and interval_minutes <= 0:
@@ -362,7 +393,7 @@ class Views:
         return dashboard.build_maintenance_lane({'review': sources.Result(source='local', payload=rows, exit_code=0)}, now.date())
 
     def kept(self, config: documents.Config, now: dt.datetime) -> happened.Kept:
-        """What doit keeps itself, as `happened.read_kept` reads it from a desk's files."""
+        """What doit keeps itself: the pursuit state and both review registers."""
         found = happened.Kept()
         if config.pursuits:
             found.state = self.state(config, now)
@@ -466,8 +497,7 @@ class Views:
         return stored
 
     def readings(self) -> list[forecast.Reading]:
-        names = {entry.name for entry in dc.fields(forecast.Reading)}
-        return [forecast.Reading(**{key: value for key, value in held.items() if key in names}) for held in self.store.readings()]
+        return [forecast.reading_from(held) for held in self.store.readings()]
 
     def forecast_list(self) -> list[dict]:
         return [dc.asdict(reading) for reading in self.readings()]

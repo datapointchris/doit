@@ -1,82 +1,51 @@
-"""Tests for doit.review — register loading, derived schedule status, and --json.
+"""Tests for doit.review — the register's schema, and the schedule status derived from it.
 
-The register and state paths are module constants read at call time, so an
-autouse fixture repoints them rather than the env-before-import dance the
-dotfiles version needed when this was a uv single-file script loaded by path.
-
-Tests that need recorded done-dates write a state file under tmp_path, because
-overdue days are derived from today and a committed state file would rot.
+The commands are tested against the service in `api/tests`. What is tested here
+is what both sides call: the parser and the derived status.
 """
 
 import datetime as dt
-import json
 import re
 from pathlib import Path
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from doit import review
+from doit.service_commands import review as review_commands
 
-FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'review'
-
-
-@pytest.fixture(autouse=True)
-def register(monkeypatch):
-    """Point at the committed fixture register and a state file that does not exist."""
-    monkeypatch.setattr(review, 'REGISTER', FIXTURE_DIR / 'register.yml')
-    monkeypatch.setattr(review, 'STATE', FIXTURE_DIR / 'does-not-exist-state.json')
+FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'review' / 'register.yml'
+TODAY = dt.date(2026, 8, 4)
 
 
-def write_state(tmp_path, monkeypatch, done_dates: dict) -> None:
-    """Point the module at a state file recording the given last-done dates."""
-    state_file = tmp_path / 'review-state.json'
-    state_file.write_text(json.dumps(done_dates))
-    monkeypatch.setattr(review, 'STATE', state_file)
+def registered(text: str | None = None) -> dict[str, dict]:
+    return review.register_from_document(yaml.safe_load(FIXTURE.read_text() if text is None else text))
 
 
-def test_load_items_reads_the_register():
-    items = review.load_items()
-    assert items is not None
+def test_the_register_reads_each_item_by_id():
+    items = registered()['items']
     assert set(items) == {'never-done', 'overdue-item', 'fresh-item'}
     assert items['overdue-item']['cadence'] == '1w'
     assert items['fresh-item']['show'] == 'echo fresh'
 
 
-def test_load_items_none_without_a_register(monkeypatch):
-    """None distinguishes "no register at all" from "a register with no items"."""
-    monkeypatch.setattr(review, 'REGISTER', FIXTURE_DIR / 'nope.yml')
-    assert review.load_items() is None
-
-
-def test_unknown_item_field_is_refused(tmp_path, monkeypatch):
+def test_unknown_item_field_is_refused():
     """A misspelled field would otherwise drop what the item declared without a word."""
-    register_file = tmp_path / 'register.yml'
-    register_file.write_text('items:\n  typo:\n    cadance: 1w\n')
-    monkeypatch.setattr(review, 'REGISTER', register_file)
-    with pytest.raises(review.RegisterError):
-        review.load_items()
-    assert CliRunner().invoke(review.app, ['list']).exit_code == 1
+    with pytest.raises(review.RegisterError, match='cadance'):
+        registered('items:\n  typo:\n    cadance: 1w\n')
 
 
 def test_statuses_never_done_reads_as_most_urgent():
-    rows = {row['id']: row for row in review.statuses()}
-    assert rows['never-done']['overdue'] is None
-    assert review.statuses()[0]['overdue'] is None
+    rows = review.statuses_of(registered(), {}, TODAY)
+    assert rows[0]['overdue'] is None
+    assert {row['id']: row for row in rows}['never-done']['due'] is True
 
 
-def test_statuses_orders_most_overdue_first(tmp_path, monkeypatch):
-    today = dt.date.today()
-    write_state(
-        tmp_path,
-        monkeypatch,
-        {
-            'overdue-item': (today - dt.timedelta(days=30)).isoformat(),
-            'fresh-item': today.isoformat(),
-        },
-    )
+def test_statuses_orders_most_overdue_first():
+    done = {'overdue-item': (TODAY - dt.timedelta(days=30)).isoformat(), 'fresh-item': TODAY.isoformat()}
 
-    rows = review.statuses()
+    rows = review.statuses_of(registered(), done, TODAY)
 
     assert [row['id'] for row in rows] == ['never-done', 'overdue-item', 'fresh-item']
     assert rows[1]['overdue'] == 23  # 30 days since done, 7-day cadence
@@ -92,107 +61,6 @@ def test_the_template_names_every_field_an_item_may_declare():
         assert re.search(rf'\b{field}\b', review.TEMPLATE), f'{field} is read by review and absent from its template'
 
 
-def test_orphaned_state_ids_names_history_a_rename_stranded(tmp_path, monkeypatch):
-    """Renaming an item strands its done-date under the old key, and the item
-    then reads as never done — the state that looks most like it needs doing."""
-    write_state(tmp_path, monkeypatch, {'overdue-item': '2026-01-01', 'old-name': '2026-01-01'})
-
-    assert review.orphaned_state_ids() == ['old-name']
-
-
-def test_list_json_emits_every_item_with_its_status(capsys):
-    assert review.cmd_list(as_json=True) == 0
-
-    rows = json.loads(capsys.readouterr().out)
-
-    assert len(rows) == 3, '--json emits the whole register, not just what is due'
-    assert set(rows[0]) == {
-        'id',
-        'block',
-        'cadence',
-        'cadence_days',
-        'desc',
-        'command',
-        'show',
-        'last',
-        'overdue',
-        'due',
-    }
-    # Never done reads overdue: null, which a consumer cannot filter on as due.
-    assert rows[0]['id'] == 'never-done'
-    assert rows[0]['overdue'] is None
-    assert rows[0]['due'] is True
-
-
-def test_list_json_is_parsable_without_a_register(monkeypatch, capsys):
-    """--json must always emit JSON; the prose hint would break a consumer."""
-    monkeypatch.setattr(review, 'REGISTER', FIXTURE_DIR / 'nope.yml')
-
-    assert review.cmd_list(as_json=True) == 0
-    assert json.loads(capsys.readouterr().out) == []
-
-
-def nudge_lines(capsys) -> list[str]:
-    """The nudge's non-blank output lines."""
-    return [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-
-
-def test_nudge_is_one_line_per_due_item(capsys):
-    """The nudge is a different density from `due`, not just a quieter one.
-
-    A line count is the regression guard that matters here: the nudge used to
-    reuse `render_item`, so each item silently cost four lines at shell startup.
-    """
-    assert review.cmd_nudge() == 0
-
-    lines = nudge_lines(capsys)
-    due = [row for row in review.statuses() if review.is_due(row['overdue'])]
-
-    assert len(lines) == len(due) + 2, 'one header, one line per due item, one trailer'
-    assert 'never-done' in lines[1]
-    assert 'echo overdue' in lines[2], 'the command a row carries is the point of the row'
-    assert not any('Has never been marked done' in line for line in lines), (
-        'descriptions are browse-time information and stay in `doit review due`'
-    )
-
-
-def test_nudge_caps_the_roster_and_says_so(tmp_path, monkeypatch, capsys):
-    """Overflow points at the browse view rather than printing itself."""
-    over_cap = review.NUDGE_MAX_ITEMS + 3
-    register_file = tmp_path / 'register.yml'
-    items = '\n'.join(f'  item-{i}:\n    description: d{i}\n    cadence: 1w' for i in range(over_cap))
-    register_file.write_text(f'items:\n{items}\n')
-    monkeypatch.setattr(review, 'REGISTER', register_file)
-
-    assert review.cmd_nudge() == 0
-
-    lines = nudge_lines(capsys)
-    assert len(lines) == review.NUDGE_MAX_ITEMS + 3, 'header, capped rows, +N more, trailer'
-    assert f'+{over_cap - review.NUDGE_MAX_ITEMS} more' in lines[-2]
-
-
-def test_nudge_clips_long_commands_rather_than_wrapping(tmp_path, monkeypatch, capsys):
-    """A wrapped row is two lines, which is how the nudge grew in the first place."""
-    register_file = tmp_path / 'register.yml'
-    register_file.write_text('items:\n  long-one:\n    description: d\n    cadence: 1w\n    command: ' + 'x' * 200 + '\n')
-    monkeypatch.setattr(review, 'REGISTER', register_file)
-    monkeypatch.setenv('COLUMNS', '60')
-
-    assert review.cmd_nudge() == 0
-
-    rows = nudge_lines(capsys)
-    assert all(len(row) <= 60 for row in rows), rows
-
-
-def test_nudge_is_silent_when_nothing_is_due(tmp_path, monkeypatch, capsys):
-    """A nudge you don't notice on a clear day is one you'll read on a busy one."""
-    today = dt.date.today().isoformat()
-    write_state(tmp_path, monkeypatch, {'never-done': today, 'overdue-item': today, 'fresh-item': today})
-
-    assert review.cmd_nudge() == 0
-    assert capsys.readouterr().out == ''
-
-
 def test_parse_duration_minutes():
     assert review.parse_duration_minutes('4h') == 240
     assert review.parse_duration_minutes('90m') == 90
@@ -204,7 +72,7 @@ def test_parse_duration_minutes():
 
 def test_nudge_every_rejects_an_unparsable_duration():
     """A bad value is a usage error, which typer.BadParameter is what earns."""
-    result = CliRunner().invoke(review.app, ['nudge-every', 'soon'])
+    result = CliRunner().invoke(review_commands.app, ['nudge-every', 'soon'])
 
     assert result.exit_code == 2
     assert 'expected a duration' in result.output

@@ -11,28 +11,31 @@ apart.
 """
 
 import datetime as dt
-import json
 from pathlib import Path
 
 import pytest
 
 from doit import forecast
-from doit import journal
-from doit import paths
 from doit import pursuits
 
-FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'pursuits'
+FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'pursuits' / 'pursuits.yml'
 NOW = dt.datetime.fromisoformat('2026-08-04T12:00:00-04:00')
 
 
-@pytest.fixture(autouse=True)
-def register(monkeypatch, tmp_path):
-    monkeypatch.setattr(pursuits, 'REGISTER', FIXTURE_DIR / 'pursuits.yml')
-    monkeypatch.setattr(paths, 'JOURNAL_DIR', tmp_path / 'state')
-    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
-    monkeypatch.setattr(pursuits, 'machine_name', lambda: 'testbox')
-    monkeypatch.setattr(forecast, 'machine_name', lambda: 'testbox')
-    return tmp_path
+def parsed(text: str) -> dict:
+    return pursuits.parse_register(text, 'pursuits.yml')
+
+
+def registered() -> dict:
+    return pursuits.pursuits_from_document(parsed(FIXTURE.read_text()), FIXTURE)
+
+
+def taken(budget: float, replicates: int) -> forecast.Reading:
+    """A forecast of the fixture register on a fresh journal, as the service takes one."""
+    register = registered()
+    written: list[dict] = []
+    live = pursuits.build_state(register, NOW, append=written.extend, machine='testbox')
+    return forecast.forecast_from(register, NOW, budget, live, written, [], replicates, machine='testbox')
 
 
 def done(pursuit: str, minutes: int | None = None, days_ago: float = 0.0) -> dict:
@@ -121,12 +124,12 @@ def test_an_unpriced_pursuit_still_costs_something():
     assert spent == [('ghost', float(forecast.FALLBACK_MINUTES))]
 
 
-def test_the_simulation_feeds_its_own_logs_back_into_the_next_day(register):
+def test_the_simulation_feeds_its_own_logs_back_into_the_next_day():
     # The loop that makes this worth simulating: a log pays off that pursuit's
     # balance, which changes what is owed tomorrow and so what heads the list.
-    active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
+    active = pursuits.build_state(registered(), NOW)['active']
     cost = forecast.durations(active, [])
-    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 5, 120, replicate=1)
+    run = forecast.simulate(registered(), [], {}, cost, NOW, 5, 120, replicate=1)
     assert run
     assert {day for day, _, _ in run} <= set(range(5))
     # Nothing is done twice in one day: the draw samples without replacement.
@@ -135,34 +138,34 @@ def test_the_simulation_feeds_its_own_logs_back_into_the_next_day(register):
         assert len(names) == len(set(names))
 
 
-def test_the_simulation_reaches_the_pursuit_the_real_draw_pins(register):
+def test_the_simulation_reaches_the_pursuit_the_real_draw_pins():
     # `chores` has never been done, so the live allocator pins it. It is lighter
     # than the two pursuits ahead of it, so it waits a day for the budget, and a
     # forecast that never offered it would mean the simulation had stopped
     # running the same draw.
-    active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
+    active = pursuits.build_state(registered(), NOW)['active']
     cost = forecast.durations(active, [])
-    run = forecast.simulate(pursuits.load_pursuits(), [], {}, cost, NOW, 3, 120, replicate=1)
+    run = forecast.simulate(registered(), [], {}, cost, NOW, 3, 120, replicate=1)
     assert 'chores' in {name for _, name, _ in run}
 
 
-def test_a_forecast_predicts_every_active_pursuit_at_every_horizon(register):
-    result = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=5)
-    active = pursuits.build_state(pursuits.load_pursuits(), NOW)['active']
+def test_a_forecast_predicts_every_active_pursuit_at_every_horizon():
+    result = taken(120, replicates=5)
+    active = pursuits.build_state(registered(), NOW)['active']
     for days in forecast.HORIZONS:
         assert set(result.horizons[str(days)]) == set(active)
     assert 'paused-thing' not in result.horizons['7']
 
 
-def test_a_longer_horizon_never_predicts_fewer_occasions(register):
-    result = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=5)
+def test_a_longer_horizon_never_predicts_fewer_occasions():
+    result = taken(120, replicates=5)
     for name in result.horizons['7']:
         assert result.horizons['30'][name]['occasions'] >= result.horizons['7'][name]['occasions']
 
 
-def test_a_bigger_budget_never_predicts_less_work(register):
-    lean = forecast.forecast(pursuits.load_pursuits(), NOW, 60, replicates=5)
-    rich = forecast.forecast(pursuits.load_pursuits(), NOW, 240, replicates=5)
+def test_a_bigger_budget_never_predicts_less_work():
+    lean = taken(60, replicates=5)
+    rich = taken(240, replicates=5)
 
     def total(result):
         return sum(row['occasions'] for row in result.horizons['30'].values())
@@ -170,26 +173,15 @@ def test_a_bigger_budget_never_predicts_less_work(register):
     assert total(rich) > total(lean)
 
 
-def test_the_first_forecast_on_a_fresh_journal_reads_the_sightings_it_wrote(register):
-    # Seeded without them, every simulated day puts a never-zeroed pursuit's
-    # start one interval back from that day, so it never builds a backlog.
-    (register / 'state').mkdir()
-
-    first = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=3)
-    again = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=3)
-
-    assert first.horizons == again.horizons
-
-
-def test_a_reading_records_where_each_duration_came_from(register):
-    result = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=5)
+def test_a_reading_records_where_each_duration_came_from():
+    result = taken(120, replicates=5)
     assert {value['source'] for value in result.durations.values()} <= {'measured', 'default'}
 
 
-def test_a_reading_carries_what_each_goal_asks_over_each_horizon(register):
+def test_a_reading_carries_what_each_goal_asks_over_each_horizon():
     # Stored beside the prediction, because the register can move after the
     # reading is taken and the comparison has to be against the goal it ran on.
-    result = forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=3)
+    result = taken(120, replicates=3)
 
     week = result.horizons['7']
     assert (week['chores']['asked'], week['chores']['unit']) == (1.0, 'checkoffs')
@@ -225,40 +217,13 @@ def test_an_estimate_names_its_source_in_full(capsys):
     assert row.split()[-2:] == ['45m', 'default']
 
 
-def test_a_reading_round_trips_through_the_store(tmp_path):
-    stored = reading(NOW, {'7': {'chores': {'occasions': 1.0, 'minutes': 25.0}}})
-    path = forecast.reading_path(tmp_path, 'testbox')
-    forecast.append(path, stored)
-    assert forecast.read_all(tmp_path) == [stored]
-
-
-def test_a_half_synced_line_does_not_make_the_rest_unreadable(tmp_path):
-    path = forecast.reading_path(tmp_path, 'testbox')
-    forecast.append(path, reading(NOW, {}))
-    with path.open('a') as handle:
-        handle.write('{"generated": broken\n')
-    assert len(forecast.read_all(tmp_path)) == 1
-
-
-def test_readings_from_every_machine_are_merged_oldest_first(tmp_path):
-    forecast.append(forecast.reading_path(tmp_path, 'b'), reading(NOW, {}, machine='b'))
-    forecast.append(forecast.reading_path(tmp_path, 'a'), reading(NOW - dt.timedelta(days=1), {}, machine='a'))
-    assert [row.machine for row in forecast.read_all(tmp_path)] == ['a', 'b']
-
-
-def test_select_takes_the_newest_when_no_handle_is_given(tmp_path):
-    path = forecast.reading_path(tmp_path, 'testbox')
-    forecast.append(path, reading(NOW - dt.timedelta(days=2), {}))
-    forecast.append(path, reading(NOW, {}))
-    selected = forecast.select(forecast.read_all(tmp_path))
+def test_select_takes_the_newest_when_no_handle_is_given():
+    selected = forecast.select([reading(NOW - dt.timedelta(days=2), {}), reading(NOW, {})])
     assert selected is not None and selected.generated == NOW.isoformat()
 
 
-def test_a_handle_selects_by_timestamp_prefix(tmp_path):
-    path = forecast.reading_path(tmp_path, 'testbox')
-    forecast.append(path, reading(NOW - dt.timedelta(days=2), {}))
-    forecast.append(path, reading(NOW, {}))
-    selected = forecast.select(forecast.read_all(tmp_path), '2026-08-02')
+def test_a_handle_selects_by_timestamp_prefix():
+    selected = forecast.select([reading(NOW - dt.timedelta(days=2), {}), reading(NOW, {})], '2026-08-02')
     assert selected is not None and selected.generated.startswith('2026-08-02')
 
 
@@ -304,54 +269,13 @@ def test_the_worst_prediction_is_reported_first():
     assert [v.pursuit for v in forecast.grade(stored, [], NOW, 7)] == ['b', 'a']
 
 
-def test_run_stores_a_reading_and_show_reads_it_back(register, tmp_path, capsys):
-    assert forecast.cmd_run(as_json=False, budget=120, directory=tmp_path) == 0
-    capsys.readouterr()
-    assert forecast.cmd_show('', as_json=True, directory=tmp_path) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload['budget_minutes'] == 120
-    assert payload['horizons']['30']
-
-
-def test_the_budget_flag_overrides_the_register(register, tmp_path, capsys):
-    assert forecast.cmd_run(as_json=True, budget=45, directory=tmp_path) == 0
-    assert json.loads(capsys.readouterr().out)['budget_minutes'] == 45
-
-
-def test_show_without_a_stored_reading_says_how_to_take_one(tmp_path, capsys):
-    assert forecast.cmd_show('', as_json=False, directory=tmp_path) == 1
-    assert 'forecast run' in capsys.readouterr().err
-
-
-@pytest.mark.parametrize('as_json', [False, True])
-def test_trend_before_anything_has_matured_fails_on_stderr(register, tmp_path, capsys, as_json):
-    forecast.append(forecast.reading_path(tmp_path, 'testbox'), reading(dt.datetime.now().astimezone(), {}))
-    assert forecast.cmd_trend(7, as_json=as_json, directory=tmp_path) == 1
-    captured = capsys.readouterr()
-    assert captured.out == ''
-    assert captured.err
-
-
-def test_the_forecast_reads_the_budget_from_the_register(tmp_path, monkeypatch):
-    path = tmp_path / 'pursuits.yml'
-    path.write_text('forecast:\n  budget_minutes: 90\npursuits:\n  a:\n    weight: 5\n')
-    assert pursuits.load_settings(path) == {'budget_minutes': 90}
+def test_the_forecast_reads_the_budget_from_the_register():
+    document = parsed('forecast:\n  budget_minutes: 90\npursuits:\n  a:\n    weight: 5\n')
+    assert pursuits.settings_from_document(document, 'pursuits.yml') == {'budget_minutes': 90}
 
 
 @pytest.mark.parametrize('bad', ['0', '-1', 'true', 'lots'])
-def test_a_budget_that_is_not_a_positive_whole_number_is_refused(tmp_path, bad):
-    path = tmp_path / 'pursuits.yml'
-    path.write_text(f'forecast:\n  budget_minutes: {bad}\npursuits:\n  a:\n    weight: 5\n')
+def test_a_budget_that_is_not_a_positive_whole_number_is_refused(bad):
+    document = parsed(f'forecast:\n  budget_minutes: {bad}\npursuits:\n  a:\n    weight: 5\n')
     with pytest.raises(pursuits.RegisterError, match='budget_minutes'):
-        pursuits.load_settings(path)
-
-
-def test_a_register_with_no_forecast_block_has_no_settings(tmp_path):
-    path = tmp_path / 'pursuits.yml'
-    path.write_text('pursuits:\n  a:\n    weight: 5\n')
-    assert pursuits.load_settings(path) == {}
-
-
-def test_a_simulated_journal_never_touches_the_real_one(register, tmp_path):
-    forecast.forecast(pursuits.load_pursuits(), NOW, 120, replicates=3)
-    assert journal.read_all(tmp_path / 'state') == []
+        pursuits.settings_from_document(document, 'pursuits.yml')

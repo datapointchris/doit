@@ -15,7 +15,7 @@ lives with the dashboard rather than in config. Adapters are the migration path,
 not the design: every one of them is a source that has not yet been asked to
 speak the contract.
 
-Rejected: expressing the mapping in `sources.yml` as paths and format strings.
+Rejected: expressing the mapping in the sources document as paths and format strings.
 That is a template language rebuilt in YAML, it could not express a label chosen
 by a boolean without growing conditionals, and it puts the burden on the consumer
 forever rather than on the producer once.

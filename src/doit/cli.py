@@ -6,11 +6,14 @@ tree is built this way. Each subcommand module owns its own `app`; this file
 only assembles them.
 """
 
+import os
 import sys
 from typing import Annotated
 from typing import Any
 
 import typer
+from pyclilogin import LoginError
+from pyclilogin.typercmd import add_auth_commands
 from pyselfupdate import Config
 from pyselfupdate import notify
 from pyselfupdate.typercmd import add_update_command
@@ -18,19 +21,22 @@ from typer.core import TyperGroup
 
 from doit import __version__
 from doit import content
-from doit import dashboard
+from doit import desk_import
 from doit import find
-from doit import forecast
-from doit import happened
 from doit import labs
-from doit import pursuits
-from doit import review
+from doit import service
 from doit import shell
-from doit import sources
-from doit import today
 from doit import tools
 from doit import workflows
+from doit.render import error_console
 from doit.render import set_no_input
+from doit.service_commands import dashboard
+from doit.service_commands import forecast
+from doit.service_commands import happened
+from doit.service_commands import pursuits
+from doit.service_commands import review
+from doit.service_commands import sources
+from doit.service_commands import today
 
 TAGLINE = 'What to do now, and everything that decides it.'
 
@@ -52,6 +58,9 @@ Examples:
     doit review due    every review and practice item due; the dashboard shows three
 
 **next** and **dashboard** are separate systems. They meet only on the dashboard.
+
+doit's service holds your pursuits and computes every view, so a new machine runs
+`doit auth login <url>` once.
 """
 
 
@@ -147,6 +156,8 @@ app.add_typer(find.kit_app, name='kit')
 app.add_typer(shell.app, name='shell')
 app.add_typer(sources.app, name='sources')
 app.add_typer(content.app, name='content')
+app.command('import')(desk_import.import_command)
+add_auth_commands(app, service.LOGIN)
 
 
 def version_callback(asked: bool) -> None:
@@ -198,5 +209,37 @@ def root(
         notify(UPDATE_CONFIG)
 
 
+# Variables that chose which desk files doit read and wrote. The service holds
+# that data, so one still set names a target nothing reads, and is refused.
+RETIRED_VARIABLES = {
+    'DOIT_JOURNAL_DIR': '--state-dir',
+    'DOIT_REVIEW_STATE': '--state-dir',
+    'DOIT_PURSUITS': '--config-dir',
+    'DOIT_REGISTER': '--config-dir',
+    'DOIT_SOURCES': '--config-dir',
+}
+
+# What a command exits with when no answer came, the one failure the same command run later can outlast.
+NO_ANSWER_EXIT = 4
+
+
+def retired_variable_set() -> str:
+    """The refusal for the first retired variable still set, or '' where none is."""
+    for variable, flag in RETIRED_VARIABLES.items():
+        if os.environ.get(variable):
+            return (
+                f'${variable} is set, and doit reads its records from its service instead. '
+                f'Unset it, then hand the folder it names to `doit import {flag} <folder>` once.'
+            )
+    return ''
+
+
 def main() -> None:
-    app()
+    if refusal := retired_variable_set():
+        error_console.print(f'doit: {refusal}', soft_wrap=True, markup=False)
+        raise SystemExit(2)
+    try:
+        app()
+    except (service.ServiceFailed, LoginError) as failure:
+        error_console.print(f'doit: {failure}', soft_wrap=True, markup=False)
+        raise SystemExit(NO_ANSWER_EXIT if isinstance(failure, service.NoAnswer) else 1) from None

@@ -44,7 +44,7 @@ def factory():
         GitHub(settings.github),
         settings.clickhouse,
     )
-    views = Views(store, readers)
+    views = Views(store, readers, draw_lifetime=settings.draw_lifetime)
     return create_app(
         settings=settings,
         store=store,

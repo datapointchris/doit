@@ -191,6 +191,8 @@ wheels = [
 name = "doit"
 source = { editable = "../" }
 dependencies = [
+    { name = "httpx2" },
+    { name = "pyclilogin" },
     { name = "pyselfupdate", extra = ["typer"] },
     { name = "pyyaml" },
     { name = "rich" },
@@ -199,6 +201,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx2", specifier = ">=2.9.1" },
+    { name = "pyclilogin", specifier = ">=0.2.0" },
     { name = "pyselfupdate", extras = ["typer"], specifier = ">=0.5.4" },
     { name = "pyyaml" },
     { name = "rich", specifier = ">=13.0.0" },
@@ -473,15 +477,15 @@ fastapi = [
 
 [[package]]
 name = "pyclilogin"
-version = "0.1.1"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx2" },
     { name = "keyring" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b3/93/6d6429a3ed04f85610370291a872b20675d7b51131f0d9d08db2b0648c72/pyclilogin-0.1.1.tar.gz", hash = "sha256:6fe6f4fc08688aa91e79a5d2d03e6509e286284849c576777fb9f84344acc3d0", size = 28842, upload-time = "2026-11-02T15:24:32.133Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/78/04/c12b2b0719df2f37407f3de9ceb1ff8ef00d64937118ce3f61f99e6998bb/pyclilogin-0.2.0.tar.gz", hash = "sha256:f5bd26058b344469a0f04f4d3e69c199d20d8dd62da0da7a80472921e2e47974", size = 29084, upload-time = "2026-11-02T18:41:53.558Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cb/de/cd8b389c07081eab5bb7575f53fb49bd93410b3ccb2d4aa638ff97526022/pyclilogin-0.1.1-py3-none-any.whl", hash = "sha256:8e56e78abddd06c96ead16aeffd0d339baa723fd05b5bf02ce7a02382f276362", size = 33126, upload-time = "2026-11-02T15:24:31.091Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/c4/6b97b31750f5e2d594b2e6dfef9f2a7523c2b711da851f81f51e5bde98f9/pyclilogin-0.2.0-py3-none-any.whl", hash = "sha256:1e70fbee52b9b946ef2f8166afbcbf727c2980be7f784c92c40816b5184e3ea4", size = 33311, upload-time = "2026-11-02T18:41:52.321Z" },
 ]
 
 [[package]]

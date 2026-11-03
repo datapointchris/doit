@@ -1,8 +1,8 @@
 """Which apps doit asks, and what to do when one of them cannot answer.
 
-doit must not know which apps exist. Adding one is an edit to `sources.yml`,
-never a release — that file is the only place the set of backends is written
-down, and nothing here imports a backend by name.
+doit must not know which sources a person asks. The sources document is the only
+place that set is written down, so turning one on or off is an edit, never a
+release, and nothing here imports a backend by name.
 
 Two kinds of source, and the difference is whose job the shape is:
 
@@ -14,19 +14,19 @@ because its other consumers render the same data completely differently.
 
 The adapter also carries the command it reads. The command and the shape are
 one contract with the tool, so they live together in code, where a sweep for a
-renamed flag finds them. A `sources.yml` entry names the adapter and says
+renamed flag finds them. An entry in the sources document names the adapter and says
 nothing of its command; one that restates it is told to delete the line.
 
 **Conforming** — the source emits a lane document (see `doit.lanes`) directly and
-doit renders it with no adapter. Available, and the right choice only for a tool
-whose entire reason to exist is feeding this dashboard.
+doit renders it with no adapter. The service reads apps over HTTP and runs no
+command, so it refuses a conforming source declared as one. Each refusal is the
+source's lane, unavailable, saying so.
 
 Two blocks, and the difference is which question the entry answers. `sources:`
 answers what is outstanding and feeds `doit dashboard`. `completions:` answers
 what happened over a window and feeds `doit happened` and `doit today`. An
-entry in either is the same `Source`, so one parser, one runner and one failure
-policy serve both — the block an entry sits in is the whole of what
-distinguishes it.
+entry in either is the same `Source`, so one parser and one failure policy serve
+both — the block an entry sits in is the whole of what distinguishes it.
 
 A completions command needs the window it answers for, and `{since}` and
 `{until}` are the only tokens substituted into one. `resolved_command` carries
@@ -38,37 +38,17 @@ that is configured but missing gets a single line naming it. One that runs and
 fails shows its error. A configured lane is never silently dropped.
 """
 
-import datetime as dt
-import json
-import os
-import re
 import shlex
-import subprocess
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from dataclasses import field
 from enum import StrEnum
-from pathlib import Path
-from typing import Annotated
 
-import typer
-import yaml
 from rich.text import Text
 
 from doit import lanes
-from doit.editor import open_in_editor
-from doit.paths import xdg_config_home
 from doit.render import console
-from doit.render import error_console
 from doit.window import Bounds
-from doit.window import day_of
-
-SOURCES = Path(os.environ.get('DOIT_SOURCES') or xdg_config_home() / 'doit' / 'sources.yml')
-
-# Generous against a measured happy path of well under a second. The sources run
-# concurrently, so this is the worst-case total rather than a per-source penalty.
-DEFAULT_TIMEOUT_SECONDS = 5.0
 
 # The substitutions a command may ask for. `resolved_command` says what they
 # match against.
@@ -78,19 +58,17 @@ UNTIL_PLACEHOLDER = '{until}'
 TEMPLATE = """\
 # Which apps doit asks, and what it asks them.
 #
-# doit does not know which apps exist — this file is the only place that says.
-# Adding one is an edit here, never a release.
+# This is the only place that says which sources doit asks, so turning one on
+# or off is an edit here, never a release.
 #
-#   adapter   name a Python adapter in doit; it knows the command to run and
-#             shapes that command's own model into lanes
-#   command   argv to run, for a source with no adapter; it must print a lane
-#             document on stdout
-#   timeout   seconds to wait (default: the adapter's own, else 5)
+#   adapter   name an adapter in doit; the service reads its app over HTTP and
+#             the adapter shapes the answer into lanes
+#   command   argv printing a lane document, for a source with no adapter; the
+#             service runs no command, so it shows the source as failed
 #   lanes     optional; restricts which of a source's lanes are shown
 #
-# A source emitting doit's own lane document needs no adapter. Run
-# `doit sources contract` for the shape, or `doit dashboard --json` for a
-# worked example.
+# `doit sources contract` prints the lane document every source becomes, and
+# `doit dashboard --json` a worked example.
 
 # What is outstanding. Read by `doit dashboard`.
 sources:
@@ -101,9 +79,7 @@ sources:
     adapter: learning
 
 # What happened over a window. Read by `doit happened`, and by `doit today` for
-# the day. Same four settings, and `{since}` and `{until}` in place of an argv
-# part of a command become the window's ends as RFC 3339 instants — a whole
-# part only, so a backend gets each as its own argument.
+# the day. Same three settings, and each adapter asks its app for the window.
 completions:
   icb-habits:
     adapter: icb-habits
@@ -114,11 +90,7 @@ completions:
 
 
 class Failure(StrEnum):
-    NOT_CONFIGURED = 'not-configured'
-    NOT_INSTALLED = 'not-installed'
-    TIMED_OUT = 'timed-out'
     FAILED = 'failed'
-    UNREADABLE = 'unreadable'
 
 
 @dataclass(frozen=True)
@@ -127,7 +99,6 @@ class Source:
 
     id: str
     command: list[str]
-    timeout: float = DEFAULT_TIMEOUT_SECONDS
     adapter: str = ''
     lanes: tuple[str, ...] = ()
 
@@ -141,7 +112,6 @@ class Result:
     exit_code: int | None = None
     stderr: str = ''
     failure: Failure | None = None
-    timeout: float | None = None
     # The window the call was asked about, so an adapter filters to the same one.
     bounds: Bounds | None = None
 
@@ -200,34 +170,25 @@ def parse_block(declared: object, block: str, problems: list[str]) -> dict[str, 
         found[name] = Source(
             id=name,
             command=[str(part) for part in command],
-            timeout=float(config.get('timeout') or (adapter.timeout if adapter else None) or DEFAULT_TIMEOUT_SECONDS),
             adapter=adapter_name,
             lanes=tuple(config.get('lanes') or ()),
         )
     return found
 
 
-def load(path: Path | None = None) -> Registry:
-    """Read `sources.yml`, both blocks.
-
-    A block that is absent is an empty map rather than an error. A machine with
-    no `completions:` block gets `doit today` without the groups those sources
-    would list, rather than a warning it cannot act on.
-
-    An id used in both blocks is a problem rather than two entries. `fetch` keys
-    its results by id, so the two commands collide on one result and the lane
-    the loser would have built disappears with nothing said. `icb` and `meso`
-    are plausible in either block, which is what makes the collision reachable
-    rather than theoretical.
-    """
-    path = SOURCES if path is None else path
-    if not path.exists():
-        return Registry()
-    return registry_from_document(yaml.safe_load(path.read_text()) or {})
-
-
 def registry_from_document(document: dict) -> Registry:
-    """Both blocks of a parsed `sources.yml`, as :func:`load` describes."""
+    """Both blocks of a parsed sources document.
+
+    A block that is absent is an empty map rather than an error. A register
+    with no `completions:` block gets `doit today` without the groups those
+    sources would list, rather than a warning nobody can act on.
+
+    An id used in both blocks is a problem rather than two entries. A round's
+    results are keyed by id, so the two reads collide on one result and the
+    lane the loser would have built disappears with nothing said. `icb` and
+    `meso` are plausible in either block, which is what makes the collision
+    reachable rather than theoretical.
+    """
     registry = Registry()
     registry.sources = parse_block(document.get('sources'), 'sources', registry.problems)
     registry.completions = parse_block(document.get('completions'), 'completions', registry.problems)
@@ -256,91 +217,17 @@ def resolved_command(command: list[str], bounds: Bounds) -> list[str]:
     return [ends.get(part, part) for part in command]
 
 
-def run(source: Source, bounds: Bounds) -> Result:
-    command = resolved_command(source.command, bounds)
-    try:
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=source.timeout, check=False)
-    except FileNotFoundError:
-        return Result(source=source.id, failure=Failure.NOT_INSTALLED, bounds=bounds)
-    except subprocess.TimeoutExpired:
-        return Result(source=source.id, failure=Failure.TIMED_OUT, timeout=source.timeout, bounds=bounds)
-    except OSError as error:
-        # A file without its execute bit, among others. One source that cannot
-        # start costs its own lane, never every other source in the round.
-        return Result(source=source.id, stderr=str(error), failure=Failure.FAILED, bounds=bounds)
-
-    stderr = completed.stderr.strip()
-    if completed.returncode != 0:
-        return Result(source=source.id, exit_code=completed.returncode, stderr=stderr, failure=Failure.FAILED, bounds=bounds)
-    try:
-        return Result(source=source.id, payload=json.loads(completed.stdout), exit_code=0, stderr=stderr, bounds=bounds)
-    except json.JSONDecodeError:
-        return Result(source=source.id, exit_code=0, stderr=stderr, failure=Failure.UNREADABLE, bounds=bounds)
-
-
-def fetch(sources: list[Source], bounds: Bounds | None = None) -> dict[str, Result]:
-    """Every source, concurrently, each asked about `bounds`, today where none is given. Only what was asked for is called."""
-    if not sources:
-        return {}
-    asked = bounds or day_of(dt.datetime.now().astimezone())
-    with ThreadPoolExecutor(max_workers=len(sources)) as pool:
-        return {result.source: result for result in pool.map(lambda source: run(source, asked), sources)}
-
-
 def first_line(text: str) -> str:
     return text.strip().splitlines()[0] if text.strip() else ''
 
 
 def reason(name: str, result: Result | None) -> str:
-    """Turn a failed call into one actionable line."""
+    """Turn a failed read into one actionable line."""
     if result is None:
         return f'{name} was not queried'
-    if result.failure is Failure.NOT_CONFIGURED:
-        return f'{name} is not in sources.yml'
-    if result.failure is Failure.NOT_INSTALLED:
-        return f'{name} is not installed on this machine'
-    if result.failure is Failure.TIMED_OUT:
-        return f'{name} timed out after {result.timeout:g}s'
-    if result.failure is Failure.UNREADABLE:
-        return f'{name} did not return JSON'
     if result.failure is Failure.FAILED:
-        # Exit 2 is a usage error across these CLIs. Either side can be the
-        # stale one, an old binary or a command written for one, so the tool's
-        # own words say which flag or verb it refused.
-        if result.exit_code == 2:
-            program, *args = result_command(name)
-            refused = error_line(result.stderr)
-            return f'{program}: {refused}' if refused else f'{program} rejected `{" ".join(args)}`'
-        return first_line(result.stderr) or f'{name} exited {result.exit_code}'
+        return first_line(result.stderr) or f'{name} failed'
     return ''
-
-
-def rejected(result: Result) -> bool:
-    """Whether the tool refused the command itself, as opposed to failing to answer it."""
-    return result.failure is Failure.FAILED and result.exit_code == 2
-
-
-def error_line(stderr: str) -> str:
-    """The stderr line stating the error, without its `Error:` label.
-
-    The first line opening with `error` where there is one, since a CLI may print
-    usage or a runner's progress ahead of it. The first line otherwise.
-    """
-    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
-    stated = next((line for line in lines if line.lower().startswith('error')), lines[0] if lines else '')
-    return re.sub(r'^error:\s*', '', stated, flags=re.IGNORECASE)
-
-
-def result_command(name: str) -> list[str]:
-    """The configured argv for a source id, for use in an error message.
-
-    The id alone when nothing configures it. Both blocks, because an id is
-    unique across the file and a caller holding a failed `Result` has no idea
-    which block the entry came from.
-    """
-    registry = load()
-    source = registry.sources.get(name) or registry.completions.get(name)
-    return list(source.command) if source else [name]
 
 
 @dataclass(frozen=True)
@@ -348,28 +235,20 @@ class Adapter:
     """The command a non-conforming tool is asked, and what turns its answer into lanes.
 
     Registered by the module that owns the knowledge, so this file imports no
-    backend. `{since}` and `{until}` in the command are substituted as
-    `resolved_command` says.
-
-    `timeout` is how long the tool may take, where it budgets itself longer
-    than the default. It belongs with the command for the same reason the
-    command does: a caller's limit below the tool's own cuts the tool off while
-    it still counts itself healthy, and a copy in `sources.yml` is one nobody
-    revisits when the tool's budget moves.
+    backend. The service reads the same answer over HTTP, so the command is the
+    one a person types for the tool's own view. `{since}` and `{until}` in it are
+    substituted as `resolved_command` says.
     """
 
     command: tuple[str, ...]
     build: Callable[[Result], list[lanes.Lane]]
-    timeout: float | None = None
 
 
 ADAPTERS: dict[str, Adapter] = {}
 
 
-def register_adapter(
-    name: str, command: tuple[str, ...], build: Callable[[Result], list[lanes.Lane]], timeout: float | None = None
-) -> None:
-    ADAPTERS[name] = Adapter(command, build, timeout)
+def register_adapter(name: str, command: tuple[str, ...], build: Callable[[Result], list[lanes.Lane]]) -> None:
+    ADAPTERS[name] = Adapter(command, build)
 
 
 def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
@@ -384,7 +263,7 @@ def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
     if not built and source.adapter:
         adapter = ADAPTERS.get(source.adapter)
         if adapter is None:
-            missing = f'this doit has no adapter named {source.adapter} — update doit, or correct `adapter:` in sources.yml'
+            missing = f'this doit has no adapter named {source.adapter} — update doit, or correct `adapter:` with doit sources edit'
         else:
             built = adapter.build(result)
     if source.lanes:
@@ -398,46 +277,6 @@ def lanes_from(source: Source, result: Result) -> list[lanes.Lane]:
             return [lanes.unavailable(name, name.upper(), why) for name in source.lanes]
         built = [lane for lane in built if lane.name in source.lanes]
     return built
-
-
-app = typer.Typer(name='sources', no_args_is_help=True, help='Which apps doit asks, and what it asks them.')
-
-
-@app.command('list')
-def list_command(
-    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
-) -> None:
-    """Every configured source, and whether it answers.
-
-    Exits 3 when an installed tool rejects the command a source runs. That
-    break waits on a person, whereas a tool that is absent, logged out or slow
-    is reported and exits 0.
-    """
-    registry = load()
-    for problem in registry.problems:
-        error_console.print(Text(f'sources.yml: {problem}', style='yellow'))
-    if not registry.sources and not registry.completions:
-        if as_json:
-            print(json.dumps([], indent=2))
-            raise typer.Exit(0)
-        console.print(Text(f'No sources configured in {SOURCES}.'))
-        console.print('Write one with [cyan]doit sources edit[/].')
-        raise typer.Exit(0)
-
-    # One call for the whole file, so the two blocks cost what the slower of
-    # them costs rather than the sum.
-    everything = list(registry.sources.values()) + list(registry.completions.values())
-    results = fetch(everything)
-    outstanding = [answer('outstanding', source, results[name]) for name, source in registry.sources.items()]
-    happened = [answer('happened', source, results[name]) for name, source in registry.completions.items()]
-    code = 3 if any(rejected(result) for result in results.values()) else 0
-    if as_json:
-        print(json.dumps(outstanding + happened, indent=2))
-        raise typer.Exit(code)
-    width = max(len(source.id) for source in everything)
-    report_block('outstanding', outstanding, width)
-    report_block('happened', happened, width)
-    raise typer.Exit(code)
 
 
 def answer(block: str, source: Source, result: Result) -> dict[str, object]:
@@ -482,44 +321,3 @@ def report_block(title: str, answers: list[dict[str, object]], width: int) -> No
         else:
             line.append('  answered, but offered no lanes', style='yellow')
         console.print(line, no_wrap=True, overflow='ellipsis')
-
-
-@app.command('example')
-def example_command() -> None:
-    """Print an annotated sources.yml without writing a file."""
-    print(TEMPLATE)
-    raise typer.Exit(0)
-
-
-@app.command('edit')
-def edit_command() -> None:
-    """Edit sources.yml in $EDITOR, creating it from the example if absent."""
-    if not SOURCES.exists():
-        SOURCES.parent.mkdir(parents=True, exist_ok=True)
-        SOURCES.write_text(TEMPLATE)
-    open_in_editor(SOURCES)
-    raise typer.Exit(0)
-
-
-@app.command('contract')
-def contract_command() -> None:
-    """The lane document a source may emit, as an annotated example.
-
-    This is the interface. A tool printing this shape needs no adapter, no
-    mapping and no release of doit to appear on the dashboard.
-    """
-    example = lanes.to_document(
-        [
-            lanes.Lane(
-                name='trips',
-                title='TRIPS',
-                meta='2 planned',
-                rows=[lanes.Row(label='next', text='Lisbon', note='in 12d', urgency=lanes.Urgency.DUE)],
-                total=2,
-                hints=['nomad trips list'],
-            )
-        ],
-        dt.datetime(2026, 8, 6, 12, 0, 0),
-    )
-    print(json.dumps(example, indent=2))
-    raise typer.Exit(0)
