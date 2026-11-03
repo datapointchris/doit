@@ -59,6 +59,9 @@ cp -R "$deploy/." "$out/"
 (
   cd "$out"
   kustomize edit set image "doit-api=$image"
-  kustomize edit add label --without-selector --include-templates "app.kubernetes.io/version:$version"
+  # A template label reaches a StatefulSet's claim template, which cannot change once applied.
+  kustomize edit add label --without-selector "app.kubernetes.io/version:$version"
+  kustomize edit add patch --kind StatefulSet --name doit-api --patch \
+    "[{\"op\":\"add\",\"path\":\"/spec/template/metadata/labels/app.kubernetes.io~1version\",\"value\":\"$version\"}]"
 )
 kustomize build "$out" >/dev/null
