@@ -232,22 +232,6 @@ def test_a_tracked_pursuit_cannot_be_passed_or_returned_to_and_a_paced_one_can(s
     assert [record['pursuit'] for record in store.journal() if record['event'] == 'skip'] == ['chores']
 
 
-def test_a_review_completion_admits_a_service_client_holding_its_scope_and_no_other_route_does(store):
-    """A scheduled run that finishes a review item records it; its token reaches nothing else."""
-    client = client_for(store)
-    client.put('/api/v1/documents/review', json={'text': 'items:\n  audit-skills:\n    cadence: 2w\n'}).raise_for_status()
-
-    def as_service(token: str) -> dict:
-        return {'Authorization': f'Bearer {token}'}
-
-    recorded = client.post('/api/v1/review/audit-skills/completions', json={}, headers=as_service('review-writer-token'))
-    unscoped = client.post('/api/v1/review/audit-skills/completions', json={}, headers=as_service('other-scope-token'))
-    elsewhere = client.get('/api/v1/review', headers=as_service('review-writer-token'))
-
-    assert (recorded.status_code, unscoped.status_code, elsewhere.status_code) == (201, 403, 403)
-    assert [row['recorded_by'] for row in store.review_completions('audit-skills')] == ['doit-svc-runs']
-
-
 def test_every_adapter_doit_registers_has_a_read_or_a_reason():
     readers = Readers({}, GitHub(GitHubSettings()), ClickHouseSettings())
 

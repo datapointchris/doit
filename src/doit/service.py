@@ -1,9 +1,7 @@
 """The one module that makes a request to doit's service.
 
 `~/.config/doit/config.toml` names the service, its issuer and this machine's
-client, and `doit auth login <url>` fills it in. A workload handed its tokens
-names the command that hands them as the file's `token_command` instead, and
-never logs in.
+client, and `doit auth login <url>` fills it in.
 
 A refusal reaches a command as `ServiceFailed`, carrying the service's own
 sentence, or the repair for a refused token. `NoAnswer` is the one failure the

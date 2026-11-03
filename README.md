@@ -67,11 +67,6 @@ doit today                   # every record at once: what the day still owes, an
 doit happened --since 7d     # what every record says happened over the week, and who did it
 ```
 
-A scheduled job has no one to log in. Its `~/.config/doit/config.toml` names `api` and a
-`token_command`, the command that hands it a token, and the CLI sends what that command prints. A
-service client's token reaches one route, `doit review done`'s, and only while it holds
-`doit.review.write`.
-
 The first run clones terminal-library into `$XDG_DATA_HOME/terminal-library/`. A command asking
 for `--help` clones nothing. doit refuses to clone into a directory that already holds files,
 because deciding whose files win is not its call. A failed clone only warns, because the draw, the
@@ -450,9 +445,7 @@ is one copy of each.
 - **A forecast is taken on an interval inside the process**, every `DOIT_API_FORECAST_INTERVAL`.
 
 Every `/api/v1` route answers a person's login, verified as an RFC 9068 access token from the
-issuer. `POST /api/v1/review/{entry}/completions` also admits a service client holding
-`doit.review.write`, so a scheduled run that finishes a review item records it. `/health`,
-`/ready` and `/.well-known/oauth-protected-resource` answer anyone.
+issuer. `/health`, `/ready` and `/.well-known/oauth-protected-resource` answer anyone.
 
 The image is built from the repository root, because the service runs the root package:
 

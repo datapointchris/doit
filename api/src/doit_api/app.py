@@ -5,10 +5,8 @@ returned. Nothing here computes a view, reads an app or opens the store itself.
 
 `/health`, `/ready` and the RFC 9728 metadata answer anyone. Everything under
 `/api/v1` answers a person's login, because every route reads or writes one
-person's register and journal. A review completion also admits a service client
-holding `doit.review.write`, so a scheduled run that finishes a review item
-records it. A write records the caller as `recorded_by`, beside the machine and
-actor the client names.
+person's register and journal. A write records the caller as `recorded_by`,
+beside the machine and actor the client names.
 
 `create_app` takes every collaborator as an argument. Production passes the ones
 `main` builds from the environment. A test passes a temporary store, stand-in
@@ -30,7 +28,6 @@ from fastapi import Query
 from fastapi import Response
 from pyapiauth import Caller
 from pyapiauth.fastapi_dependencies import person_dependency
-from pyapiauth.fastapi_dependencies import person_or_scoped_service_dependency
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -52,9 +49,6 @@ log = logging.getLogger(__name__)
 
 # Where RFC 9728 puts the metadata of an API served at the root of its host.
 PROTECTED_RESOURCE_PATH = '/.well-known/oauth-protected-resource'
-
-# The one scope a service client is admitted with, on the one route that takes it.
-REVIEW_WRITE_SCOPE = 'doit.review.write'
 
 
 class Strict(BaseModel):
@@ -173,7 +167,6 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
 
     api = APIRouter(prefix='/api/v1')
     Person = Annotated[Caller, Depends(person_dependency(verifier))]
-    ReviewWriter = Annotated[Caller, Depends(person_or_scoped_service_dependency(verifier, REVIEW_WRITE_SCOPE))]
 
     @api.get('/documents')
     def document_list(caller: Person) -> list[dict]:
@@ -295,7 +288,7 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
         return views.review(block)
 
     @api.post('/review/{entry}/completions', status_code=201)
-    def review_complete(entry: str, body: CompletionBody, caller: ReviewWriter) -> dict:
+    def review_complete(entry: str, body: CompletionBody, caller: Person) -> dict:
         return views.complete_review(entry, body.day, caller.who)
 
     @api.get('/review/nudge')
