@@ -129,8 +129,7 @@ def upcoming_countdowns(countdowns: list[dict], now: dt.datetime) -> list[dict]:
 
 
 # Each read the overview makes: its section, the label a warning names it by,
-# and the request. The same table the CLI fans out over, less the issues
-# section, which no lane reads.
+# and the request. The same table the CLI fans out over.
 OVERVIEW_READS: tuple[tuple[str, str, str, Callable[[], dict]], ...] = (
     ('tasks', 'tasks', '/tasks', lambda: {'status': 'open'}),
     ('habits', 'habits', '/habits/day', lambda: {'timezone': local_zone()}),

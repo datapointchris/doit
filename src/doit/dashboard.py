@@ -75,7 +75,8 @@ LANE_ROW_CAPS = {'tasks': 5, 'learning': 5}
 # The `icb overview` schema this build understands. A newer one is reported
 # rather than half-read: dotfiles and ichrisbirch install independently.
 # v3 task rows carry no priority; a row's position in the list is its rank.
-ICB_SCHEMA_VERSION = 3
+# v4 holds no issues section, because the tracker is slate's.
+ICB_SCHEMA_VERSION = 4
 
 LABEL_WIDTH = 8
 
