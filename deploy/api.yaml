@@ -52,6 +52,9 @@ metadata:
 spec:
   replicas: 1
   serviceName: doit-api
+  # The default, OrderedReady, holds a rollout until the current pod is Ready, so a
+  # release whose API crashes at start would stop the next release replacing it.
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app.kubernetes.io/name: doit
