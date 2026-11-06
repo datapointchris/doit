@@ -14,7 +14,6 @@ import yaml
 from doit import dashboard
 from doit import lanes
 from doit import sources
-from doit.window import Bounds
 
 NOW = dt.datetime(2026, 8, 6, 12, 0, 0)
 
@@ -59,8 +58,8 @@ def test_the_contract_wins_over_a_registered_adapter():
 
     Its adapter simply stops being reached, with nothing in doit changing.
     """
-    sources.register_adapter('never', ('day',), lambda _: [lanes.Lane(name='from-adapter', title='X')])
-    source = sources.Source(id='day', command=['day'], adapter='never')
+    sources.register_adapter('never', lambda _: [lanes.Lane(name='from-adapter', title='X')])
+    source = sources.Source(id='day', adapter='never')
 
     built = sources.lanes_from(source, sources.Result(source='day', payload=CONFORMING, exit_code=0))
 
@@ -97,11 +96,11 @@ def test_a_declared_lane_whose_adapter_this_doit_lacks_names_the_adapter():
     sources.yml and the installed doit disagree about an adapter's name across
     any rename, on every machine, until both have moved.
     """
-    source = sources.Source(id='problems', command=['fleet'], adapter='no-such-adapter', lanes=('problems',))
+    source = sources.Source(id='trips', adapter='no-such-adapter', lanes=('trips',))
 
-    built = sources.lanes_from(source, sources.Result(source='problems', payload=[], exit_code=0))
+    built = sources.lanes_from(source, sources.Result(source='trips', payload=[], exit_code=0))
 
-    assert [lane.name for lane in built] == ['problems']
+    assert [lane.name for lane in built] == ['trips']
     assert built[0].available is False
     assert 'no-such-adapter' in built[0].reason
 
@@ -159,20 +158,20 @@ def test_both_blocks_parse_into_the_same_source():
     assert registry.completions['done'] == sources.Source(id='done', command=['done', '--json'])
 
 
-def test_an_adapted_entry_runs_its_adapters_command_and_a_restated_one_is_reported():
-    """The command belongs to the adapter, so no copy in sources.yml can drift from it.
+def test_a_command_beside_an_adapter_is_ignored_and_reported():
+    """The read belongs to the adapter, so no command in the sources document can drift from it.
 
-    A restated command is ignored rather than the entry dropped, so the lane
-    keeps answering while the line waits to be deleted.
+    The command is ignored rather than the entry dropped, so the lane keeps
+    answering while the line waits to be deleted.
     """
-    sources.register_adapter('owned', ('owned', '--json'), lambda _: [])
+    sources.register_adapter('owned', lambda _: [])
     body = 'sources:\n  quiet:\n    adapter: owned\n  stale:\n    adapter: owned\n    command: [owned, --old-flag]\n'
 
     registry = parsed(body)
 
-    assert registry.sources['quiet'].command == ['owned', '--json']
-    assert registry.sources['stale'].command == ['owned', '--json']
-    assert registry.problems == ['stale: the owned adapter supplies its own command — delete `command`']
+    assert registry.sources['quiet'] == sources.Source(id='quiet', adapter='owned')
+    assert registry.sources['stale'] == sources.Source(id='stale', adapter='owned')
+    assert registry.problems == ['stale: the owned adapter has its own read — delete `command`']
 
 
 def test_a_file_with_no_completions_block_is_not_a_problem():
@@ -219,16 +218,6 @@ def test_a_block_that_is_not_a_mapping_names_itself():
     registry = parsed('completions: [icb, tasks]\n')
 
     assert any('completions' in problem for problem in registry.problems)
-
-
-def test_the_window_ends_replace_whole_argv_parts_and_nothing_else():
-    """Equality rather than a substring replace, so a path or a title containing a token passes through untouched."""
-    zone = dt.timezone(dt.timedelta(hours=-4))
-    bounds = Bounds(dt.datetime(2026, 8, 6, 15, 0, tzinfo=zone), dt.datetime(2026, 8, 7, tzinfo=zone))
-
-    resolved = sources.resolved_command(['grep', 'due {since}', '--since', '{since}', '--until', '{until}'], bounds)
-
-    assert resolved == ['grep', 'due {since}', '--since', '2026-08-06T15:00:00-04:00', '--until', '2026-08-07T00:00:00-04:00']
 
 
 def test_source_order_is_the_files_order():

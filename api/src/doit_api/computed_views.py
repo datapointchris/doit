@@ -3,13 +3,11 @@
 Each method here is the computing half of a CLI command: it reads the documents,
 the journal and the apps, calls the function the command calls, and returns the
 document the command's `--json` printed. Nothing here re-derives a balance, a
-due date or a lane. That is what keeps the service's answer and a desk's answer
-from drifting: there is one copy of each rule, and both run it.
+due date or a lane, so there is one copy of each rule.
 
 Writes go through the same functions. A journal entry is built by
 `pursuits.done_record` and its siblings, and the sightings and paces a build
-finds are appended to the store through `build_state`'s `append`, as a desk
-appends them to its file.
+finds are appended to the store through `build_state`'s `append`.
 """
 
 from __future__ import annotations
@@ -117,7 +115,7 @@ class Views:
     def registered(self) -> documents.Config:
         found = self.config()
         if not found.pursuits:
-            raise NotFound("no pursuits yet: `doit pursuits edit` writes them, or `doit import` brings a desk's")
+            raise NotFound('no pursuits yet: `doit pursuits edit` writes them')
         return found
 
     def pursuit_list(self) -> dict:

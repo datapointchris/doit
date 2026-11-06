@@ -6,8 +6,6 @@ tree is built this way. Each subcommand module owns its own `app`; this file
 only assembles them.
 """
 
-import os
-import sys
 from typing import Annotated
 from typing import Any
 
@@ -20,14 +18,8 @@ from pyselfupdate.typercmd import add_update_command
 from typer.core import TyperGroup
 
 from doit import __version__
-from doit import content
-from doit import desk_import
-from doit import find
-from doit import labs
 from doit import service
 from doit import shell
-from doit import tools
-from doit import workflows
 from doit.render import error_console
 from doit.render import set_no_input
 from doit.service_commands import dashboard
@@ -136,27 +128,13 @@ app.command('next')(pursuits.next_command)
 app.command('dashboard')(dashboard.dashboard_command)
 app.command('today')(today.today_command)
 app.command('happened')(happened.happened_command)
-app.command('find')(find.find_command)
-app.command('choose')(find.choose_command)
-app.command('launch')(find.launch_command)
-
-app.command('show')(find.show_command)
 add_update_command(app, UPDATE_CONFIG)
-
-# What the fzf preview pane calls, not what you type.
-app.command('__preview', hidden=True)(find.preview_command)
 
 app.add_typer(pursuits.app, name='pursuits')
 app.add_typer(forecast.app, name='forecast')
 app.add_typer(review.app, name='review')
-app.add_typer(labs.app, name='labs')
-app.add_typer(workflows.app, name='workflows')
-app.add_typer(tools.app, name='tools')
-app.add_typer(find.kit_app, name='kit')
 app.add_typer(shell.app, name='shell')
 app.add_typer(sources.app, name='sources')
-app.add_typer(content.app, name='content')
-app.command('import')(desk_import.import_command)
 add_auth_commands(app, service.LOGIN)
 
 
@@ -180,27 +158,8 @@ def root(
         typer.Option('--no-input', help='Never prompt; fail naming the flag that would have answered.'),
     ] = False,
 ) -> None:
-    """Root callback, hosting the app-level options.
-
-    The content clone happens here so a new machine needs no setup step anyone
-    has to remember. It is one `exists()` once the checkout is there — see
-    `doit.content.ensure_cloned` for why a failure only warns.
-
-    Keeping it current is the same argument on every later run, so that is not a
-    verb anyone has to remember either — the pull is detached, so a command costs
-    the same whether or not one was due. `content` is exempt: its own subcommands
-    report on the checkout, and a pull racing them would have `status` describe a
-    tree being rewritten underneath it.
-    """
+    """Root callback, hosting the app-level options."""
     set_no_input(no_input)
-    # A help screen reads no cards, so neither the clone nor the pull belongs on
-    # one. Typer runs this callback before answering a subcommand's --help, so
-    # without the guard `doit anything --help` clones a repo on a new machine
-    # and starts a pull on every other.
-    if content.worth_a_pull(sys.argv):
-        content.ensure_cloned()
-        if ctx.invoked_subcommand != 'content':
-            content.autosync()
 
     # `update` runs its own check, so notifying too would ask the releases API
     # twice for one command and let the notice contradict what `--check` just
@@ -209,35 +168,11 @@ def root(
         notify(UPDATE_CONFIG)
 
 
-# Variables that chose which desk files doit read and wrote. The service holds
-# that data, so one still set names a target nothing reads, and is refused.
-RETIRED_VARIABLES = {
-    'DOIT_JOURNAL_DIR': '--state-dir',
-    'DOIT_REVIEW_STATE': '--state-dir',
-    'DOIT_PURSUITS': '--config-dir',
-    'DOIT_REGISTER': '--config-dir',
-    'DOIT_SOURCES': '--config-dir',
-}
-
 # What a command exits with when no answer came, the one failure the same command run later can outlast.
 NO_ANSWER_EXIT = 4
 
 
-def retired_variable_set() -> str:
-    """The refusal for the first retired variable still set, or '' where none is."""
-    for variable, flag in RETIRED_VARIABLES.items():
-        if os.environ.get(variable):
-            return (
-                f'${variable} is set, and doit reads its records from its service instead. '
-                f'Unset it, then hand the folder it names to `doit import {flag} <folder>` once.'
-            )
-    return ''
-
-
 def main() -> None:
-    if refusal := retired_variable_set():
-        error_console.print(f'doit: {refusal}', soft_wrap=True, markup=False)
-        raise SystemExit(2)
     try:
         app()
     except (service.ServiceFailed, LoginError) as failure:

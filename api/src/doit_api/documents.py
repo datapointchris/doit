@@ -1,10 +1,8 @@
 """The three documents a person edits, and the configuration every view is computed from.
 
 `pursuits`, `review` and `sources` are each kept as the text they were written
-as, comments and layout included, because that text is what a person edits. On a
-desk they are `pursuits.yml`, `register.yml` and `sources.yml`. The text is the
-authority: every view parses it with doit's own validators, the same ones a desk
-runs on its files, so the service and a desk cannot read one document two ways.
+as, comments and layout included, because that text is what a person edits. The
+text is the authority: every view parses it with doit's own validators.
 
 Each entry is also a row of its own versioned table, written in the same
 transaction as the text. Those tables are what a question about a document over

@@ -72,7 +72,6 @@ def test_every_lane_builds_from_fixtures():
 ADAPTER_PAYLOADS: dict[str, dict | list] = {
     'icb': {},
     'learning': {},
-    'problems': [],
     'meso': [],
     'prs': [],
     'dotfiles': [],
@@ -84,8 +83,7 @@ def test_every_shipped_adapter_names_the_lanes_it_declares():
 
     Derived rather than listed. A hand-written enum and a hand-written test
     population agree with each other while both omit the same lane, and nothing
-    surfaces the omission: measured on `prs`, `training`, `dotfiles` and `problems`,
-    four working lanes `--help` named none of.
+    surfaces the omission.
 
     Both branches of every builder, because a lane is named twice — once where it
     builds rows and once where it reports itself unavailable. One site is reached
@@ -96,7 +94,7 @@ def test_every_shipped_adapter_names_the_lanes_it_declares():
     and the name is the word typed at `--lane`, so a reader who copies the header
     has to get a lane back.
     """
-    for adapter_id, _, adapter, declared in dashboard.SHIPPED_ADAPTERS:
+    for adapter_id, adapter, declared in dashboard.SHIPPED_ADAPTERS:
         answered = sources.Result(source=adapter_id, payload=ADAPTER_PAYLOADS[adapter_id], exit_code=0)
         broke = sources.Result(source=adapter_id, exit_code=1, stderr='no', failure=sources.Failure.FAILED)
 
@@ -942,194 +940,6 @@ def test_a_source_that_did_not_answer_says_so_rather_than_vanishing() -> None:
 
     assert lane.name == 'dotfiles'
     assert lane.rows == []
-
-
-def inbox(*problems: dict) -> sources.Result:
-    return sources.Result(source='problems', payload=list(problems), exit_code=0)
-
-
-def problem(
-    key: str,
-    title: str,
-    *,
-    machines=('archlinux',),
-    count: int = 1,
-    archived: bool = False,
-    status: str = 'new',
-    ask: dict | None = None,
-    last: str = '',
-) -> dict:
-    row = {
-        'key': key,
-        'title': title,
-        'machines': list(machines),
-        'count': count,
-        'is_archived': archived,
-        'last_seen_ts': last or dt.date.today().isoformat(),
-        'status': status,
-    }
-    if ask:
-        row['ask'] = ask
-    return row
-
-
-def question(text: str, *labels: str, recommendation: int = 0, command: str = '') -> dict:
-    asked = {'question': text, 'options': [{'label': label} for label in labels], 'step': '0199', 'recommendation': recommendation}
-    if command:
-        asked['command'] = command
-    return asked
-
-
-def test_the_problems_lane_is_an_alert_carrying_one_row_per_open_problem() -> None:
-    result = inbox(problem('hosts-drift', 'hosts does not match the inventory', machines=('scheduler-lxc',)))
-
-    lane = dashboard.problems_adapter(result)[0]
-
-    assert lane.alert is True
-    assert [row.text for row in lane.rows] == ['hosts does not match the inventory']
-    assert lane.rows[0].note == 'scheduler-lxc'
-    assert lane.rows[0].handle == 'fleet inbox show hosts-drift'
-
-
-def test_an_archived_problem_is_not_a_row() -> None:
-    """Archiving is how a problem is dealt with, so a dismissed one reappearing
-    on the dashboard would make archiving pointless."""
-    result = inbox(problem('gone', 'dealt with', archived=True), problem('live', 'still wrong'))
-
-    lane = dashboard.problems_adapter(result)[0]
-
-    assert [row.text for row in lane.rows] == ['still wrong']
-    assert lane.total == 1
-
-
-def test_a_problem_seen_more_than_once_says_so_beside_its_machine() -> None:
-    lane = dashboard.problems_adapter(inbox(problem('hosts-drift', 'drifted', count=3)))[0]
-
-    assert lane.rows[0].note == 'archlinux ×3'
-
-
-def test_an_escalated_problem_leads_with_its_question_and_the_command_that_answers_it() -> None:
-    asked = question('Restart the runner?', 'Restart it', 'Leave it down', recommendation=1)
-    result = inbox(problem('runner-check', 'runner-check failed'), problem('runner-down', 'runner is down', status='escalated', ask=asked))
-
-    lane = dashboard.problems_adapter(result)[0]
-
-    assert [row.label for row in lane.rows] == ['ask', 'today']
-    assert lane.rows[0].text == 'Restart the runner?'
-    assert lane.rows[0].note == 'recommends 1. Restart it'
-    assert lane.rows[0].handle == 'fleet inbox answer runner-down <n>'
-
-
-def test_a_privileged_ask_opens_the_problem_rather_than_running_one_option() -> None:
-    asked = question('Rewrite /etc/hosts?', 'Rewrite it', 'Leave it', command='sudo fleet machine hosts apply')
-
-    row = dashboard.problems_adapter(inbox(problem('hosts-drift', 'hosts drifted', status='escalated', ask=asked)))[0].rows[0]
-
-    assert row.handle == 'fleet inbox show hosts-drift'
-    assert row.note == '2 options', 'an ask recommending nothing still says there is a choice to read'
-
-
-def test_an_escalation_without_a_question_is_a_pr_waiting_on_review() -> None:
-    lane = dashboard.problems_adapter(inbox(problem('audit/incomplete-sweep', 'sweep incomplete', status='escalated')))[0]
-
-    assert lane.rows[0].label == 'review'
-    assert lane.rows[0].handle == 'fleet inbox show audit/incomplete-sweep'
-
-
-def test_a_distress_leads_the_lane_and_its_heading_above_every_escalation() -> None:
-    asked = question('Restart the runner?', 'Restart it', 'Leave it down')
-    result = inbox(
-        problem('runner-check', 'runner-check failed'),
-        problem('runner-down', 'runner is down', status='escalated', ask=asked),
-        problem('schedule/job-failed/sweep', 'sweep failed 3 times', status='distress'),
-    )
-
-    lane = dashboard.problems_adapter(result)[0]
-
-    assert [row.label for row in lane.rows] == ['distress', 'ask', 'today']
-    assert lane.meta == '1 distress · 1 escalated · 1 new'
-
-
-def test_an_untriaged_problem_says_how_long_ago_it_last_fired() -> None:
-    three_days_ago = (dt.date.today() - dt.timedelta(days=3)).isoformat()
-
-    lane = dashboard.problems_adapter(inbox(problem('hosts-drift', 'drifted', last=three_days_ago)))[0]
-
-    assert lane.rows[0].label == '3d'
-
-
-def test_a_status_this_build_does_not_know_is_listed_under_its_own_name() -> None:
-    lane = dashboard.problems_adapter(inbox(problem('hosts-drift', 'drifted', status='blocked')))[0]
-
-    assert lane.rows[0].label == 'blocked'
-    assert lane.meta == '1 blocked'
-
-
-def test_the_heading_counts_fixing_and_verifying_without_listing_them() -> None:
-    result = inbox(
-        problem('a', 'being fixed', status='fixing'),
-        problem('b', 'being fixed too', status='fixing'),
-        problem('c', 'waiting on a clean run', status='verifying'),
-        problem('d', 'untriaged'),
-    )
-
-    lane = dashboard.problems_adapter(result)[0]
-
-    assert lane.meta == '1 new · 2 fixing · 1 verifying'
-    assert [row.text for row in lane.rows] == ['untriaged']
-    assert (lane.total, lane.in_flight) == (1, 3)
-
-
-def test_work_in_flight_keeps_the_lane_drawn_with_nothing_escalated(capsys) -> None:
-    lane = dashboard.problems_adapter(inbox(problem('a', 'being fixed', status='fixing')))[0]
-
-    dashboard.render_lanes([lane], dt.date.today(), 5)
-
-    assert dashboard.quiet_alert(lane) is False
-    assert 'PROBLEMS  1 fixing' in capsys.readouterr().out
-
-
-def test_a_duplicate_is_neither_a_row_nor_a_count() -> None:
-    result = inbox(problem('runner-down', 'runner is down'), problem('schedule/job-failed/sweep', 'sweep failed', status='duplicate'))
-
-    lane = dashboard.problems_adapter(result)[0]
-
-    assert [row.text for row in lane.rows] == ['runner is down']
-    assert lane.meta == '1 new'
-
-
-def test_a_problem_with_no_status_is_a_new_row() -> None:
-    unstated = problem('hosts-drift', 'hosts drifted')
-    del unstated['status']
-
-    lane = dashboard.problems_adapter(inbox(unstated))[0]
-
-    assert [row.text for row in lane.rows] == ['hosts drifted']
-    assert lane.meta == '1 new'
-
-
-def test_an_empty_inbox_still_builds_its_lane() -> None:
-    """Returning no lane would make `lanes_from` fall back to reporting the lane
-    unavailable, and an empty inbox is the healthy answer rather than a broken
-    one. The renderer is what drops it from sight."""
-    lane = dashboard.problems_adapter(inbox())[0]
-
-    assert lane.alert is True
-    assert lane.available is True
-    assert lane.rows == []
-    assert dashboard.quiet_alert(lane) is True
-
-
-def test_an_inbox_that_could_not_be_read_is_unavailable_rather_than_quiet() -> None:
-    """The omission is for a lane that answered and had nothing, never for one
-    that failed to answer."""
-    failed = sources.Result(source='problems', exit_code=1, stderr='nope', failure=sources.Failure.FAILED)
-
-    lane = dashboard.problems_adapter(failed)[0]
-
-    assert lane.available is False
-    assert lane.alert is True, 'a lane that could not answer is still the alert lane'
-    assert dashboard.quiet_alert(lane) is False
 
 
 def test_an_ordinary_lane_is_never_quiet_even_when_empty() -> None:

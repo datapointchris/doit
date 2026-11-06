@@ -277,20 +277,20 @@ pursuits:
     description: The next thing on the task list
     weight: 25
     cadence: 3d
-    resolve: icb tasks list --limit 3 --json
+    resolve: {app: icb, path: /tasks, query: {limit: 3}}
     label: name
     id: id
     context: category
     view: icb tasks show {id}
     on_log: icb tasks complete {id}
-    evidence: icb tasks list --status completed --json
+    evidence: {app: icb, path: /tasks, query: {status: completed}}
     evidence_time: complete_date
 
   read-library:
     description: A book already on the shelf
     weight: 30
     weekly_minutes: 120
-    resolve: icb books list --progress reading --json
+    resolve: {app: icb, path: /books, query: {progress: reading}}
     label: title
     context: author
 
@@ -298,7 +298,7 @@ pursuits:
     description: The current section of the CS track
     weight: 35
     weekly_minutes: 180
-    resolve: learning overview --json
+    resolve: {app: learning, path: /overview}
     items: in_progress_resources
     label: title
     detail: notes
@@ -345,6 +345,12 @@ def pursuits_from_document(document: dict, where: object) -> dict:
             # `weekly_minutes` in the list can fix `minutes` without leaving the
             # terminal; one told only what is wrong cannot.
             raise RegisterError(f'{name}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(KNOWN_FIELDS))}')
+        for read in ('resolve', 'evidence'):
+            if isinstance(config.get(read), str):
+                raise RegisterError(
+                    f'{name}: {read} is a read the service makes, not a command. '
+                    'Write it as {app: <name>, path: /<route>, query: {<parameter>: <value>}}'
+                )
         cadence = config.get('cadence')
         minutes = config.get('weekly_minutes')
         if cadence is not None and minutes is not None:

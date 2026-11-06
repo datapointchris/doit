@@ -4,14 +4,15 @@ What to do now, and everything that decides it.
 
 Every other personal CLI here stewards records. icb holds tasks, habits, books and projects.
 learning holds tracks, meso holds workouts, and nomad holds trips. doit is the one that consumes
-them and points somewhere: what is outstanding, what to do next, what is due to revisit, what to
-practice, and how to use the tool once you are there.
+them and points somewhere: what is outstanding, what to do next, what is due to revisit and what to
+practice.
 
 doit owns no domain record. Which book is next, which habit is due and when a task is late are
 answered by the CLI that owns the domain, and doit lays the answer out. A change that has doit
-deciding a domain rule belongs in that CLI instead. The cards, Labs and tool registry doit reads
-live in [terminal-library](https://github.com/datapointchris/terminal-library), so writing one
-needs no release of this repo.
+deciding a domain rule belongs in that CLI instead.
+
+doit covers what a person does themselves. Engineering work that agents do belongs in the tracker
+those agents read, and no pursuit or daily list carries it.
 
 ## Install
 
@@ -30,22 +31,16 @@ branch, a commit or a local checkout, because none of them carries a release ver
 Every other command checks for a newer release at most once a day, and names one it finds in a line
 on stderr.
 
-uv fetches the Python doit needs. git clones the cards. fzf is the picker behind `find`, `choose`
-and `labs choose`.
+uv fetches the Python doit needs.
 
 ## Starting from scratch
 
 The pursuits, the registers and every record live in doit's service, described under
 [The service](#the-service--one-store-and-every-view-computed-behind-it). A machine logs in to it
-once, and every command after that reads and writes there. The cards and the tool registry are the
-one thing a machine keeps itself.
+once, and every command after that reads and writes there.
 
 ```bash
 doit auth login https://doit.example.com   # once per machine: names the service and logs you in
-doit import                  # a machine that kept doit's files itself: hand them to the service, as often as it takes
-
-doit content status          # clones terminal-library on first use, then says where and which setting chose it
-doit labs list               # proves the cards arrived: every Lab in the checkout
 
 doit sources example         # an annotated sources document, printed, writing nothing
 doit sources edit            # the sources in $EDITOR, starting from that example where none are written
@@ -67,12 +62,6 @@ doit today                   # every record at once: what the day still owes, an
 doit happened --since 7d     # what every record says happened over the week, and who did it
 ```
 
-The first run clones terminal-library into `$XDG_DATA_HOME/terminal-library/`. A command asking
-for `--help` clones nothing. doit refuses to clone into a directory that already holds files,
-because deciding whose files win is not its call. A failed clone only warns, because the draw, the
-dashboard and the registers need no cards. With no checkout, `doit content sync` prints the
-`git clone` to run by hand.
-
 Each `edit` opens the document the service holds, or its template where none is written yet. The
 service validates the whole text and stores nothing it refuses. A refusal names the first fault and
 reopens the editor on the text as you left it, so one typo never costs the edit. A save that fails
@@ -81,18 +70,14 @@ starts from it. doit never rewrites a document itself, so your comments and layo
 
 ## The grammar
 
-The noun comes first and the verb last: `doit review due`, `doit labs show <lab>`,
-`doit forecast run`. The draw sits at the root as `next`, because it is what you type most. Logging
-and skipping a pursuit are `doit pursuits log` and `doit pursuits skip`, beside the file that holds
-the pursuits. The other single-verb reads sit at the root beside `next`: `dashboard`, `today`,
-`find`, `choose`, `show` and `launch`.
+The noun comes first and the verb last: `doit review due`, `doit forecast run`. The draw sits at the
+root as `next`, because it is what you type most. Logging and skipping a pursuit are
+`doit pursuits log` and `doit pursuits skip`, beside the file that holds the pursuits. The other
+single-verb reads sit at the root beside `next`: `dashboard`, `today` and `happened`.
 
 Every node prints its help when given no arguments, so the tree can be walked one word at a time
 without a cryptic error. A usage error exits 2. `--no-input` never prompts, and fails naming the
 flag that would have answered.
-
-`doit update` brings doit itself up to date, and `doit content sync` brings the cards. They are two
-words because they are two things, and one word would make "did you update?" ambiguous.
 
 ## Which surface answers which question
 
@@ -105,13 +90,9 @@ words because they are two things, and one word would make "did you update?" amb
 | Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered |
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
 | What is due to revisit or practice | `review due` | the review register and its completions |
-| How do I use this tool | `show`, `find`, `tools show` | the registry and cards in terminal-library, your shell's functions and aliases |
-| What was that command | `choose` | the same index, ending on the invocation |
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |
-| Have I committed the card I wrote | `content status` | the terminal-library checkout |
 
-`show`, `find`, `tools show`, `choose` and `content status` read this machine's checkout and
-shell. The service answers every other row, reading what the row names.
+The service answers every row, reading what the row names.
 
 `dashboard`, `today` and `next` are three densities over the same records, not three subjects.
 `dashboard` ranks across nothing. `next` ranks across everything, because you declared the
@@ -322,86 +303,24 @@ the rest.
 doit review due              # what is due to revisit or practice, most overdue first
 doit review done <id>        # record it done today
 doit review nudge-every 8h   # how often the shell's startup nudge may print
-doit labs show <lab>         # open a Lab to read while you work in another pane
 ```
 
 The review register is one of the service's documents, edited with `doit review edit`. Each item
 declares what to revisit and a cadence such as `2w` or `1mo`. Its last-done date is the newest `doit review done` for it, and
 nothing else. Running the command an item names does not mark it done.
 
-A Lab is one markdown file under `labs/` in terminal-library, and carries no schedule. The Labs you
-work through on a schedule are items in the register's `practice:` block, keyed by the Lab's id.
-`doit review done <lab>` records one. The startup nudge leaves practice out. `doit today` counts it
-as its own checklist, so a deck of never-practiced Labs cannot bury the maintenance that is due.
+The register's `practice:` block holds what you work through on a schedule, each entry with the same
+fields. `doit review done <id>` records one. The startup nudge leaves practice out. `doit today`
+counts it as its own checklist, so a deck of never-practiced items cannot bury the maintenance that
+is due.
 
 ```yaml
 practice:
   rg-search-code:
     description: Search code with ripgrep
     cadence: 2w
-    command: doit labs show rg-search-code
+    command: howto labs show rg-search-code
 ```
-
-## `find`, `show`, `choose` — one index over everything you own, rendered by whoever owns it
-
-```bash
-doit find rg                 # fuzzy-match a line, press Enter, get how to use it
-doit show rg                 # the same page, when you already know the name
-doit choose                  # the same picker, printing the invocation instead of opening it
-doit launch                  # doit's own areas, then every tool you own
-doit tools list              # the registry, grouped by category
-doit workflows show <card>   # one reference card
-```
-
-The index is one row shape over every collection you own: the tool registry, the workflow cards,
-annotated shell functions, aliases, git aliases, forgit's shortcuts, the tmux keybindings, and the
-zsh keys your config binds. `--source` narrows a search to one of `tool`, `workflow`, `func`,
-`alias`, `git`, `forgit`, `tmux` or `zsh`.
-
-Every row carries its invocation, not only its name. A registry key is a package name as often as a
-command: `ripgrep` installs `rg`, and `git-delta` installs `delta`. A row keyed by name alone would
-name something you cannot type.
-
-doit renders no subject itself. Each lens hands off to whatever owns it, because a second renderer
-is a second thing to keep in step with the first. fzf is the picker, shelled out to rather than
-rebuilt.
-
-`$(doit choose)` works in any shell. In zsh, `eval "$(doit shell widgets zsh)"` defines a widget
-that lands the pick on the prompt. Bind it to a chord of your choosing, such as
-`bindkey '^X^D' doit-choose-widget`, because doit cannot see what your keymap already holds.
-
-## `kit` — everything you own, as one list
-
-```bash
-doit kit list                  # every indexed row, as the picker sees it
-doit kit list --json           # the same rows, for a script
-```
-
-## `content` — the cards live in terminal-library, never in this repo
-
-```bash
-doit content status          # where the checkout is, which setting chose it, and what is uncommitted
-doit content sync            # pull now, and clear a failure the background pull reported
-doit content edit <id>       # open a card or Lab in $EDITOR, wherever it lives
-doit workflows new <name>    # write a card into the checkout and open it
-doit labs new <name>         # scaffold a Lab there and open it
-```
-
-Cards, Labs and the tool registry are content, not code. They are authored far more often than doit
-is released, so they live in terminal-library, checked out at `$XDG_DATA_HOME/terminal-library/`.
-Writing a card and having it are the same act on every machine.
-The library is named for itself rather than for doit, because doit is one reader of it.
-
-Every command you type, apart from a help screen and `content` itself, pulls the checkout in the
-background, detached and never waited on. The pull is `--ff-only`, so it refuses rather than
-merging, and git declines to overwrite a modified file. An unfinished card is never the price of a
-sync. A pull that fails is reported on the next run, with `doit content sync` to retry.
-
-The path resolves in three rungs: `$DOIT_LIBRARY_DIR`, then `library_dir` in
-`$XDG_CONFIG_HOME/doit/config.toml`, then the default. A machine that authors cards points one of
-them at a checkout kept where its git lives, so writing a card and reading it stay one file.
-`config.toml` is optional, and a machine keeping the library at the default needs no file saying
-so.
 
 ## The service — one store, and every view computed behind it
 
@@ -424,8 +343,8 @@ is one copy of each.
   and never edits one. Every view replays the log as the CLI does.
 - **Apps are read over HTTP, with the service's own credential.** Each app is asked as a
   client-credentials client holding read scopes only. A source names an adapter, and the adapter
-  name selects the HTTP read that returns what its CLI command printed. A pursuit's `resolve` and
-  `evidence` name an app, a path and a query:
+  name selects the HTTP read. A pursuit's `resolve` and `evidence` name an app, a path and a query,
+  and the register refuses either written as a command:
 
   ```yaml
   resolve:
@@ -436,12 +355,6 @@ is one copy of each.
 
   A read that fails becomes the reason on its lane or row, and the service logs it at error as
   `source_failed` with the source's name.
-- **A desk's files are imported, as often as it takes.** `doit import` sends the files of
-  `~/.config/doit/` and `~/.local/state/doit/` to `POST /api/v1/imports`, each with its path under
-  `config/` or `state/`, and prints what the service merged and what it skipped.
-  A second run adds only what the first lacked. A command in a pursuit's `resolve` or `evidence`
-  is rewritten as the read it makes, and one with no known read is listed for rewriting by hand. A
-  document edited on the service is never replaced by a later import.
 - **A forecast is taken on an interval inside the process**, every `DOIT_API_FORECAST_INTERVAL`.
 
 Every `/api/v1` route answers a person's login, verified as an RFC 9068 access token from the
@@ -505,14 +418,9 @@ cosign verify \
 The service holds the documents and every record. A machine keeps these of its own, and the service
 needs none of them.
 
-- **Content** is the terminal-library checkout. doit writes there when it pulls, and when you author
-  a card or a Lab.
 - **Config** is `$XDG_CONFIG_HOME/doit/config.toml`. It names the service, its issuer and this
-  machine's client, which `doit auth login` writes, and the optional `library_dir`. The login's
-  tokens are in the system keychain. Neither is in either repo, because both are personal and both
-  repos are public.
-- **State** is `$XDG_STATE_HOME/doit/`. It holds the log of this machine's last background pull of
-  the cards, and any edit the service never took.
+  machine's client, which `doit auth login` writes. The login's tokens are in the system keychain.
+- **State** is `$XDG_STATE_HOME/doit/`. It holds any edit the service never took.
 - **Cache** is `$XDG_CACHE_HOME/doit/`. It holds what the shell's completion and startup gate read
   without starting Python or asking the service. Each file is rewritten by the command that fetches
   it.

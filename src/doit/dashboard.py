@@ -767,16 +767,14 @@ PR_ROWS = 5
 
 
 def prs_adapter(result: sources.Result) -> list[LaneView]:
-    """`pull-requests` prints its own model as JSON; the shaping happens here.
+    """The open pull requests the service read from GitHub, shaped into one lane here.
 
-    That tool answers "what pull requests are open" and nothing else. What a lane
-    looks like is doit's question, so doit is what answers it — the alternative
-    was a `--lane` flag over there, which put this file's row shape inside a tool
-    whose only other consumer renders it completely differently.
+    The read answers "what pull requests are open" and nothing else. What a lane
+    looks like is doit's question, so doit is what answers it.
     """
     payload = result.payload
     if not isinstance(payload, list):
-        return [unavailable('prs', 'PRS', sources.reason('pull-requests', result))]
+        return [unavailable('prs', 'PRS', sources.reason('prs', result))]
 
     oldest = max((pr.get('age_days', 0) for pr in payload), default=0)
     ranked = sorted(payload, key=lambda pr: -pr.get('age_days', 0))[:PR_ROWS]
@@ -868,175 +866,31 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
-# `fixing` and `verifying` need nothing from you: the fix agent holds one, and
-# the other waits for the producer to run clean. Both are counted in the heading
-# and in `in_flight`, never listed. A duplicate is neither counted nor listed,
-# because the row it names carries its work.
-IN_FLIGHT_STATUSES = ('fixing', 'verifying')
-DUPLICATE_STATUS = 'duplicate'
-ESCALATED_STATUS = 'escalated'
-NEW_STATUS = 'new'
-# A distress is a part of the system failing over and over, which its keeper
-# pages at high priority, so it leads the escalations that wait on you.
-# `waiting_since` cannot rank them: a proposal waiting at new carries it too.
-DISTRESS_STATUS = 'distress'
-LEADING_STATUSES = (DISTRESS_STATUS, ESCALATED_STATUS)
-HEADING_STATUSES = (*LEADING_STATUSES, 'new', 'fixing', 'verifying')
-
-
-def problem_status(problem: dict) -> str:
-    """A row with no `status` reads as `new`, fleet's status for a problem
-    waiting on triage."""
-    return str(problem.get('status') or NEW_STATUS)
-
-
-def elapsed_label(timestamp: object, today: dt.date) -> str:
-    """How long ago a problem last fired, short enough for the label column."""
-    elapsed = days_away_from(str(timestamp), today) if timestamp else None
-    if elapsed is None:
-        return '—'
-    return 'today' if elapsed < 1 else f'{int(elapsed)}d' if elapsed < 14 else f'{int(elapsed / 7)}w'
-
-
-def problem_where(problem: dict) -> str:
-    """Which boxes reported it, and how many times if more than once."""
-    boxes = ', '.join(str(box) for box in problem.get('machines') or []) or '—'
-    seen = int(problem.get('count') or 0)
-    return f'{boxes} ×{seen}' if seen > 1 else boxes
-
-
-def ask_note(ask: dict) -> str:
-    """The triage's recommended option, numbered from 1 as `fleet inbox answer` takes it."""
-    options = [option for option in ask.get('options') or [] if isinstance(option, dict)]
-    chosen = ask.get('recommendation')
-    if isinstance(chosen, int) and 1 <= chosen <= len(options):
-        return f'recommends {chosen}. {clean(options[chosen - 1].get("label", ""))}'
-    return plural(len(options), 'option')
-
-
-def problem_row(problem: dict, today: dt.date) -> Row:
-    """One problem nobody else is acting on.
-
-    Running a privileged ask's command settles nothing until it is answered, and
-    a handle holds one command. So that handle is `fleet inbox show`, which
-    prints the command and the answer line together.
-
-    An escalation with no question is a fix PR waiting on review. The PR is only
-    in the row's steps, and choosing which step is current is fleet's rule, not
-    doit's. `fleet inbox show` prints it.
-
-    A status this build does not know is labeled by name rather than by age, so
-    it never passes for an untriaged row.
-    """
-    key = problem.get('key', '')
-    status = problem_status(problem)
-    shown = f'fleet inbox show {key}'
-    ask = problem.get('ask')
-    if status == ESCALATED_STATUS and isinstance(ask, dict):
-        handle = shown if ask.get('command') else f'fleet inbox answer {key} <n>'
-        return Row('ask', clean(ask.get('question', '')), ask_note(ask), Urgency.OVERDUE, handle)
-    if status == ESCALATED_STATUS:
-        label = 'review'
-    elif status == NEW_STATUS:
-        label = elapsed_label(problem.get('last_seen_ts'), today)
-    else:
-        label = status
-    return Row(label, clean(problem.get('title', '')), problem_where(problem), Urgency.OVERDUE, shown)
-
-
-def leading_rank(problem: dict) -> int:
-    """Where a row sorts: each leading status in its order, then every other."""
-    status = problem_status(problem)
-    return LEADING_STATUSES.index(status) if status in LEADING_STATUSES else len(LEADING_STATUSES)
-
-
-def problems_heading(statuses: list[str]) -> str:
-    """How many open problems sit in each status, the ones waiting on you first.
-
-    A status this build does not know is still counted, because the lane lists
-    it as a row.
-    """
-    order = [*HEADING_STATUSES, *(status for status in dict.fromkeys(statuses) if status not in HEADING_STATUSES)]
-    return ' · '.join(f'{statuses.count(status)} {status}' for status in order if status in statuses) or 'nothing open'
-
-
-def problems_adapter(result: sources.Result) -> list[LaneView]:
-    """A problem inbox's open problems, as an alert lane.
-
-    Shaped for what a problem inbox's `list --json` emits, and named for the
-    shape rather than for the binary that emits it. The lane is declared in the
-    sources document like any other, so where nothing produces it the line is
-    simply absent.
-
-    The rows are the problems nobody else is acting on: each distress, then
-    the escalations, because each waits on you, then everything triage has
-    not reached.
-
-    Always one lane while the call succeeded, even with nothing open. Returning
-    none would make `lanes_from` fall back to reporting the lane unavailable,
-    and an empty inbox is the healthy answer rather than a broken one — the
-    renderer is what drops it from sight. `in_flight` carries fixing and
-    verifying problems, so a lane that lists nothing while they are open is
-    still drawn.
-    """
-    payload = result.payload
-    if not isinstance(payload, list):
-        broken = unavailable('problems', 'PROBLEMS', sources.reason('problems', result))
-        broken.alert = True
-        return [broken]
-
-    open_problems = [
-        problem
-        for problem in payload
-        if isinstance(problem, dict) and not problem.get('is_archived') and problem_status(problem) != DUPLICATE_STATUS
-    ]
-    listed = [problem for problem in open_problems if problem_status(problem) not in IN_FLIGHT_STATUSES]
-    # Stable, so fleet's most-recently-active order holds within each group.
-    listed.sort(key=leading_rank)
-    today = dt.date.today()
-    return [
-        LaneView(
-            name='problems',
-            title='PROBLEMS',
-            meta=problems_heading([problem_status(problem) for problem in open_problems]),
-            rows=[problem_row(problem, today) for problem in listed],
-            total=len(listed),
-            in_flight=len(open_problems) - len(listed),
-            hints=['fleet inbox list'] if open_problems else [],
-            alert=True,
-        )
-    ]
-
-
 def learning_adapter(result: sources.Result) -> list[LaneView]:
     """learning's overview model, as one lane."""
     return [build_learning_lane({'learning': result}, dt.date.today())]
 
 
-# Every adapter doit ships, with the command it reads and the lanes it can name.
-# One table rather than two lists, because the registration and the `--lane`
-# enum have to agree. A separate enum is one an adapter can be registered without
-# touching, and a lane `--help` cannot name is a lane nobody can find.
-#
-# meso is asked for cycles rather than sessions: the lane says what is
-# prescribed, and what was performed is the opposite of outstanding.
+# Every adapter doit ships, with the lanes it can name. One table rather than two
+# lists, because the registration and the `--lane` enum have to agree. A separate
+# enum is one an adapter can be registered without touching, and a lane `--help`
+# cannot name is a lane nobody can find.
 SHIPPED_ADAPTERS = (
-    ('icb', ('icb', 'overview', '--json'), icb_adapter, tuple(name for name, _ in ICB_LANES)),
-    ('problems', ('fleet', 'inbox', 'list', '--json'), problems_adapter, ('problems',)),
-    ('learning', ('learning', 'overview', '--json'), learning_adapter, ('learning',)),
-    ('meso', ('meso', 'cycles', 'list', '--json'), meso_adapter, ('training',)),
-    ('prs', ('pull-requests',), prs_adapter, ('prs',)),
-    ('dotfiles', ('dotfiles', 'report', 'list', '--json', '--limit', '80'), dotfiles_adapter, ('dotfiles',)),
+    ('icb', icb_adapter, tuple(name for name, _ in ICB_LANES)),
+    ('learning', learning_adapter, ('learning',)),
+    ('meso', meso_adapter, ('training',)),
+    ('prs', prs_adapter, ('prs',)),
+    ('dotfiles', dotfiles_adapter, ('dotfiles',)),
 )
 
-for adapter_id, command, adapter_fn, _ in SHIPPED_ADAPTERS:
-    sources.register_adapter(adapter_id, command, adapter_fn)
+for adapter_id, adapter_fn, _ in SHIPPED_ADAPTERS:
+    sources.register_adapter(adapter_id, adapter_fn)
 
 # Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
 # conforming source contributes lanes doit has never heard of, and a sources
 # document that omits one of these offers fewer. `--lane` is checked against
 # what actually came back rather than against this.
-LANE_NAMES = [*chain.from_iterable(declared for _, _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
+LANE_NAMES = [*chain.from_iterable(declared for _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
 
 
 def source_lanes(registry: sources.Registry, results: dict[str, sources.Result]) -> list[LaneView]:

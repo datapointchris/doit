@@ -10,7 +10,6 @@ from conftest import served
 from conftest import stand_in
 from doit_api.readers import icb
 from doit_api.readers.apps import ReadFailed
-from doit_api.readers.declared_reads import UNREAD_ADAPTERS
 from doit_api.readers.declared_reads import Readers
 from doit_api.readers.github import GitHub
 from doit_api.settings import ClickHouseSettings
@@ -232,10 +231,10 @@ def test_a_tracked_pursuit_cannot_be_passed_or_returned_to_and_a_paced_one_can(s
     assert [record['pursuit'] for record in store.journal() if record['event'] == 'skip'] == ['chores']
 
 
-def test_every_adapter_doit_registers_has_a_read_or_a_reason():
+def test_every_adapter_doit_registers_has_a_read():
     readers = Readers({}, GitHub(GitHubSettings()), ClickHouseSettings())
 
-    assert set(sources.ADAPTERS) == set(readers.adapter_reads) | set(UNREAD_ADAPTERS)
+    assert set(sources.ADAPTERS) == set(readers.adapter_reads)
 
 
 def test_the_service_never_loads_the_client_that_calls_it():

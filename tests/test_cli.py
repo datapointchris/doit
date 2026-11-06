@@ -49,7 +49,7 @@ def test_version_flag_prints_one_line(flag):
     assert result.output.strip() == f'doit {__version__}'
 
 
-@pytest.mark.parametrize('argv', [[], ['review'], ['labs']])
+@pytest.mark.parametrize('argv', [[], ['review'], ['forecast']])
 def test_every_node_shows_help_bare(argv):
     """cli-design.md: no args shows help, at every level of the tree."""
     result = runner.invoke(app, argv)
@@ -78,8 +78,7 @@ def test_root_help_lists_every_command():
 
     A hand-written list passes for every command it was written with and says
     nothing about the next one added, which is the one at risk. Hidden nodes
-    are excluded the same way the pursuits check above excludes them —
-    `__preview` is what the fzf pane calls, not what anyone types.
+    are excluded the same way the pursuits check above excludes them.
     """
     visible = {command_name(command) for command in app.registered_commands if not command.hidden}
     visible |= {group.name for group in app.registered_groups if group.name}
@@ -90,7 +89,7 @@ def test_root_help_lists_every_command():
     assert not [name for name in visible if name not in result.output]
 
 
-@pytest.mark.parametrize('argv', [['nonsense'], ['review', 'nonsense'], ['labs', 'nonsense']])
+@pytest.mark.parametrize('argv', [['nonsense'], ['review', 'nonsense']])
 def test_unknown_command_exits_2(argv):
     """A caller has to tell "you typed it wrong" from "it ran and failed"."""
     result = runner.invoke(app, argv)
@@ -98,12 +97,8 @@ def test_unknown_command_exits_2(argv):
     assert result.exit_code == 2
 
 
-@pytest.mark.parametrize('argv', [['review', 'done'], ['labs', 'show'], ['labs', 'done']])
-def test_missing_required_argument_exits_2(argv):
-    """The hand-rolled `needs_argument` helper this replaced returned 2 by hand."""
-    result = runner.invoke(app, argv)
-
-    assert result.exit_code == 2
+def test_missing_required_argument_exits_2():
+    assert runner.invoke(app, ['review', 'done']).exit_code == 2
 
 
 def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
