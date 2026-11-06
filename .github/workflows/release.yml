@@ -5,8 +5,7 @@ on:
     branches: [main]
 
 # Two pushes to main inside one run's window would otherwise race. Both runs
-# resolve the same version, and the later one fails pushing its tag or its
-# version commit.
+# resolve the same version, and the later one fails pushing its tag.
 # Never cancel-in-progress: a canceled release can leave a tag with no release.
 concurrency:
   group: release-${{ github.ref }}
@@ -26,8 +25,6 @@ jobs:
     permissions:
       contents: write
 
-  # A separate job in the same workflow, gated on the one above.
-  #
   # Same workflow because a tag pushed with GITHUB_TOKEN does not trigger
   # another workflow run, so a publish keyed on `push: tags` would never fire.
   # Separate job so the index credentials are reachable from these steps only,
@@ -48,6 +45,8 @@ jobs:
           ref: ${{ needs.release.outputs.tag }}
 
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.24"
 
       - run: uv build
 
