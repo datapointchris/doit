@@ -41,6 +41,7 @@ once, and every command after that reads and writes there.
 
 ```bash
 doit auth login https://doit.example.com   # once per machine: names the service and logs you in
+doit config show             # what this machine resolved, and where each value came from
 
 doit sources example         # an annotated sources document, printed, writing nothing
 doit sources edit            # the sources in $EDITOR, starting from that example where none are written
@@ -91,6 +92,7 @@ flag that would have answered.
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
 | What is due to revisit or practice | `review due` | the review register and its completions |
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |
+| What is this machine set to, and who set it | `config show` | the config file, the environment and the defaults, asking no service |
 
 The service answers every row, reading what the row names.
 

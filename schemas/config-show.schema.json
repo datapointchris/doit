@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:doit:config-show:v1",
+  "title": "doit config show",
+  "description": "Every value doit resolved on this machine, and where each came from. An empty value means nothing set it. client_secret holds `set` where the variable is set, and never the secret.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "settings"],
+  "definitions": {
+    "setting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source", "from"],
+      "properties": {
+        "value": {"type": "string"},
+        "source": {
+          "enum": ["file", "environment", "default", "hostname", ""],
+          "description": "The kind of place that set the value. Empty where nothing did."
+        },
+        "from": {
+          "type": "string",
+          "description": "The config file's path, or the variable that set the value. Empty for a default or a hostname."
+        }
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"const": 1},
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api", "issuer", "client_id", "token_command", "client_secret", "config_file", "cache_dir", "state_dir", "editor", "machine", "actor"],
+      "properties": {
+        "api": {"$ref": "#/definitions/setting", "description": "The service this machine asks."},
+        "issuer": {"$ref": "#/definitions/setting", "description": "The login server the service trusts."},
+        "client_id": {"$ref": "#/definitions/setting", "description": "The client this machine logs in as."},
+        "token_command": {"$ref": "#/definitions/setting", "description": "The command that hands this machine its tokens, where the config file names one."},
+        "client_secret": {"$ref": "#/definitions/setting", "description": "Whether a service client's secret is set."},
+        "config_file": {"$ref": "#/definitions/setting", "description": "The file holding api, issuer and client_id."},
+        "cache_dir": {"$ref": "#/definitions/setting", "description": "Where doit keeps what the shell reads with no request."},
+        "state_dir": {"$ref": "#/definitions/setting", "description": "Where doit keeps an edit the service never took."},
+        "editor": {"$ref": "#/definitions/setting", "description": "The program each edit verb opens."},
+        "machine": {"$ref": "#/definitions/setting", "description": "The name written on every journal record from this machine."},
+        "actor": {"$ref": "#/definitions/setting", "description": "The identity written on every journal record from this process."}
+      }
+    }
+  }
+}

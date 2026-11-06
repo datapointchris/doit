@@ -19,6 +19,7 @@ from pyselfupdate.typercmd import add_update_command
 from typer.core import TyperGroup
 
 from doit import __version__
+from doit import config_commands
 from doit import service
 from doit import shell
 from doit.render import error_console
@@ -134,6 +135,7 @@ add_update_command(app, UPDATE_CONFIG)
 app.add_typer(pursuits.app, name='pursuits')
 app.add_typer(forecast.app, name='forecast')
 app.add_typer(review.app, name='review')
+app.add_typer(config_commands.app, name='config')
 app.add_typer(shell.app, name='shell')
 app.add_typer(sources.app, name='sources')
 add_auth_commands(app, service.LOGIN)

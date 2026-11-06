@@ -46,14 +46,12 @@ whichever app owns that domain, exactly as the dashboard delegates its lanes.
 
 import datetime as dt
 import math
-import os
 import random
 import re
 import shlex
 import subprocess
 from collections.abc import Callable
 from collections.abc import Iterable
-from pathlib import Path
 from typing import NamedTuple
 
 import typer
@@ -88,7 +86,7 @@ from doit.render import span_text
 from doit.window import first_instant
 from doit.window import span
 
-CACHE_DIR = Path(os.environ.get('DOIT_CACHE_DIR') or xdg_cache_home() / 'doit')
+CACHE_DIR = xdg_cache_home() / 'doit'
 NAMES_CACHE = CACHE_DIR / 'next-names.txt'
 
 # How many of its own intervals a pursuit goes quiet for before it reads as dormant.

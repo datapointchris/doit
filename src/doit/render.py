@@ -48,6 +48,15 @@ def set_no_input(value: bool) -> None:
     no_input = value
 
 
+def examples(*rows: tuple[str, str]) -> str:
+    """A help screen's epilog: each command beside the situation it answers.
+
+    A markdown list, because each row has to keep a line of its own. The root's
+    markdown mode reaches every screen below it.
+    """
+    return '\n\n'.join(['**Examples**', *(f'- `{command}` — {purpose}' for command, purpose in rows)])
+
+
 def can_prompt() -> bool:
     """Whether the user can be asked anything: --no-input never allows it, and
     otherwise stdin has to be a terminal.

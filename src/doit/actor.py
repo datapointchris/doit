@@ -36,6 +36,13 @@ def identity() -> str:
     return f'{user}@{host}' if host else user
 
 
+def identity_source() -> str:
+    """The variable that decided `identity`, as a person reads it."""
+    if os.environ.get('CLAUDE_CODE_SESSION_ID'):
+        return '$CLAUDE_CODE_SESSION_ID'
+    return f'${SCHEDULED_JOB_ENV}' if os.environ.get(SCHEDULED_JOB_ENV) else '$USER and the hostname'
+
+
 def kind(recorded: str) -> str:
     """Which of the three actors a recorded identity names, blank where none was recorded.
 

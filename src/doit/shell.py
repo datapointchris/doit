@@ -95,6 +95,7 @@ _doit() {{
     'sources:Which apps doit asks for lanes'
     'shell:The blocks your shell loads from doit'
     'auth:Log this machine in to the doit service'
+    'config:Where this machine points doit, and the files it keeps'
     'update:Update doit to the latest release'
   )
 

@@ -6,9 +6,12 @@ rather than from code in this repo, so these are the tests that would catch the
 tree being wired up in a way that loses them.
 """
 
+import json
 from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 
 import pytest
+from jsonschema import Draft7Validator
 from typer.main import get_command
 from typer.models import CommandInfo
 from typer.testing import CliRunner
@@ -21,6 +24,7 @@ from doit.cli import app
 from doit.service_commands import pursuits as pursuit_commands
 
 runner = CliRunner()
+SCHEMAS = Path(__file__).resolve().parents[1] / 'schemas'
 
 
 @pytest.fixture(autouse=True)
@@ -87,6 +91,35 @@ def test_root_help_lists_every_command():
     assert result.exit_code == 0
     assert visible
     assert not [name for name in visible if name not in result.output]
+
+
+def test_config_show_says_where_each_setting_came_from(tmp_path, monkeypatch):
+    """A plausible value is the failure this read exists to expose, so the layer sits beside it."""
+    (tmp_path / 'doit').mkdir()
+    (tmp_path / 'doit' / 'config.toml').write_text('api = "https://doit.example.com"\nissuer = "https://id.example.com"\nclient_id = "c"\n')
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+    monkeypatch.delenv('XDG_STATE_HOME', raising=False)
+    monkeypatch.setenv('DOIT_CLIENT_SECRET', 'never-print-this')
+
+    result = runner.invoke(app, ['config', 'show', '--json'])
+
+    document = json.loads(result.output)
+    Draft7Validator(json.loads((SCHEMAS / 'config-show.schema.json').read_text())).validate(document)
+    settings = document['settings']
+    assert (settings['api']['value'], settings['api']['source']) == ('https://doit.example.com', 'file')
+    assert (settings['config_file']['source'], settings['config_file']['from']) == ('environment', '$XDG_CONFIG_HOME')
+    assert settings['state_dir']['source'] == 'default'
+    assert settings['client_secret']['value'] == 'set'
+    assert 'never-print-this' not in result.output
+
+
+def test_config_show_answers_on_a_machine_with_no_config_and_names_the_login(tmp_path, monkeypatch):
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+
+    result = runner.invoke(app, ['config', 'show'])
+
+    assert result.exit_code == 0
+    assert 'doit auth login' in result.output
 
 
 @pytest.mark.parametrize('argv', [['nonsense'], ['review', 'nonsense']])
