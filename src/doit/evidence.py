@@ -43,11 +43,10 @@ MAX_WORKERS = 6
 def answerable(config: dict) -> bool:
     """Whether a pursuit declared something that can say when it last happened.
 
-    A command without `evidence_time` cannot answer when, so it is not evidence
-    and is skipped rather than guessed at. `evidence_files` needs no such pairing
-    — a file's own timestamp is the field.
+    A read without `evidence_time` cannot answer when, so it is not evidence and is
+    skipped rather than guessed at.
     """
-    return bool(config.get('evidence_files')) or bool(config.get('evidence') and config.get('evidence_time'))
+    return bool(config.get('evidence') and config.get('evidence_time'))
 
 
 def declared(pursuits: dict) -> dict[str, dict]:
@@ -55,7 +54,7 @@ def declared(pursuits: dict) -> dict[str, dict]:
     return {name: config for name, config in pursuits.items() if answerable(config)}
 
 
-ANSWER_FIELDS = ('evidence', 'evidence_files', 'evidence_items', 'evidence_time', 'evidence_where')
+ANSWER_FIELDS = ('evidence', 'evidence_items', 'evidence_time', 'evidence_where')
 
 
 def declaration(config: dict) -> str:

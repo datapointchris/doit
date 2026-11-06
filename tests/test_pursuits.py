@@ -416,10 +416,19 @@ def test_context_and_detail_without_a_label_are_refused(tmp_path):
         load(path)
 
 
-@pytest.mark.parametrize('field', ['resolve', 'evidence'])
-def test_a_read_written_as_a_command_is_refused_naming_the_read_form(tmp_path, field):
-    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    {field}: icb tasks list --json\n')
-    with pytest.raises(pursuits.RegisterError, match=rf'a: {field} is a read .*{{app: <name>, path: /<route>'):
+@pytest.mark.parametrize(
+    ('field', 'declared'),
+    [
+        ('resolve', 'icb tasks list --json'),
+        ('evidence', 'icb tasks list --json'),
+        ('resolve', '{app: icb}'),
+        ('evidence', '{app: icb, path: /tasks, timeout: 3}'),
+        ('resolve', '{app: icb, path: /tasks, query: limit}'),
+    ],
+)
+def test_a_read_the_service_cannot_make_is_refused_naming_the_read_form(tmp_path, field, declared):
+    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    {field}: {declared}\n')
+    with pytest.raises(pursuits.RegisterError, match=rf'\ba: {field}\b.*{re.escape(pursuits.READ_FORM)}'):
         load(path)
 
 
@@ -653,12 +662,10 @@ def test_the_tally_sets_what_was_done_beside_what_was_asked():
     assert pursuits.tally_text(state, 'read') == '1h 30m of 30h in 40d'
 
 
-@pytest.mark.parametrize(
-    'source', ['evidence_files: ~/notes/journal', 'evidence: {app: icb, path: /tasks}\n    evidence_time: completed_at']
-)
-def test_a_pursuit_measured_in_minutes_refuses_an_app_source(source):
+def test_a_pursuit_measured_in_minutes_refuses_an_app_source():
     """An app says which day, never how long. Crediting a day some guessed
     number of minutes paid a week's journal from one file saved twice."""
+    source = 'evidence: {app: icb, path: /tasks}\n    evidence_time: completed_at'
     body = f'pursuits:\n  journal:\n    description: x\n    weight: 10\n    weekly_minutes: 60\n    {source}\n'
 
     with pytest.raises(pursuits.RegisterError, match='journal: weekly_minutes is paid by `doit pursuits log --minutes` only'):

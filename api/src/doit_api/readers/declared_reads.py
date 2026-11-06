@@ -12,7 +12,8 @@ query, which this module asks:
       path: /tasks
       query: {limit: 3}
 
-The register's validator refuses either one written as a command.
+The register's validator refuses any other shape, so a read reaching here is one
+the service can make.
 
 Every failed read is logged at error as `source_failed`, naming the source and
 the reason, and the reason is what the lane or the row shows.
@@ -50,22 +51,6 @@ log = logging.getLogger(__name__)
 def source_failed(source: str, adapter: str | None, reason: str, *, exc_info: bool = False) -> None:
     """The one line an alert is filed on: a read the service could not make, with the source's name."""
     log.error('source_failed', extra={'source': source, 'adapter': adapter, 'reason': reason}, exc_info=exc_info)
-
-
-READ_KEYS = {'app', 'path', 'query'}
-
-
-def declared_read(declaration: object, field: str) -> tuple[str, str, dict]:
-    """A `resolve` or `evidence` declaration's app, path and query, or a `ReadFailed` naming what is wrong with it."""
-    if not isinstance(declaration, dict) or not declaration.get('app') or not str(declaration.get('path', '')).startswith('/'):
-        raise ReadFailed(f'{field} must name an app and a path starting with /')
-    unknown = set(declaration) - READ_KEYS
-    if unknown:
-        raise ReadFailed(f'{field} has unknown key(s) {", ".join(sorted(unknown))}; it takes app, path and query')
-    query = declaration.get('query') or {}
-    if not isinstance(query, dict):
-        raise ReadFailed(f'{field}.query must be a mapping of parameter to value')
-    return str(declaration['app']), str(declaration['path']), query
 
 
 class Readers:
@@ -128,19 +113,18 @@ class Readers:
         with ThreadPoolExecutor(max_workers=len(sources)) as pool:
             return {result.source: result for result in pool.map(lambda source: self.result(source, bounds, now), sources)}
 
-    def declared(self, declaration: object, field: str) -> object:
-        app, path, query = declared_read(declaration, field)
-        return self.app(app).get(path, query)
+    def declared(self, declaration: dict) -> object:
+        return self.app(str(declaration['app'])).get(str(declaration['path']), declaration.get('query') or {})
 
     def resolve(self, name: str, config: dict) -> dict | None:
         """What a pursuit means right now, read from its app."""
         if not config.get('resolve'):
             return None
-        backend = config['resolve'].get('app', 'resolve') if isinstance(config['resolve'], dict) else 'resolve'
+        backend = str(config['resolve']['app'])
         try:
             if not config.get('label'):
                 raise ReadFailed('resolve over HTTP reads JSON, so it needs a label field')
-            document = self.declared(config['resolve'], 'resolve')
+            document = self.declared(config['resolve'])
         except ReadFailed as error:
             log.error('source_failed', extra={'source': f'{name}.resolve', 'reason': error.reason})
             return {'pursuit': name, 'error': error.reason, 'backend': backend}
@@ -157,9 +141,7 @@ class Readers:
     def evidence(self, name: str, config: dict, now: dt.datetime) -> tuple[str, dict]:
         """When a pursuit last happened, by its app, as the entry `evidence.refreshed` caches."""
         try:
-            if config.get('evidence_files'):
-                raise ReadFailed('evidence_files names a directory on a desk, which the service cannot read')
-            document = self.declared(config.get('evidence'), 'evidence')
+            document = self.declared(config['evidence'])
         except ReadFailed as error:
             log.error('source_failed', extra={'source': f'{name}.evidence', 'reason': error.reason})
             return name, {'checked_at': now.isoformat(), 'error': error.reason}
