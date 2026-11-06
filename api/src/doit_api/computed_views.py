@@ -341,8 +341,10 @@ class Views:
         """Offers by the machine that drew them: ever, over drift's default window, and that window's counts no pursuit owns."""
         config, now = self.config(), self.now()
         recent = self.store.offers_since(window.bound(pursuits.DRIFT_SINCE, now, end=False).date())
-        stranded = sorted({name for by_machine in recent.values() for name in by_machine if name not in config.pursuits})
-        return {'counts': self.store.offer_counts(), 'recent': recent, 'stranded': stranded}
+        stranded: set[str] = set()
+        for by_machine in recent.values():
+            stranded |= {name for name in by_machine if name not in config.pursuits}
+        return {'counts': self.store.offer_counts(), 'recent': recent, 'stranded': sorted(stranded)}
 
     # --- the review register --------------------------------------------------
 
@@ -352,7 +354,9 @@ class Views:
             raise BadRequest(f'no block named {block}; the blocks are {", ".join(review.BLOCKS)}')
         config, now = self.config(), self.now()
         stamps = self.store.review_stamps()
-        owned = {entry for entries in config.review.values() for entry in entries}
+        owned: set[str] = set()
+        for entries in config.review.values():
+            owned |= set(entries)
         return {
             'entries': review.statuses_of(config.review, stamps, now.date(), block),
             'stranded': sorted(entry for entry in stamps if entry not in owned),

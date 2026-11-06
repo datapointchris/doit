@@ -597,7 +597,9 @@ def verdict_lines(groups: list[Lane], width: int) -> list[Text]:
     failed = [lane.name for lane in groups if not lane.available]
     cut = [lane.name for lane in groups if lane.available and lane.reason]
     recording = [lane.name for lane in groups if any(cell.actor for cell in lane.grid)]
-    unknown = sum(actor.kind(cell.actor) == actor.UNKNOWN for lane in groups for cell in lane.grid)
+    unknown = 0
+    for lane in groups:
+        unknown += sum(actor.kind(cell.actor) == actor.UNKNOWN for cell in lane.grid)
     lead = f'{GROUP_INDENT}asked '
     wrapped = textwrap.fill(
         ', '.join(asked), width, initial_indent=lead, subsequent_indent=' ' * len(lead), break_long_words=False, break_on_hyphens=False

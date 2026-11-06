@@ -151,7 +151,10 @@ def set_lanes(built: list[dashboard.LaneView], done: list[Lane]) -> list[Lane]:
         if not lane.available:
             due.append(lane)
             continue
-        finished = {cell.text for group in done if group.name == lane.name for cell in group.grid}
+        finished: set[str] = set()
+        for group in done:
+            if group.name == lane.name:
+                finished |= {cell.text for cell in group.grid}
         template = lane.hints[0] if lane.hints else ''
         left = [
             Row(cell.text, '', handle=filled(template, cell.handle)) for cell in lane.grid if not cell.done and cell.text not in finished

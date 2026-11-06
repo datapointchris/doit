@@ -2156,7 +2156,8 @@ def in_window(record: dict, cutoff: dt.datetime) -> bool:
 def earliest(records: list[dict], evidence_days: dict[str, list[dt.date]]) -> dt.datetime | None:
     """The first instant drift could read: the oldest record or app day."""
     times = [when for record in records if (when := journal.occurred(record))]
-    times += [first_instant(day) for days in evidence_days.values() for day in days]
+    for days in evidence_days.values():
+        times += [first_instant(day) for day in days]
     return min(times, default=None)
 
 
