@@ -184,6 +184,29 @@ def test_the_list_gives_a_tracked_pursuit_no_weight_and_no_due_date(api):
     assert not re.search(r'\d', line.split('last')[0]), 'a weight was printed'
 
 
+def test_a_reason_reaches_every_read_of_a_pursuit_and_its_json(api, capsys):
+    reason = 'It keeps the [house] standing, per chores.md'
+    register = f'pursuits:\n  chores:\n    weight: 25\n    cadence: 3d\n    reason: {reason}\n  walk:\n    weight: 5\n    cadence: 3d\n'
+    api.put('/api/v1/documents/pursuits', json={'text': register}).raise_for_status()
+
+    assert pursuit_commands.cmd_list(as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)['pursuits']['chores']['reason'] == reason
+    assert pursuit_commands.cmd_drift(None, None, as_json=True) == 0
+    assert [row['reason'] for row in json.loads(capsys.readouterr().out)['rows']] == [reason, None]
+    assert pursuit_commands.cmd_dormant() == 0
+    assert reason in ' '.join(capsys.readouterr().out.split())
+
+    assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
+    capsys.readouterr()
+    for read in (
+        lambda: pursuit_commands.cmd_list(as_json=False),
+        lambda: pursuit_commands.cmd_drift(None, None, as_json=False),
+        lambda: pursuit_commands.cmd_next(explain=True, as_json=False, reroll=False),
+    ):
+        assert read() == 0
+        assert ' '.join(capsys.readouterr().out.split()).count(reason) == 1
+
+
 def test_a_log_asks_for_what_was_not_passed_and_minutes_only_of_a_timed_pursuit(api, store, monkeypatch):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
     asked = answers(monkeypatch, 'read-library', '', '45', '')

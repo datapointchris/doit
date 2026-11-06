@@ -136,6 +136,10 @@ A weight never moves a pace. It orders what is owed, heaviest first, and when le
 owed it draws the rest. So whether a pursuit is getting enough is answered by its own goal alone,
 whatever the rest of the register weighs and however much else got logged that week.
 
+A weight is set by hand, and `reason:` says why it is what it is. `doit pursuits list`, `drift`,
+`dormant` and `doit next --explain` print it, and the `--json` of those that have one carries it. Nothing reads
+it to adjust anything.
+
 A pursuit declaring no pace is tracked. It asks for nothing, so it is never due, never drawn, and
 takes no weight. Its logs and its app's evidence are read all the same, so `doit today` lists it as
 done and `doit pursuits drift` counts it. That suits something already done plenty of, whose time

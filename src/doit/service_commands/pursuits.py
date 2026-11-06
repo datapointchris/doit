@@ -28,6 +28,7 @@ from doit.pursuits import minutes_refusal
 from doit.pursuits import offer
 from doit.pursuits import offered_order
 from doit.pursuits import paced
+from doit.pursuits import print_reason
 from doit.pursuits import prompt_for_minutes
 from doit.pursuits import prompt_for_pursuit
 from doit.pursuits import render_drift
@@ -313,6 +314,7 @@ def cmd_list(as_json: bool) -> int:
         elif name in state['suppressed']:
             line.append('  skipped', style='yellow')
         console.print(line, no_wrap=True, overflow='ellipsis')
+        print_reason(config.get('reason'))
     tracking = ' · tracked is logged and never due' if not all(paced(config) for config in pursuits.values()) else ''
     console.print(f'\n  weight orders what is owed and draws the rest{tracking} · [cyan]doit pursuits edit[/]')
     render_stranded_counts(client.get('/pursuits/offers'))
@@ -366,6 +368,7 @@ def cmd_dormant() -> int:
         line.append(f'{row["pursuit"]:<{width}}', style='white')
         line.append(f'  {format_elapsed(row["days_since"])} · goal {row["goal"]}')
         console.print(line)
+        print_reason(row.get('reason'))
     console.print('\n  Cold is the time since the last one.')
     console.print('  [cyan]doit pursuits list[/] shows it beside what each owes.\n')
     return 0

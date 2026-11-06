@@ -58,6 +58,7 @@ from typing import NamedTuple
 
 import typer
 import yaml
+from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
@@ -138,6 +139,7 @@ READABLE_CHOICE_WIDTH = 30
 KNOWN_FIELDS = {
     'description',
     'weight',
+    'reason',
     'cadence',
     'until',
     'paused',
@@ -174,6 +176,9 @@ TEMPLATE = """\
 #                What is owed is shown heaviest first, and when less than a
 #                screen is owed the rest is drawn by weight. Relative
 #                magnitudes, so nothing adds up
+#   reason       optional; why it weighs what it does. `doit pursuits list`,
+#                `drift`, `dormant` and `doit next --explain` print it, and
+#                nothing reads it to adjust anything
 #
 # A pursuit declares at most one pace:
 #
@@ -376,6 +381,8 @@ def pursuits_from_document(document: dict, where: object) -> dict:
             )
         if paced(config) and (not isinstance(weight, int | float) or isinstance(weight, bool) or weight < 0):
             raise RegisterError(f'{name}: weight must be a non-negative number')
+        if config.get('reason') is not None and not isinstance(config['reason'], str):
+            raise RegisterError(f'{name}: reason must be text')
         if cadence is not None and not DAYS_CADENCE.fullmatch(str(cadence).strip()):
             raise RegisterError(f'{name}: cadence is a whole number of days, like 3d or 9d')
         if minutes is not None and (not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0):
@@ -1195,8 +1202,15 @@ def dormant_rows(state: dict) -> list[dict]:
     for name in state['active']:
         elapsed, interval = state['days_since'][name], state['intervals'][name]
         if not math.isinf(interval) and (elapsed is None or elapsed > interval * DORMANT_INTERVALS):
+            config = state['active'][name]
             rows.append(
-                {'pursuit': name, 'days_since': elapsed, 'interval_days': round(interval, 2), 'goal': goal_text(state['active'][name])}
+                {
+                    'pursuit': name,
+                    'days_since': elapsed,
+                    'interval_days': round(interval, 2),
+                    'goal': goal_text(config),
+                    'reason': config.get('reason'),
+                }
             )
     return sorted(rows, key=lambda row: -(math.inf if row['days_since'] is None else row['days_since']))
 
@@ -1712,6 +1726,25 @@ def standing_from(payload: dict, register: dict, now: dt.datetime) -> dict:
     }
 
 
+def print_reason(reason: str | None) -> None:
+    """A pursuit's reason on the lines under its row, wrapped because a row is one line and a reason is a sentence."""
+    if reason:
+        console.print(Padding(Text(reason), (0, 0, 0, 4), expand=False))
+
+
+def render_reasons(named: Iterable[tuple[str, str | None]]) -> None:
+    """The reasons under a table, whose columns have no room for a sentence."""
+    table = Table(box=None, pad_edge=False, show_header=False)
+    table.add_column('pursuit', no_wrap=True)
+    table.add_column('reason')
+    for name, reason in named:
+        if reason:
+            table.add_row(name, Text(reason))
+    if table.row_count:
+        console.print()
+        console.print(table)
+
+
 def render_explain(state: dict, selection: dict) -> int:
     console.rule('[cyan]Why these', align='left')
     console.print(f'draw {selection["draw_id"][:8]}\n')
@@ -1736,6 +1769,7 @@ def render_explain(state: dict, selection: dict) -> int:
             'owed' if name in pins else f'{state["probability"][name] * 100:.1f}%',
         )
     console.print(table)
+    render_reasons((name, state['active'][name].get('reason')) for name in offered_order(state, state['active']))
     console.print(f'\n  every owed row is shown, heaviest first · the rest is drawn by weight to fill {DRAW_SIZE} rows')
     console.print('  pick is the chance of being drawn [bold]first[/] · [yellow]yellow[/] is skipped')
     console.print('  [cyan]doit next --json[/] carries the raw balance every column here is derived from')
@@ -2067,6 +2101,7 @@ def drift_rows(
                 'unit': 'minutes' if name in weekly else 'checkoffs',
                 'goal': goal_text(pursuits[name]),
                 'weight': state['weights'].get(name),
+                'reason': pursuits[name].get('reason'),
                 'since': start.isoformat(),
                 'asked': None if asked is None else round(asked, 1),
                 'done': round(done, 1),
@@ -2149,3 +2184,4 @@ def render_drift(rows: list[dict]) -> None:
             str(row['skips']),
         )
     console.print(table)
+    render_reasons((row['pursuit'], row.get('reason')) for row in rows)
