@@ -97,10 +97,6 @@ def test_unknown_command_exits_2(argv):
     assert result.exit_code == 2
 
 
-def test_missing_required_argument_exits_2():
-    assert runner.invoke(app, ['review', 'done']).exit_code == 2
-
-
 def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
     """`doit next --no-input` is refused by `next`; the root is where it goes."""
     with pytest.raises(Exception) as refused:

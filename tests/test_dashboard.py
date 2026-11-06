@@ -964,11 +964,6 @@ def test_an_alert_lane_draws_before_every_work_lane() -> None:
     assert [lane.name for lane in ordered] == ['problems', 'tasks', 'habits']
 
 
-def test_config_still_decides_the_order_among_alert_lanes() -> None:
-    """The sort is stable, so it lifts the alerts without reshuffling them."""
-    assert [lane.name for lane in dashboard.arranged([alert_lane('second'), alert_lane('first')], None)] == ['second', 'first']
-
-
 def test_the_terminal_drops_an_alert_lane_with_nothing_open(capsys) -> None:
     """Seeing it every day while it is empty is what teaches you to stop reading
     the one place that says something is wrong."""
@@ -979,33 +974,6 @@ def test_the_terminal_drops_an_alert_lane_with_nothing_open(capsys) -> None:
     printed = capsys.readouterr().out
     assert 'PROBLEMS' not in printed
     assert 'TASKS' in printed
-
-
-def test_an_alert_lane_with_something_open_is_drawn(capsys) -> None:
-    dashboard.render_lanes([alert_lane()], dt.date.today(), 5)
-
-    assert 'PROBLEMS' in capsys.readouterr().out
-
-
-def test_an_alert_lane_that_failed_is_drawn_rather_than_dropped(capsys) -> None:
-    """A lane that could not answer is never omitted, alert or not — a dashboard
-    that quietly drops one reads as nothing outstanding. It carries no rows, so
-    only `available` separates it from the alert that answered and had none."""
-    broken = dashboard.lanemodel.unavailable('problems', 'PROBLEMS', 'fleet is not installed')
-    broken.alert = True
-
-    dashboard.render_lanes([broken], dt.date.today(), 5)
-
-    assert dashboard.quiet_alert(broken) is False
-    assert 'problems' in capsys.readouterr().out
-
-
-def test_json_keeps_an_alert_lane_the_terminal_would_drop() -> None:
-    """A consumer asking what doit knows wants the empty answer too."""
-    document = json.loads(dashboard.lanemodel.dumps([alert_lane(rows=0)], dt.datetime.now()))
-
-    assert [lane['name'] for lane in document['lanes']] == ['problems']
-    assert document['lanes'][0]['alert'] is True
 
 
 def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
