@@ -414,3 +414,39 @@ def test_happened_with_only_an_end_reads_from_the_earliest_record_through_that_w
     assert document['until'][:10] == '2026-07-21'
     assert document['asked'] == ['review', 'practice']
     assert [lane.name for lane in lanes.from_document({'lanes': document['groups']})] == ['review', 'practice']
+
+
+def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store, monkeypatch, tmp_path, capsys):
+    overview = {
+        'schema_version': 1,
+        'as_of_month': '2026-07',
+        'scheduled': {
+            'items': [{'id': 'trip-1', 'name': 'Portland', 'notes': '', 'planned_date': '2026-04', 'past_its_month': True}],
+            'total': 1,
+            'past_its_month_total': 1,
+        },
+        'warnings': [],
+    }
+    feedback = [{'id': 'f-1', 'body': 'The rest timer is too small', 'context_path': '/sessions/4', 'created_at': '2026-07-20T12:00:00Z'}]
+    apps = {
+        'nomad': stand_in('nomad', {'/overview': lambda request: overview}),
+        'meso': stand_in('meso', {'/feedback': lambda request: feedback if request.url.params['status'] == 'open' else []}),
+    }
+    client = connected(store, monkeypatch, tmp_path, apps=apps)
+    document = 'sources:\n  icb:\n    adapter: icb\n  nomad:\n    adapter: nomad\n  meso-feedback:\n    adapter: meso-feedback\n'
+    client.put('/api/v1/documents/sources', json={'text': document}).raise_for_status()
+
+    assert dashboard_commands.cmd_dashboard(None, as_json=False) == 0
+    printed = capsys.readouterr().out
+    assert '3mo owed' in printed
+    assert 'partial — icb is not configured' in printed, 'an icb that cannot answer costs its rows, not the trips'
+    assert 'MESO - FEEDBACK  1 open' in printed
+    assert 'The rest timer' in printed
+
+    assert today_commands.cmd_today(as_json=False) == 0
+    printed = capsys.readouterr().out
+    assert 'Portland' in printed
+    assert 'partial — icb is not configured' in printed, 'the due list says what it could not ask'
+
+    listed = CliRunner().invoke(sources_commands.app, ['list', '--json'])
+    assert {row['id']: row['failure'] for row in json.loads(listed.output)} == {'icb': 'failed', 'nomad': None, 'meso-feedback': None}

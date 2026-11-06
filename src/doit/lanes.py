@@ -114,6 +114,10 @@ class Lane:
     no rows and a nonzero `in_flight` is still drawn. An alert lane that could
     not be built is still drawn too: the omission is for a lane that answered
     and had nothing, never for one that failed to answer.
+
+    `omit_when_empty` gives a work lane that same omission without the red and
+    without drawing first: open feedback is empty most days, and a standing `—`
+    says nothing while it is.
     """
 
     name: str
@@ -127,6 +131,7 @@ class Lane:
     reason: str = ''
     available: bool = True
     alert: bool = False
+    omit_when_empty: bool = False
 
 
 def unavailable(name: str, title: str, reason: str) -> Lane:
@@ -186,6 +191,7 @@ def lane_from(payload: dict) -> Lane:
         reason=str(payload.get('reason') or ''),
         available=payload.get('status', 'ok') != 'unavailable',
         alert=bool(payload.get('alert')),
+        omit_when_empty=bool(payload.get('omit_when_empty')),
     )
 
 
@@ -231,6 +237,7 @@ def lane_to_dict(lane: Lane) -> dict:
         'meta': lane.meta,
         'status': 'ok' if lane.available else 'unavailable',
         'alert': lane.alert,
+        'omit_when_empty': lane.omit_when_empty,
         'reason': lane.reason or None,
         'rows': [
             {'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency), 'handle': row.handle} for row in lane.rows

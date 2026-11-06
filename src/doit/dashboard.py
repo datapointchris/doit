@@ -38,6 +38,8 @@ a coding session. Same plumbing, different audience.
 
 import datetime as dt
 import math
+from dataclasses import dataclass
+from dataclasses import field
 from itertools import chain
 from urllib.parse import urlsplit
 
@@ -68,15 +70,25 @@ ROW_CAP = 3
 FOCUSED_ROW_CAP = 10
 
 # Lanes whose useful unit is bigger than the default. Tasks is the list you
-# actually pick from. The other rows a study plan's head, every started
-# resource and then what follows, which three rows would cut short.
-LANE_ROW_CAPS = {'tasks': 5, 'learning': 5}
+# actually pick from. Learning rows a study plan's head, every started resource
+# and then what follows, which three rows would cut short. Upcoming holds what
+# is owed above what is next, and three owed trips would hide every date ahead.
+LANE_ROW_CAPS = {'tasks': 5, 'learning': 5, 'upcoming': 8}
 
 # The `icb overview` schema this build understands. A newer one is reported
 # rather than half-read: dotfiles and ichrisbirch install independently.
 # v3 task rows carry no priority; a row's position in the list is its rank.
 # v4 holds no issues section, because the tracker is slate's.
 ICB_SCHEMA_VERSION = 4
+
+# The `GET /overview` schema of nomad's API this build understands. A newer one
+# is reported the same way.
+NOMAD_SCHEMA_VERSION = 1
+
+UPCOMING = 'upcoming'
+
+# One feedback lane per app, named for the app, and never one combined across apps.
+MESO_FEEDBACK = 'meso - feedback'
 
 LABEL_WIDTH = 8
 
@@ -417,10 +429,26 @@ def project_item_row(label: str, item: dict, focus: dict) -> Row:
     )
 
 
-def build_upcoming_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
+@dataclass(frozen=True)
+class UpcomingShare:
+    """What one source adds to the upcoming lane, each row beside the key it sorts on.
+
+    `available` is False where the source gave no rows to add, and `reason` says
+    why. A share that answered can still carry a reason for a part it could not read.
+    """
+
+    dated_rows: list[tuple[tuple[str, str], Row]] = field(default_factory=list)
+    meta: str = ''
+    total: int = 0
+    hints: tuple[str, ...] = ()
+    reason: str = ''
+    available: bool = True
+
+
+def icb_upcoming(results: dict[str, sources.Result], today: dt.date) -> UpcomingShare:
     payload, reason = icb_context(results, ('countdowns', 'events'))
     if payload is None:
-        return unavailable('upcoming', 'UPCOMING', reason)
+        return UpcomingShare(reason=reason, available=False)
 
     countdowns = payload.get('countdowns') or {}
     events = payload.get('events') or {}
@@ -434,23 +462,150 @@ def build_upcoming_lane(results: dict[str, sources.Result], today: dt.date) -> L
     for event in events.get('items') or []:
         text = describe(event.get('name', ''), event.get('venue') or event.get('notes', ''))
         entries.append((event_date(event.get('date', '')), text, view_handle('icb events show', event)))
-    entries.sort(key=lambda entry: entry[0])
 
     # The gutter always answers "how far away", the note always answers "which
     # day". Which kind of entry it is says nothing about what you would do next,
     # so it does not earn the column — the handle names it anyway.
-    rows = [Row(relative_day(due, today), text, calendar_day(due), day_urgency(due, today), handle) for due, text, handle in entries]
+    dated_rows = [
+        ((due, ''), Row(relative_day(due, today), text, calendar_day(due), day_urgency(due, today), handle))
+        for due, text, handle in entries
+    ]
     countdown_total = countdowns.get('total', 0)
     event_total = events.get('total', 0)
-    return LaneView(
-        name='upcoming',
-        title='UPCOMING',
+    return UpcomingShare(
+        dated_rows=dated_rows,
         meta=f'{plural(countdown_total, "countdown")} · {plural(event_total, "event")}',
-        rows=rows,
         total=countdown_total + event_total,
-        hints=['icb countdowns list', 'icb events list'],
+        hints=('icb countdowns list', 'icb events list'),
         reason=reason,
     )
+
+
+def nomad_upcoming(results: dict[str, sources.Result], today: dt.date) -> UpcomingShare:
+    """Every planned trip at month grain. A trip with no month sits in `queued`, which this never reads.
+
+    nomad judged `past_its_month` in its own zone against `as_of_month`, so that
+    mark decides what is owed, and `as_of_month` only says how far away a month is.
+    """
+    result = results.get('nomad')
+    if result is None or result.payload is None:
+        return UpcomingShare(reason=sources.reason('nomad', result), available=False)
+
+    payload = result.payload
+    if not isinstance(payload, dict):
+        return UpcomingShare(reason='nomad answered with an overview this dashboard cannot read', available=False)
+
+    version = payload.get('schema_version', 0)
+    if version > NOMAD_SCHEMA_VERSION:
+        return UpcomingShare(reason=f'nomad overview schema v{version} is newer than this dashboard — update doit', available=False)
+
+    scheduled = payload.get('scheduled') or {}
+    as_of_month = str(payload.get('as_of_month') or '')
+    owed = scheduled.get('past_its_month_total', 0)
+    warnings = [
+        f'nomad: {warning.get("message", "")}' for warning in payload.get('warnings') or [] if warning.get('section') == 'scheduled'
+    ]
+    return UpcomingShare(
+        dated_rows=[trip_entry(trip, as_of_month, today) for trip in scheduled.get('items') or []],
+        meta=join_context([plural(scheduled.get('total', 0), 'trip'), f'{owed} owed' if owed else '']),
+        total=scheduled.get('total', 0),
+        hints=('nomad trips list',),
+        reason='; '.join(warnings),
+    )
+
+
+def trip_entry(trip: dict, as_of_month: str, today: dt.date) -> tuple[tuple[str, str], Row]:
+    """One trip as a row, and the key that places it among rows carrying a whole date.
+
+    A trip has no day, so it sorts at the first of its month or at today,
+    whichever is later, and after any row dated that same day. An owed trip then
+    stays under what falls today, which `doit today` would otherwise cut to make
+    room for it.
+    """
+    month = str(trip.get('planned_date') or '')
+    owed = bool(trip.get('past_its_month'))
+    row = Row(
+        trip_distance(month, as_of_month, owed),
+        describe(trip.get('name', ''), trip.get('notes', '')),
+        calendar_month(month),
+        Urgency.OVERDUE if owed else Urgency.NONE,
+        view_handle('nomad trips show', trip),
+    )
+    return (max(month, today.isoformat()), month), row
+
+
+def month_number(month: str) -> int | None:
+    """A YYYY-MM month as a count of months, or None for anything else."""
+    try:
+        parsed = dt.datetime.strptime(month, '%Y-%m')
+    except ValueError:
+        return None
+    return parsed.year * 12 + parsed.month
+
+
+def trip_distance(month: str, as_of_month: str, owed: bool) -> str:
+    """The gutter word for a trip, at month grain, in the words `relative_day` uses for a day."""
+    planned, current = month_number(month), month_number(as_of_month)
+    if planned is None or current is None:
+        return 'owed' if owed else month
+    away = planned - current
+    if owed:
+        return f'{-away}mo owed'
+    return f'in {away}mo' if away else 'this month'
+
+
+def calendar_month(month: str) -> str:
+    try:
+        return dt.datetime.strptime(month, '%Y-%m').strftime('%b %Y')
+    except ValueError:
+        return month
+
+
+UPCOMING_SHARES = {'icb': icb_upcoming, 'nomad': nomad_upcoming}
+
+
+def build_upcoming_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
+    """One timeline over whichever sources `results` holds, each failing on its own.
+
+    A source that could not answer costs its own rows and adds its reason. The
+    lane is unavailable only when no source gave it anything to show.
+    """
+    shares = [share(results, today) for source, share in UPCOMING_SHARES.items() if source in results]
+    reason = '; '.join(share.reason for share in shares if share.reason)
+    answered = [share for share in shares if share.available]
+    if not answered:
+        return unavailable(UPCOMING, UPCOMING.upper(), reason)
+
+    dated_rows = sorted(chain.from_iterable(share.dated_rows for share in answered), key=lambda entry: entry[0])
+    return LaneView(
+        name=UPCOMING,
+        title=UPCOMING.upper(),
+        meta=' · '.join(share.meta for share in answered),
+        rows=[row for _, row in dated_rows],
+        total=sum(share.total for share in answered),
+        hints=[hint for share in answered for hint in share.hints],
+        reason=reason,
+    )
+
+
+def upcoming_joined(collected: list[LaneView], registry: sources.Registry, results: dict[str, sources.Result]) -> list[LaneView]:
+    """`collected` with every source's upcoming lane as one, in the place of the first.
+
+    An adapter reads one source, so each builds a lane holding its own rows. The
+    join happens here, where both answers are in hand. It is this one lane's, and
+    not a merge of same-named lanes: a lane name keeps meaning one source's lane
+    everywhere else.
+    """
+    feeding = {
+        source.adapter: results[source.id]
+        for source in registry.sources.values()
+        if source.adapter in UPCOMING_SHARES and (not source.lanes or UPCOMING in source.lanes)
+    }
+    if len(feeding) < 2:
+        return collected
+    position = next(index for index, lane in enumerate(collected) if lane.name == UPCOMING)
+    others = [lane for lane in collected if lane.name != UPCOMING]
+    return [*others[:position], build_upcoming_lane(feeding, dt.date.today()), *others[position:]]
 
 
 def build_learning_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
@@ -589,6 +744,40 @@ def meso_adapter(result: sources.Result) -> list[LaneView]:
     other adapter, because `adapter:` in the sources document answers "whose model is
     this" — the lane it builds is named for its subject instead."""
     return [build_training_lane({'meso': result}, dt.date.today())]
+
+
+def meso_feedback_adapter(result: sources.Result) -> list[LaneView]:
+    """What is open in meso's feedback, newest first as meso lists it. The bodies are read in meso."""
+    payload = result.payload
+    if not isinstance(payload, list):
+        return [unavailable(MESO_FEEDBACK, MESO_FEEDBACK.upper(), sources.reason('meso-feedback', result))]
+
+    today = dt.date.today()
+    rows = [
+        Row(
+            relative_day(event_date(str(item.get('created_at') or '')), today),
+            first_sentence(item.get('body')),
+            str(item.get('context_path') or ''),
+            handle=view_handle('meso admin feedback show', item),
+        )
+        for item in payload
+    ]
+    return [
+        LaneView(
+            name=MESO_FEEDBACK,
+            title=MESO_FEEDBACK.upper(),
+            meta=f'{len(rows)} open',
+            rows=rows,
+            total=len(rows),
+            hints=['meso admin feedback list'],
+            omit_when_empty=True,
+        )
+    ]
+
+
+def nomad_adapter(result: sources.Result) -> list[LaneView]:
+    """nomad's planned trips, as the upcoming lane. `source_lanes` joins it with icb's where both are asked."""
+    return [build_upcoming_lane({'nomad': result}, dt.date.today())]
 
 
 def plan_entry_row(entry: dict) -> Row:
@@ -748,7 +937,7 @@ ICB_LANES = (
     ('books', build_books_lane),
     ('articles', build_articles_lane),
     ('projects', build_projects_lane),
-    ('upcoming', build_upcoming_lane),
+    (UPCOMING, build_upcoming_lane),
 )
 
 LOCAL_LANES = ('maintenance',)
@@ -879,6 +1068,8 @@ SHIPPED_ADAPTERS = (
     ('icb', icb_adapter, tuple(name for name, _ in ICB_LANES)),
     ('learning', learning_adapter, ('learning',)),
     ('meso', meso_adapter, ('training',)),
+    ('meso-feedback', meso_feedback_adapter, (MESO_FEEDBACK,)),
+    ('nomad', nomad_adapter, (UPCOMING,)),
     ('prs', prs_adapter, ('prs',)),
     ('dotfiles', dotfiles_adapter, ('dotfiles',)),
 )
@@ -890,7 +1081,7 @@ for adapter_id, adapter_fn, _ in SHIPPED_ADAPTERS:
 # conforming source contributes lanes doit has never heard of, and a sources
 # document that omits one of these offers fewer. `--lane` is checked against
 # what actually came back rather than against this.
-LANE_NAMES = [*chain.from_iterable(declared for _, _, declared in SHIPPED_ADAPTERS), *LOCAL_LANES]
+LANE_NAMES = [*dict.fromkeys(chain.from_iterable(declared for _, _, declared in SHIPPED_ADAPTERS)), *LOCAL_LANES]
 
 
 def source_lanes(registry: sources.Registry, results: dict[str, sources.Result]) -> list[LaneView]:
@@ -905,7 +1096,7 @@ def source_lanes(registry: sources.Registry, results: dict[str, sources.Result])
         if not built and result.failure is not None:
             built = [lanemodel.unavailable(source.id, source.id.upper(), sources.reason(source.id, result))]
         collected.extend(built)
-    return collected
+    return upcoming_joined(collected, registry, results)
 
 
 def arranged(collected: list[LaneView], wanted: list[str] | None) -> list[LaneView]:
@@ -940,23 +1131,23 @@ def cap_for(lane_name: str, row_cap: int) -> int:
     return LANE_ROW_CAPS.get(lane_name, row_cap)
 
 
-def quiet_alert(lane: LaneView) -> bool:
-    """An alert lane that answered and had nothing open.
+def quiet_lane(lane: LaneView) -> bool:
+    """A lane that answered, had nothing open, and declared it should not be drawn then.
 
     A lane that vanished while an agent was fixing its problems would read as a
-    clean inbox.
+    clean inbox, so work in flight keeps it.
 
     Only the terminal drops it. `--json` keeps every lane, because a consumer
     asking what doit knows wants the empty answer as much as the full one.
     """
-    return lane.alert and lane.available and not lane.rows and not lane.grid and not lane.in_flight
+    return (lane.alert or lane.omit_when_empty) and lane.available and not lane.rows and not lane.grid and not lane.in_flight
 
 
 def render_lanes(lanes: list[LaneView], today: dt.date, row_cap: int) -> None:
     width = terminal_width()
     console.rule(f'[cyan]Dashboard[/] · {today.strftime("%a %d %b")}', align='left')
 
-    for lane in (lane for lane in lanes if lane.available and not quiet_alert(lane)):
+    for lane in (lane for lane in lanes if lane.available and not quiet_lane(lane)):
         render_lane(lane, width, cap_for(lane.name, row_cap))
 
     degraded = [lane for lane in lanes if not lane.available]

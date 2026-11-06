@@ -40,6 +40,7 @@ from . import clickhouse
 from . import icb
 from . import learning
 from . import meso
+from . import nomad
 from . import slate
 from .apps import App
 from .apps import ReadFailed
@@ -71,6 +72,8 @@ class Readers:
             'icb': lambda bounds, now: (icb.overview(self.app('icb'), now), ''),
             'learning': lambda bounds, now: (learning.overview(self.app('learning')), ''),
             'meso': lambda bounds, now: (meso.cycles(self.app('meso')), ''),
+            'meso-feedback': lambda bounds, now: (meso.open_feedback(self.app('meso')), ''),
+            'nomad': lambda bounds, now: (nomad.overview(self.app('nomad')), ''),
             'prs': lambda bounds, now: self.github.open_pull_requests(now),
             'dotfiles': lambda bounds, now: (clickhouse.desk_checks_document(self.clickhouse_settings, now, self.clickhouse_client), ''),
             'learning-completed': lambda bounds, now: learning.completed(self.app('learning'), bounds),

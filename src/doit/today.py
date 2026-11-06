@@ -191,7 +191,7 @@ def appointment_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
             found.append(lane)
             continue
         rows = [Row('', row.text, row.label, row.urgency, row.handle) for row in lane.rows if row.urgency in (Urgency.DUE, Urgency.OVERDUE)]
-        found.append(Lane(name=lane.name, title=lane.title, rows=rows, total=len(rows), hints=list(lane.hints)))
+        found.append(Lane(name=lane.name, title=lane.title, rows=rows, total=len(rows), hints=list(lane.hints), reason=lane.reason))
     return found
 
 
@@ -478,3 +478,5 @@ def render_due(groups: list[Lane], width: int) -> None:
             console.print(line, no_wrap=True, overflow='ellipsis')
             if handle and not inline:
                 print_handle_below(handle, len(ITEM_INDENT) + label_width + (1 if label_width else 0), width)
+        if lane.reason:
+            console.print(Text(f'{ITEM_INDENT}partial — {lane.reason}', style='yellow'))

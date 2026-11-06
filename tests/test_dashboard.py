@@ -73,6 +73,8 @@ ADAPTER_PAYLOADS: dict[str, dict | list] = {
     'icb': {},
     'learning': {},
     'meso': [],
+    'meso-feedback': [],
+    'nomad': {},
     'prs': [],
     'dotfiles': [],
 }
@@ -607,7 +609,7 @@ def test_newer_schema_version_is_reported_rather_than_half_read():
 
 def test_cap_for_gives_tasks_more_room_but_focus_still_wins():
     assert dashboard.cap_for('tasks', dashboard.ROW_CAP) == 5
-    assert dashboard.cap_for('upcoming', dashboard.ROW_CAP) == dashboard.ROW_CAP
+    assert dashboard.cap_for('books', dashboard.ROW_CAP) == dashboard.ROW_CAP
     assert dashboard.cap_for('tasks', dashboard.FOCUSED_ROW_CAP) == dashboard.FOCUSED_ROW_CAP
 
 
@@ -947,7 +949,7 @@ def test_an_ordinary_lane_is_never_quiet_even_when_empty() -> None:
     so, which is what `—` is for."""
     lane = dashboard.LaneView(name='tasks', title='TASKS')
 
-    assert dashboard.quiet_alert(lane) is False
+    assert dashboard.quiet_lane(lane) is False
 
 
 def alert_lane(name: str = 'problems', rows: int = 1) -> dashboard.LaneView:
@@ -993,7 +995,126 @@ def test_work_in_flight_survives_a_round_trip_through_the_contract() -> None:
     read_back = dashboard.lanemodel.from_document(document)[0]
 
     assert read_back.in_flight == 2
-    assert dashboard.quiet_alert(read_back) is False
+    assert dashboard.quiet_lane(read_back) is False
+
+
+NOMAD_OVERVIEW = {
+    'schema_version': dashboard.NOMAD_SCHEMA_VERSION,
+    'as_of_month': '2026-07',
+    'scheduled': {
+        'items': [
+            {'id': 'trip-past', 'name': 'Portland', 'notes': 'Scout it. Book later.', 'planned_date': '2026-04', 'past_its_month': True},
+            {'id': 'trip-now', 'name': 'Denver', 'notes': '', 'planned_date': '2026-07', 'past_its_month': False},
+            {'id': 'trip-later', 'name': 'Lisbon', 'notes': '', 'planned_date': '2027-03', 'past_its_month': False},
+        ],
+        'total': 3,
+        'past_its_month_total': 1,
+    },
+    'queued': {'items': [{'id': 'trip-queued', 'name': 'Someday', 'planned_date': None, 'past_its_month': False}], 'total': 1},
+    'completed': {'total': 2},
+    'warnings': [],
+}
+
+ICB_DATES = {
+    'schema_version': dashboard.ICB_SCHEMA_VERSION,
+    'countdowns': {
+        'items': [{'id': 7, 'name': 'Dentist', 'due_date': TODAY.isoformat()}, {'id': 8, 'name': 'Passport', 'due_date': '2026-08-02'}],
+        'total': 2,
+    },
+    'events': {'items': [], 'total': 0},
+}
+
+
+def answered(source: str, payload: object) -> sources.Result:
+    return sources.Result(source=source, payload=payload, exit_code=0)
+
+
+def failed(source: str, said: str) -> sources.Result:
+    return sources.Result(source=source, stderr=said, failure=sources.Failure.FAILED)
+
+
+def test_planned_trips_sit_among_the_dates_at_month_grain_and_one_past_its_month_is_owed() -> None:
+    results = {'icb': answered('icb', ICB_DATES), 'nomad': answered('nomad', NOMAD_OVERVIEW)}
+
+    lane = dashboard.build_upcoming_lane(results, TODAY)
+
+    assert [(row.label, row.text, row.note, row.urgency) for row in lane.rows] == [
+        ('today', 'Dentist', '24 Jul 2026', Urgency.DUE),
+        ('3mo owed', 'Portland — Scout it.', 'Apr 2026', Urgency.OVERDUE),
+        ('this month', 'Denver', 'Jul 2026', Urgency.NONE),
+        ('in 9d', 'Passport', '02 Aug 2026', Urgency.NONE),
+        ('in 8mo', 'Lisbon', 'Mar 2027', Urgency.NONE),
+    ]
+    assert lane.rows[1].handle == 'nomad trips show trip-past'
+    assert lane.meta == '2 countdowns · 0 events · 3 trips · 1 owed'
+    assert lane.total == 5
+
+
+def test_a_source_that_cannot_answer_costs_only_its_own_rows_and_says_why() -> None:
+    icb, nomad = answered('icb', ICB_DATES), answered('nomad', NOMAD_OVERVIEW)
+    icb_down, nomad_down = failed('icb', 'icb did not answer'), failed('nomad', 'nomad answered 503 to GET /overview')
+
+    without_trips = dashboard.build_upcoming_lane({'icb': icb, 'nomad': nomad_down}, TODAY)
+    without_dates = dashboard.build_upcoming_lane({'icb': icb_down, 'nomad': nomad}, TODAY)
+    without_either = dashboard.build_upcoming_lane({'icb': icb_down, 'nomad': nomad_down}, TODAY)
+
+    assert [row.text for row in without_trips.rows] == ['Dentist', 'Passport']
+    assert without_trips.reason == 'nomad answered 503 to GET /overview'
+    assert [row.note for row in without_dates.rows] == ['Apr 2026', 'Jul 2026', 'Mar 2027']
+    assert without_dates.reason == 'icb did not answer'
+    assert without_either.available is False
+    assert without_either.reason == 'icb did not answer; nomad answered 503 to GET /overview'
+
+
+def test_a_newer_nomad_overview_is_reported_rather_than_half_read() -> None:
+    newer = {**NOMAD_OVERVIEW, 'schema_version': dashboard.NOMAD_SCHEMA_VERSION + 1}
+
+    lane = dashboard.build_upcoming_lane({'icb': answered('icb', ICB_DATES), 'nomad': answered('nomad', newer)}, TODAY)
+
+    assert [row.text for row in lane.rows] == ['Dentist', 'Passport']
+    assert 'newer than this dashboard' in lane.reason
+
+
+def test_two_sources_of_upcoming_are_one_lane_where_the_first_stood() -> None:
+    results = {
+        'nomad': answered('nomad', NOMAD_OVERVIEW),
+        'learning': answered('learning', {'plan_head': []}),
+        'icb': answered('icb', ICB_DATES),
+    }
+    document = {'sources': {name: {'adapter': name} for name in results}}
+
+    built = dashboard.source_lanes(sources.registry_from_document(document), results)
+
+    assert [lane.name for lane in built] == ['upcoming', 'learning', 'tasks', 'habits', 'books', 'articles', 'projects']
+    assert {row.handle.split()[0] for row in built[0].rows} == {'icb', 'nomad'}
+
+
+def test_open_feedback_lists_each_body_and_says_where_it_was_raised() -> None:
+    item = {
+        'id': 'abc',
+        'body': 'The rest timer\nis too small. It hides.',
+        'context_path': '/sessions/4',
+        'created_at': '2026-07-20T12:00:00Z',
+    }
+
+    [lane] = dashboard.meso_feedback_adapter(answered('meso-feedback', [item]))
+
+    assert (lane.name, lane.meta) == ('meso - feedback', '1 open')
+    assert [(row.text, row.note, row.handle) for row in lane.rows] == [
+        ('The rest timer is too small.', '/sessions/4', 'meso admin feedback show abc')
+    ]
+
+
+def test_feedback_with_none_open_prints_nothing_and_a_failed_read_says_why(capsys) -> None:
+    [nothing_open] = dashboard.meso_feedback_adapter(answered('meso-feedback', []))
+    document = json.loads(dashboard.lanemodel.dumps([nothing_open], dt.datetime.now()))
+
+    dashboard.render_lanes(dashboard.lanemodel.from_document(document), dt.date.today(), 5)
+    assert 'FEEDBACK' not in capsys.readouterr().out
+
+    broke = dashboard.meso_feedback_adapter(failed('meso-feedback', 'meso answered 403 to GET /feedback'))
+    dashboard.render_lanes(broke, dt.date.today(), 5)
+    assert 'meso answered 403 to GET /feedback' in capsys.readouterr().out
 
 
 def test_when_a_cell_was_done_survives_a_round_trip_through_the_contract() -> None:

@@ -37,6 +37,12 @@ behind, the other when it comes due. Converting a counted checkoff into minutes,
 into points, would let the two be summed. Both conversions were weighed and rejected, because a
 checkoff has no length and a point is a quantity nobody declared.
 
+**Two adapters build a lane named `upcoming`, and `dashboard.upcoming_joined` joins them.** A
+person's dates and planned trips live in two apps and read as one timeline, and each source fails
+on its own: it costs its rows and adds its reason. That join is this one lane's. A merge of every
+same-named lane was rejected, because it changes what a lane name means for every other source.
+Feedback stays the opposite way: one lane per app, never combined, so three apps draw three lanes.
+
 ## Documents and records are the service's, and a machine keeps only its login and its caches
 
 - **Documents** — the pursuits, the review register and the sources. The service stores each as its
