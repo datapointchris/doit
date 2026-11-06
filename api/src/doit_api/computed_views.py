@@ -176,7 +176,7 @@ class Views:
             selection = pursuits.compute_draw(state)
             selection['resolved'] = self.readers.resolve_all(selection['offered'], config.pursuits)
             self.store.save_draw(selection)
-            self.store.bump_offers(paths.canonical_machine(machine or MACHINE), selection['offered'])
+            self.store.bump_offers(paths.canonical_machine(machine or MACHINE), selection['offered'], now.date())
         else:
             selection = standing
         context, context_error = self.context(now)
@@ -317,11 +317,7 @@ class Views:
         except ValueError as error:
             raise BadRequest(str(error)) from error
         state = self.state(config, now)
-        counts: dict[str, int] = {}
-        for by_name in self.store.offer_counts().values():
-            for name, count in by_name.items():
-                counts[name] = counts.get(name, 0) + count
-        rows = pursuits.drift_rows(config.pursuits, state, start, end, counts)
+        rows = pursuits.drift_rows(config.pursuits, state, start, end, self.store.offers_by_day())
         return {'since': start and start.isoformat(), 'until': (end or now).isoformat(), 'rows': rows}
 
     def dormant(self) -> dict:
@@ -342,11 +338,11 @@ class Views:
         }
 
     def offer_counts(self) -> dict:
-        """How often each pursuit was offered, by the machine that drew it, and the counts no pursuit owns."""
-        config = self.config()
-        counts = self.store.offer_counts()
-        stranded = sorted({name for by_machine in counts.values() for name in by_machine if name not in config.pursuits})
-        return {'counts': counts, 'stranded': stranded}
+        """Offers by the machine that drew them: ever, over drift's default window, and that window's counts no pursuit owns."""
+        config, now = self.config(), self.now()
+        recent = self.store.offers_since(window.bound(pursuits.DRIFT_SINCE, now, end=False).date())
+        stranded = sorted({name for by_machine in recent.values() for name in by_machine if name not in config.pursuits})
+        return {'counts': self.store.offer_counts(), 'recent': recent, 'stranded': stranded}
 
     # --- the review register --------------------------------------------------
 

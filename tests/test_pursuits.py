@@ -1465,13 +1465,13 @@ def test_a_paused_pursuit_with_days_keeps_them_and_asks_nothing_and_renders_a_da
 
 
 def test_the_stranded_count_warning_names_the_box_holding_each_count(capsys):
-    """Saying whose a stranded total is turns a nag into an instruction, and a count whose pursuit is held says nothing."""
+    """Saying whose a stranded count is turns a nag into an instruction, and a count whose pursuit is held says nothing."""
     counts = {'testbox': {'retired-here': 8, 'chores': 4}, 'otherbox': {'retired-there': 7}}
 
-    pursuits.render_stranded_counts({'counts': counts, 'stranded': []})
+    pursuits.render_stranded_counts({'recent': counts, 'stranded': []})
     assert capsys.readouterr().out == ''
 
-    pursuits.render_stranded_counts({'counts': counts, 'stranded': ['retired-here', 'retired-there']})
+    pursuits.render_stranded_counts({'recent': counts, 'stranded': ['retired-here', 'retired-there']})
     printed = capsys.readouterr().out
     assert 'retired-here  8  testbox' in printed
     assert 'retired-there  7  otherbox' in printed

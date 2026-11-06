@@ -22,7 +22,9 @@ leaves the row in `review_completions_history`. `done_on` is the day it says the
 thing happened, which an entry recorded late sets apart from when it was stored.
 
 **State the service keeps.** The offered counts, the standing draw, the evidence
-cache and the nudge are small rows the service rewrites.
+cache and the nudge are small rows the service rewrites. Offers are counted twice,
+as a lifetime total and as a row per day, because a report over a window can only
+read the second.
 
 A timestamp the service writes is ISO 8601 UTC text with its `Z`, to the
 millisecond, so a column sorts as it reads. A record's own times keep the offset
@@ -222,11 +224,22 @@ COMPLETION_HISTORY_SCHEMA = """
 ALTER TABLE review_completions ADD COLUMN valid_from TEXT GENERATED ALWAYS AS (stored_at) VIRTUAL;
 """ + history_schema('review_completions')
 
+OFFERS_BY_DAY_SCHEMA = """
+CREATE TABLE offer_counts_by_day (
+    day TEXT NOT NULL CHECK (day GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+    machine TEXT NOT NULL,
+    pursuit TEXT NOT NULL,
+    offered INTEGER NOT NULL CHECK (offered > 0),
+    PRIMARY KEY (day, machine, pursuit)
+);
+"""
+
 # Applied in order, each once. `PRAGMA user_version` holds how many have run. A
 # change to the schema is appended here, never made to an entry a database has run.
 MIGRATIONS = (
     ''.join(versioned_schema(table) for table in FIRST_VERSIONED_TABLES) + RECORDS_SCHEMA,
     COMPLETION_HISTORY_SCHEMA,
+    OFFERS_BY_DAY_SCHEMA,
 )
 
 
@@ -481,7 +494,29 @@ class Store:
                 found.setdefault(row['machine'], {})[row['pursuit']] = row['offered']
         return found
 
-    def bump_offers(self, machine: str, names: list[str]) -> None:
+    def offers_by_day(self) -> dict[str, dict[dt.date, int]]:
+        """Each pursuit's offers on each day, summed over every machine."""
+        found: dict[str, dict[dt.date, int]] = {}
+        with self.connect() as connection:
+            for row in connection.execute('SELECT pursuit, day, SUM(offered) AS offered FROM offer_counts_by_day GROUP BY pursuit, day'):
+                found.setdefault(row['pursuit'], {})[dt.date.fromisoformat(row['day'])] = row['offered']
+        return found
+
+    def offers_since(self, first_day: dt.date) -> dict[str, dict[str, int]]:
+        """Offered counts from `first_day` on, by machine, then pursuit."""
+        found: dict[str, dict[str, int]] = {}
+        with self.connect() as connection:
+            for row in connection.execute(
+                """
+                SELECT machine, pursuit, SUM(offered) AS offered FROM offer_counts_by_day WHERE day >= ?
+                GROUP BY machine, pursuit ORDER BY machine, pursuit
+                """,
+                (first_day.isoformat(),),
+            ):
+                found.setdefault(row['machine'], {})[row['pursuit']] = row['offered']
+        return found
+
+    def bump_offers(self, machine: str, names: list[str], day: dt.date) -> None:
         with self.write() as connection:
             for name in names:
                 connection.execute(
@@ -490,6 +525,13 @@ class Store:
                     ON CONFLICT (machine, pursuit) DO UPDATE SET offered = offered + 1
                     """,
                     (machine, name),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO offer_counts_by_day (day, machine, pursuit, offered) VALUES (?, ?, ?, 1)
+                    ON CONFLICT (day, machine, pursuit) DO UPDATE SET offered = offered + 1
+                    """,
+                    (day.isoformat(), machine, name),
                 )
 
     # --- the standing draw ----------------------------------------------------

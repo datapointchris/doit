@@ -30,7 +30,7 @@ character a reader skips. Every view states standing as a date instead, built by
 every journal entry.
 
 doit's service keeps the register, the append-only journal, and how many times
-each pursuit has been offered, so `drift` can tell "never comes up" apart from
+each pursuit was offered each day, so `drift` can tell "never comes up" apart from
 "comes up and is ignored". The functions here compute every number from those,
 and the service runs them. The commands here ask the service and render what it
 answers.
@@ -1979,27 +1979,34 @@ def skip_span(duration: str | None, interval: float | None) -> int:
 
 
 def render_stranded_counts(offers: dict) -> None:
-    """Name any offer counts whose pursuit the register no longer holds, in the one view about the register itself.
+    """Name any recent offer counts whose pursuit the register no longer holds, in the one view about the register itself.
 
-    The counts are keyed by name, so retiring or renaming a pursuit strands its
-    total. ``drift`` walks the register, so the row never appears there again
-    and nothing else would ever mention it. ``next`` and the nudge stay silent,
-    because a misfiled record is not a task, and an interrupt that reports
-    bookkeeping is the kind you stop reading.
+    The counts are keyed by name, so retiring or renaming a pursuit strands them.
+    ``drift`` walks the register, so the row never appears there again and nothing
+    else would ever mention it. A line leaves once its last offer falls outside
+    the window, so a retired pursuit needs nothing to clear it. ``next`` and the
+    nudge stay silent, because a misfiled record is not a task, and an interrupt
+    that reports bookkeeping is the kind you stop reading.
     """
     stranded = offers.get('stranded') or []
     if not stranded:
         return
-    console.print(Text('\n  Offer counts with no pursuit:', style='yellow'))
+    console.print(Text(f'\n  Offers over the last {DRIFT_SINCE} with no pursuit:', style='yellow'))
     for name in stranded:
-        for machine, counts in sorted((offers.get('counts') or {}).items()):
+        for machine, counts in sorted((offers.get('recent') or {}).items()):
             if name in counts:
                 console.print(f'    [yellow]{name}[/]  {counts[name]}  {machine}')
-    console.print('  Renaming a pursuit strands its total. Naming it back in the register picks the total up again.')
+    console.print('  Renaming a pursuit strands its counts. Naming it back in the register picks them up again.')
+
+
+def offered_since(days: dict[dt.date, int], start: dt.datetime, now: dt.datetime) -> int:
+    """A pursuit's offers on each day from ``start`` on, a day partly inside counting whole because it is all a count keeps."""
+    opened = start.astimezone(now.tzinfo).date()
+    return sum(count for day, count in days.items() if day >= opened)
 
 
 def drift_rows(
-    pursuits: dict, state: dict, since: dt.datetime | None, until: dt.datetime | None, counts: dict[str, int] | None = None
+    pursuits: dict, state: dict, since: dt.datetime | None, until: dt.datetime | None, offers: dict[str, dict[dt.date, int]] | None = None
 ) -> list[dict]:
     """Every pursuit worth a row: what its goal asked for over the window, and what got done.
 
@@ -2023,20 +2030,23 @@ def drift_rows(
     An ``until`` drops every record and app day after it, so the window reads as
     the journal stood then. ``since`` absent runs from the earliest of either.
 
-    ``counts`` is how often each pursuit was offered, summed over every machine.
+    ``offers`` is how often each pursuit was offered on each day, summed over every
+    machine. A row sums the days of its own span, the one its asked and done run
+    over, so a day with no row counts nothing.
     """
     end = until or state['now']
     records = state['records']
     evidence_days = state['evidence_days']
+    offers = offers or {}
     if until:
         records = [record for record in records if (when := journal.occurred(record)) is None or when < until]
         evidence_days = {name: [day for day in days if first_instant(day) < until] for name, days in evidence_days.items()}
+        offers = {name: {day: count for day, count in days.items() if first_instant(day) < until} for name, days in offers.items()}
     cutoff = since or earliest(records, evidence_days) or end
     weekly = declared_minutes(pursuits)
     tracked = state['tracked']
     mine = records_by_pursuit(records)
     reset_at = zero_resets(records)
-    counts = counts or {}
 
     rows = []
     for name in sorted(pursuits, key=lambda key: -pursuits[key].get('weight', 0)):
@@ -2064,7 +2074,7 @@ def drift_rows(
                 'logs': logs,
                 'balance': None if name not in state['balance'] else round(state['balance'][name], 1),
                 'due_days': None if (due := due_in_days(state, name)) is None else round(due, 1),
-                'offered': counts.get(name, 0),
+                'offered': offered_since(offers.get(name, {}), start, state['now']),
                 'skips': passes,
             }
         )

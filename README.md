@@ -87,7 +87,7 @@ flag that would have answered.
 | What is outstanding anywhere | `dashboard` | every `sources:` entry, plus doit's own review register |
 | What does today still want, and what has it had | `today` | the same sources, every `completions:` entry but closed issues, the journal, the review completions |
 | What happened over a window, and who did it | `happened` | every `completions:` entry, the journal and the evidence cache, the review completions |
-| Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered |
+| Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered each day |
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
 | What is due to revisit or practice | `review due` | the review register and its completions |
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |

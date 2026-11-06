@@ -1,3 +1,4 @@
+import datetime as dt
 import logging
 import subprocess
 import sys
@@ -206,16 +207,37 @@ def test_the_standing_draw_retries_a_failed_resolve_and_drops_each_logged_pursui
     assert spent['draw_id'] != first['draw_id'], 'a draw with every pursuit logged is drawn again rather than shown empty'
 
 
-def test_an_offer_count_whose_pursuit_left_the_register_is_named_stranded(store):
-    """Counts are keyed by name, so a rename strands a total that drift, which walks the register, never shows again."""
-    client = client_for(store)
+def test_an_offer_count_whose_pursuit_left_the_register_is_stranded_until_it_ages_out(store):
+    """Counts are keyed by name, so a rename strands counts that drift, which walks the register, never shows again."""
+    moments = [NOW]
+    client = client_for(store, clock=lambda: moments[0])
     client.put('/api/v1/documents/pursuits', json={'text': 'pursuits:\n  walk:\n    weight: 1\n    cadence: 1d\n'})
     client.get('/api/v1/next', params={'machine': 'desk'})
     client.put('/api/v1/documents/pursuits', json={'text': 'pursuits:\n  run:\n    weight: 1\n    cadence: 1d\n'})
 
     offers = client.get('/api/v1/pursuits/offers').json()
+    assert (offers['counts'], offers['recent'], offers['stranded']) == ({'desk': {'walk': 1}}, {'desk': {'walk': 1}}, ['walk'])
 
-    assert (offers['counts'], offers['stranded']) == ({'desk': {'walk': 1}}, ['walk'])
+    moments[0] = NOW + dt.timedelta(days=91)
+    offers = client.get('/api/v1/pursuits/offers').json()
+    assert (offers['counts'], offers['recent'], offers['stranded']) == ({'desk': {'walk': 1}}, {}, [])
+
+
+def test_drift_counts_only_the_offers_inside_its_window(store):
+    moments = [NOW - dt.timedelta(days=30)]
+    client = client_for(store, clock=lambda: moments[0])
+    client.put('/api/v1/documents/pursuits', json={'text': 'pursuits:\n  walk:\n    weight: 1\n    cadence: 1d\n'})
+    client.get('/api/v1/next', params={'machine': 'desk'})
+    moments[0] = NOW - dt.timedelta(days=1)
+    client.get('/api/v1/next', params={'machine': 'laptop'})
+    moments[0] = NOW
+
+    def offered(**over: str) -> int:
+        return client.get('/api/v1/pursuits/drift', params=over).json()['rows'][0]['offered']
+
+    assert offered() == 2
+    assert offered(since='7d') == 1
+    assert offered(since='60d', until='7d') == 1
 
 
 def test_only_happened_asks_for_closed_issues(store):
