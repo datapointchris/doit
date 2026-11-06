@@ -127,22 +127,7 @@ def stamps_in(document, config: dict, now: dt.datetime) -> list[dt.datetime]:
 
 
 def dates_of(stamps: list[dt.datetime], now: dt.datetime) -> list[str]:
-    """The distinct local dates up to today, oldest first.
-
-    Dates rather than a count of rows, because row counts are not commensurable
-    across apps: a habits backend answers with hundreds and a books backend with
-    one, so counting would call reading three hundred times rarer than habits. A
-    date either carries evidence or does not, whichever app was asked.
-
-    Every date the app returns is kept, because standing counts back to a
-    pursuit's zero point however old it is. A date dropped here is a payment the
-    balance can no longer see, which is debt that grows by construction. Distinct
-    dates bound the cache at one entry per day of history.
-
-    Local by the same reading `aware` gives an offset-less stamp, so one machine's
-    notion of a day is used throughout. A stamp the backend dated ahead of today
-    is dropped.
-    """
+    """The distinct local dates among `stamps`, oldest first, keeping none later than today."""
     today = now.date()
     days = {stamp.astimezone(now.tzinfo).date() for stamp in stamps}
     return sorted(day.isoformat() for day in days if day <= today)
@@ -209,7 +194,7 @@ def refreshed(
         for name, entry in answers:
             previous = entries.get(name) or {}
             entry['declaration'] = declaration(due[name])
-            # One cached before answers carried their declaration counts as the same.
+            # An entry cached before entries recorded a declaration has none, and counts as unchanged.
             same = previous.get('declaration') in (None, entry['declaration'])
             if same and 'error' in entry and previous.get('last'):
                 entry['last'] = previous['last']

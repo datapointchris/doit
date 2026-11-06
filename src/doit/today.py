@@ -240,7 +240,7 @@ def owing(state: dict) -> list[tuple[str, float | None]]:
     """
     behind = []
     for name in state['active']:
-        # A skipped pursuit is one you chose to pass on, as `doit next` says.
+        # A pursuit under a running skip owes nothing, so it is never behind.
         if name in state['suppressed'] or state['balance'][name] < state['checkoff_size'][name]:
             continue
         behind.append((name, pursuits.due_in_days(state, name)))
@@ -277,7 +277,7 @@ CHECKLIST_GROUPS = (*DAY_SET_LANES, *(register.name for register in happened.reg
 
 
 def checklists(done: list[Lane], due: list[Lane]) -> list[quota.Checklist]:
-    """Each checklist group as done today of done today and still due, or why either half could not be read."""
+    """Each checklist group as what it finished today out of what it finished and still has due, or why either half could not be read."""
     found = []
     for lane in due:
         if lane.name not in CHECKLIST_GROUPS:

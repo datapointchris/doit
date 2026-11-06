@@ -214,7 +214,7 @@ def build_tasks_lane(results: dict[str, sources.Result], today: dt.date) -> Lane
     # icb sends tasks in queue order, pinned first, so a row's position is its
     # rank. `#3` rather than a bare `3`: in a gutter that elsewhere holds words,
     # a lone numeral reads as a row number. The position is not the id, so the
-    # handle is what you act on. A row without `pinned` is not pinned.
+    # handle is what you act on.
     rows = [
         Row(
             'pin' if task.get('pinned') else f'#{position}',

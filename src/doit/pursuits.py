@@ -133,7 +133,7 @@ MIN_CHOICE_WIDTH = 12
 READABLE_CHOICE_WIDTH = 30
 
 # Fields a pursuit may declare. Anything else is a typo, and a typo in a weight
-# file is silent damage — it would allocate attention by a number nobody wrote.
+# file fails silently, allocating attention by a number nobody wrote.
 KNOWN_FIELDS = {
     'description',
     'weight',
@@ -371,8 +371,8 @@ def pursuits_from_document(document: dict, where: object) -> dict:
             raise RegisterError(f'{name}: declare cadence or weekly_minutes, not both — a pace is one or the other')
         weight = config.get('weight')
         if not paced(config) and weight is not None:
-            # A weight with no pace is the one shape a forgotten pace leaves, and
-            # reading it as tracked would drop the pursuit from the draw unannounced.
+            # A forgotten pace leaves a weight with no pace. Read as tracked, the
+            # pursuit would leave the draw and nothing would say so.
             raise RegisterError(
                 f'{name}: with no pace this is tracked and never drawn, so it takes no weight. '
                 'Add a pace (cadence: 3d or weekly_minutes: 120), or remove the weight'
@@ -653,9 +653,9 @@ def pace_changes(pursuits: dict, active: dict, records: list[dict], now: dt.date
     nothing, which is what keeps a pause from being billed when it ends.
 
     A change is written only where the register disagrees with the newest record
-    from any machine and with the newest this machine wrote. The second test is
-    what stops two machines whose registers differ from each writing their own
-    pace on every run: each has already said its piece. A machine reading a
+    from any machine and with the newest this machine wrote. The second test
+    stops two machines whose registers differ from each writing its own pace on
+    every run, because each finds its own pace already recorded. A machine reading a
     register that has not synced yet still writes the old pace once, and the
     hours until it catches up are priced at it.
 

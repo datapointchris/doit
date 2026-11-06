@@ -69,7 +69,7 @@ DEFAULT_NUDGE_MINUTES = 240
 
 
 # Fields a register item may declare: the ones the TEMPLATE header documents.
-# Anything else is a typo, and a typo here is silent damage. A misspelled
+# Anything else is a typo, and a typo here fails silently. A misspelled
 # `cadence:` is ignored, so the item loses its schedule with nothing printed.
 ITEM_FIELDS = {'description', 'cadence', 'command', 'show'}
 

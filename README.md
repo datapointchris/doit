@@ -200,7 +200,7 @@ gives up the weight, then the goal, then the tally, and keeps the name and the d
 
 The forecast runs the real draw against a journal it builds as it goes, over a week, two weeks and a
 month. A day's budget is `forecast.budget_minutes` in the register, or `--budget` on the command.
-The competition for that budget is the thing worth simulating: whether a register's goals fit in its
+The forecast simulates the competition for that budget, because whether a register's goals fit in its
 days cannot be read off the page.
 
 ## `dashboard` — every lane, ranked across none of them
