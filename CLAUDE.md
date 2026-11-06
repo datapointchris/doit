@@ -17,31 +17,45 @@ entry's `command` is text in the review document, which doit shows and never run
 
 ## What will look like a bug and is not
 
-**The dashboard duplicates due-ness.** It imports nothing from the cadence module and instead
-mirrors the `overdue` field the review register already emits. Backends own due-ness and speak
-`--json`; that is the contract, and it is what lets the dashboard need no dependencies. Inside one
-package it reads as removable duplication. Do not remove it.
+**Keep the dashboard's duplicate of due-ness.** It imports nothing from the cadence module and
+mirrors the `overdue` field the review register emits. Backends own due-ness and speak `--json`,
+and that contract is what lets the dashboard need no dependencies.
 
-**The journal records each pursuit's pace, though the register already declares it.** The
-register says only what is asked from now on. Standing counts back to the zero point, so a pace
-read off the register alone reprices every past day whenever it is edited, and bills a pause in
-full the day it ends. A build writes a `pace` record wherever the register disagrees with the
-newest one, and `asked_since` prices each span at the pace recorded over it. Reading the register
-in its place would look simpler and be wrong about every day before the last edit.
+**Keep the journal's record of each pursuit's pace, though the register declares it.** The register
+says only what is asked from now on. Standing counts back to the zero point, so a pace read off the
+register alone reprices every past day whenever it is edited, and bills a pause in full the day it
+ends. A build writes a `pace` record wherever the register disagrees with the newest one, and
+`asked_since` prices each span at the pace recorded over it.
 
-**`doit today` counts a timed pursuit behind long before the due list does.** Its line counts
-every minute the pace asked before today and nothing paid. The due list calls a pursuit owed only
-once it is a whole checkoff behind, and a timed pursuit's checkoff is a week. So work can read
-hours behind there while `doit next` still says `due in 3d`. Both are right: one says how far
-behind, the other when it comes due. Converting a counted checkoff into minutes, or either unit
-into points, would let the two be summed. Both conversions were weighed and rejected, because a
-checkoff has no length and a point is a quantity nobody declared.
+**Keep evidence as a list of dates, never a count of rows, and age none of them out.** Row counts
+do not compare across apps: a habits backend answers with hundreds and a books backend with one. A
+date either carries evidence or does not, whichever app was asked. Standing counts back to a
+pursuit's zero point, so a date dropped is a payment the balance no longer sees, and the pursuit
+reads as owing it forever.
 
-**Two adapters build a lane named `upcoming`, and `dashboard.upcoming_joined` joins them.** A
-person's dates and planned trips live in two apps and read as one timeline, and each source fails
-on its own: it costs its rows and adds its reason. That join is this one lane's. A merge of every
-same-named lane was rejected, because it changes what a lane name means for every other source.
-Feedback stays the opposite way: one lane per app, never combined, so three apps draw three lanes.
+**Do not reconcile `doit today` and the due list on a timed pursuit.** `doit today` counts every
+minute the pace asked before today and nothing paid. The due list calls a pursuit owed only once it
+is a whole checkoff behind, and a timed pursuit's checkoff is a week. So work can read hours behind
+there while `doit next` still says `due in 3d`. One says how far behind, the other when it comes
+due. Converting a counted checkoff into minutes, or either unit into points, would let the two be
+summed. Both conversions were weighed and rejected, because a checkoff has no length and a point is
+a quantity nobody declared.
+
+**Join the `upcoming` lane and no other.** Two adapters build a lane named `upcoming`, because a
+person's dates and planned trips live in two apps and read as one timeline.
+`dashboard.upcoming_joined` joins them, and each source fails on its own: it costs its rows and adds
+its reason. A merge of every same-named lane was rejected, because it changes what a lane name means
+for every other source. Feedback stays the opposite way: one lane per app, never combined, so three
+apps draw three lanes.
+
+## The service runs no command, and the CLI starts exactly three processes
+
+- **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`.
+- **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking.
+- **A review item's `show`**, in `review.run_show`, inside the nudge.
+
+A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit
+learns from another program arrives over HTTP through the wrappers below.
 
 ## Documents and records are the service's, and a machine keeps only its login and its caches
 
@@ -53,7 +67,8 @@ Feedback stays the opposite way: one lane per app, never combined, so three apps
   one module that makes a request.
 - **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer and the
   machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no Python and no request,
-  each file rewritten by the command that fetches it.
+  each file rewritten by the command that fetches it. `doit config show` prints each of these with
+  where it came from, and a value doit newly resolves gets a row there.
 
 ## Which sources are asked is configuration, and how each is read is code
 
