@@ -1,8 +1,8 @@
 """XDG base-directory resolution, defined here once so every part of doit agrees
 on where state and cache live.
 
-The pursuits, the review register, the sources and the journal are the service's,
-so no desk path holds them. Anything a recompute can rebuild belongs under the
+The service holds the pursuits, the review register, the sources and the journal,
+so no path here names them. Anything a recompute can rebuild belongs under the
 cache dir, and an edit the service never took belongs under the state dir.
 """
 
@@ -24,9 +24,8 @@ def xdg_cache_home() -> Path:
 def machine_name() -> str:
     """This machine's identity: the bare lowercased hostname, no platform prefix.
 
-    Recorded on every journal write and offered count. A prefixed form drifted
-    across platforms and split one machine into several, so the bare name is
-    recorded and any canonicalization happens at read time.
+    Recorded on every journal write and offered count. A platform prefix would
+    split one machine into several, so the bare name is what gets recorded.
     """
     return canonical_machine(socket.gethostname())
 

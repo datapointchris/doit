@@ -73,7 +73,7 @@ starts from it. doit never rewrites a document itself, so your comments and layo
 The noun comes first and the verb last: `doit review due`, `doit forecast run`. The draw sits at the
 root as `next`, because it is what you type most. Logging and skipping a pursuit are
 `doit pursuits log` and `doit pursuits skip`, beside the file that holds the pursuits. The other
-single-verb reads sit at the root beside `next`: `dashboard`, `today` and `happened`.
+single-verb reads sit at the root beside `next`, and `doit --help` lists them.
 
 Every node prints its help when given no arguments, so the tree can be walked one word at a time
 without a cryptic error. A usage error exits 2. `--no-input` never prompts, and fails naming the
@@ -129,8 +129,8 @@ whole days only, so twice a week is `3d` or `4d`. `weekly_minutes: 240` asks for
 and makes the pursuit measured in time. `doit pursuits log` asks a timed pursuit how long it took and never
 asks a counted one. `weekly_minutes:` is what a week asks for. `doit pursuits log --minutes` is how long one
 sitting took. A timed pursuit is paid only by what is logged that way. An app reports which day
-something happened and never how long, so the register refuses `evidence` or `evidence_files` on a
-pursuit measured in minutes.
+something happened and never how long, so the register refuses `evidence` on a pursuit measured in
+minutes.
 
 A weight never moves a pace. It orders what is owed, heaviest first, and when less than a screen is
 owed it draws the rest. So whether a pursuit is getting enough is answered by its own goal alone,
@@ -312,7 +312,7 @@ nothing else. Running the command an item names does not mark it done.
 The register's `practice:` block holds what you work through on a schedule, each entry with the same
 fields. `doit review done <id>` records one. The startup nudge leaves practice out. `doit today`
 counts it as its own checklist, so a deck of never-practiced items cannot bury the maintenance that
-is due.
+is due. howto carries the Labs, and a practice entry's `command` names the howto verb that opens one.
 
 ```yaml
 practice:

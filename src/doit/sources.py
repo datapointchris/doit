@@ -14,8 +14,8 @@ because its other consumers render the same data completely differently.
 
 The read and the shape are one contract with the app, so both live in code, where
 a sweep for a renamed route finds them. An entry in the sources document names the
-adapter and says nothing of how it reads; one that declares a `command` as well is
-told to delete the line.
+adapter and says nothing of how it reads; one that declares a `command` beside an
+adapter this doit has is told to delete the line.
 
 **Conforming** — the source emits a lane document (see `doit.lanes`) directly and
 doit renders it with no adapter. The service reads apps over HTTP and runs no
@@ -86,7 +86,7 @@ class Failure(StrEnum):
 
 @dataclass(frozen=True)
 class Source:
-    """One configured backend: an adapter's name, or the command it declared in place of one."""
+    """One configured backend, as the adapter and the command its entry declares."""
 
     id: str
     command: list[str] = field(default_factory=list)
@@ -244,8 +244,8 @@ def answer(block: str, source: Source, result: Result) -> dict[str, object]:
 
     `via` is `contract` for a lane document and `adapter:<name>` otherwise, and
     is null when there are no lanes to describe. `adapter` is what the entry
-    declares, and `command` is empty unless it declares one instead. `failure` and
-    `reason` are null for a source that answered.
+    declares, and `command` is empty for an entry whose adapter this doit has.
+    `failure` and `reason` are null for a source that answered.
     """
     built = [] if result.failure else lanes_from(source, result)
     via = None

@@ -871,7 +871,7 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
     return [build_learning_lane({'learning': result}, dt.date.today())]
 
 
-# Every adapter doit ships, with the lanes it can name. One table rather than two
+# The adapters whose lanes `--lane` can name. One table rather than two
 # lists, because the registration and the `--lane` enum have to agree. A separate
 # enum is one an adapter can be registered without touching, and a lane `--help`
 # cannot name is a lane nobody can find.

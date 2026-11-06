@@ -13,7 +13,7 @@ stuff", and of the register's fleet items, "They are personal review things that
 to do, not build tasks that claude is going to do".
 
 howto carries the cards, the Labs and the tool registry, and doit reads nothing from it. A practice
-entry's `command` is text in the review document that names `howto labs show <id>`.
+entry's `command` is text in the review document, which doit shows and never runs.
 
 ## What will look like a bug and is not
 
@@ -53,8 +53,8 @@ checkoff has no length and a point is a quantity nobody declared.
 
 `doit` must not know which sources a person asks, so turning one on is an edit to the sources
 document, never a release. How a source is read is an adapter: an HTTP read in
-`readers.declared_reads` and a builder in `doit.dashboard` or `doit.happened`, joined by the
-adapter's name. The read and the model it returns are one contract, and a copy of either in the
+`readers.declared_reads` and a builder passed to `sources.register_adapter`, joined by the adapter's
+name. The read and the model it returns are one contract, and a copy of either in the
 sources document is one no sweep of the code finds when the app changes.
 
 The service runs no command, so a source declared by `command` alone, printing the lane document,
