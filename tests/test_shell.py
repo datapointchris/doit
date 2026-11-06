@@ -14,6 +14,7 @@ import time
 import pytest
 from typer.testing import CliRunner
 
+from doit import pursuits
 from doit import shell
 from doit.cli import app as cli_app
 from doit.service_commands import review as review_commands
@@ -58,27 +59,39 @@ def test_a_shell_never_waits_on_the_nudge_and_the_next_one_prints_what_it_found(
     assert open_shell()[0] == '', 'a showing prints once, and the marker holds the next check off for the interval'
 
 
-def test_completion_reads_the_cache_rather_than_calling_doit():
-    """A TAB must not wait on a Python start."""
-    script = shell.zsh_completion()
+@needs_zsh
+def test_tab_after_pursuits_log_offers_the_cached_names_without_starting_doit(tmp_path):
+    """A TAB must not wait on a Python start, so a stand-in doit leaves a mark if anything runs it."""
+    pursuits.write_names_cache({'chores': {'description': 'Do them'}, 'read': {'description': 'Read it'}})
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    started = tmp_path / 'started'
+    (bin_dir / 'doit').write_text(f'#!/bin/sh\ntouch {started}\n')
+    (bin_dir / 'doit').chmod(0o755)
+    stubs = 'compdef() { :; }\n_describe() { print -rl -- "${(@P)4}" }\n'
+    press_tab = "words=(doit pursuits log '')\nCURRENT=4\n_doit\n"
+    environment = {**os.environ, 'PATH': f'{bin_dir}{os.pathsep}{os.environ["PATH"]}'}
 
-    assert 'next-names.txt' in script
-    assert 'doit ' not in script.split('_doit_pursuits')[1].split('}')[0]
+    tabbed = subprocess.run(
+        ['zsh', '-f', '-c', stubs + shell.zsh_completion() + press_tab],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+
+    assert tabbed.stdout.splitlines() == ['chores:Do them', 'read:Read it']
+    assert not started.exists()
 
 
-def test_completion_offers_a_pursuit_where_one_is_expected():
-    script = shell.zsh_completion()
-
-    assert "'pursuits log'|'pursuits skip')" in script, 'the two verbs that take a pursuit'
-
-
-def test_the_completion_offers_no_verb_the_cli_does_not_have():
+def test_the_completion_offers_the_verbs_the_cli_has():
     """Nothing else joins this hand-written list to the command tree."""
     offered = set(re.findall(r"^\s+'([a-z-]+):", shell.zsh_completion(), re.M))
     registered = {command.name for command in cli_app.registered_commands}
     registered |= {group.name for group in cli_app.registered_groups}
 
-    assert offered <= registered, f'completion offers {sorted(offered - registered)}'
+    assert offered == registered
 
 
 @pytest.mark.parametrize('verb', ['init', 'completion'])
