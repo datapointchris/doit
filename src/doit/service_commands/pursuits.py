@@ -43,6 +43,7 @@ from doit.pursuits import write_names_cache
 from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
+from doit.render import examples
 from doit.render import terminal_width
 from doit.window import span
 from doit.window import window
@@ -355,9 +356,14 @@ def cmd_drift(since: str | None, until: str | None, as_json: bool) -> int:
     return 0
 
 
-def cmd_dormant() -> int:
+def cmd_dormant(as_json: bool = False) -> int:
     """Pursuits gone quiet for more than three of their own intervals."""
-    stale = service.client().get('/pursuits/dormant')['dormant']
+    answered = service.client().get('/pursuits/dormant')
+    if as_json:
+        # See cmd_next: a Console would soft-wrap this into invalid JSON.
+        print(json.dumps(answered, indent=2))
+        return 0
+    stale = answered['dormant']
     console.rule('[cyan]Dormant', align='left')
     if not stale:
         console.print('Nothing is running cold.\n')
@@ -503,10 +509,22 @@ def drift_command(
     run(lambda: cmd_drift(since, until, as_json))
 
 
-@app.command('dormant')
-def dormant_command() -> None:
-    """Pursuits gone quiet for more than three of their own intervals."""
-    run(cmd_dormant)
+@app.command(
+    'dormant',
+    epilog=examples(
+        ('doit pursuits dormant', 'what has gone quiet, coldest first'),
+        ('doit pursuits dormant --json', 'the same rows as data'),
+    ),
+)
+def dormant_command(
+    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
+) -> None:
+    """Pursuits gone quiet for more than three of their own intervals.
+
+    In --json, `days_since` is null for a pursuit never done. `doit pursuits list`
+    shows every pursuit, quiet or not.
+    """
+    run(lambda: cmd_dormant(as_json))
 
 
 @app.command('reset')

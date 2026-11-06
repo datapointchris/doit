@@ -19,6 +19,7 @@ from conftest import TOKEN
 from conftest import client_for
 from conftest import stand_in
 from fastapi.testclient import TestClient
+from jsonschema import Draft7Validator
 from typer.testing import CliRunner
 
 from doit import cli
@@ -39,6 +40,7 @@ from doit.service_commands import sources as sources_commands
 from doit.service_commands import today as today_commands
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures'
+SCHEMAS = Path(__file__).resolve().parents[2] / 'schemas'
 TASKS = [{'name': 'Face Mud', 'id': 501}, {'name': 'Return hoodies', 'id': 512}, {'name': 'Journal', 'id': 474}]
 
 
@@ -170,6 +172,11 @@ def test_a_log_is_counted_by_the_list_drift_and_dormant_views_that_follow(api, c
     printed = capsys.readouterr().out
     cold = [line for line in printed.splitlines() if 'never' in line]
     assert len(cold) > 1 and len({line.index('never') for line in cold}) == 1, 'the rows align'
+
+    assert pursuit_commands.cmd_dormant(as_json=True) == 0
+    answered = json.loads(capsys.readouterr().out)
+    Draft7Validator(json.loads((SCHEMAS / 'pursuits-dormant.schema.json').read_text())).validate(answered)
+    assert len(answered['dormant']) == len(cold)
 
 
 def test_the_list_gives_a_tracked_pursuit_no_weight_and_no_due_date(api):

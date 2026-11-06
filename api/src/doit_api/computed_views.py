@@ -321,9 +321,9 @@ class Views:
         return {'since': start and start.isoformat(), 'until': (end or now).isoformat(), 'rows': rows}
 
     def dormant(self) -> dict:
-        """`doit pursuits dormant`: pursuits gone quiet for several of their own intervals."""
+        """`doit pursuits dormant --json`, which `schemas/pursuits-dormant.schema.json` describes."""
         config, now = self.registered(), self.now()
-        return {'dormant': pursuits.dormant_rows(self.state(config, now))}
+        return {'schema_version': 1, 'dormant': pursuits.dormant_rows(self.state(config, now))}
 
     def evidence(self) -> dict:
         """`doit pursuits evidence --json`: what each app says was last done, asking every one now."""
