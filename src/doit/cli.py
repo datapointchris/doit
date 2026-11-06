@@ -6,6 +6,7 @@ tree is built this way. Each subcommand module owns its own `app`; this file
 only assembles them.
 """
 
+import os
 from typing import Annotated
 from typing import Any
 
@@ -168,11 +169,26 @@ def root(
         notify(UPDATE_CONFIG)
 
 
+# Each chose the files doit read and wrote. The service holds that data, so one
+# still set names a target nothing reads, and is refused rather than ignored.
+RETIRED_VARIABLES = ('DOIT_JOURNAL_DIR', 'DOIT_REVIEW_STATE', 'DOIT_PURSUITS', 'DOIT_REGISTER', 'DOIT_SOURCES')
+
 # What a command exits with when no answer came, the one failure the same command run later can outlast.
 NO_ANSWER_EXIT = 4
 
 
+def retired_variable_set() -> str:
+    """The refusal for the first retired variable still set, or '' where none is."""
+    for variable in RETIRED_VARIABLES:
+        if os.environ.get(variable):
+            return f'${variable} is set, and doit reads its records from its service. Unset it.'
+    return ''
+
+
 def main() -> None:
+    if refusal := retired_variable_set():
+        error_console.print(f'doit: {refusal}', soft_wrap=True, markup=False)
+        raise SystemExit(2)
     try:
         app()
     except (service.ServiceFailed, LoginError) as failure:
