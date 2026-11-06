@@ -583,7 +583,7 @@ def build_upcoming_lane(results: dict[str, sources.Result], today: dt.date) -> L
         meta=' · '.join(share.meta for share in answered),
         rows=[row for _, row in dated_rows],
         total=sum(share.total for share in answered),
-        hints=[hint for share in answered for hint in share.hints],
+        hints=list(chain.from_iterable(share.hints for share in answered)),
         reason=reason,
     )
 
