@@ -29,10 +29,13 @@ requires-python = ">=3.13"
 #
 # The [typer] extra is the ready-made `doit update`; safekeep declines it only
 # because it is argparse. Resolved from PyPI, where the name was free.
+#
+# typer's floor is the first release carrying click at `typer._click`, whose
+# types cli.py imports. pyyaml's is the first with wheels for this Python.
 dependencies = [
-    "typer>=0.15.0",
+    "typer>=0.26.0",
     "rich>=13.0.0",
-    "pyyaml",
+    "pyyaml>=6.0.2",
     "pyselfupdate[typer]>=0.5.4",
     "pyclilogin>=0.2.0",
     "httpx2>=2.9.1",
@@ -166,6 +169,7 @@ pinned = ["ruff"]
 [dependency-groups]
 dev = [
     "bandit>=1.7.8",
+    "jsonschema>=4.0",
     "mypy>=1.10.0",
     "pre-commit>=4.3.0",
     "pytest>=8.0.0",
