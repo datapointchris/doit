@@ -14,6 +14,13 @@ from doit.dashboard import ROW_CAP
 from doit.dashboard import render_lanes
 from doit.render import console
 from doit.render import error_console
+from doit.render import examples
+
+DASHBOARD_EXAMPLES = examples(
+    ('doit dashboard', 'every lane at a glance'),
+    ('doit dashboard --lane tasks', 'one lane, with all its rows'),
+    ('doit dashboard --json', 'the lanes as data, where each says whether it was read'),
+)
 
 
 def cmd_dashboard(lane: list[str] | None, as_json: bool) -> int:
@@ -64,5 +71,10 @@ def dashboard_command(
     ] = None,
     as_json: Annotated[bool, typer.Option('--json', help='Output the lane model as JSON to stdout.')] = False,
 ) -> None:
-    """Every lane — what is outstanding across everything."""
+    """Every lane: what is outstanding across your apps.
+
+    A lane is one list on this screen, what one app says is outstanding. Nothing
+    ranks across lanes, so `doit next` is the command that picks one thing. A lane
+    that could not be read says why, and the last line names any pursuit that is behind.
+    """
     raise typer.Exit(cmd_dashboard(lane, as_json))

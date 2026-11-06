@@ -10,8 +10,14 @@ from doit import lanes
 from doit import quota
 from doit import service
 from doit.render import error_console
+from doit.render import examples
 from doit.today import Day
 from doit.today import render
+
+TODAY_EXAMPLES = examples(
+    ('doit today', 'what the day still owes, above what it has had'),
+    ('doit today --json', 'the same day as data, where each lane says whether it was read'),
+)
 
 
 def cmd_today(as_json: bool) -> int:
@@ -38,5 +44,8 @@ def cmd_today(as_json: bool) -> int:
 def today_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output the day as JSON to stdout.')] = False,
 ) -> None:
-    """What today still wants, and what it has had."""
+    """What today still owes, above what it has had.
+
+    Only what a day can finish, where `doit dashboard` lists everything outstanding.
+    """
     raise typer.Exit(cmd_today(as_json))

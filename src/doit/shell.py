@@ -25,9 +25,18 @@ import typer
 
 from doit import pursuits
 from doit import review
+from doit.render import examples
 from doit.service_commands import review as review_commands
 
-app = typer.Typer(name='shell', no_args_is_help=True, help='The blocks your shell loads from doit.')
+app = typer.Typer(
+    name='shell',
+    no_args_is_help=True,
+    help='What your shell loads from doit: a reminder of due review items, and completion.',
+    epilog=examples(
+        ('eval "$(doit shell init zsh)"', 'in your rc: a reminder of due review items'),
+        ('eval "$(doit shell completion zsh)"', 'in your rc: completion for the verbs and your pursuit names'),
+    ),
+)
 
 SHELLS = ('zsh',)
 
@@ -93,7 +102,7 @@ _doit() {{
     'pursuits:The weights the draw runs on'
     'review:What is due to revisit or practice'
     'sources:Which apps doit asks for lanes'
-    'shell:The blocks your shell loads from doit'
+    'shell:What your shell loads from doit'
     'auth:Log this machine in to the doit service'
     'config:Where this machine points doit, and the files it keeps'
     'update:Update doit to the latest release'
@@ -130,7 +139,7 @@ def emit(shell: str, kind: str) -> int:
 ShellArgument = Annotated[str, typer.Argument(help=f'Which shell: {", ".join(SHELLS)}.')]
 
 
-@app.command('init')
+@app.command('init', epilog=examples(('doit shell init zsh', 'print the block, for `eval "$(doit shell init zsh)"` in your rc')))
 def shell_init_command(shell: ShellArgument) -> None:
     """Print the startup block that nudges you about due items.
 
@@ -140,7 +149,9 @@ def shell_init_command(shell: ShellArgument) -> None:
     raise typer.Exit(emit(shell, 'init'))
 
 
-@app.command('completion')
+@app.command(
+    'completion', epilog=examples(('doit shell completion zsh', 'print the script, for `eval "$(doit shell completion zsh)"` in your rc'))
+)
 def completion_command(shell: ShellArgument) -> None:
     """Print the completion script for the verbs and your pursuit names.
 

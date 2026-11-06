@@ -48,6 +48,13 @@ from doit.render import terminal_width
 from doit.window import span
 from doit.window import window
 
+NEXT_EXAMPLES = examples(
+    ('doit next', 'what to do now, with every other pursuit under it'),
+    ('doit next --explain', 'the same draw with every number behind it'),
+    ('doit next --reroll', 'a fresh draw, before the standing one expires'),
+    ('doit next --json', 'the draw and the state behind it, as data'),
+)
+
 
 def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
     """The service's draw: the one standing for this window, or a fresh one where none stands or ``reroll`` asks."""
@@ -440,7 +447,13 @@ def next_command(
     reroll: Annotated[bool, typer.Option('--reroll', help='Force a fresh draw before the standing one expires.')] = False,
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
-    """What to do now, drawn from what you said matters."""
+    """What to do now, drawn from your pursuits.
+
+    A pursuit is something you mean to keep doing, at a pace you declare. The draw
+    is this table: everything owed, heaviest first, then the rest picked by weight.
+    It stands for a while, so running this again shows the same one. `doit dashboard`
+    lists everything outstanding rather than picking.
+    """
     run(lambda: cmd_next(explain, as_json, reroll))
 
 
@@ -475,10 +488,29 @@ def skip_command(
     run(lambda: cmd_skip(pursuit, duration))
 
 
-app = typer.Typer(name='pursuits', no_args_is_help=True, help='What `doit next` draws from: each pursuit, its goal and its weight.')
+app = typer.Typer(
+    name='pursuits',
+    no_args_is_help=True,
+    help=(
+        'What `doit next` draws from: each pursuit, its goal and its weight.\n\n'
+        'A pursuit is something you mean to keep doing, at a pace you declare. Its weight orders what is owed '
+        'and picks the rest of the draw. The register is the document holding them, which `doit pursuits edit` opens.'
+    ),
+    epilog=examples(
+        ('doit pursuits list', 'every pursuit and when it is next due'),
+        ('doit pursuits log read --minutes 40', 'record a 40-minute sitting of a timed pursuit'),
+        ('doit pursuits drift', 'what each goal asked for against what you did'),
+    ),
+)
 
 
-@app.command('list')
+@app.command(
+    'list',
+    epilog=examples(
+        ('doit pursuits list', 'every pursuit, its weight, goal and when it is next due'),
+        ('doit pursuits list --json', 'the same pursuits and the state behind them, as data'),
+    ),
+)
 def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
@@ -486,7 +518,15 @@ def list_command(
     run(lambda: cmd_list(as_json))
 
 
-@app.command('drift')
+@app.command(
+    'drift',
+    epilog=examples(
+        ('doit pursuits drift', 'the default window, up to now'),
+        ('doit pursuits drift --since 2w', 'the past two weeks'),
+        ('doit pursuits drift --since 2026-10-01 --until 2026-10-31', 'one whole month'),
+        ('doit pursuits drift --json', 'the same rows as data'),
+    ),
+)
 def drift_command(
     since: Annotated[
         str | None,
@@ -527,7 +567,14 @@ def dormant_command(
     run(lambda: cmd_dormant(as_json))
 
 
-@app.command('reset')
+@app.command(
+    'reset',
+    epilog=examples(
+        ('doit pursuits reset chore', 'forgive what one pursuit owes, starting its balance again from now'),
+        ('doit pursuits reset', 'every pursuit, after asking'),
+        ('doit pursuits reset --yes', 'every pursuit, without asking'),
+    ),
+)
 def reset_command(
     pursuit: Annotated[str | None, typer.Argument(help='The pursuit to zero; every one when omitted.')] = None,
     assume_yes: Annotated[bool, typer.Option('-y', '--yes', help='Zero every pursuit without confirming.')] = False,
@@ -536,7 +583,13 @@ def reset_command(
     run(lambda: cmd_reset(pursuit, assume_yes))
 
 
-@app.command('resume')
+@app.command(
+    'resume',
+    epilog=examples(
+        ('doit pursuits resume chore', 'end one skip early'),
+        ('doit pursuits resume', 'end every skip'),
+    ),
+)
 def resume_command(
     pursuit: Annotated[str | None, typer.Argument(help='The pursuit to bring back; every skipped one when omitted.')] = None,
 ) -> None:
@@ -544,7 +597,13 @@ def resume_command(
     run(lambda: cmd_resume(pursuit))
 
 
-@app.command('evidence')
+@app.command(
+    'evidence',
+    epilog=examples(
+        ('doit pursuits evidence', 'when each app says you last did it, and which apps could not answer'),
+        ('doit pursuits evidence --json', 'the same answers as data'),
+    ),
+)
 def evidence_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
@@ -552,7 +611,7 @@ def evidence_command(
     run(lambda: cmd_evidence(as_json))
 
 
-@app.command('edit')
+@app.command('edit', epilog=examples(('doit pursuits edit', 'change a pace or a weight, or add a pursuit')))
 def edit_command() -> None:
     """Edit the pursuits in $EDITOR, starting from an annotated template where none are written."""
     run(cmd_edit)
@@ -568,5 +627,19 @@ def run(action: Callable[[], int]) -> None:
     raise typer.Exit(action())
 
 
-app.command('log')(log_command)
-app.command('skip')(skip_command)
+app.command(
+    'log',
+    epilog=examples(
+        ('doit pursuits log', 'pick the pursuit and answer what it asks'),
+        ('doit pursuits log read --minutes 40 chapter three', 'all of it in one line, with a note'),
+        ('doit pursuits log read --ago 3h --minutes 40', 'something you did earlier'),
+        ('doit pursuits log chore --no-write', "record it without running the pursuit's on_log command"),
+    ),
+)(log_command)
+app.command(
+    'skip',
+    epilog=examples(
+        ('doit pursuits skip', 'pick from what is in the draw, and pass for one interval'),
+        ('doit pursuits skip chore --for 2w', 'out of the draw for two weeks, owing nothing meanwhile'),
+    ),
+)(skip_command)

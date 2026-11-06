@@ -14,6 +14,7 @@ from doit.forecast import reading_from
 from doit.forecast import source_summary
 from doit.render import console
 from doit.render import error_console
+from doit.render import examples
 from doit.service_commands.pursuits import run
 
 
@@ -72,13 +73,33 @@ def cmd_trend(days: int, as_json: bool) -> int:
     return 0
 
 
-app = typer.Typer(name='forecast', no_args_is_help=True, help='What the register would have you do, run forward.')
+app = typer.Typer(
+    name='forecast',
+    no_args_is_help=True,
+    help=(
+        'Your pursuits run forward, to show whether their paces fit your days.\n\n'
+        'A forecast runs the register, the document `doit pursuits edit` opens, through the real draw, and stores '
+        'what it predicted. Once enough time has passed, a trend grades that against what you logged.'
+    ),
+    epilog=examples(
+        ('doit forecast run', 'take a forecast now and store it'),
+        ('doit forecast show', 'read the newest one back'),
+        ('doit forecast trend', 'how earlier forecasts held up'),
+    ),
+)
 
 
 JsonOption = Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')]
 
 
-@app.command('run')
+@app.command(
+    'run',
+    epilog=examples(
+        ('doit forecast run', 'at the daily budget the register declares'),
+        ('doit forecast run --budget 120', 'what two hours a day would get done'),
+        ('doit forecast run --json', 'the same reading as data'),
+    ),
+)
 def run_command(
     budget: Annotated[int | None, typer.Option('--budget', help='Minutes a day to spend, overriding the register.')] = None,
     as_json: JsonOption = False,
@@ -87,7 +108,14 @@ def run_command(
     run(lambda: cmd_run(as_json, budget))
 
 
-@app.command('show')
+@app.command(
+    'show',
+    epilog=examples(
+        ('doit forecast show', 'the newest forecast'),
+        ('doit forecast show 2026-11', 'the one a timestamp starting that way names'),
+        ('doit forecast show --json', 'the newest as data'),
+    ),
+)
 def show_command(
     handle: Annotated[str, typer.Argument(help='Timestamp prefix; the newest when omitted.')] = '',
     as_json: JsonOption = False,
@@ -96,13 +124,26 @@ def show_command(
     run(lambda: cmd_show(handle, as_json))
 
 
-@app.command('list')
+@app.command(
+    'list',
+    epilog=examples(
+        ('doit forecast list', 'every stored forecast and its timestamp, to pass to show'),
+        ('doit forecast list --json', 'the same forecasts as data'),
+    ),
+)
 def list_command(as_json: JsonOption = False) -> None:
     """Every forecast taken, oldest first."""
     run(lambda: cmd_list(as_json))
 
 
-@app.command('trend')
+@app.command(
+    'trend',
+    epilog=examples(
+        ('doit forecast trend', 'how the week ahead held up'),
+        ('doit forecast trend --days 30', 'how the month ahead held up'),
+        ('doit forecast trend --json', 'the same verdicts as data'),
+    ),
+)
 def trend_command(
     days: Annotated[int, typer.Option('--days', help='Which horizon to grade: 7, 14 or 30.')] = 7,
     as_json: JsonOption = False,

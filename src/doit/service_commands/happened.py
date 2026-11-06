@@ -12,7 +12,15 @@ from doit import window
 from doit.happened import DEFAULT_SINCE
 from doit.happened import render
 from doit.render import error_console
+from doit.render import examples
 from doit.window import Bounds
+
+HAPPENED_EXAMPLES = examples(
+    ('doit happened', 'the past week'),
+    ('doit happened --since 30d', 'the past month'),
+    ('doit happened --since 2026-11-01 --until 2026-11-03', 'three whole days, since a day includes all of itself'),
+    ('doit happened --json', 'every group as data'),
+)
 
 
 def cmd_happened(since: str | None, until: str | None, as_json: bool) -> int:
@@ -57,5 +65,8 @@ def happened_command(
     ] = None,
     as_json: Annotated[bool, typer.Option('--json', help='Output every group as JSON to stdout.')] = False,
 ) -> None:
-    """What every record says happened over a window, and who did it where the record says."""
+    """What happened over a span of time, from every app and log, and who did it.
+
+    `doit today` folds the same records over the one day, beside what the day still owes.
+    """
     raise typer.Exit(cmd_happened(since, until, as_json))

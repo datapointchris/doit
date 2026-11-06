@@ -7,6 +7,8 @@ tree being wired up in a way that loses them.
 """
 
 import json
+import re
+import shlex
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from typer.testing import CliRunner
 import doit
 import doit.cli
 from doit import __version__
+from doit.cli import ROOT_ORDER
 from doit.cli import accepted_placements
 from doit.cli import app
 from doit.service_commands import pursuits as pursuit_commands
@@ -77,20 +80,36 @@ def test_the_pursuits_help_lists_every_verb_registered_under_it():
     assert not [name for name in registered if name not in result.output]
 
 
-def test_root_help_lists_every_command():
-    """Derived from the tree, not listed here.
+def visible_nodes(command, path=()):
+    """Every command a person can reach, with the words that reach it."""
+    yield path, command
+    for name, child in getattr(command, 'commands', {}).items():
+        if not child.hidden:
+            yield from visible_nodes(child, (*path, name))
 
-    A hand-written list passes for every command it was written with and says
-    nothing about the next one added, which is the one at risk. Hidden nodes
-    are excluded the same way the pursuits check above excludes them.
+
+def test_every_root_command_sits_in_a_named_panel_at_its_place():
+    """A command left out falls into a panel named Commands, at the foot of the screen."""
+    commands = get_command(app).commands
+
+    assert set(commands) == set(ROOT_ORDER)
+    assert not [name for name, command in commands.items() if not command.rich_help_panel]
+
+
+def test_every_screen_carries_examples_that_parse():
+    """An example is copied whole, so one naming a verb or flag doit lacks is the reader's first error.
+
+    A trailing --help answers only once the line parses, so an unknown command or flag still fails.
     """
-    visible = {command_name(command) for command in app.registered_commands if not command.hidden}
-    visible |= {group.name for group in app.registered_groups if group.name}
-    result = runner.invoke(app, ['--help'])
+    runnable = []
+    for path, command in visible_nodes(get_command(app)):
+        assert command.epilog, f'doit {" ".join(path)} shows no example'
+        runnable += re.findall(r'`(?:eval "\$\()?(doit [^`)"]+)', command.epilog)
 
-    assert result.exit_code == 0
-    assert visible
-    assert not [name for name in visible if name not in result.output]
+    assert runner.invoke(app, ['review', 'done', 'x', '--onn', 'y', '--help']).exit_code == 2, 'a bad flag must fail through --help'
+    for example in runnable:
+        result = runner.invoke(app, [*shlex.split(example)[1:], '--help'])
+        assert result.exit_code == 0, f'{example}: {result.output}'
 
 
 def test_config_show_says_where_each_setting_came_from(tmp_path, monkeypatch):

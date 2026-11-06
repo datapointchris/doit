@@ -13,6 +13,7 @@ from doit.cadence import status_label
 from doit.paths import xdg_cache_home
 from doit.render import console
 from doit.render import error_console
+from doit.render import examples
 from doit.render import nudge_header
 from doit.render import nudge_row
 from doit.render import nudge_width
@@ -173,16 +174,35 @@ def cmd_nudge_every(minutes: int) -> int:
     return 0
 
 
-app = typer.Typer(name='review', no_args_is_help=True, help="What's due to revisit, on a cadence.")
+app = typer.Typer(
+    name='review',
+    no_args_is_help=True,
+    help=(
+        "What's due to revisit, on a cadence.\n\n"
+        'A review item is something to revisit on a cadence, whether maintenance or practice. '
+        'The register is the document listing them, which `doit review edit` opens.'
+    ),
+    epilog=examples(
+        ('doit review due', "what's due now, most overdue first"),
+        ('doit review done prune-docker', 'mark one done, which sets when it comes due again'),
+        ('doit review list', 'every item and its status, due or not'),
+    ),
+)
 
 
-@app.command('due')
+@app.command('due', epilog=examples(('doit review due', 'every item due, where the dashboard shows the first few')))
 def due_command() -> None:
     """What's due now, most overdue first."""
     raise typer.Exit(cmd_due())
 
 
-@app.command('list')
+@app.command(
+    'list',
+    epilog=examples(
+        ('doit review list', 'every item and its status, due or not'),
+        ('doit review list --json', 'the same items as data, to filter on `due` or `overdue`'),
+    ),
+)
 def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
@@ -207,7 +227,13 @@ def past_day(text: str | None) -> dt.date | None:
     return day
 
 
-@app.command('done')
+@app.command(
+    'done',
+    epilog=examples(
+        ('doit review done prune-docker', 'done today'),
+        ('doit review done prune-docker --on 2026-11-04', 'record one you did earlier, and read its due date from that day'),
+    ),
+)
 def done_command(
     item_id: Annotated[str, typer.Argument(help='The register id to mark done.')],
     on: Annotated[
@@ -218,23 +244,33 @@ def done_command(
     raise typer.Exit(cmd_done(item_id, past_day(on)))
 
 
-@app.command('undo')
+@app.command('undo', epilog=examples(('doit review undo prune-docker', 'take back a completion recorded by mistake')))
 def undo_command(item_id: Annotated[str, typer.Argument(help='The register id to take a completion back from.')]) -> None:
     """Take back an item's newest completion, so it reads as it did before."""
     raise typer.Exit(cmd_undo(item_id))
 
 
-@app.command('edit')
+@app.command('edit', epilog=examples(('doit review edit', 'add an item or change its cadence')))
 def edit_command() -> None:
-    """Edit the register in $EDITOR."""
+    """Edit the register in $EDITOR, the document listing every review item."""
     raise typer.Exit(0 if service.edit_document('review', TEMPLATE) else 1)
 
 
-@app.command('nudge-every')
+@app.command(
+    'nudge-every',
+    epilog=examples(
+        ('doit review nudge-every 4h', 'at most every four hours, across every machine'),
+        ('doit review nudge-every 90m', 'at most every ninety minutes'),
+    ),
+)
 def nudge_every_command(
     duration: Annotated[str, typer.Argument(help='How often, e.g. 4h, 90m, or a bare number of hours.')],
 ) -> None:
-    """Set the startup-nudge interval."""
+    """Set how often the startup nudge may fire.
+
+    The nudge is what a new shell prints about due items, once `doit shell init` is
+    in your rc.
+    """
     minutes = parse_duration_minutes(duration)
     if minutes is None or minutes <= 0:
         raise typer.BadParameter('expected a duration like 4h, 90m, or a bare number of hours')

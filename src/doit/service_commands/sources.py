@@ -11,13 +11,32 @@ from doit import lanes
 from doit import service
 from doit.render import console
 from doit.render import error_console
+from doit.render import examples
 from doit.sources import TEMPLATE
 from doit.sources import report_block
 
-app = typer.Typer(name='sources', no_args_is_help=True, help='Which apps doit asks, and what it asks them.')
+app = typer.Typer(
+    name='sources',
+    no_args_is_help=True,
+    help=(
+        'Which apps doit asks, and what it asks them.\n\n'
+        'A source is one app doit reads, and it becomes one or more lanes on the dashboard. Which apps those are is '
+        'yours to declare, in the document `doit sources edit` opens.'
+    ),
+    epilog=examples(
+        ('doit sources list', 'every configured source, and whether it answers'),
+        ('doit sources edit', 'turn one on or off'),
+    ),
+)
 
 
-@app.command('list')
+@app.command(
+    'list',
+    epilog=examples(
+        ('doit sources list', 'every configured source, and whether it answers'),
+        ('doit sources list --json', 'the same answers as data'),
+    ),
+)
 def list_command(
     as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
 ) -> None:
@@ -38,20 +57,20 @@ def list_command(
     raise typer.Exit(0)
 
 
-@app.command('example')
+@app.command('example', epilog=examples(('doit sources example', 'see what the document can say, before writing one')))
 def example_command() -> None:
     """Print the annotated example of the sources, writing nothing."""
     print(TEMPLATE)
     raise typer.Exit(0)
 
 
-@app.command('edit')
+@app.command('edit', epilog=examples(('doit sources edit', 'turn a source on or off')))
 def edit_command() -> None:
     """Edit the sources in $EDITOR, starting from the example where none are written."""
     raise typer.Exit(0 if service.edit_document('sources', TEMPLATE) else 1)
 
 
-@app.command('contract')
+@app.command('contract', epilog=examples(('doit sources contract', 'the shape every lane takes, for a source you are writing')))
 def contract_command() -> None:
     """The lane document every source becomes, as an annotated example.
 

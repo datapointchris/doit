@@ -1,9 +1,7 @@
 """doit's command tree.
 
-Every node prints help when given no arguments, and a usage error exits 2 —
-both from typer rather than hand-rolled here, which is the whole reason the
-tree is built this way. Each subcommand module owns its own `app`; this file
-only assembles them.
+Every node prints help when given no arguments and a usage error exits 2, both
+from typer. Each subcommand module owns its own `app`, and this file assembles them.
 """
 
 import os
@@ -24,6 +22,7 @@ from doit import config_commands
 from doit import service
 from doit import shell
 from doit.render import error_console
+from doit.render import examples
 from doit.render import set_no_input
 from doit.service_commands import dashboard
 from doit.service_commands import forecast
@@ -33,39 +32,59 @@ from doit.service_commands import review
 from doit.service_commands import sources
 from doit.service_commands import today
 
-TAGLINE = 'What to do now, and everything that decides it.'
-
 # A command list answers "what is there" and the reader arrives with "what do I
 # do now". Routing lives on this screen and on a hub that owns several children,
 # never on a leaf — a tool that explains its workflow at every altitude buries
 # the command list it is trying to introduce.
-#
-# The examples sit in an indented block because markdown joins the lines of a
-# paragraph, and each example has to keep a line of its own.
-ROOT_HELP = f"""{TAGLINE}
+ROOT_HELP = """What to attend to now, from your pursuits, your review items and what your apps say is outstanding.
 
-Examples:
+Most commands are a noun, then a verb: `doit pursuits log`. So a list, log, drift loop on your
+pursuits changes only the last word. The views you read most are one word: `doit today`.
 
-    doit dashboard     the spread: every lane, ranked across none of them
-    doit next          be handed one thing, ranked by your pursuit weights
-    doit today         only what the day can finish, above what it has had
-    doit happened      what every record says happened this past week
-    doit review due    every review and practice item due; the dashboard shows three
+You never name a file or a machine. doit's service holds your records and computes every view.
+This machine's login says where the service is, and `doit auth login <url>` writes it once.
 
-**next** and **dashboard** are separate systems. They meet only on the dashboard.
+Start with `doit dashboard` to see everything outstanding, or `doit next` to be handed one thing.
+The dashboard's last line names any pursuit that is behind, and `doit next` offers it first.
 
-doit's service holds your pursuits and computes every view, so a new machine runs
-`doit auth login <url>` once.
+A **pursuit** is something you mean to keep doing, at a pace you declare, with a weight that orders
+it against the others. The **draw** is what `doit next` offers from them: everything owed, then the
+rest picked by weight. A **lane** is one list on the dashboard: what one app says is outstanding.
+A **review item** is something to revisit on a cadence.
+
+Run any partial command with no arguments or `--help` to see what comes next.
 """
+
+ROOT_EXAMPLES = examples(
+    ('doit dashboard', 'everything outstanding, every lane at a glance'),
+    ('doit next', 'what to do now, drawn from your pursuits'),
+    ('doit today', 'what today still owes, above what it has had'),
+    ('doit happened --since 7d', 'what your apps and logs recorded this past week'),
+    ('doit review due', 'every review item due, where the dashboard shows the first few'),
+    ('doit pursuits log read --minutes 40', 'record a 40-minute sitting of a timed pursuit'),
+)
+
+WHAT_TO_DO_NOW = 'What to do now'
+WHAT_CAME_OF_IT = 'What came of it'
+WHAT_YOU_DECLARED = 'What you declared'
+THIS_MACHINE = 'This machine'
+
+# Typer lists a group's commands ahead of its sub-apps and draws each panel where
+# its first command falls. Left alone, `update` would put This machine above What
+# you declared.
+ROOT_ORDER = ('next', 'today', 'dashboard', 'happened', 'forecast', 'pursuits', 'review', 'sources', 'auth', 'config', 'shell', 'update')
 
 
 class RootGroup(TyperGroup):
-    """The root group, which says where an option a command refused is accepted.
+    """The root group, which lists its commands by panel and says where an option a command refused is accepted.
 
     `--no-input` belongs to the root, so `doit next --no-input` is refused by
     `next`. click's "No such option" alone sends the reader to `--help` to find
     where the option goes, so the refusal names the placement that works.
     """
+
+    def list_commands(self, ctx: Context) -> list[str]:
+        return sorted(self.commands, key=lambda name: ROOT_ORDER.index(name) if name in ROOT_ORDER else len(ROOT_ORDER))
 
     def invoke(self, ctx: Context) -> object:
         try:
@@ -108,7 +127,16 @@ def name_accepted_placements(refused: NoSuchOption) -> None:
         refused.possibilities = None
 
 
-app = typer.Typer(name='doit', cls=RootGroup, no_args_is_help=True, help=ROOT_HELP, rich_markup_mode='markdown')
+# No typer completion: `doit shell completion` is the one that answers without starting Python.
+app = typer.Typer(
+    name='doit',
+    cls=RootGroup,
+    no_args_is_help=True,
+    add_completion=False,
+    help=ROOT_HELP,
+    epilog=ROOT_EXAMPLES,
+    rich_markup_mode='markdown',
+)
 
 
 # Notify-only by house rule: one check per 24h, one line to stderr, and
@@ -121,21 +149,48 @@ app = typer.Typer(name='doit', cls=RootGroup, no_args_is_help=True, help=ROOT_HE
 # redirects that or empties it, and it is the user's lever rather than ours.
 UPDATE_CONFIG = Config(tool='doit', owner='datapointchris')
 
+AUTH_EXAMPLES = {
+    'login': examples(
+        ('doit auth login https://doit.example.com', 'log a new machine in to that service'),
+        ('doit auth login', 'log in again to the service the config file names'),
+    ),
+    'logout': examples(('doit auth logout', "forget this machine's token")),
+    'token': examples(('doit auth token', 'an access token, for calling the service directly')),
+    'status': examples(
+        ('doit auth status', 'whether this machine is logged in, and to what'),
+        ('doit auth status --json', 'the same as data'),
+    ),
+}
+
 # The draw sits at the root because it is typed most. Logging and skipping live
 # under `pursuits`, beside the file they write to.
-app.command('next')(pursuits.next_command)
-app.command('dashboard')(dashboard.dashboard_command)
-app.command('today')(today.today_command)
-app.command('happened')(happened.happened_command)
-add_update_command(app, UPDATE_CONFIG)
+app.command('next', rich_help_panel=WHAT_TO_DO_NOW, epilog=pursuits.NEXT_EXAMPLES)(pursuits.next_command)
+app.command('today', rich_help_panel=WHAT_TO_DO_NOW, epilog=today.TODAY_EXAMPLES)(today.today_command)
+app.command('dashboard', rich_help_panel=WHAT_TO_DO_NOW, epilog=dashboard.DASHBOARD_EXAMPLES)(dashboard.dashboard_command)
+app.command('happened', rich_help_panel=WHAT_CAME_OF_IT, epilog=happened.HAPPENED_EXAMPLES)(happened.happened_command)
+app.add_typer(forecast.app, name='forecast', rich_help_panel=WHAT_CAME_OF_IT)
+app.add_typer(pursuits.app, name='pursuits', rich_help_panel=WHAT_YOU_DECLARED)
+app.add_typer(review.app, name='review', rich_help_panel=WHAT_YOU_DECLARED)
+app.add_typer(sources.app, name='sources', rich_help_panel=WHAT_YOU_DECLARED)
+app.add_typer(config_commands.app, name='config', rich_help_panel=THIS_MACHINE)
+app.add_typer(shell.app, name='shell', rich_help_panel=THIS_MACHINE)
 
-app.add_typer(pursuits.app, name='pursuits')
-app.add_typer(forecast.app, name='forecast')
-app.add_typer(review.app, name='review')
-app.add_typer(config_commands.app, name='config')
-app.add_typer(shell.app, name='shell')
-app.add_typer(sources.app, name='sources')
-add_auth_commands(app, service.LOGIN)
+auth = add_auth_commands(app, service.LOGIN, rich_help_panel=THIS_MACHINE)
+auth.info.epilog = examples(
+    ('doit auth status', 'whether this machine is logged in, and to what'),
+    ('doit auth login https://doit.example.com', 'log a new machine in to that service'),
+)
+for auth_command in auth.registered_commands:
+    auth_command.epilog = AUTH_EXAMPLES[auth_command.name or '']
+
+# pyselfupdate takes no panel or epilog, so its command is given them once registered.
+add_update_command(app, UPDATE_CONFIG)
+update_command = app.registered_commands[-1]
+update_command.rich_help_panel = THIS_MACHINE
+update_command.epilog = examples(
+    ('doit update --check', 'whether a newer release exists, installing nothing'),
+    ('doit update', 'install the newest release over this one'),
+)
 
 
 def version_callback(asked: bool) -> None:
