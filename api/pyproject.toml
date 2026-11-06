@@ -24,9 +24,6 @@ dependencies = [
     # Signing the GitHub App's assertion. `crypto` is what signs RS256.
     "pyjwt[crypto]>=2.10",
     "pyyaml>=6.0",
-    # Rewrites a document's values in place, so an imported register keeps the
-    # comments and layout it was written with.
-    "ruamel.yaml>=0.18",
 ]
 
 [project.scripts]

@@ -278,7 +278,7 @@ def test_a_handle_too_wide_for_its_row_is_printed_whole_beneath_it(monkeypatch, 
         title='REVIEW',
         rows=[
             Row('a-review', 'Read the report', 'never run', Urgency.OVERDUE, wide),
-            Row('practice', 'Work through a Lab', 'never run', handle='doit labs choose'),
+            Row('practice', 'Work through a Lab', 'never run', handle='howto labs choose'),
         ],
         total=2,
     )
@@ -288,7 +288,7 @@ def test_a_handle_too_wide_for_its_row_is_printed_whole_beneath_it(monkeypatch, 
     lines = capsys.readouterr().out.splitlines()
     assert lines[1].rstrip().endswith('never run'), 'the row keeps its own line'
     assert lines[2].strip() == f'↳ {wide}'
-    assert lines[3].endswith('↳ doit labs choose'), 'a handle that fits stays inline'
+    assert lines[3].endswith('↳ howto labs choose'), 'a handle that fits stays inline'
 
 
 def test_a_long_label_leaves_the_text_its_floor_beside_an_inline_handle(monkeypatch, capsys):
@@ -297,7 +297,7 @@ def test_a_long_label_leaves_the_text_its_floor_beside_an_inline_handle(monkeypa
     lane = Lane(
         name='practice',
         title='PRACTICE',
-        rows=[Row('x' * today.DUE_LABEL_MAX, text, 'never run', Urgency.OVERDUE, 'doit labs show a-lab')],
+        rows=[Row('x' * today.DUE_LABEL_MAX, text, 'never run', Urgency.OVERDUE, 'howto labs show a-lab')],
         total=1,
     )
 

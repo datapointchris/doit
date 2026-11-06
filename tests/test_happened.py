@@ -42,12 +42,12 @@ def ok(source: str, payload, bounds: Bounds = DAY):
 
 
 def adapter_for(source_id: str):
-    return sources.ADAPTERS[source_id].build
+    return sources.ADAPTERS[source_id]
 
 
 @pytest.fixture(autouse=True)
 def frozen_clock(monkeypatch):
-    """Pin the adapters' wall clock. They take no `now`, because `sources.Adapter` is a one-argument callable."""
+    """Pin the adapters' wall clock. They take no `now`, because an adapter is a one-argument callable."""
 
     class Frozen(dt.datetime):
         @classmethod

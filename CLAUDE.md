@@ -6,6 +6,15 @@ The layer that decides what to attend to and drives it. It stewards no records o
 per-domain CLIs do that — so a change that has `doit` deciding a domain rule belongs in the CLI
 that owns the domain, not here.
 
+doit covers what a person does themselves, and that includes the person's own review of the fleet,
+so the review register's fleet-maintenance items stay. Engineering work that agents do is tracked by
+slate and fleet, and no pursuit or daily list carries it. Chris: "doit is more for personal life
+stuff", and of the register's fleet items, "They are personal review things that I personally have
+to do, not build tasks that claude is going to do".
+
+howto carries the cards, the Labs and the tool registry, and doit reads nothing from it. A practice
+entry's `command` is text in the review document, which doit shows and never runs.
+
 ## What will look like a bug and is not
 
 **The dashboard duplicates due-ness.** It imports nothing from the cadence module and instead
@@ -28,44 +37,25 @@ behind, the other when it comes due. Converting a counted checkoff into minutes,
 into points, would let the two be summed. Both conversions were weighed and rejected, because a
 checkoff has no length and a point is a quantity nobody declared.
 
-## Content is the machine's, and documents and records are the service's
+## Documents and records are the service's, and a machine keeps only its login and its caches
 
-- **Content** — cards, Labs, and the tool registry (`cards/`, `labs/`, `tools/`). The
-  `terminal-library` repo, cloned into `$XDG_DATA_HOME/terminal-library/`, updated by
-  `doit content sync`. Authored often, so it must never need a release of this repo to change.
-  Named for the library and not for doit, because doit is one reader of it. `paths.library_dir()`
-  is the only place that resolves the root; every module reaches into a subdirectory of that rather
-  than rebuilding the path, so the next move is one line.
-  That path is resolved, never assumed to be a real directory: a machine that authors cards points
-  it at a checkout kept where its git lives, so writing a card and reading it stay one file. Making
-  that so is the installing layer's job — doit only ever opens the path it is given.
 - **Documents** — the pursuits, the review register and the sources. The service stores each as its
   text, so comments and layout survive, and `service.edit_document` round-trips it through
-  `$EDITOR`. Never in either repo: it is personal, and both repos are public.
+  `$EDITOR`. Never in the repo: it is personal, and the repo is public.
 - **Records** — the journal, review completions, offered counts, forecast readings and the nudge's
   last showing, in the service's store. A command reaches them only through `doit.service`, the
   one module that makes a request.
-- **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer, the
-  machine's client and `library_dir`. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no
-  Python and no request, each file rewritten by the command that fetches it.
-
-## One renderer per collection, and `doit.tools` owns most of them
-
-`doit find` and `doit show` assemble a subject from every collection that has it and render none
-of it themselves — each lens hands off to whatever owns it. `doit.tools` is that owner for the
-registry and for the shell collections, so its card shapes take plain arguments rather than index
-rows: that is what lets `doit show` compose them without `tools` importing `index`, which would
-close a cycle.
-
-The registry's own path and loader live in `doit.tools` for the same reason — `index` and `labs`
-both read it, and a constant defined per reader is a constant that drifts.
+- **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer and the
+  machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no Python and no request,
+  each file rewritten by the command that fetches it.
 
 ## Which sources are asked is configuration, and how each is read is code
 
 `doit` must not know which sources a person asks, so turning one on is an edit to the sources
-document, never a release. How a source is read is an adapter, and the adapter carries its read
-and its command too. The read and the model it returns are one contract, and a copy of either in
-the sources document is one no sweep of the code finds when the app changes.
+document, never a release. How a source is read is an adapter: an HTTP read in
+`readers.declared_reads` and a builder passed to `sources.register_adapter`, joined by the adapter's
+name. The read and the model it returns are one contract, and a copy of either in the
+sources document is one no sweep of the code finds when the app changes.
 
 The service runs no command, so a source declared by `command` alone, printing the lane document,
 is shown as failed rather than read. An app with no adapter needs a release before doit can ask it.
@@ -108,9 +98,8 @@ Shapes that look wrong and are not:
 - **`deploy/` names the image `doit-api` with no tag.** `release/pin-manifests` pins it by digest in
   the copy the release pushes, and `validate.yml` lints what that renders. kube-linter refuses the
   committed base, which is why it reads the rendered copy.
-- **The register's validator accepts a `resolve` or `evidence` written as a command** as well as
-  the read `{app, path, query}` the service runs. A desk's register arrives by import in the
-  command form, which the import rewrites into the read, and the reader names any it cannot run.
+- **The store keeps an `imports` table nothing writes.** It is the only record of what each desk's
+  files added when they moved onto the service.
 - **`readers/icb.py` composes icb's overview itself.** icb serves one route per section and no
   overview, so the module is a copy of icb's CLI composition: the focus project, the article
   queue, the countdowns, and the rule that a refused credential refuses the whole document. A

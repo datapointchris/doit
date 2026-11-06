@@ -154,9 +154,11 @@ KNOWN_FIELDS = {
     'evidence_time',
     'evidence_items',
     'evidence_where',
-    'evidence_files',
     'weekly_minutes',
 }
+
+READ_KEYS = {'app', 'path', 'query'}
+READ_FORM = '{app: <name>, path: /<route>, query: {<parameter>: <value>}}'
 
 TEMPLATE = """\
 # Pursuits, read by `doit next`. Hand-edit freely — this tool only reads.
@@ -246,8 +248,6 @@ TEMPLATE = """\
 #   evidence_time   the timestamp field on each row
 #   evidence_items  optional key holding the rows when they are nested
 #   evidence_where  optional field: value pairs selecting the rows that count
-#   evidence_files  a directory of files on a desk, which the service cannot
-#                   read, so it reports the pursuit's evidence as failed
 #
 # Evidence counts occurrences, so a cadence takes it and so does a tracked
 # pursuit. An app says which day something happened and never how long, so a
@@ -277,20 +277,20 @@ pursuits:
     description: The next thing on the task list
     weight: 25
     cadence: 3d
-    resolve: icb tasks list --limit 3 --json
+    resolve: {app: icb, path: /tasks, query: {limit: 3}}
     label: name
     id: id
     context: category
     view: icb tasks show {id}
     on_log: icb tasks complete {id}
-    evidence: icb tasks list --status completed --json
+    evidence: {app: icb, path: /tasks, query: {status: completed}}
     evidence_time: complete_date
 
   read-library:
     description: A book already on the shelf
     weight: 30
     weekly_minutes: 120
-    resolve: icb books list --progress reading --json
+    resolve: {app: icb, path: /books, query: {progress: reading}}
     label: title
     context: author
 
@@ -298,7 +298,7 @@ pursuits:
     description: The current section of the CS track
     weight: 35
     weekly_minutes: 180
-    resolve: learning overview --json
+    resolve: {app: learning, path: /overview}
     items: in_progress_resources
     label: title
     detail: notes
@@ -320,6 +320,20 @@ def parse_register(text: str, where: object) -> dict:
     if not isinstance(document, dict):
         raise RegisterError(f'{where}: must be a mapping with a `pursuits` key, not {type(document).__name__}')
     return document
+
+
+def read_fault(declaration: object) -> str:
+    """What stops the service making a `resolve` or `evidence` read, or '' where nothing does."""
+    if isinstance(declaration, str):
+        return 'is a read the service makes, not a command'
+    if not isinstance(declaration, dict) or not declaration.get('app') or not str(declaration.get('path', '')).startswith('/'):
+        return 'must name an app and a path starting with /'
+    unknown = set(declaration) - READ_KEYS
+    if unknown:
+        return f'has unknown key(s) {", ".join(sorted(unknown))}'
+    if not isinstance(declaration.get('query') or {}, dict):
+        return 'has a query that is not a mapping of parameter to value'
+    return ''
 
 
 def pursuits_from_document(document: dict, where: object) -> dict:
@@ -345,6 +359,9 @@ def pursuits_from_document(document: dict, where: object) -> dict:
             # `weekly_minutes` in the list can fix `minutes` without leaving the
             # terminal; one told only what is wrong cannot.
             raise RegisterError(f'{name}: unknown field(s) {", ".join(sorted(unknown))}. Accepted: {", ".join(sorted(KNOWN_FIELDS))}')
+        for read in ('resolve', 'evidence'):
+            if config.get(read) and (fault := read_fault(config[read])):
+                raise RegisterError(f'{name}: {read} {fault}. Write it as {READ_FORM}')
         cadence = config.get('cadence')
         minutes = config.get('weekly_minutes')
         if cadence is not None and minutes is not None:
@@ -363,7 +380,7 @@ def pursuits_from_document(document: dict, where: object) -> dict:
             raise RegisterError(f'{name}: cadence is a whole number of days, like 3d or 9d')
         if minutes is not None and (not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0):
             raise RegisterError(f'{name}: weekly_minutes must be a positive whole number')
-        if minutes is not None and (config.get('evidence') or config.get('evidence_files')):
+        if minutes is not None and config.get('evidence'):
             raise RegisterError(
                 f'{name}: weekly_minutes is paid by `doit pursuits log --minutes` only — an app reports days, never how long'
             )

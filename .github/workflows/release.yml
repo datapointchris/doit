@@ -20,8 +20,6 @@ jobs:
   validate:
     uses: ./.github/workflows/validate.yml
 
-  # The cards and Labs ship separately in terminal-library, which is why
-  # authoring one needs no release here.
   release:
     needs: validate
     uses: datapointchris/reusable-workflows/.github/workflows/python-semantic-release.yml@v1

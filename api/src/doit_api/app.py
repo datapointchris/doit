@@ -35,7 +35,6 @@ from pydantic import Field
 from doit import journal
 
 from . import documents
-from . import importing
 from .computed_views import Views
 from .computed_views import instant
 from .errors import NotFound
@@ -109,16 +108,6 @@ class NudgeBody(Strict):
 
 class ForecastBody(Strict):
     budget_minutes: int | None = Field(None, gt=0, description="Minutes a day to spend. The register's budget when omitted.")
-
-
-class ImportedFile(Strict):
-    path: str = Field(description='The path under the desk folders, starting config/ or state/.')
-    text: str
-    modified_at: str | None = Field(None, description='When the file was last modified, ISO 8601 with an offset.')
-
-
-class ImportBody(Strict):
-    files: list[ImportedFile]
 
 
 def create_app(*, settings: Settings, store: Store, views: Views, verifier, forecast_loop: ForecastLoop | None = None) -> FastAPI:
@@ -338,15 +327,6 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     def forecast_show(generated: str, caller: Person) -> dict:
         """The forecast taken at a moment, by any prefix of its timestamp; `latest` for the newest."""
         return views.forecast_show('' if generated == 'latest' else generated)
-
-    @api.post('/imports', status_code=201)
-    def import_files(body: ImportBody, caller: Person) -> dict:
-        """Merge a desk's config and state files into the store. Safe to run again: a second run adds only what is new."""
-        return importing.run(store, [file.model_dump() for file in body.files], caller.who, views.now())
-
-    @api.get('/imports')
-    def import_list(caller: Person) -> list[dict]:
-        return store.imports()
 
     app.include_router(api)
     return app

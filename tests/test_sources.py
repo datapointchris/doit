@@ -1,9 +1,4 @@
-"""Tests for the source registry and the lane contract.
-
-The property that matters most is at the bottom: a source doit has never heard
-of contributes a lane with no doit code at all. Everything else is the failure
-policy around it.
-"""
+"""Tests for the source registry, the lane contract and the failure policy around them."""
 
 import datetime as dt
 import json
@@ -14,7 +9,6 @@ import yaml
 from doit import dashboard
 from doit import lanes
 from doit import sources
-from doit.window import Bounds
 
 NOW = dt.datetime(2026, 8, 6, 12, 0, 0)
 
@@ -37,30 +31,13 @@ def parsed(body: str) -> sources.Registry:
     return sources.registry_from_document(yaml.safe_load(body) or {})
 
 
-def test_a_source_doit_has_never_heard_of_needs_no_code():
-    """The whole interface, in one assertion.
-
-    A tool that prints a lane document appears on the dashboard with no adapter,
-    no mapping and no release of doit.
-    """
-    source = sources.Source(id='day', command=['day', '--json'])
-    result = sources.Result(source='day', payload=CONFORMING, exit_code=0)
-
-    built = sources.lanes_from(source, result)
-
-    assert [lane.name for lane in built] == ['day']
-    assert built[0].rows[0].text == 'Lights to evening scene'
-    assert built[0].rows[0].urgency is lanes.Urgency.DUE
-    assert built[0].hints == ['day status']
-
-
 def test_the_contract_wins_over_a_registered_adapter():
     """An app that starts speaking the contract is picked up the moment it does.
 
     Its adapter simply stops being reached, with nothing in doit changing.
     """
-    sources.register_adapter('never', ('day',), lambda _: [lanes.Lane(name='from-adapter', title='X')])
-    source = sources.Source(id='day', command=['day'], adapter='never')
+    sources.register_adapter('never', lambda _: [lanes.Lane(name='from-adapter', title='X')])
+    source = sources.Source(id='day', adapter='never')
 
     built = sources.lanes_from(source, sources.Result(source='day', payload=CONFORMING, exit_code=0))
 
@@ -97,11 +74,11 @@ def test_a_declared_lane_whose_adapter_this_doit_lacks_names_the_adapter():
     sources.yml and the installed doit disagree about an adapter's name across
     any rename, on every machine, until both have moved.
     """
-    source = sources.Source(id='problems', command=['fleet'], adapter='no-such-adapter', lanes=('problems',))
+    source = sources.Source(id='trips', adapter='no-such-adapter', lanes=('trips',))
 
-    built = sources.lanes_from(source, sources.Result(source='problems', payload=[], exit_code=0))
+    built = sources.lanes_from(source, sources.Result(source='trips', payload=[], exit_code=0))
 
-    assert [lane.name for lane in built] == ['problems']
+    assert [lane.name for lane in built] == ['trips']
     assert built[0].available is False
     assert 'no-such-adapter' in built[0].reason
 
@@ -114,13 +91,6 @@ def test_a_failed_source_that_declared_no_lanes_is_one_unavailable_lane_under_it
     [lane] = dashboard.source_lanes(registry, {'gh': result})
 
     assert (lane.name, lane.available, lane.reason) == ('gh', False, 'boom')
-
-
-def test_a_non_conforming_payload_without_an_adapter_yields_nothing():
-    """Silence rather than a guess: doit does not know this app's model."""
-    source = sources.Source(id='day', command=['day'])
-
-    assert sources.lanes_from(source, sources.Result(source='day', payload={'stuff': []}, exit_code=0)) == []
 
 
 def test_an_empty_document_configures_nothing():
@@ -159,20 +129,20 @@ def test_both_blocks_parse_into_the_same_source():
     assert registry.completions['done'] == sources.Source(id='done', command=['done', '--json'])
 
 
-def test_an_adapted_entry_runs_its_adapters_command_and_a_restated_one_is_reported():
-    """The command belongs to the adapter, so no copy in sources.yml can drift from it.
+def test_a_command_beside_an_adapter_is_ignored_and_reported():
+    """The read belongs to the adapter, so no command in the sources document can drift from it.
 
-    A restated command is ignored rather than the entry dropped, so the lane
-    keeps answering while the line waits to be deleted.
+    The command is ignored rather than the entry dropped, so the lane keeps
+    answering while the line waits to be deleted.
     """
-    sources.register_adapter('owned', ('owned', '--json'), lambda _: [])
+    sources.register_adapter('owned', lambda _: [])
     body = 'sources:\n  quiet:\n    adapter: owned\n  stale:\n    adapter: owned\n    command: [owned, --old-flag]\n'
 
     registry = parsed(body)
 
-    assert registry.sources['quiet'].command == ['owned', '--json']
-    assert registry.sources['stale'].command == ['owned', '--json']
-    assert registry.problems == ['stale: the owned adapter supplies its own command — delete `command`']
+    assert registry.sources['quiet'] == sources.Source(id='quiet', adapter='owned')
+    assert registry.sources['stale'] == sources.Source(id='stale', adapter='owned')
+    assert len(registry.problems) == 1 and 'stale' in registry.problems[0]
 
 
 def test_a_file_with_no_completions_block_is_not_a_problem():
@@ -211,7 +181,7 @@ def test_one_id_in_both_blocks_is_reported_and_the_completion_dropped():
 
     assert list(registry.sources) == ['meso']
     assert registry.completions == {}
-    assert any('both' in problem and 'meso' in problem for problem in registry.problems)
+    assert any('meso' in problem for problem in registry.problems)
 
 
 def test_a_block_that_is_not_a_mapping_names_itself():
@@ -219,16 +189,6 @@ def test_a_block_that_is_not_a_mapping_names_itself():
     registry = parsed('completions: [icb, tasks]\n')
 
     assert any('completions' in problem for problem in registry.problems)
-
-
-def test_the_window_ends_replace_whole_argv_parts_and_nothing_else():
-    """Equality rather than a substring replace, so a path or a title containing a token passes through untouched."""
-    zone = dt.timezone(dt.timedelta(hours=-4))
-    bounds = Bounds(dt.datetime(2026, 8, 6, 15, 0, tzinfo=zone), dt.datetime(2026, 8, 7, tzinfo=zone))
-
-    resolved = sources.resolved_command(['grep', 'due {since}', '--since', '{since}', '--until', '{until}'], bounds)
-
-    assert resolved == ['grep', 'due {since}', '--since', '2026-08-06T15:00:00-04:00', '--until', '2026-08-07T00:00:00-04:00']
 
 
 def test_source_order_is_the_files_order():

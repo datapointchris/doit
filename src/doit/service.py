@@ -37,7 +37,6 @@ PREFIX = '/api/v1'
 # Must outlast the longest read a view makes of an app, so a slow app costs the
 # view one failed lane and not the whole answer.
 TIMEOUT = httpx2.Timeout(60.0, connect=10.0)
-IMPORT_TIMEOUT = httpx2.Timeout(300.0, connect=10.0)
 
 # One request with its retries, bounded together. A command can wait on a person
 # between requests, so the bound is per request rather than per command.

@@ -188,15 +188,22 @@ def row_text(row: dict, label_field: str) -> str:
     return str(row.get(label_field) or '').strip() or '—'
 
 
+# The window's ends in a hint's command. Each is one whole argument.
+SINCE = '{since}'
+UNTIL = '{until}'
+
+
 def hint_for(command: tuple[str, ...], bounds: Bounds) -> str:
-    """The command that lists what a group read, over the same window, as a person would type it."""
-    return shlex.join(part for part in sources.resolved_command(list(command), bounds) if part != '--json')
+    """The command that lists what a group read, over the same window, as a person would type it.
+
+    Instants rather than days, because a window may start mid-afternoon and a
+    backend handed a day would answer for all of it.
+    """
+    ends = {SINCE: bounds.start.isoformat(timespec='seconds'), UNTIL: bounds.stop.isoformat(timespec='seconds')}
+    return shlex.join(ends.get(part, part) for part in command if part != '--json')
 
 
 # --- the completion adapters ---------------------------------------------------
-
-SINCE = sources.SINCE_PLACEHOLDER
-UNTIL = sources.UNTIL_PLACEHOLDER
 
 
 def unreadable_reason(source_id: str, result: sources.Result, expected: str) -> str:
@@ -220,7 +227,7 @@ def with_cut(lane: Lane, result: sources.Result) -> Lane:
 
 
 def flat_adapter(
-    source_id: str, name: str, title: str, label_field: str, date_field: str, actor_field: str, command: tuple[str, ...]
+    source_id: str, name: str, title: str, label_field: str, date_field: str, actor_field: str, hint: tuple[str, ...]
 ) -> Callable[[sources.Result], list[Lane]]:
     """An adapter for a backend answering with a flat array of finished things.
 
@@ -229,10 +236,8 @@ def flat_adapter(
     rather than more keys in the sources document, because `lanes.py` rejects field
     mappings in that file by name.
 
-    The failure reason is asked for under the source id, never the lane name.
-    `reason` looks the argv back up by that id to name the program that
-    rejected it, so a lane name here would lose the command and name a thing
-    that was never a source.
+    The failure reason is asked for under the source id, never the lane name,
+    because a lane name would name a thing that was never a source.
     """
 
     def adapter(result: sources.Result) -> list[Lane]:
@@ -244,14 +249,15 @@ def flat_adapter(
             done_cell(row_text(row, label_field), row.get(date_field), now, str(row.get(actor_field) or '') if actor_field else '')
             for row in rows_within(result.payload, date_field, bounds, now)
         ]
-        return [with_cut(done_lane(name, title, cells, hint_for(command, bounds)), result)]
+        return [with_cut(done_lane(name, title, cells, hint_for(hint, bounds)), result)]
 
     return adapter
 
 
 # Which completion source answers which group, with the field holding its title,
-# its date and its actor, and the command it runs. The field names came from
-# live payloads, so check one before changing a row here.
+# its date and its actor, and the command a person types to list the same rows,
+# which the group shows as its hint. The field names came from live payloads, so
+# check one before changing a row here.
 #
 # learning still returns only its newest 100 inside the window, and says so on
 # stderr when it cuts, which marks the group partial.
@@ -328,7 +334,7 @@ MESO_KINDS = (
     ('log_entries', 'mood', 'entry_date'),
     ('measurements', 'metric', 'measured_on'),
 )
-MESO_COMMAND = ('meso', 'review', '--since', SINCE, '--until', UNTIL, '--json')
+MESO_HINT = ('meso', 'review', '--since', SINCE, '--until', UNTIL, '--json')
 
 
 def meso_adapter(result: sources.Result) -> list[Lane]:
@@ -346,7 +352,7 @@ def meso_adapter(result: sources.Result) -> list[Lane]:
         for key, label_field, date_field in MESO_KINDS
         for row in rows_within(payload.get(key), date_field, bounds, now)
     ]
-    return [with_cut(done_lane('training', 'TRAINING', cells, hint_for(MESO_COMMAND, bounds)), result)]
+    return [with_cut(done_lane('training', 'TRAINING', cells, hint_for(MESO_HINT, bounds)), result)]
 
 
 # Every completion adapter doit ships, with the group each one produces. One
@@ -357,9 +363,9 @@ COMPLETION_ADAPTERS: tuple[tuple[str, str], ...] = tuple((adapter_id, lane_name)
     ('meso-review', 'training'),
 )
 
-for lane_name, lane_title, adapter_id, label, stamp, recorded_by, command in FLAT_COMPLETIONS:
-    sources.register_adapter(adapter_id, command, flat_adapter(adapter_id, lane_name, lane_title, label, stamp, recorded_by, command))
-sources.register_adapter('meso-review', MESO_COMMAND, meso_adapter)
+for lane_name, lane_title, adapter_id, label, stamp, recorded_by, hint in FLAT_COMPLETIONS:
+    sources.register_adapter(adapter_id, flat_adapter(adapter_id, lane_name, lane_title, label, stamp, recorded_by, hint))
+sources.register_adapter('meso-review', meso_adapter)
 
 
 # --- doit's own records --------------------------------------------------------

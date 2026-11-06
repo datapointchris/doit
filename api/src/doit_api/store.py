@@ -463,25 +463,6 @@ class Store:
                     (machine, name),
                 )
 
-    @staticmethod
-    def raise_offers(connection: sqlite3.Connection, machine: str, counts: dict[str, int]) -> int:
-        """Take each count a machine's file holds where it is higher than what is held, and say how many rose.
-
-        Higher, never replaced, because a count only grows: a second import of
-        an older copy must not undo a newer one.
-        """
-        rose = 0
-        for name, count in counts.items():
-            cursor = connection.execute(
-                """
-                INSERT INTO offer_counts (machine, pursuit, offered) VALUES (?, ?, ?)
-                ON CONFLICT (machine, pursuit) DO UPDATE SET offered = excluded.offered WHERE excluded.offered > offered
-                """,
-                (machine, name, int(count)),
-            )
-            rose += cursor.rowcount
-        return rose
-
     # --- the standing draw ----------------------------------------------------
 
     def newest_draw(self) -> dict | None:
@@ -539,18 +520,3 @@ class Store:
                 'UPDATE nudge SET last_nudged_at = ? WHERE singleton = 1 AND (last_nudged_at IS NULL OR last_nudged_at < ?)',
                 (last_nudged_at, last_nudged_at),
             )
-
-    # --- imports --------------------------------------------------------------
-
-    @staticmethod
-    def record_import(connection: sqlite3.Connection, imported_by: str, summary: dict, at: str) -> int:
-        cursor = connection.execute(
-            'INSERT INTO imports (imported_at, imported_by, summary) VALUES (?, ?, ?)', (at, imported_by, json.dumps(summary))
-        )
-        return int(cursor.lastrowid or 0)
-
-    def imports(self) -> list[dict]:
-        """Every import run, oldest first, with what each added."""
-        with self.connect() as connection:
-            rows = connection.execute('SELECT id, imported_at, imported_by, summary FROM imports ORDER BY id').fetchall()
-        return [{**dict(row), 'summary': json.loads(row['summary'])} for row in rows]

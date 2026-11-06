@@ -13,9 +13,9 @@ The due date is derived, never stored: next_due = last_done + cadence. A new ite
 with no recorded done simply shows as never done. Storing only last_done means
 there is no date to keep in sync and nothing to drift.
 
-The register holds two blocks: `items` for maintenance and `practice` for the
-Labs you work through. The Labs live in terminal-library, which is shared
-reference. When you practice one is yours, so its schedule is kept here.
+The register holds two blocks: `items` for maintenance and `practice` for what
+you work through on a schedule. howto carries the Labs. When you practice one is
+yours, so its schedule is kept here.
 """
 
 import contextlib
@@ -44,8 +44,9 @@ TEMPLATE = """\
 #   show         optional command the nudge runs to print a card inline, where
 #                the item's name alone does not say enough to act on
 #
-# `practice:` holds the Labs you work through on a schedule, with the same
-# fields, keyed by the Lab's id. An id names one item across both blocks.
+# `practice:` holds what you work through on a schedule, with the same fields.
+# For a howto Lab, key it by the Lab's id and set `command: howto labs show <id>`.
+# An id names one item across both blocks.
 
 items:
   prune-docker:

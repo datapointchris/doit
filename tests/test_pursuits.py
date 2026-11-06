@@ -408,10 +408,27 @@ def test_view_without_resolve_is_refused(tmp_path):
 
 
 def test_context_and_detail_without_a_label_are_refused(tmp_path):
-    # Both read fields off a parsed row, and there is no row without `label` —
-    # the resolver falls back to reading plain lines.
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    resolve: echo hi\n    context: repo\n')
+    # Both read fields off a parsed row, and there is no row without `label`.
+    path = write_register(
+        tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    resolve: {app: icb, path: /tasks}\n    context: repo\n'
+    )
     with pytest.raises(pursuits.RegisterError, match='label'):
+        load(path)
+
+
+@pytest.mark.parametrize(
+    ('field', 'declared'),
+    [
+        ('resolve', 'icb tasks list --json'),
+        ('evidence', 'icb tasks list --json'),
+        ('resolve', '{app: icb}'),
+        ('evidence', '{app: icb, path: /tasks, timeout: 3}'),
+        ('resolve', '{app: icb, path: /tasks, query: limit}'),
+    ],
+)
+def test_a_read_the_service_cannot_make_is_refused_naming_the_read_form(tmp_path, field, declared):
+    path = write_register(tmp_path, f'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    {field}: {declared}\n')
+    with pytest.raises(pursuits.RegisterError, match=rf'\ba: {field}\b.*{re.escape(pursuits.READ_FORM)}'):
         load(path)
 
 
@@ -446,7 +463,7 @@ def test_a_resolve_counts_after_the_register_narrows_the_rows():
 
 def test_on_log_substitutes_the_offered_items_id(tmp_path):
     marker = tmp_path / 'ran.txt'
-    config = {'resolve': 'echo x', 'on_log': f'cp {tmp_path / "seed.txt"} {marker}'}
+    config = {'on_log': f'cp {tmp_path / "seed.txt"} {marker}'}
     (tmp_path / 'seed.txt').write_text('422')
     result = pursuits.run_on_log(config, {'id': '422', 'label': 'Task'}, '', None, assume_yes=True)
     assert result is not None and result['ran'] is True
@@ -457,7 +474,7 @@ def test_on_log_is_not_run_when_there_is_nobody_to_confirm_with(tmp_path):
     """The prompt would block on a stdin that never closes, so an unconfirmed
     on_log is skipped rather than asked about. -y is what runs it unattended."""
     marker = tmp_path / 'ran.txt'
-    config = {'resolve': 'echo x', 'on_log': f'touch {marker}'}
+    config = {'on_log': f'touch {marker}'}
 
     assert pursuits.run_on_log(config, {'id': '1', 'label': 'Task'}, '', None, assume_yes=False) is None
     assert not marker.exists()
@@ -467,7 +484,7 @@ def test_on_log_is_not_run_under_no_input_even_on_a_terminal(tmp_path, monkeypat
     monkeypatch.setattr('sys.stdin.isatty', lambda: True)
     monkeypatch.setattr(render, 'no_input', True)
     marker = tmp_path / 'ran.txt'
-    config = {'resolve': 'echo x', 'on_log': f'touch {marker}'}
+    config = {'on_log': f'touch {marker}'}
 
     assert pursuits.run_on_log(config, {'id': '1', 'label': 'Task'}, '', None, assume_yes=False) is None
     assert not marker.exists()
@@ -475,12 +492,12 @@ def test_on_log_is_not_run_under_no_input_even_on_a_terminal(tmp_path, monkeypat
 
 def test_on_log_is_skipped_when_the_item_has_no_id():
     # Nothing was offered, so there is nothing to complete — better than guessing.
-    config = {'resolve': 'echo x', 'on_log': 'icb tasks complete {id}'}
+    config = {'on_log': 'icb tasks complete {id}'}
     assert pursuits.run_on_log(config, {'label': 'no id here'}, '', None, assume_yes=True) is None
 
 
 def test_on_log_is_skipped_when_the_pursuit_declares_none():
-    assert pursuits.run_on_log({'resolve': 'echo x'}, {'id': '1'}, '', None, assume_yes=True) is None
+    assert pursuits.run_on_log({}, {'id': '1'}, '', None, assume_yes=True) is None
 
 
 def test_a_record_carries_the_state_that_produced_it_and_when_it_happened():
@@ -645,10 +662,10 @@ def test_the_tally_sets_what_was_done_beside_what_was_asked():
     assert pursuits.tally_text(state, 'read') == '1h 30m of 30h in 40d'
 
 
-@pytest.mark.parametrize('source', ['evidence_files: ~/notes/journal', 'evidence: echo []\n    evidence_time: completed_at'])
-def test_a_pursuit_measured_in_minutes_refuses_an_app_source(source):
+def test_a_pursuit_measured_in_minutes_refuses_an_app_source():
     """An app says which day, never how long. Crediting a day some guessed
     number of minutes paid a week's journal from one file saved twice."""
+    source = 'evidence: {app: icb, path: /tasks}\n    evidence_time: completed_at'
     body = f'pursuits:\n  journal:\n    description: x\n    weight: 10\n    weekly_minutes: 60\n    {source}\n'
 
     with pytest.raises(pursuits.RegisterError, match='journal: weekly_minutes is paid by `doit pursuits log --minutes` only'):
@@ -1367,7 +1384,7 @@ pursuits:
     description: Done inside its own app, never typed here
     weight: 25
     cadence: 3d
-    evidence: echo []
+    evidence: {app: icb, path: /tasks}
     evidence_time: completed_at
 """
 

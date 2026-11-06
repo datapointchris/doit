@@ -22,7 +22,6 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from doit import cli
-from doit import content
 from doit import happened
 from doit import journal
 from doit import lanes
@@ -41,12 +40,6 @@ from doit.service_commands import today as today_commands
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures'
 TASKS = [{'name': 'Face Mud', 'id': 501}, {'name': 'Return hoodies', 'id': 512}, {'name': 'Journal', 'id': 474}]
-
-
-@pytest.fixture(autouse=True)
-def library_present(monkeypatch):
-    """Every command starts by cloning the content library where none is, which a test must not."""
-    monkeypatch.setattr(content, 'ensure_cloned', lambda: True)
 
 
 @pytest.fixture
