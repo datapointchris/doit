@@ -69,22 +69,20 @@ def test_the_most_recent_row_wins_not_the_first():
         {'at': (NOW - dt.timedelta(days=2)).isoformat()},
         {'at': (NOW - dt.timedelta(days=6)).isoformat()},
     ]
-    found = evidence.latest_in(rows, {'evidence_time': 'at'}, NOW)
-    assert found == NOW - dt.timedelta(days=2)
+    assert evidence.answer_from(rows, {'evidence_time': 'at'}, NOW)['last'] == (NOW - dt.timedelta(days=2)).isoformat()
 
 
 def test_a_backend_answering_without_an_offset_is_still_comparable():
     """A naive stamp compared against an aware now raises rather than sorting."""
     rows = [{'at': '2026-08-15T09:30:00'}]
-    found = evidence.latest_in(rows, {'evidence_time': 'at'}, NOW)
-    assert found is not None
-    assert (NOW - found).days == 1
+    last = evidence.answer_from(rows, {'evidence_time': 'at'}, NOW)['last']
+    assert (NOW - dt.datetime.fromisoformat(last)).days == 1
 
 
 def test_nested_rows_and_a_lone_object_both_read():
     nested = {'sessions': [{'at': NOW.isoformat()}]}
-    assert evidence.latest_in(nested, {'evidence_time': 'at', 'evidence_items': 'sessions'}, NOW) == NOW
-    assert evidence.latest_in({'at': NOW.isoformat()}, {'evidence_time': 'at'}, NOW) == NOW
+    assert evidence.answer_from(nested, {'evidence_time': 'at', 'evidence_items': 'sessions'}, NOW)['last'] == NOW.isoformat()
+    assert evidence.answer_from({'at': NOW.isoformat()}, {'evidence_time': 'at'}, NOW)['last'] == NOW.isoformat()
 
 
 def test_a_failed_read_keeps_the_previous_answer_and_its_days_and_says_why():
@@ -159,7 +157,6 @@ def test_a_declaration_without_a_time_field_is_not_evidence():
 
 
 def test_every_day_the_app_reported_survives_the_read():
-    """The occurrences are what `latest_in` alone throws away."""
     rows = [
         {'at': (NOW - dt.timedelta(hours=1)).isoformat()},
         {'at': (NOW - dt.timedelta(hours=2)).isoformat()},

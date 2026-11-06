@@ -269,44 +269,6 @@ def test_articles_are_their_own_lane():
     assert lane.total == 61, '60 queued plus the one being read'
 
 
-def dotfiles_lane_from(runs: list) -> Lane:
-    return dashboard.dotfiles_adapter(sources.Result(source='', payload=runs, exit_code=0))[0]
-
-
-def test_two_boxes_sharing_a_manifest_are_two_rows():
-    """Both Macs declare macos-personal-workstation, so a fold on the manifest
-    counts them as one and the newer run hides the older."""
-    lane = dotfiles_lane_from(
-        [
-            {'host': 'macmini', 'machine': 'macos-personal-workstation', 'outcome': 'ok'},
-            {'host': 'mbp', 'machine': 'macos-personal-workstation', 'outcome': 'issue'},
-        ]
-    )
-
-    assert lane.meta == '1 of 2 need a look'
-    assert [row.label for row in lane.rows] == ['mbp']
-
-
-def test_a_run_written_before_the_host_field_still_folds():
-    """dotfiles and doit install independently, so a payload from either side of
-    the field must fold rather than vanish."""
-    lane = dotfiles_lane_from([{'machine': 'archlinux-personal-workstation', 'outcome': 'ok'}])
-
-    assert lane.meta == '1 machine(s) reporting'
-
-
-def test_the_newest_run_per_box_is_the_one_that_counts():
-    """The listing is every run from every machine, newest first."""
-    lane = dotfiles_lane_from(
-        [
-            {'host': 'archlinux', 'machine': 'a', 'outcome': 'ok'},
-            {'host': 'archlinux', 'machine': 'a', 'outcome': 'issue'},
-        ]
-    )
-
-    assert lane.meta == '1 machine(s) reporting', 'the older issue must not resurface'
-
-
 def articles_lane_with(**fields) -> Lane:
     """The articles lane built from the fixture with its section patched.
 
@@ -699,11 +661,6 @@ def test_describe_joins_a_title_to_the_gist_of_its_note():
     assert dashboard.describe('A Title', 'The gist. The reasoning behind it.') == 'A Title — The gist.'
 
 
-def test_clip():
-    assert dashboard.clip('short', 10) == 'short'
-    assert dashboard.clip('a much longer string', 10) == 'a much lo…'
-
-
 def test_a_due_note_renders_rather_than_raising(capsys):
     """rich refuses a style argument when appending a Text.
 
@@ -900,41 +857,6 @@ def test_a_training_lane_that_cannot_answer_says_so_rather_than_vanishing():
     assert lane.available is False
     assert lane.title == 'TRAINING'
     assert 'not logged in' in lane.reason
-
-
-def dotfiles_runs(*rows: tuple[str, str, str]) -> sources.Result:
-    payload = [{'run': f'2026-{machine}-check', 'machine': machine, 'verb': verb, 'outcome': outcome} for machine, verb, outcome in rows]
-    return sources.Result(source='dotfiles', payload=payload, exit_code=0)
-
-
-def test_the_dotfiles_lane_keeps_only_each_machines_newest_run() -> None:
-    """`runs/` is shared across the fleet, so the listing is every machine's
-    history. What a dashboard wants is the state of each box now."""
-    result = dotfiles_runs(('scheduler', 'check', '2 unconverged: packages'), ('scheduler', 'check', 'ok'))
-
-    lane = dashboard.dotfiles_adapter(result)[0]
-
-    assert [row.label for row in lane.rows] == ['scheduler']
-    assert lane.rows[0].text == '2 unconverged: packages'
-
-
-def test_a_healthy_machine_is_not_a_row() -> None:
-    """A lane where every row reads ok is a lane that trains you to stop reading
-    it. The count stays in the meta so a silent lane still says it measured."""
-    lane = dashboard.dotfiles_adapter(dotfiles_runs(('archlinux', 'check', 'ok'), ('mbp', 'check', 'ok')))[0]
-
-    assert lane.rows == []
-    assert lane.total == 0
-    assert '2 machine(s) reporting' in lane.meta
-
-
-def test_an_unhealthy_machine_carries_the_command_that_opens_its_run() -> None:
-    """A row you can read against a row you can do — the reason `Row` has a
-    handle at all."""
-    lane = dashboard.dotfiles_adapter(dotfiles_runs(('scheduler', 'check', 'unreadable')))[0]
-
-    assert lane.rows[0].handle == 'dotfiles report show 2026-scheduler-check'
-    assert lane.rows[0].urgency is Urgency.DUE
 
 
 def test_a_source_that_did_not_answer_says_so_rather_than_vanishing() -> None:

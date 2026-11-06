@@ -126,12 +126,6 @@ def stamps_in(document, config: dict, now: dt.datetime) -> list[dt.datetime]:
     return [stamp for stamp in stamps if stamp is not None]
 
 
-def latest_in(document, config: dict, now: dt.datetime) -> dt.datetime | None:
-    """The most recent timestamp among the rows that count, or None."""
-    found = stamps_in(document, config, now)
-    return max(found) if found else None
-
-
 def dates_of(stamps: list[dt.datetime], now: dt.datetime) -> list[str]:
     """The distinct local dates up to today, oldest first.
 

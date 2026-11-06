@@ -9,6 +9,7 @@ from conftest import NOW
 from conftest import client_for
 from conftest import served
 from conftest import stand_in
+from doit_api.readers import clickhouse
 from doit_api.readers import icb
 from doit_api.readers.apps import ReadFailed
 from doit_api.readers.declared_reads import Readers
@@ -288,3 +289,16 @@ def test_the_service_never_loads_the_client_that_calls_it():
     ).stdout.strip()
 
     assert loaded == '[]'
+
+
+def test_the_desk_check_lane_names_only_the_machines_with_a_failing_check():
+    """A lane where every row passes teaches you to stop reading it, so a clean machine is only counted."""
+    rows = [
+        {'machine': 'desk', 'check_key': 'packages', 'outcome': 'pass', 'summary': '', 'reported_ms': ''},
+        {'machine': 'laptop', 'check_key': 'packages', 'outcome': 'fail', 'summary': '2 unconverged', 'reported_ms': ''},
+    ]
+
+    lane = clickhouse.desk_checks_lane(rows, NOW)
+
+    assert lane.meta == '1 of 2 need a look'
+    assert [(row.label, row.text) for row in lane.rows] == [('laptop', 'packages: 2 unconverged')]

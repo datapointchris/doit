@@ -997,62 +997,14 @@ def pr_urgency(age: int) -> Urgency:
     return Urgency.DUE if age >= PR_DUE else Urgency.NONE
 
 
-def run_box(run: dict) -> str:
-    """Which box wrote a run, preferring the field that identifies one.
-
-    `machine` names the manifest a box converges to, and two boxes can share one —
-    both Macs declare `macos-personal-workstation`, so folding on it counts them
-    as one and the newer run hides the older. `host` is the bare hostname and is
-    what makes the writes unique, so a reader of a synced directory picks each
-    box's file by it rather than taking whichever file is newest.
-
-    A run written before dotfiles carried `host` falls back to `machine`, which is
-    what this fold has always used.
-    """
-    return run.get('host') or run.get('machine', '')
-
-
 def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
-    """`dotfiles report list --json` as one row per box, newest run only.
+    """The desk-check lane when its read failed.
 
-    That listing is every run from every machine, newest first, because `runs/` is
-    shared across the fleet. What a dashboard wants from it is the current state
-    of each box, so the fold is to the first row each machine appears in.
-
-    dotfiles decides what `ok` means — the field is the same string its own table
-    prints. Folding to the latest per machine and drawing it is doit's half, which
-    is the split `prs_adapter` above describes.
-
-    A healthy machine is not a row. The lane exists to say which box needs
-    something, and a fleet where every row reads ok is a lane that trains you to
-    stop reading it.
+    A read that answers returns a lane document, which `sources.lanes_from` draws
+    before it reaches any adapter. This entry keeps `adapter: dotfiles` valid in the
+    sources document, and keeps the lane on the screen with its reason.
     """
-    payload = result.payload
-    if not isinstance(payload, list):
-        return [unavailable('dotfiles', 'DOTFILES', sources.reason('dotfiles', result))]
-
-    latest: dict[str, dict] = {}
-    for run in payload:
-        box = run_box(run)
-        if box and box not in latest:
-            latest[box] = run
-
-    wrong = [(box, run) for box, run in sorted(latest.items()) if run.get('outcome') != 'ok']
-    rows = [
-        Row(box, run.get('outcome', ''), run.get('verb', ''), Urgency.DUE, f'dotfiles report show {run.get("run", "")}')
-        for box, run in wrong
-    ]
-    healthy = len(latest) - len(wrong)
-    return [
-        LaneView(
-            name='dotfiles',
-            title='DOTFILES',
-            meta=f'{len(latest)} machine(s) reporting' if not wrong else f'{len(wrong)} of {len(latest)} need a look',
-            rows=rows,
-            total=len(wrong),
-            hints=['dotfiles check'] if wrong else [f'{healthy} machine(s) clean'],
-        )
-    ]
+    return [unavailable('dotfiles', 'DOTFILES', sources.reason('dotfiles', result))]
 
 
 def learning_adapter(result: sources.Result) -> list[LaneView]:
@@ -1115,12 +1067,6 @@ def arranged(collected: list[LaneView], wanted: list[str] | None) -> list[LaneVi
     if wanted:
         collected = [lane for lane in collected if lane.name in wanted]
     return sorted(collected, key=lambda lane: not lane.alert)
-
-
-def clip(text: str, width: int) -> str:
-    if width <= 0:
-        return ''
-    return text if len(text) <= width else text[: width - 1] + '…'
 
 
 def cap_for(lane_name: str, row_cap: int) -> int:
