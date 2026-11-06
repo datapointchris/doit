@@ -238,13 +238,13 @@ def test_a_reading_whose_window_has_not_closed_is_not_graded():
     # the calendar rather than the model.
     fresh = [reading(NOW - dt.timedelta(days=3), {'7': {'chores': {'occasions': 2.0}}})]
     assert forecast.matured(fresh, NOW, 7) == []
-    assert forecast.grade(fresh, [], NOW, 7) == []
+    assert forecast.grade(fresh, [], NOW, 7, {'chores'}) == []
 
 
 def test_a_matured_reading_is_graded_against_what_the_journal_recorded():
     stored = [reading(NOW - dt.timedelta(days=8), {'7': {'chores': {'occasions': 2.0}}})]
     records = [done('chores', days_ago=7), done('chores', days_ago=6), done('chores', days_ago=5)]
-    verdict = forecast.grade(stored, records, NOW, 7)[0]
+    verdict = forecast.grade(stored, records, NOW, 7, {'chores'})[0]
     assert verdict.pursuit == 'chores'
     assert verdict.predicted == 2.0
     assert verdict.actual == 3.0
@@ -258,7 +258,7 @@ def test_grading_averages_across_readings_rather_than_listing_them():
         reading(NOW - dt.timedelta(days=8), {'7': {'chores': {'occasions': 2.0}}}),
         reading(NOW - dt.timedelta(days=9), {'7': {'chores': {'occasions': 4.0}}}),
     ]
-    verdicts = forecast.grade(stored, [], NOW, 7)
+    verdicts = forecast.grade(stored, [], NOW, 7, {'chores'})
     assert len(verdicts) == 1
     assert verdicts[0].predicted == 3.0
     assert verdicts[0].readings == 2
@@ -266,7 +266,12 @@ def test_grading_averages_across_readings_rather_than_listing_them():
 
 def test_the_worst_prediction_is_reported_first():
     stored = [reading(NOW - dt.timedelta(days=8), {'7': {'a': {'occasions': 1.0}, 'b': {'occasions': 9.0}}})]
-    assert [v.pursuit for v in forecast.grade(stored, [], NOW, 7)] == ['b', 'a']
+    assert [v.pursuit for v in forecast.grade(stored, [], NOW, 7, {'a', 'b'})] == ['b', 'a']
+
+
+def test_a_retired_pursuit_is_not_graded():
+    stored = [reading(NOW - dt.timedelta(days=8), {'7': {'chores': {'occasions': 2.0}, 'retired': {'occasions': 9.0}}})]
+    assert [v.pursuit for v in forecast.grade(stored, [], NOW, 7, {'chores'})] == ['chores']
 
 
 def test_the_forecast_reads_the_budget_from_the_register():

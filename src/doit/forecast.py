@@ -30,8 +30,8 @@ pursuit and printed, because a forecast resting on eight defaults is a different
 claim from one resting on eight measurements, and nothing else on screen would
 say which you are reading.
 
-**What a day holds.** ``forecast.budget_minutes`` in the register. Discretionary
-time the draw is allowed to spend, not the length of a day.
+**What a day holds.** ``forecast.budget_minutes`` in the register: the discretionary
+minutes the forecast assumes a day holds, not the length of a day.
 
 The behavioral model is one rule: walk the offered list from the top, do what
 fits in what is left, stop when nothing left fits. What that order is belongs to
@@ -52,6 +52,7 @@ would read a register and a journal that have since moved.
 import dataclasses as dc
 import datetime as dt
 import statistics
+from collections.abc import Collection
 from dataclasses import dataclass
 from dataclasses import field
 
@@ -363,12 +364,15 @@ def matured(stored: list[Reading], now: dt.datetime, days: int) -> list[Reading]
     return ready
 
 
-def grade(stored: list[Reading], records: list[dict], now: dt.datetime, days: int) -> list[Verdict]:
+def grade(stored: list[Reading], records: list[dict], now: dt.datetime, days: int, declared: Collection[str]) -> list[Verdict]:
     """Every matured reading's prediction at one horizon, against the journal.
 
     Averaged across readings rather than reported per reading: several forecasts
     taken hours apart are near-identical predictions of overlapping windows, so
     listing them separately would present one measurement as many.
+
+    Only declared pursuits are graded, because stored readings keep their
+    predictions for pursuits the register has since retired.
     """
     ready = matured(stored, now, days)
     if not ready:
@@ -381,6 +385,8 @@ def grade(stored: list[Reading], records: list[dict], now: dt.datetime, days: in
             continue
         counts = actual_occasions(records, window, days)
         for name, prediction in reading.horizons.get(str(days), {}).items():
+            if name not in declared:
+                continue
             predicted.setdefault(name, []).append(float(prediction['occasions']))
             happened.setdefault(name, []).append(float(counts.get(name, 0)))
     return sorted(

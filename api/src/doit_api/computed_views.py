@@ -512,7 +512,7 @@ class Views:
         if days not in forecast.HORIZONS:
             raise BadRequest(f'days must be one of {", ".join(str(horizon) for horizon in forecast.HORIZONS)}')
         stored = self.readings()
-        verdicts = forecast.grade(stored, self.store.journal(), self.now(), days)
+        verdicts = forecast.grade(stored, self.store.journal(), self.now(), days, self.config().pursuits)
         return {
             'days': days,
             'readings': len(forecast.matured(stored, self.now(), days)),
