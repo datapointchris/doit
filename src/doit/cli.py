@@ -8,7 +8,6 @@ only assembles them.
 
 import os
 from typing import Annotated
-from typing import Any
 
 import typer
 from pyclilogin import LoginError
@@ -16,6 +15,8 @@ from pyclilogin.typercmd import add_auth_commands
 from pyselfupdate import Config
 from pyselfupdate import notify
 from pyselfupdate.typercmd import add_update_command
+from typer._click.core import Context
+from typer._click.exceptions import NoSuchOption
 from typer.core import TyperGroup
 
 from doit import __version__
@@ -66,49 +67,45 @@ class RootGroup(TyperGroup):
     where the option goes, so the refusal names the placement that works.
     """
 
-    def invoke(self, ctx: Any) -> Any:
+    def invoke(self, ctx: Context) -> object:
         try:
             return super().invoke(ctx)
-        except Exception as failure:
-            name_accepted_placements(failure)
+        except NoSuchOption as refused:
+            name_accepted_placements(refused)
             raise
 
 
-def accepted_placements(failure: Any) -> list[str]:
+def accepted_placements(refused: NoSuchOption) -> list[str]:
     """The refused command line with the option moved onto each group above it that declares it.
 
-    click's `NoSuchOption` is recognized by its `option_name` and `possibilities`
-    rather than by class, because typer vendors click under a private module.
     Its `ctx` is the command that refused, and its parents are the groups above.
     """
-    option = getattr(failure, 'option_name', None)
-    refusing = getattr(failure, 'ctx', None)
-    if not option or not hasattr(failure, 'possibilities') or refusing is None:
-        return []
-    chain: list[Any] = []
-    while refusing is not None:
-        chain.insert(0, refusing)
-        refusing = refusing.parent
-    names = [context.info_name or '' for context in chain]
+    option = refused.option_name
+    chain: list[Context] = []
+    context = refused.ctx
+    while context is not None:
+        chain.insert(0, context)
+        context = context.parent
+    names = [each.info_name or '' for each in chain]
     return [
         ' '.join([*names[: depth + 1], option, *names[depth + 1 :]])
-        for depth, context in enumerate(chain[:-1])
-        if any(option in getattr(param, 'opts', ()) for param in context.command.params)
+        for depth, each in enumerate(chain[:-1])
+        if any(option in param.opts for param in each.command.params)
     ]
 
 
-def name_accepted_placements(failure: Any) -> None:
+def name_accepted_placements(refused: NoSuchOption) -> None:
     """Append the placements that work to a refused option's message.
 
     The near-miss options click would suggest are dropped once one is found,
     because the option the reader typed exists verbatim and only sits in the
     wrong place.
     """
-    placements = accepted_placements(failure)
+    placements = accepted_placements(refused)
     if placements:
         listed = ' or '.join(f"'{placement}'" for placement in placements)
-        failure.message = f'{failure.message}. It goes before the command: {listed}.'
-        failure.possibilities = None
+        refused.message = f'{refused.message}. It goes before the command: {listed}.'
+        refused.possibilities = None
 
 
 app = typer.Typer(name='doit', cls=RootGroup, no_args_is_help=True, help=ROOT_HELP, rich_markup_mode='markdown')
