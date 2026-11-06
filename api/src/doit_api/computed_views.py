@@ -426,10 +426,11 @@ class Views:
         """`doit today --json`: what today still wants, and what it has had."""
         config, now = self.config(), self.now()
         bounds = window.day_of(now)
-        everything = [*config.registry.sources.values(), *config.registry.completions.values()]
+        registry = today.day_registry(config.registry)
+        everything = [*registry.sources.values(), *registry.completions.values()]
         results = self.readers.results(everything, bounds, now)
-        built = dashboard.arranged([*dashboard.source_lanes(config.registry, results), self.maintenance_lane(config, now)], None)
-        day = today.assemble(config.registry, results, built, self.kept(config, now), bounds, now)
+        built = dashboard.arranged([*dashboard.source_lanes(registry, results), self.maintenance_lane(config, now)], None)
+        day = today.assemble(registry, results, built, self.kept(config, now), bounds, now)
         return {
             'schema_version': lanes.SCHEMA_VERSION,
             'generated_at': lanes.timestamp(now),

@@ -218,6 +218,25 @@ def test_an_offer_count_whose_pursuit_left_the_register_is_named_stranded(store)
     assert (offers['counts'], offers['stranded']) == ({'desk': {'walk': 1}}, ['walk'])
 
 
+def test_only_happened_asks_for_closed_issues(store):
+    asked = []
+
+    def closed(request):
+        asked.append(request.url.path)
+        return [{'title': 'closed it', 'closed_ts': '2026-11-02T09:00:00-05:00', 'closed_by': 'ada@laptop'}]
+
+    client = client_for(store, {'slate': stand_in('slate', {'/issues': closed})})
+    client.put('/api/v1/documents/sources', json={'text': 'completions:\n  slate-issues:\n    adapter: slate-issues\n'}).raise_for_status()
+
+    day = client.get('/api/v1/today').json()
+    assert 'issues' not in [lane['name'] for lane in day['done']]
+    assert asked == []
+
+    held = client.get('/api/v1/happened').json()
+    [issues] = [lane for lane in held['groups'] if lane['name'] == 'issues']
+    assert [cell['text'] for cell in issues['grid']] == ['closed it']
+
+
 def test_a_tracked_pursuit_cannot_be_passed_or_returned_to_and_a_paced_one_can(store):
     """A skip on a pursuit with no pace would read in drift as `passed 1` against a draw it never had."""
     client = client_for(store)

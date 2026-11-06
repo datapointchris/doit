@@ -2,7 +2,8 @@
 
 The fold for one question, "what happened". `doit happened` renders it over the
 window asked, and `doit today` renders it over the day, so the two cannot
-disagree about what a day held.
+disagree about what a day held. `doit today` leaves one source out of its fold,
+the closed issues, as `doit.today` says.
 
 **Every record that keeps a completion is asked.** doit's own are the pursuit
 journal with each app's evidence, and the registers. The rest are every

@@ -85,7 +85,7 @@ flag that would have answered.
 | --- | --- | --- |
 | What should I do now | `next` | the pursuits, the journal, each pursuit's `resolve` and `evidence` reads |
 | What is outstanding anywhere | `dashboard` | every `sources:` entry, plus doit's own review register |
-| What does today still want, and what has it had | `today` | the same sources, every `completions:` entry, the journal, the review completions |
+| What does today still want, and what has it had | `today` | the same sources, every `completions:` entry but closed issues, the journal, the review completions |
 | What happened over a window, and who did it | `happened` | every `completions:` entry, the journal and the evidence cache, the review completions |
 | Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered |
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
@@ -255,8 +255,9 @@ showing.
 
 ### Done is the day's share of `happened`
 
-The done list is what `doit happened` reads, over the day. The section below says where each entry
-comes from. A group that could not be read is said once, in the due list.
+The done list is what `doit happened` reads, over the day, minus closed issues. An issue closed is
+engineering work, which the issue tracker reports, and only `doit happened` asks for it. The section
+below says where each entry comes from. A group that could not be read is said once, in the due list.
 
 ## `happened` — every record over one window
 

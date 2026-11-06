@@ -26,8 +26,10 @@ had it, so it is listed as done and only as done.
 
 **The done list is `doit.happened`'s fold over the day.** `doit happened` renders
 the same fold over any window, so the two cannot disagree about what a day held.
-A group that could not be read is said once, in the due list, where its absence
-would read as nothing owed. A group with nothing in it prints nothing.
+Closed issues are the one difference. They are engineering work agents did, which
+the issue tracker reports, so only `doit happened` asks for them. A group that
+could not be read is said once, in the due list, where its absence would read as
+nothing owed. A group with nothing in it prints nothing.
 
 Nothing here recomputes due-ness. The dashboard mirrors the `overdue` a backend
 emits rather than deriving it again, and that holds just as hard at this
@@ -50,6 +52,7 @@ is, and a group that could not be read is red. The text, the labels and the
 handles stay plain.
 """
 
+import dataclasses as dc
 import datetime as dt
 from itertools import chain
 from typing import NamedTuple
@@ -113,6 +116,14 @@ DUE_LABEL_MAX = 20
 DUE_TEXT_MIN = 16
 
 LIST_STYLE = 'cyan'
+
+OFF_THE_DAY_ADAPTERS = ('slate-issues',)
+
+
+def day_registry(registry: sources.Registry) -> sources.Registry:
+    """The sources a day asks: every one but the completion sources whose records stay off it."""
+    asked = {name: source for name, source in registry.completions.items() if source.adapter not in OFF_THE_DAY_ADAPTERS}
+    return dc.replace(registry, completions=asked)
 
 
 def filled(template: str, handle: str) -> str:
