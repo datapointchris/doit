@@ -197,6 +197,10 @@ class Service:
     def put(self, path: str, body: dict) -> Any:
         return self.send('PUT', path, repeatable=True, json=body)
 
+    def delete(self, path: str) -> Any:
+        """A delete whose path names one row, so sending it again removes nothing more."""
+        return self.send('DELETE', path, repeatable=True)
+
 
 def client() -> Service:
     """The service this machine's config file and token source name."""

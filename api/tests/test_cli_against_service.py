@@ -322,6 +322,33 @@ def test_marking_an_item_done_takes_it_off_the_due_list(api, capsys):
     assert rows['overdue-item']['due'] is True
 
 
+def test_a_completion_taken_back_leaves_the_entry_as_it_read_and_stays_in_history(api):
+    write(api, 'review', 'review/register.yml')
+    runner = CliRunner()
+
+    def last() -> str | None:
+        return next(row['last'] for row in api.get('/api/v1/review').json()['entries'] if row['id'] == 'never-done')
+
+    assert runner.invoke(cli_app, ['review', 'done', 'never-done', '--on', '2026-07-17']).exit_code == 0
+    assert last() == '2026-07-17'
+    assert runner.invoke(cli_app, ['review', 'done', 'never-done']).exit_code == 0
+    assert last() == dt.date.today().isoformat()
+
+    assert runner.invoke(cli_app, ['review', 'undo', 'never-done']).exit_code == 0
+    assert last() == '2026-07-17'
+    assert 'Now: never done.' in runner.invoke(cli_app, ['review', 'undo', 'never-done']).output
+    assert last() is None
+    assert runner.invoke(cli_app, ['review', 'undo', 'never-done']).exit_code == 1
+
+    history = api.get('/api/v1/history/review_completions', params={'key': 'never-done'}).json()
+    assert sorted(row['done_on'] for row in history) == ['2026-07-17', dt.date.today().isoformat()]
+    assert all(row['valid_to'] for row in history)
+
+    tomorrow = (dt.date.today() + dt.timedelta(days=1)).isoformat()
+    assert runner.invoke(cli_app, ['review', 'done', 'never-done', '--on', tomorrow]).exit_code == 2
+    assert last() is None
+
+
 def test_a_forecast_taken_is_read_back_and_not_graded_before_its_window_closes(api, capsys):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
 

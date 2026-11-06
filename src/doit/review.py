@@ -7,7 +7,8 @@ Two records, by design, both kept by doit's service:
                           edit` (description, cadence, optional command). It is
                           kept as written, so your comments and layout are never
                           disturbed.
-  - the done dates        the days `done` recorded per item.
+  - the done dates        the days `done` recorded per item, less any `undo` took
+                          back.
 
 The due date is derived, never stored: next_due = last_done + cadence. A new item
 with no recorded done simply shows as never done. Storing only last_done means

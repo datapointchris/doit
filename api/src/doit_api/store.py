@@ -11,10 +11,15 @@ into `<table>_history` with the `valid_to` that closed it. SQLite has no native
 system versioning, so the triggers are the mechanism. The table can then be read
 as of any instant, and two reads diff.
 
-**Records, appended.** The journal, review completions and forecast readings are
-events. Each is keyed on what identifies it in the files it was imported from, a
-journal entry's UUIDv7 and a reading's machine and moment, so an import run twice
-adds only what the first run lacked.
+**Records, appended.** The journal and forecast readings are events. Each is keyed
+on what identifies it, a journal entry's UUIDv7 and a reading's machine and moment,
+so a write sent again adds nothing.
+
+**Review completions, appended and versioned.** A completion is an event a person
+can get wrong, so one can be taken back. Its table carries the same triggers as the
+config tables, and a completion is valid from the moment it was stored. A delete
+leaves the row in `review_completions_history`. `done_on` is the day it says the
+thing happened, which an entry recorded late sets apart from when it was stored.
 
 **State the service keeps.** The offered counts, the standing draw, the evidence
 cache and the nudge are small rows the service rewrites.
@@ -50,7 +55,11 @@ VERSIONED: dict[str, tuple[str, tuple[str, ...]]] = {
     'forecast_settings': ('singleton', ('budget_minutes',)),
     'review_entries': ('id', ('block', 'description', 'cadence', 'command', 'show')),
     'sources': ('id', ('block', 'adapter', 'command', 'timeout', 'lanes')),
+    # Read by entry, which holds one row a day, so nothing writes it through `put`.
+    'review_completions': ('entry', ('done_on', 'recorded_by', 'stored_at')),
 }
+
+FIRST_VERSIONED_TABLES = ('documents', 'pursuits', 'pursuit_cycles', 'forecast_settings', 'review_entries', 'sources')
 
 # A pursuit's settings are the mapping the pursuits document declares, held as JSON so a
 # pursuit reads back exactly as it was written. The facts a question about the
@@ -98,6 +107,12 @@ TABLE_COLUMNS = {
         timeout REAL,
         lanes TEXT CHECK (lanes IS NULL OR json_valid(lanes)),
     """,
+    'review_completions': """
+        entry TEXT NOT NULL,
+        done_on TEXT NOT NULL CHECK (done_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        recorded_by TEXT NOT NULL,
+        stored_at TEXT NOT NULL,
+    """,
 }
 
 
@@ -110,12 +125,12 @@ def history_columns(table: str) -> str:
     )
 
 
-def versioned_schema(table: str) -> str:
+def history_schema(table: str) -> str:
+    """The history table a versioned table keeps its replaced rows in, and the triggers that fill it."""
     key, values = VERSIONED[table]
     copied = ', '.join((key, *values))
     old = ', '.join(f'OLD.{column}' for column in (key, *values))
     return f"""
-    CREATE TABLE {table} ({TABLE_COLUMNS[table]} valid_from TEXT NOT NULL);
     CREATE TABLE {table}_history ({history_columns(table)});
     CREATE INDEX {table}_history_by_key ON {table}_history ({key}, valid_from);
     CREATE TRIGGER {table}_keeps_what_an_update_replaced AFTER UPDATE ON {table}
@@ -128,6 +143,10 @@ def versioned_schema(table: str) -> str:
         VALUES ({old}, OLD.valid_from, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
     END;
     """
+
+
+def versioned_schema(table: str) -> str:
+    return f'CREATE TABLE {table} ({TABLE_COLUMNS[table]} valid_from TEXT NOT NULL);' + history_schema(table)
 
 
 RECORDS_SCHEMA = """
@@ -198,8 +217,17 @@ CREATE TABLE imports (
 );
 """
 
-# Applied in order, each once. `PRAGMA user_version` holds how many have run.
-MIGRATIONS = (''.join(versioned_schema(table) for table in VERSIONED) + RECORDS_SCHEMA,)
+# A generated `valid_from`, so the release still serving during a rollout can insert a completion.
+COMPLETION_HISTORY_SCHEMA = """
+ALTER TABLE review_completions ADD COLUMN valid_from TEXT GENERATED ALWAYS AS (stored_at) VIRTUAL;
+""" + history_schema('review_completions')
+
+# Applied in order, each once. `PRAGMA user_version` holds how many have run. A
+# change to the schema is appended here, never made to an entry a database has run.
+MIGRATIONS = (
+    ''.join(versioned_schema(table) for table in FIRST_VERSIONED_TABLES) + RECORDS_SCHEMA,
+    COMPLETION_HISTORY_SCHEMA,
+)
 
 
 def stamp(at: dt.datetime) -> str:
@@ -412,16 +440,17 @@ class Store:
         )
         return cursor.rowcount
 
-    def review_completions(self, entry: str | None = None) -> list[dict]:
+    @staticmethod
+    def remove_completion(connection: sqlite3.Connection, entry: str, day: str) -> int:
+        """Take back one day's completion, which the table's trigger keeps in history."""
+        return connection.execute('DELETE FROM review_completions WHERE entry = ? AND done_on = ?', (entry, day)).rowcount
+
+    def review_completions(self, entry: str) -> list[dict]:
+        """Every completion an entry holds, oldest day first."""
         with self.connect() as connection:
-            if entry is None:
-                rows = connection.execute(
-                    'SELECT entry, done_on, recorded_by, stored_at FROM review_completions ORDER BY done_on'
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    'SELECT entry, done_on, recorded_by, stored_at FROM review_completions WHERE entry = ? ORDER BY done_on', (entry,)
-                ).fetchall()
+            rows = connection.execute(
+                'SELECT entry, done_on, recorded_by, stored_at FROM review_completions WHERE entry = ? ORDER BY done_on', (entry,)
+            ).fetchall()
         return [dict(row) for row in rows]
 
     # --- forecast readings ----------------------------------------------------

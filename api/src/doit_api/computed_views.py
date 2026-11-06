@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import dataclasses as dc
 import datetime as dt
+import logging
 from collections.abc import Callable
 
 import click
@@ -44,6 +45,8 @@ from .settings import MACHINE
 from .store import Store
 from .store import stamp
 
+log = logging.getLogger(__name__)
+
 # How far past the service's clock a client's instant may run before it reads as the future.
 FUTURE_SKEW = dt.timedelta(minutes=1)
 
@@ -63,6 +66,18 @@ def instant(text: str | None, name: str) -> dt.datetime | None:
     if parsed.tzinfo is None:
         raise BadRequest(f'{name}={text!r} carries no offset, so it names no instant')
     return parsed.astimezone()
+
+
+def completion_day(text: str) -> dt.date:
+    """A completion's day, or a refusal naming the field."""
+    try:
+        return dt.date.fromisoformat(text)
+    except ValueError:
+        raise BadRequest(f'day={text!r} is not a date (YYYY-MM-DD)') from None
+
+
+def registered_entry(config: documents.Config, entry: str) -> bool:
+    return any(entry in entries for entries in config.review.values())
 
 
 class Views:
@@ -349,20 +364,35 @@ class Views:
 
     def complete_review(self, entry: str, day: str | None, recorded_by: str) -> dict:
         config, now = self.config(), self.now()
-        if not any(entry in entries for entries in config.review.values()):
+        if not registered_entry(config, entry):
             raise NotFound(f'no review entry named {entry}')
         done_on = day or now.date().isoformat()
-        try:
-            done_day = dt.date.fromisoformat(done_on)
-        except ValueError:
-            raise BadRequest(f'day={done_on!r} is not a date (YYYY-MM-DD)') from None
-        if done_day > now.astimezone(FURTHEST_AHEAD_ZONE).date():
+        if completion_day(done_on) > now.astimezone(FURTHEST_AHEAD_ZONE).date():
             raise BadRequest(f'day={done_on!r} is later than today anywhere, and a completion records what has happened')
         with self.store.write() as connection:
             added = self.store.add_completion(connection, entry, done_on, recorded_by, stamp(now))
+        return {'entry': entry, 'done_on': done_on, 'added': bool(added), 'status': self.review_status(config, entry, now)}
+
+    def review_completions(self, entry: str) -> list[dict]:
+        """Every completion an entry holds, oldest day first. An entry the register no longer names keeps its own."""
+        held = self.store.review_completions(entry)
+        if not held and not registered_entry(self.config(), entry):
+            raise NotFound(f'no review entry named {entry}')
+        return held
+
+    def take_back_completion(self, entry: str, day: str, removed_by: str) -> dict:
+        """Remove one day's completion, and say how the entry reads without it."""
+        config, now = self.config(), self.now()
+        completion_day(day)
+        with self.store.write() as connection:
+            removed = self.store.remove_completion(connection, entry, day)
+        if removed:
+            log.info('review_completion_taken_back', extra={'entry': entry, 'done_on': day, 'removed_by': removed_by})
+        return {'entry': entry, 'done_on': day, 'removed': bool(removed), 'status': self.review_status(config, entry, now)}
+
+    def review_status(self, config: documents.Config, entry: str, now: dt.datetime) -> dict | None:
         rows = review.statuses_of(config.review, self.store.review_stamps(), now.date(), None)
-        status = next((row for row in rows if row['id'] == entry), None)
-        return {'entry': entry, 'done_on': done_on, 'added': bool(added), 'status': status}
+        return next((row for row in rows if row['id'] == entry), None)
 
     def nudge(self) -> dict:
         """Whether the shell nudge shows now, the interval it waits between showings, and the entries it would show."""

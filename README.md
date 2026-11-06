@@ -303,12 +303,19 @@ the rest.
 ```bash
 doit review due              # what is due to revisit or practice, most overdue first
 doit review done <id>        # record it done today
+doit review done <id> --on 2026-07-17  # record a day it was done, after the fact
+doit review undo <id>        # take back its newest completion
 doit review nudge-every 8h   # how often the shell's startup nudge may print
 ```
 
 The review register is one of the service's documents, edited with `doit review edit`. Each item
 declares what to revisit and a cadence such as `2w` or `1mo`. Its last-done date is the newest `doit review done` for it, and
 nothing else. Running the command an item names does not mark it done.
+
+A wrong completion reads exactly like the review having happened, so it has to be correctable.
+`doit review undo` takes back the newest one, and the entry reads as it did before. The service
+keeps the removed row, and `GET /api/v1/history/review_completions?key=<id>` reads it back with the
+moment it was taken back as its `valid_to`.
 
 The register's `practice:` block holds what you work through on a schedule, each entry with the same
 fields. `doit review done <id>` records one. The startup nudge leaves practice out. `doit today`

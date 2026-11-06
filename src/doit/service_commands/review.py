@@ -12,6 +12,7 @@ from doit.cadence import is_due
 from doit.cadence import status_label
 from doit.paths import xdg_cache_home
 from doit.render import console
+from doit.render import error_console
 from doit.render import nudge_header
 from doit.render import nudge_row
 from doit.render import nudge_width
@@ -86,14 +87,39 @@ def cmd_list(as_json: bool = False) -> int:
     return 0
 
 
-def cmd_done(item_id: str) -> int:
+def reads_now(status: dict | None) -> str:
+    """How an entry reads after a correction, which no longer sits one cadence from today."""
+    if not status:
+        return ''
+    last = f', last {status["last"]}' if status.get('last') else ''
+    return f' Now: {status_label(status.get("overdue"))}{last}.'
+
+
+def cmd_done(item_id: str, on: dt.date | None = None) -> int:
     # The desk's own day, because the service's clock may sit in another zone.
     # One completion per item and day, so sending it again records nothing new.
-    done = service.client().post(f'/review/{item_id}/completions', {'day': dt.date.today().isoformat()}, repeatable=True)
+    day = (on or dt.date.today()).isoformat()
+    done = service.client().post(f'/review/{item_id}/completions', {'day': day}, repeatable=True)
     line = Text.from_markup('[green]✓[/] Marked ')
     line.append(item_id, style='yellow')
     days = (done.get('status') or {}).get('cadence_days')
-    line.append(f' done ({done["done_on"]}).' + (f' Due again in {days}d.' if days else ''))
+    after = reads_now(done.get('status')) if on else f' Due again in {days}d.' if days else ''
+    line.append(f' done ({done["done_on"]}).{after}')
+    console.print(line)
+    return 0
+
+
+def cmd_undo(item_id: str) -> int:
+    doit = service.client()
+    held = doit.get(f'/review/{item_id}/completions')
+    if not held:
+        error_console.print(Text(f'{item_id} has no completion to take back.'))
+        return 1
+    # Named by its day, so a send repeated after a lost answer cannot take back the one before it.
+    undone = doit.delete(f'/review/{item_id}/completions/{held[-1]["done_on"]}')
+    line = Text.from_markup('[green]✓[/] Took back ')
+    line.append(item_id, style='yellow')
+    line.append(f' ({undone["done_on"]}).{reads_now(undone.get("status"))}')
     console.print(line)
     return 0
 
@@ -168,10 +194,34 @@ def list_command(
     raise typer.Exit(cmd_list(as_json))
 
 
+def past_day(text: str | None) -> dt.date | None:
+    """`--on` as a date, a usage error where it is not one or has not happened yet."""
+    if text is None:
+        return None
+    try:
+        day = dt.date.fromisoformat(text)
+    except ValueError:
+        raise typer.BadParameter(f'{text!r} is not a day (YYYY-MM-DD)') from None
+    if day > dt.date.today():
+        raise typer.BadParameter(f'{text} is later than today, and a completion records what has happened')
+    return day
+
+
 @app.command('done')
-def done_command(item_id: Annotated[str, typer.Argument(help='The register id to mark done.')]) -> None:
+def done_command(
+    item_id: Annotated[str, typer.Argument(help='The register id to mark done.')],
+    on: Annotated[
+        str | None, typer.Option('--on', help='The day it was done, YYYY-MM-DD, to record it late.', show_default='today')
+    ] = None,
+) -> None:
     """Mark an item done, advancing its due date."""
-    raise typer.Exit(cmd_done(item_id))
+    raise typer.Exit(cmd_done(item_id, past_day(on)))
+
+
+@app.command('undo')
+def undo_command(item_id: Annotated[str, typer.Argument(help='The register id to take a completion back from.')]) -> None:
+    """Take back an item's newest completion, so it reads as it did before."""
+    raise typer.Exit(cmd_undo(item_id))
 
 
 @app.command('edit')

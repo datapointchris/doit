@@ -280,6 +280,16 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     def review_complete(entry: str, body: CompletionBody, caller: Person) -> dict:
         return views.complete_review(entry, body.day, caller.who)
 
+    @api.get('/review/{entry}/completions')
+    def review_completions(entry: str, caller: Person) -> list[dict]:
+        """Every completion the entry holds, oldest day first."""
+        return views.review_completions(entry)
+
+    @api.delete('/review/{entry}/completions/{day}')
+    def review_take_back(entry: str, day: str, caller: Person) -> dict:
+        """Take back one day's completion. Its row stays at `/history/review_completions`, and sent again this removes nothing more."""
+        return views.take_back_completion(entry, day, caller.who)
+
     @api.get('/review/nudge')
     def review_nudge(caller: Person) -> dict:
         return views.nudge()
