@@ -504,7 +504,7 @@ def test_projects_lane_rows_carry_a_handle_you_can_type():
 
 
 def test_projects_lane_row_without_a_number_has_no_handle():
-    """An item created in todoui while the API was unreachable has no number
+    """An item created in the projects TUI while the API was unreachable has no number
     until its create is pushed. A handle that would fail is worse than none."""
     payload = fixture('icb-overview.json')
     del payload['project_items']['next'][0]['number']
