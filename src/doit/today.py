@@ -129,7 +129,7 @@ def day_registry(registry: sources.Registry) -> sources.Registry:
 def filled(template: str, handle: str) -> str:
     """A cell's handle as a command, where the lane's hint says how to make one.
 
-    The dashboard prints a habit's bare id beside a hint reading `icb habits
+    The dashboard prints a habit's bare id beside a hint reading `life habits
     complete <id>`, and the reader puts the two together. A due row has one
     handle column, so they are put together here.
     """

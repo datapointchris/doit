@@ -75,12 +75,12 @@ FOCUSED_ROW_CAP = 10
 # is owed above what is next, and three owed trips would hide every date ahead.
 LANE_ROW_CAPS = {'tasks': 5, 'learning': 5, 'upcoming': 8}
 
-# The `icb overview` schema this build understands. A newer one is reported
+# The `life overview` schema this build understands. A newer one is reported
 # rather than half-read: dotfiles and ichrisbirch install independently.
 # v3 task rows carry no priority; a row's position in the list is its rank.
 # v4 holds no issues section, because the tracker is slate's.
 # v5 holds no project_items section, because projects are the projects app's.
-ICB_SCHEMA_VERSION = 5
+LIFE_SCHEMA_VERSION = 5
 
 # The `GET /overview` schema of nomad's API this build understands. A newer one
 # is reported the same way.
@@ -125,24 +125,24 @@ QUEUE_ROWS = 3
 RELATIVE_DAYS_LIMIT = 90
 
 
-def icb_context(results: dict[str, sources.Result], sections: tuple[str, ...]) -> tuple[dict | None, str]:
-    """The icb payload plus any reason the given sections are degraded.
+def life_context(results: dict[str, sources.Result], sections: tuple[str, ...]) -> tuple[dict | None, str]:
+    """The life payload plus any reason the given sections are degraded.
 
     A payload is refused outright only when the call failed or its schema is
     newer than this build understands. A section-keyed warning still returns the
     payload: that lane degrades, the rest of the snapshot does not.
     """
-    result = results.get('icb')
+    result = results.get('life')
     if result is None or result.payload is None:
-        return None, sources.reason('icb', result)
+        return None, sources.reason('life', result)
 
     payload = result.payload
     if not isinstance(payload, dict):
-        return None, 'icb returned unreadable --json output'
+        return None, 'life returned unreadable --json output'
 
     version = payload.get('schema_version', 0)
-    if version > ICB_SCHEMA_VERSION:
-        return None, f'icb overview schema v{version} is newer than this dashboard — update doit'
+    if version > LIFE_SCHEMA_VERSION:
+        return None, f'life overview schema v{version} is newer than this dashboard — update doit'
 
     for warning in payload.get('warnings') or []:
         if warning.get('section') in sections:
@@ -205,14 +205,14 @@ def describe(title: str, detail: str | None) -> str:
 
 
 def build_tasks_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
-    payload, reason = icb_context(results, ('tasks',))
+    payload, reason = life_context(results, ('tasks',))
     if payload is None:
         return unavailable('tasks', 'TASKS', reason)
 
     section = payload.get('tasks') or {}
     items = section.get('items') or []
     total = section.get('total', len(items))
-    # icb sends tasks in queue order, pinned first, so a row's position is its
+    # life sends tasks in queue order, pinned first, so a row's position is its
     # rank. `#3` rather than a bare `3`: in a gutter that elsewhere holds words,
     # a lone numeral reads as a row number. The position is not the id, so the
     # handle is what you act on.
@@ -221,7 +221,7 @@ def build_tasks_lane(results: dict[str, sources.Result], today: dt.date) -> Lane
             'pin' if task.get('pinned') else f'#{position}',
             describe(task.get('name', ''), task.get('notes', '')),
             task.get('category', ''),
-            handle=view_handle('icb tasks show', task),
+            handle=view_handle('life tasks show', task),
         )
         for position, task in enumerate(items, start=1)
     ]
@@ -231,13 +231,13 @@ def build_tasks_lane(results: dict[str, sources.Result], today: dt.date) -> Lane
         meta=f'{total} open',
         rows=rows,
         total=total,
-        hints=['icb tasks list'],
+        hints=['life tasks list'],
         reason=reason,
     )
 
 
 def build_habits_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
-    payload, reason = icb_context(results, ('habits',))
+    payload, reason = life_context(results, ('habits',))
     if payload is None:
         return unavailable(lanemodel.HABITS, 'HABITS', reason)
 
@@ -248,7 +248,7 @@ def build_habits_lane(results: dict[str, sources.Result], today: dt.date) -> Lan
 
     # Every current habit is due every day, so the useful view is the whole set
     # with the finished ones ticked off — not a ranked excerpt. Both halves arrive
-    # from icb in habit-id order, and merging them on that id keeps a habit in the
+    # from life in habit-id order, and merging them on that id keeps a habit in the
     # same place all day, so ticking one off never shuffles the rest.
     #
     # Only the outstanding ones carry an id in the cell: a completion record
@@ -268,7 +268,7 @@ def build_habits_lane(results: dict[str, sources.Result], today: dt.date) -> Lan
         title='HABITS',
         meta=f'{len(done)} of {current_total} done today',
         grid=grid,
-        hints=['icb habits complete <id>'],
+        hints=['life habits complete <id>'],
         reason=reason,
     )
 
@@ -287,7 +287,7 @@ def habit_sort_key(habit: dict, completed: bool) -> tuple[int, int]:
 
 
 def build_books_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
-    payload, reason = icb_context(results, ('books',))
+    payload, reason = life_context(results, ('books',))
     if payload is None:
         return unavailable('books', 'BOOKS', reason)
 
@@ -300,7 +300,7 @@ def build_books_lane(results: dict[str, sources.Result], today: dt.date) -> Lane
         [book_row('next', book) for book in next_up[:QUEUE_ROWS]],
     )
     # The queue size comes from the backend's own total, never from the handful
-    # of rows built here — icb's --limit would otherwise decide what the heading
+    # of rows built here — life's --limit would otherwise decide what the heading
     # claims the pile is.
     queued = section.get('next_up_total', len(next_up))
     return LaneView(
@@ -309,17 +309,17 @@ def build_books_lane(results: dict[str, sources.Result], today: dt.date) -> Lane
         meta=f'{len(reading)} reading · {queued} queued',
         rows=rows,
         total=len(reading) + queued,
-        hints=['icb books list --ownership owned'],
+        hints=['life books list --ownership owned'],
         reason=reason,
     )
 
 
 def book_row(label: str, book: dict) -> Row:
-    return Row(label, clean(book.get('title', '')), clean(book.get('author', '')), handle=view_handle('icb books show', book))
+    return Row(label, clean(book.get('title', '')), clean(book.get('author', '')), handle=view_handle('life books show', book))
 
 
 def build_articles_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
-    payload, reason = icb_context(results, ('articles',))
+    payload, reason = life_context(results, ('articles',))
     if payload is None:
         return unavailable('articles', 'ARTICLES', reason)
 
@@ -336,7 +336,7 @@ def build_articles_lane(results: dict[str, sources.Result], today: dt.date) -> L
         meta=f'{unread_total} unread{article_reading(section, today)}',
         rows=rows,
         total=unread_total + (1 if current else 0),
-        hints=['icb articles list'],
+        hints=['life articles list'],
         reason=reason,
     )
 
@@ -350,7 +350,7 @@ def article_reading(section: dict, today: dt.date) -> str:
     read leaves the count to speak for itself — a bare "0 read" says less than the
     backlog already did.
 
-    Both fields are read defensively, because an icb release may carry neither.
+    Both fields are read defensively, because an life release may carry neither.
     Without them the lane shows the unread count alone.
     """
     read_recently = section.get('read_last_30_days')
@@ -376,7 +376,7 @@ def article_row(label: str, article: dict) -> Row:
         label,
         clean(article.get('title', '')),
         source_host(article.get('url', '')),
-        handle=view_handle('icb articles show', article),
+        handle=view_handle('life articles show', article),
     )
 
 
@@ -447,8 +447,8 @@ class UpcomingShare:
     available: bool = True
 
 
-def icb_upcoming(results: dict[str, sources.Result], today: dt.date) -> UpcomingShare:
-    payload, reason = icb_context(results, ('countdowns', 'events'))
+def life_upcoming(results: dict[str, sources.Result], today: dt.date) -> UpcomingShare:
+    payload, reason = life_context(results, ('countdowns', 'events'))
     if payload is None:
         return UpcomingShare(reason=reason, available=False)
 
@@ -460,10 +460,10 @@ def icb_upcoming(results: dict[str, sources.Result], today: dt.date) -> Upcoming
     entries = []
     for countdown in countdowns.get('items') or []:
         text = describe(countdown.get('name', ''), countdown.get('notes', ''))
-        entries.append((countdown.get('due_date', ''), text, view_handle('icb countdowns show', countdown)))
+        entries.append((countdown.get('due_date', ''), text, view_handle('life countdowns show', countdown)))
     for event in events.get('items') or []:
         text = describe(event.get('name', ''), event.get('venue') or event.get('notes', ''))
-        entries.append((event_date(event.get('date', '')), text, view_handle('icb events show', event)))
+        entries.append((event_date(event.get('date', '')), text, view_handle('life events show', event)))
 
     # The gutter always answers "how far away", the note always answers "which
     # day". Which kind of entry it is says nothing about what you would do next,
@@ -478,7 +478,7 @@ def icb_upcoming(results: dict[str, sources.Result], today: dt.date) -> Upcoming
         dated_rows=dated_rows,
         meta=f'{plural(countdown_total, "countdown")} · {plural(event_total, "event")}',
         total=countdown_total + event_total,
-        hints=('icb countdowns list', 'icb events list'),
+        hints=('life countdowns list', 'life events list'),
         reason=reason,
     )
 
@@ -563,7 +563,7 @@ def calendar_month(month: str) -> str:
         return month
 
 
-UPCOMING_SHARES = {'icb': icb_upcoming, 'nomad': nomad_upcoming}
+UPCOMING_SHARES = {'life': life_upcoming, 'nomad': nomad_upcoming}
 
 
 def build_upcoming_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
@@ -778,7 +778,7 @@ def meso_feedback_adapter(result: sources.Result) -> list[LaneView]:
 
 
 def nomad_adapter(result: sources.Result) -> list[LaneView]:
-    """nomad's planned trips, as the upcoming lane. `source_lanes` joins it with icb's where both are asked."""
+    """nomad's planned trips, as the upcoming lane. `source_lanes` joins it with life's where both are asked."""
     return [build_upcoming_lane({'nomad': result}, dt.date.today())]
 
 
@@ -933,7 +933,7 @@ def day_urgency(due: str, today: dt.date) -> Urgency:
 # Which builder answers which lane, and which source's model it reads. This is
 # doit's knowledge of apps that predate the lane contract, and it shrinks by one
 # entry every time an app starts emitting lanes itself.
-ICB_LANES = (
+LIFE_LANES = (
     ('tasks', build_tasks_lane),
     (lanemodel.HABITS, build_habits_lane),
     ('books', build_books_lane),
@@ -944,10 +944,10 @@ ICB_LANES = (
 LOCAL_LANES = ('maintenance',)
 
 
-def icb_adapter(result: sources.Result) -> list[LaneView]:
-    """icb's overview model, as lanes. Unregistered the day icb emits them."""
+def life_adapter(result: sources.Result) -> list[LaneView]:
+    """life's overview model, as lanes. Unregistered the day life emits them."""
     today = dt.date.today()
-    return [build({'icb': result}, today) for _, build in ICB_LANES]
+    return [build({'life': result}, today) for _, build in LIFE_LANES]
 
 
 # A PR is meant to be read the day it lands, so both thresholds are short.
@@ -1023,7 +1023,7 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
 # enum is one an adapter can be registered without touching, and a lane `--help`
 # cannot name is a lane nobody can find.
 SHIPPED_ADAPTERS = (
-    ('icb', icb_adapter, tuple(name for name, _ in ICB_LANES)),
+    ('life', life_adapter, tuple(name for name, _ in LIFE_LANES)),
     ('projects', projects_adapter, ('projects',)),
     ('learning', learning_adapter, ('learning',)),
     ('meso', meso_adapter, ('training',)),

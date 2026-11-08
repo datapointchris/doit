@@ -8,7 +8,7 @@ A pursuit's `resolve` and `evidence` declare an app, a path under its API and a
 query, which this module asks:
 
     resolve:
-      app: icb
+      app: life
       path: /tasks
       query: {limit: 3}
 
@@ -37,8 +37,8 @@ from doit.window import Bounds
 
 from ..settings import ClickHouseSettings
 from . import clickhouse
-from . import icb
 from . import learning
+from . import life
 from . import meso
 from . import nomad
 from . import projects
@@ -70,7 +70,7 @@ class Readers:
         self.clickhouse_settings = clickhouse_settings
         self.clickhouse_client = clickhouse_client
         self.adapter_reads: dict[str, Callable[[Bounds, dt.datetime], tuple[object, str]]] = {
-            'icb': lambda bounds, now: (icb.overview(self.app('icb'), now), ''),
+            'life': lambda bounds, now: (life.overview(self.app('life'), now), ''),
             'learning': lambda bounds, now: (learning.overview(self.app('learning')), ''),
             'meso': lambda bounds, now: (meso.cycles(self.app('meso')), ''),
             'meso-feedback': lambda bounds, now: (meso.open_feedback(self.app('meso')), ''),
@@ -80,7 +80,7 @@ class Readers:
             'dotfiles': lambda bounds, now: (clickhouse.desk_checks_document(self.clickhouse_settings, now, self.clickhouse_client), ''),
             'learning-completed': lambda bounds, now: learning.completed(self.app('learning'), bounds),
             'meso-review': lambda bounds, now: (meso.review(self.app('meso'), bounds), ''),
-            **{adapter: self.completions('icb', read) for adapter, read in icb.COMPLETIONS.items()},
+            **{adapter: self.completions('life', read) for adapter, read in life.COMPLETIONS.items()},
             **{adapter: self.completions('projects', read) for adapter, read in projects.COMPLETIONS.items()},
             **{adapter: self.completions('slate', read) for adapter, read in slate.COMPLETIONS.items()},
         }

@@ -2,8 +2,9 @@
 
 What to do now, and everything that decides it.
 
-Every other personal CLI here stewards records. icb holds tasks, habits, books and projects.
-learning holds tracks, meso holds workouts, and nomad holds trips. doit is the one that consumes
+Every other personal CLI here stewards records. life holds tasks, habits, books, articles, events,
+countdowns and recipes. projects holds projects, learning holds tracks, meso holds workouts, and
+nomad holds trips. doit is the one that consumes
 them and points somewhere: what is outstanding, what to do next, what is due to revisit and what to
 practice.
 
@@ -362,7 +363,7 @@ is one copy of each.
 
   ```yaml
   resolve:
-    app: icb
+    app: life
     path: /tasks
     query: {limit: 3}
   ```

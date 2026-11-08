@@ -202,9 +202,9 @@ class Views:
     def context(self, now: dt.datetime) -> tuple[list[str], str | None]:
         """The lines above the draw, and why they could not be read where they could not, so a failed read never passes for a quiet day."""
         try:
-            overview = self.readers.adapter_reads['icb'](window.day_of(now), now)[0]
+            overview = self.readers.adapter_reads['life'](window.day_of(now), now)[0]
         except ReadFailed as error:
-            source_failed('next-context', 'icb', error.reason)
+            source_failed('next-context', 'life', error.reason)
             return [], error.reason
         return pursuits.context_lines(overview, now.date()), None
 

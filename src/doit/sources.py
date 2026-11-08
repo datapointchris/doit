@@ -63,8 +63,8 @@ TEMPLATE = """\
 
 # What is outstanding. Read by `doit dashboard`.
 sources:
-  icb:
-    adapter: icb
+  life:
+    adapter: life
 
   learning:
     adapter: learning
@@ -72,11 +72,11 @@ sources:
 # What happened over a window. Read by `doit happened`, and by `doit today` for
 # the day. Same three settings, and each adapter asks its app for the window.
 completions:
-  icb-habits:
-    adapter: icb-habits
+  life-habits:
+    adapter: life-habits
 
-  icb-tasks:
-    adapter: icb-tasks
+  life-tasks:
+    adapter: life-tasks
 """
 
 
@@ -176,7 +176,7 @@ def registry_from_document(document: dict) -> Registry:
 
     An id used in both blocks is a problem rather than two entries. A round's
     results are keyed by id, so the two reads collide on one result and the
-    lane the loser would have built disappears with nothing said. `icb` and
+    lane the loser would have built disappears with nothing said. `life` and
     `meso` are plausible in either block, which is what makes the collision
     reachable rather than theoretical.
     """

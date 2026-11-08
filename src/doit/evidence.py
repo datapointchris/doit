@@ -74,7 +74,7 @@ def matching(rows: list, where: dict | None) -> list:
     in YAML and "14" in JSON is the same id. Case-insensitively, because the
     value was typed into a config file by hand and the row was written by an app
     — a habit named `read` and a filter saying `Read` are the same habit, and a
-    silent miss reads as a pursuit nobody has done. `prompt.OneOf` in `icb` folds
+    silent miss reads as a pursuit nobody has done. `prompt.OneOf` in `life` folds
     case for the same reason on the way in.
     """
     if not where:

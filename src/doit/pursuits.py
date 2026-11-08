@@ -280,20 +280,20 @@ pursuits:
     description: The next thing on the task list
     weight: 25
     cadence: 3d
-    resolve: {app: icb, path: /tasks, query: {limit: 3}}
+    resolve: {app: life, path: /tasks, query: {limit: 3}}
     label: name
     id: id
     context: category
-    view: icb tasks show {id}
-    on_log: icb tasks complete {id}
-    evidence: {app: icb, path: /tasks, query: {status: completed}}
+    view: life tasks show {id}
+    on_log: life tasks complete {id}
+    evidence: {app: life, path: /tasks, query: {status: completed}}
     evidence_time: complete_date
 
   read-library:
     description: A book already on the shelf
     weight: 30
     weekly_minutes: 120
-    resolve: {app: icb, path: /books, query: {progress: reading}}
+    resolve: {app: life, path: /books, query: {progress: reading}}
     label: title
     context: author
 
@@ -968,7 +968,7 @@ def build_state(
     elapsed = days_since(last_done, list(watching), now)
 
     # Both records feed the balance. A journal-only reading made `tasks` overdue
-    # on a day eight of them were completed inside `icb`, so a pursuit with a
+    # on a day eight of them were completed inside `life`, so a pursuit with a
     # backend has to count what that backend saw as well as what got retyped.
     mine = records_by_pursuit(records)
     reset_at = zero_resets(records)
@@ -1214,7 +1214,7 @@ def dormant_rows(state: dict) -> list[dict]:
 
 
 def context_lines(overview: object, today: dt.date) -> list[str]:
-    """Today's events and the countdowns due within CONTEXT_COUNTDOWN_DAYS, from icb's overview.
+    """Today's events and the countdowns due within CONTEXT_COUNTDOWN_DAYS, from life's overview.
 
     An event is something happening rather than something to choose, so it sits
     above the draw as one line and takes no part in it.
@@ -1288,7 +1288,7 @@ def choices_from(name: str, config: dict, document: object, backend: str) -> dic
     label_field = config['label']
     rows = dig(document, config['items']) if config.get('items') else document
     # A backend that already picked the one thing returns an object, not a list of
-    # one — `icb overview` does exactly this for the next project item. Treating it
+    # one — `life overview` does exactly this for the next project item. Treating it
     # as a single row keeps the register from needing a wrapper command.
     if isinstance(rows, dict):
         rows = [rows]

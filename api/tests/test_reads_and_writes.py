@@ -10,7 +10,7 @@ from conftest import client_for
 from conftest import served
 from conftest import stand_in
 from doit_api.readers import clickhouse
-from doit_api.readers import icb
+from doit_api.readers import life
 from doit_api.readers import projects
 from doit_api.readers.apps import ReadFailed
 from doit_api.readers.declared_reads import Readers
@@ -20,7 +20,7 @@ from doit_api.settings import GitHubSettings
 
 from doit import sources
 
-SOURCES = 'sources:\n  icb:\n    adapter: icb\n  prs:\n    adapter: prs\n'
+SOURCES = 'sources:\n  life:\n    adapter: life\n  prs:\n    adapter: prs\n'
 
 
 def project(id_, position, status='active'):
@@ -39,8 +39,8 @@ def item(id_, *projects, position=0):
     }
 
 
-# Answers in the shapes icb's API publishes, one route per read the overview makes.
-ICB_ROUTES = {
+# Answers in the shapes life's API publishes, one route per read the overview makes.
+LIFE_ROUTES = {
     '/tasks': lambda request: [
         {'id': 1, 'name': 'File taxes', 'category': 'Chores'},
         {'id': 2, 'name': 'Call the bank', 'category': 'Chores'},
@@ -70,7 +70,7 @@ ICB_ROUTES = {
 
 
 def test_the_overview_is_composed_from_one_read_per_section_as_the_cli_composes_it():
-    document = icb.overview(stand_in('icb', ICB_ROUTES), NOW)
+    document = life.overview(stand_in('life', LIFE_ROUTES), NOW)
 
     assert document['tasks']['total'] == 2
     assert [book['title'] for book in document['books']['reading']] == ['Dune']
@@ -80,9 +80,9 @@ def test_the_overview_is_composed_from_one_read_per_section_as_the_cli_composes_
     assert [countdown['name'] for countdown in document['countdowns']['items']] == ['Passport']
     assert document['warnings'] == []
 
-    forbidden = {**ICB_ROUTES, '/books': lambda request: httpx2.Response(403, json={'error': 'Forbidden', 'message': 'scope missing'})}
+    forbidden = {**LIFE_ROUTES, '/books': lambda request: httpx2.Response(403, json={'error': 'Forbidden', 'message': 'scope missing'})}
     with pytest.raises(ReadFailed) as refused:
-        icb.overview(stand_in('icb', forbidden), NOW)
+        life.overview(stand_in('life', forbidden), NOW)
     assert refused.value.refused
 
 
@@ -109,17 +109,17 @@ def test_the_focus_is_the_highest_ranked_active_project_split_into_next_and_bloc
 
 def test_a_section_whose_read_fails_degrades_only_its_lane_and_logs_the_source(store, caplog):
     routes = {
-        **ICB_ROUTES,
+        **LIFE_ROUTES,
         '/books': lambda request: httpx2.Response(503, json={'error': 'Unavailable', 'message': 'the book store is restarting'}),
     }
-    client = client_for(store, apps={'icb': stand_in('icb', routes)})
-    client.put('/api/v1/documents/sources', json={'text': 'sources:\n  icb:\n    adapter: icb\n  learning:\n    adapter: learning\n'})
+    client = client_for(store, apps={'life': stand_in('life', routes)})
+    client.put('/api/v1/documents/sources', json={'text': 'sources:\n  life:\n    adapter: life\n  learning:\n    adapter: learning\n'})
 
     with caplog.at_level(logging.ERROR, logger='doit_api'):
         lanes = {lane['name']: lane for lane in client.get('/api/v1/dashboard').json()['lanes']}
 
     assert lanes['tasks']['status'] == 'ok'
-    assert lanes['books']['reason'] == 'books: icb answered 503 to GET /books: the book store is restarting'
+    assert lanes['books']['reason'] == 'books: life answered 503 to GET /books: the book store is restarting'
     assert lanes['learning']['status'] == 'unavailable'
     assert (
         lanes['learning']['reason']
@@ -194,9 +194,9 @@ def test_the_standing_draw_retries_a_failed_resolve_and_drops_each_logged_pursui
     """The draw holds still for its window, so a recovered app and a log both have to show through it."""
     down = [True]
     answer = [{'name': 'Trim Dingo Nails', 'id': 4}]
-    tasks = stand_in('icb', {'/tasks': lambda request: httpx2.Response(500, json={'message': 'down'}) if down[0] else answer})
-    client = client_for(store, apps={'icb': tasks})
-    register = 'pursuits:\n  chores:\n    weight: 5\n    cadence: 1d\n    resolve: {app: icb, path: /tasks}\n    label: name\n    id: id\n'
+    tasks = stand_in('life', {'/tasks': lambda request: httpx2.Response(500, json={'message': 'down'}) if down[0] else answer})
+    client = client_for(store, apps={'life': tasks})
+    register = 'pursuits:\n  chores:\n    weight: 5\n    cadence: 1d\n    resolve: {app: life, path: /tasks}\n    label: name\n    id: id\n'
     register += '  walk:\n    weight: 1\n    cadence: 1d\n'
     client.put('/api/v1/documents/pursuits', json={'text': register})
 

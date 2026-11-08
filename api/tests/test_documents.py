@@ -11,7 +11,7 @@ pursuits:
     description: Clear one task
     cadence: 2d
     weight: 3
-    resolve: {app: icb, path: /tasks, query: {limit: 3}}
+    resolve: {app: life, path: /tasks, query: {limit: 3}}
     label: name
     id: id
 """

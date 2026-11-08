@@ -118,8 +118,10 @@ def logged(store) -> list[dict]:
 def write_through(store, monkeypatch, tmp_path, answer: Callable[[], object], around=None) -> Path:
     """`chores` resolved from a tasks app giving ``answer()``, completing the chosen item by writing its id to the file returned."""
     marker = tmp_path / 'completed'
-    client = connected(store, monkeypatch, tmp_path, {'icb': stand_in('icb', {'/tasks': lambda request: answer()})}, around)
-    register = 'pursuits:\n  chores:\n    weight: 25\n    cadence: 3d\n    resolve: {app: icb, path: /tasks}\n    label: name\n    id: id\n'
+    client = connected(store, monkeypatch, tmp_path, {'life': stand_in('life', {'/tasks': lambda request: answer()})}, around)
+    register = (
+        'pursuits:\n  chores:\n    weight: 25\n    cadence: 3d\n    resolve: {app: life, path: /tasks}\n    label: name\n    id: id\n'
+    )
     client.put('/api/v1/documents/pursuits', json={'text': register + f'    on_log: sh -c "echo {{id}} > {marker}"\n'}).raise_for_status()
     return marker
 
@@ -440,20 +442,20 @@ def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store,
         'meso': stand_in('meso', {'/feedback': lambda request: feedback if request.url.params['status'] == 'open' else []}),
     }
     client = connected(store, monkeypatch, tmp_path, apps=apps)
-    document = 'sources:\n  icb:\n    adapter: icb\n  nomad:\n    adapter: nomad\n  meso-feedback:\n    adapter: meso-feedback\n'
+    document = 'sources:\n  life:\n    adapter: life\n  nomad:\n    adapter: nomad\n  meso-feedback:\n    adapter: meso-feedback\n'
     client.put('/api/v1/documents/sources', json={'text': document}).raise_for_status()
 
     assert dashboard_commands.cmd_dashboard(None, as_json=False) == 0
     printed = capsys.readouterr().out
     assert '3mo owed' in printed
-    assert 'partial — icb is not configured' in printed, 'an icb that cannot answer costs its rows, not the trips'
+    assert 'partial — life is not configured' in printed, 'an life that cannot answer costs its rows, not the trips'
     assert 'MESO - FEEDBACK  1 open' in printed
     assert 'The rest timer' in printed
 
     assert today_commands.cmd_today(as_json=False) == 0
     printed = capsys.readouterr().out
     assert 'Portland' in printed
-    assert 'partial — icb is not configured' in printed, 'the due list says what it could not ask'
+    assert 'partial — life is not configured' in printed, 'the due list says what it could not ask'
 
     listed = CliRunner().invoke(sources_commands.app, ['list', '--json'])
-    assert {row['id']: row['failure'] for row in json.loads(listed.output)} == {'icb': 'failed', 'nomad': None, 'meso-feedback': None}
+    assert {row['id']: row['failure'] for row in json.loads(listed.output)} == {'life': 'failed', 'nomad': None, 'meso-feedback': None}
