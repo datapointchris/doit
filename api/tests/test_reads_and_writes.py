@@ -11,6 +11,7 @@ from conftest import served
 from conftest import stand_in
 from doit_api.readers import clickhouse
 from doit_api.readers import icb
+from doit_api.readers import projects
 from doit_api.readers.apps import ReadFailed
 from doit_api.readers.declared_reads import Readers
 from doit_api.readers.github import GitHub
@@ -60,13 +61,6 @@ ICB_ROUTES = {
             {'id': 13, 'title': 'Older', 'save_date': '2026-09-01T00:00:00Z'},
         ]
     ),
-    '/project-items': lambda request: [
-        item('b', project('second', 2)),
-        item('a', project('first', 1), position=2),
-        item('c', project('first', 1), position=1),
-        item('d', project('paused', 0, status='paused')),
-    ],
-    '/project-items/blocked': lambda request: [item('a', project('first', 1))],
     '/countdowns': lambda request: [
         {'id': 1, 'name': 'Passport', 'due_date': '2026-11-10'},
         {'id': 2, 'name': 'Gone', 'due_date': '2026-10-01'},
@@ -83,9 +77,6 @@ def test_the_overview_is_composed_from_one_read_per_section_as_the_cli_composes_
     assert [book['title'] for book in document['books']['next_up']] == ['Emma']
     assert [article['title'] for article in document['articles']['unread']] == ['Older', 'Newer']
     assert document['articles']['read_last_30_days'] == 1
-    assert document['project_items']['project']['id'] == 'first'
-    assert [found['id'] for found in document['project_items']['next']] == ['c']
-    assert [found['id'] for found in document['project_items']['blocked']] == ['a']
     assert [countdown['name'] for countdown in document['countdowns']['items']] == ['Passport']
     assert document['warnings'] == []
 
@@ -93,6 +84,27 @@ def test_the_overview_is_composed_from_one_read_per_section_as_the_cli_composes_
     with pytest.raises(ReadFailed) as refused:
         icb.overview(stand_in('icb', forbidden), NOW)
     assert refused.value.refused
+
+
+# Answers in the shapes projects' API publishes, for the two reads its focus makes.
+PROJECTS_ROUTES = {
+    '/project-items': lambda request: [
+        item('b', project('second', 2)),
+        item('a', project('first', 1), position=2),
+        item('c', project('first', 1), position=1),
+        item('d', project('paused', 0, status='paused')),
+    ],
+    '/project-items/blocked': lambda request: [item('a', project('first', 1))],
+}
+
+
+def test_the_focus_is_the_highest_ranked_active_project_split_into_next_and_blocked():
+    document = projects.focus(stand_in('projects', PROJECTS_ROUTES))
+
+    assert document['project']['id'] == 'first'
+    assert [found['id'] for found in document['next']] == ['c']
+    assert [found['id'] for found in document['blocked']] == ['a']
+    assert (document['next_total'], document['blocked_total']) == (1, 1)
 
 
 def test_a_section_whose_read_fails_degrades_only_its_lane_and_logs_the_source(store, caplog):

@@ -5,8 +5,8 @@ read per section, so the service composes the same document from the same reads,
 for the sections doit's lanes use. The document keeps the CLI's shape and schema
 version, so the lanes read it exactly as they read the CLI's.
 
-This module is therefore a copy of the CLI's composition: which project is in
-focus, the order of the article queue, which countdowns show. A change to that
+This module is therefore a copy of the CLI's composition: the order of the
+article queue and which countdowns show. A change to that
 composition in icb has to be made here too, until icb serves the document itself
 and this module becomes one read of it.
 
@@ -47,67 +47,6 @@ def capped(rows: list, limit: int) -> list:
     return list(rows[:limit]) if limit > 0 else []
 
 
-def project_outranks(a: dict, b: dict) -> bool:
-    """Projects by position, then creation, then id: the CLI's stable order."""
-    return project_order(a) < project_order(b)
-
-
-def project_order(project: dict) -> tuple:
-    position = project.get('position')
-    return (
-        position if isinstance(position, int) else 0,
-        instant(project.get('created_at')) or dt.datetime.min.replace(tzinfo=dt.UTC),
-        str(project.get('id', '')),
-    )
-
-
-def primary_project(item: dict) -> dict | None:
-    """The highest-ranked active project an item is queued under, or None."""
-    active = [project for project in item.get('projects') or [] if project.get('status') == 'active']
-    return min(active, key=project_order) if active else None
-
-
-def queue_position(item: dict, project_id: object) -> float:
-    for membership in item.get('memberships') or []:
-        if membership.get('project_id') == project_id:
-            return membership.get('position', float('inf'))
-    return float('inf')
-
-
-def focus_queue(items: list[dict], blocked: list[dict]) -> dict:
-    """The one project to work on and its open items split into next and blocked, as the CLI picks them."""
-    blocked_ids = {item.get('id') for item in blocked}
-    open_items = []
-    focus = None
-    for item in items:
-        if item.get('completed') or item.get('archived'):
-            continue
-        project = primary_project(item)
-        if project is None:
-            continue
-        if focus is None or project_outranks(project, focus):
-            focus = project
-        open_items.append((item, project))
-    if focus is None:
-        return {'project': None, 'next': [], 'blocked': []}
-
-    def taken(pair: tuple[dict, dict]) -> tuple:
-        item, project = pair
-        return (
-            project_order(project),
-            queue_position(item, project.get('id')),
-            instant(item.get('created_at')) or dt.datetime.min.replace(tzinfo=dt.UTC),
-            str(item.get('id', '')),
-        )
-
-    ordered = [item for item, project in sorted(open_items, key=taken) if project.get('id') == focus.get('id')]
-    return {
-        'project': focus,
-        'next': [item for item in ordered if item.get('id') not in blocked_ids],
-        'blocked': [item for item in ordered if item.get('id') in blocked_ids],
-    }
-
-
 def article_read_activity(read: list[dict], now: dt.datetime) -> tuple[str | None, int]:
     stamps = [when for when in (instant(article.get('last_read_date')) for article in read) if when is not None]
     if not stamps:
@@ -137,8 +76,6 @@ OVERVIEW_READS: tuple[tuple[str, str, str, Callable[[], dict]], ...] = (
     ('articles', 'current article', '/articles/current', dict),
     ('articles', 'unread articles', '/articles', lambda: {'unread': True}),
     ('articles', 'read articles', '/articles', lambda: {'archived': True}),
-    ('project_items', 'project items', '/project-items', lambda: {'status': 'open'}),
-    ('project_items', 'blocked items', '/project-items/blocked', dict),
     ('countdowns', 'countdowns', '/countdowns', dict),
     ('events', 'events', '/events', lambda: {'when': 'upcoming', 'timezone': local_zone()}),
 )
@@ -184,7 +121,6 @@ def overview(icb: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
     current: dict | None = found_current if isinstance(found_current, dict) else None
     queued = articles_behind_current(rows('unread articles'), current)
     last_read, read_recently = article_read_activity(rows('read articles'), now)
-    focus = focus_queue(rows('project items'), rows('blocked items'))
     countdowns = upcoming_countdowns(rows('countdowns'), now)
     events = rows('events')
     next_up = [book for book in owned if book.get('progress') == 'unread']
@@ -209,13 +145,6 @@ def overview(icb: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
             'last_read_at': last_read,
             'read_last_30_days': read_recently,
         },
-        'project_items': {
-            'project': focus['project'],
-            'next': capped(focus['next'], limit),
-            'next_total': len(focus['next']),
-            'blocked': capped(focus['blocked'], limit),
-            'blocked_total': len(focus['blocked']),
-        },
         'countdowns': {'items': capped(countdowns, limit), 'total': len(countdowns)},
         'events': {'items': capped(events, limit), 'total': len(events)},
         'warnings': [{'section': entry[0], 'message': f'{entry[1]}: {failure.reason}'} for entry, failure in failures],
@@ -235,7 +164,6 @@ def window(bounds: Bounds, *, zoned: bool = False) -> dict[str, object]:
 COMPLETIONS: dict[str, Callable[[App, Bounds], object]] = {
     'icb-habits': lambda icb, bounds: icb.get('/habits/completed', window(bounds, zoned=True)),
     'icb-tasks': lambda icb, bounds: icb.get('/tasks', {'status': 'completed', **window(bounds)}),
-    'icb-projects': lambda icb, bounds: icb.get('/project-items', {'status': 'completed', **window(bounds)}),
     'icb-articles': lambda icb, bounds: icb.get('/articles', window(bounds)),
     'icb-books': lambda icb, bounds: icb.get('/books', window(bounds, zoned=True)),
 }

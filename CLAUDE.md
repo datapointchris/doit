@@ -122,9 +122,12 @@ Shapes that look wrong and are not:
 - **The store keeps an `imports` table nothing writes.** It is the only record of what each desk's
   files added when they moved onto the service.
 - **`readers/icb.py` composes icb's overview itself.** icb serves one route per section and no
-  overview, so the module is a copy of icb's CLI composition: the focus project, the article
-  queue, the countdowns, and the rule that a refused credential refuses the whole document. A
-  change to that composition in icb is made here too, until icb serves the document.
+  overview, so the module is a copy of icb's CLI composition: the article queue, the
+  countdowns, and the rule that a refused credential refuses the whole document. A change to
+  that composition in icb is made here too, until icb serves the document.
+- **`readers/projects.py` picks the focus project itself.** projects serves its items and which
+  are blocked, and its CLI picks the focus in `projects next`. The module copies that rule, so a
+  change to it in projects is made here too.
 - **The desk-check lane reads every record the table keeps.** Each machine and check's newest
   outcome stands, with no time window, so a failure stays until a later pass. A window would drop
   a failure from a machine that went quiet before it was fixed.

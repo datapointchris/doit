@@ -151,11 +151,11 @@ ICB_SCOPES = (
     'icb.tasks.read',
     'icb.articles.read',
     'icb.books.read',
-    'icb.project-items.read',
 )
 LEARNING_SCOPES = ('learning.overview.read', 'learning.completed.read')
 MESO_SCOPES = ('meso.cycles.read', 'meso.review.read', 'meso.feedback.read')
 NOMAD_SCOPES = ('nomad.overview.read',)
+PROJECTS_SCOPES = ('projects.items.read',)
 SLATE_SCOPES = ('slate.records.read',)
 
 
@@ -194,6 +194,7 @@ class Settings:
                 'learning': app_settings('learning', 'learning-svc-doit', LEARNING_SCOPES),
                 'meso': app_settings('meso', 'meso-svc-doit', MESO_SCOPES),
                 'nomad': app_settings('nomad', 'nomad-svc-doit', NOMAD_SCOPES),
+                'projects': app_settings('projects', 'projects-svc-doit', PROJECTS_SCOPES),
                 'slate': app_settings('slate', 'slate-svc-doit', SLATE_SCOPES),
             },
             github=GitHubSettings(

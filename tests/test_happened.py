@@ -84,7 +84,7 @@ def test_a_day_counts_when_any_of_it_is_inside_the_window():
 def test_project_items_are_listed_by_when_they_were_completed_not_touched():
     """`updated_at` moves on any edit. The third fixture row was completed
     yesterday and edited today, so reading it would list three."""
-    [lane] = adapter_for('icb-projects')(ok('icb-projects', fixture('icb-projects-completed')))
+    [lane] = adapter_for('projects-completed')(ok('projects-completed', fixture('projects-completed')))
 
     assert [cell.text for cell in lane.grid] == ['the homelab CLI wraps pyinfra', 'digest does every operation in one run']
     assert dt.datetime.fromisoformat(lane.grid[0].done_at) == dt.datetime(2026, 7, 24, 9, 15, tzinfo=dt.UTC)

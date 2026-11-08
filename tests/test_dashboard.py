@@ -39,6 +39,7 @@ def ok(name: str, source: str = ''):
 def all_results() -> dict:
     return {
         'icb': ok('icb-overview.json'),
+        'projects': ok('projects-next.json'),
         'learning': ok('learning-overview.json'),
         'review': ok('review-list.json'),
     }
@@ -51,6 +52,7 @@ def lanes_by_name(results: dict) -> dict:
     an adapter reads today's date and these fixtures are pinned to one.
     """
     built = [build(results, TODAY) for _, build in dashboard.ICB_LANES]
+    built.append(dashboard.build_projects_lane(results, TODAY))
     built.append(dashboard.build_learning_lane(results, TODAY))
     built.append(dashboard.build_maintenance_lane(results, TODAY))
     return {lane.name: lane for lane in built}
@@ -59,7 +61,7 @@ def lanes_by_name(results: dict) -> dict:
 def test_every_lane_builds_from_fixtures():
     lanes = lanes_by_name(all_results())
 
-    covered = {name for name, _ in dashboard.ICB_LANES} | {'learning', *dashboard.LOCAL_LANES}
+    covered = {name for name, _ in dashboard.ICB_LANES} | {'projects', 'learning', *dashboard.LOCAL_LANES}
 
     assert set(lanes) == covered
     assert all(lane.available for lane in lanes.values())
@@ -71,6 +73,7 @@ def test_every_lane_builds_from_fixtures():
 # failure takes.
 ADAPTER_PAYLOADS: dict[str, dict | list] = {
     'icb': {},
+    'projects': {},
     'learning': {},
     'meso': [],
     'meso-feedback': [],
@@ -397,7 +400,7 @@ def test_a_handle_is_the_read_verb_not_a_write():
     assert lanes['books'].rows[0].handle.startswith('icb books show ')
     assert lanes['articles'].rows[0].handle.startswith('icb articles show ')
     assert lanes['learning'].rows[0].handle.startswith('learning resources show ')
-    assert lanes['projects'].rows[0].handle.startswith('icb projects items show ')
+    assert lanes['projects'].rows[0].handle.startswith('projects items show ')
 
 
 def test_a_row_whose_backend_gave_no_id_offers_no_handle():
@@ -465,10 +468,10 @@ def test_projects_lane_separates_next_from_blocked():
     assert [row.label for row in lane.rows] == ['next', 'next', 'blocked']
 
 
-def test_projects_lane_from_an_overview_with_no_focus_project_keeps_the_bare_counts():
-    payload = fixture('icb-overview.json')
-    del payload['project_items']['project']
-    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+def test_projects_lane_with_no_focus_project_keeps_the_bare_counts():
+    payload = fixture('projects-next.json')
+    del payload['project']
+    results = {'projects': sources.Result(source='projects', payload=payload, exit_code=0)}
 
     lane = dashboard.build_projects_lane(results, TODAY)
 
@@ -493,39 +496,26 @@ def test_projects_lane_says_where_the_work_lands():
 
 def test_projects_lane_rows_carry_a_handle_you_can_type():
     """The one lane that used to have no handle, because an item's only id was a
-    UUID sixty columns wide. Items carry a short number now and icb takes it."""
+    UUID sixty columns wide. Items carry a short number now and projects takes it."""
     lane = lanes_by_name(all_results())['projects']
 
     assert [row.handle for row in lane.rows] == [
-        'icb projects items show 101',
-        'icb projects items show 102',
-        'icb projects items show 103',
+        'projects items show 101',
+        'projects items show 102',
+        'projects items show 103',
     ]
 
 
 def test_projects_lane_row_without_a_number_has_no_handle():
     """An item created in the projects TUI while the API was unreachable has no number
     until its create is pushed. A handle that would fail is worse than none."""
-    payload = fixture('icb-overview.json')
-    del payload['project_items']['next'][0]['number']
-    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+    payload = fixture('projects-next.json')
+    del payload['next'][0]['number']
+    results = {'projects': sources.Result(source='projects', payload=payload, exit_code=0)}
 
     lane = dashboard.build_projects_lane(results, TODAY)
 
     assert lane.rows[0].handle == ''
-
-
-def test_projects_lane_survives_an_icb_that_omits_membership():
-    """Older `icb` builds have no projects field; that reads as no membership."""
-    payload = fixture('icb-overview.json')
-    for item in payload['project_items']['next']:
-        del item['projects']
-    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
-
-    lane = dashboard.build_projects_lane(results, TODAY)
-
-    assert lane.available is True
-    assert lane.rows[0].note == ''
 
 
 def test_totals_come_from_the_backend_not_the_row_count():
@@ -1007,7 +997,7 @@ def test_two_sources_of_upcoming_are_one_lane_where_the_first_stood() -> None:
 
     built = dashboard.source_lanes(sources.registry_from_document(document), results)
 
-    assert [lane.name for lane in built] == ['upcoming', 'learning', 'tasks', 'habits', 'books', 'articles', 'projects']
+    assert [lane.name for lane in built] == ['upcoming', 'learning', 'tasks', 'habits', 'books', 'articles']
     assert {row.handle.split()[0] for row in built[0].rows} == {'icb', 'nomad'}
 
 

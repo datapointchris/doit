@@ -79,7 +79,8 @@ LANE_ROW_CAPS = {'tasks': 5, 'learning': 5, 'upcoming': 8}
 # rather than half-read: dotfiles and ichrisbirch install independently.
 # v3 task rows carry no priority; a row's position in the list is its rank.
 # v4 holds no issues section, because the tracker is slate's.
-ICB_SCHEMA_VERSION = 4
+# v5 holds no project_items section, because projects are the projects app's.
+ICB_SCHEMA_VERSION = 5
 
 # The `GET /overview` schema of nomad's API this build understands. A newer one
 # is reported the same way.
@@ -171,8 +172,8 @@ def view_handle(command: str, item: dict, key: str = 'id') -> str:
     when the backend gave no id, because a handle that would fail is worse than
     no handle — it reads as something you can run.
 
-    `key` exists for project items and issues, whose id is a UUID that would run
-    to sixty columns. They carry a short `number` alongside it, and `icb` takes
+    `key` exists for project items, whose id is a UUID that would run to sixty
+    columns. They carry a short `number` alongside it, and `projects` takes
     either.
     """
     identifier = item.get(key)
@@ -380,16 +381,17 @@ def article_row(label: str, article: dict) -> Row:
 
 
 def build_projects_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
-    """The focus project and its items, as the overview picks them.
+    """The focus project and its items, as `projects next` picks them.
 
     Projects are worked one at a time, so the meta names the focus once and the
-    rows are its queue. An overview with no `project` field names each row's own.
+    rows are its queue. A document with no `project` field names each row's own.
     """
-    payload, reason = icb_context(results, ('project_items',))
-    if payload is None:
-        return unavailable('projects', 'PROJECTS', reason)
+    result = results.get('projects')
+    if result is None or not isinstance(result.payload, dict):
+        return unavailable('projects', 'PROJECTS', sources.reason('projects', result))
 
-    section = payload.get('project_items') or {}
+    section = result.payload
+    reason = ''
     next_items = section.get('next') or []
     blocked = section.get('blocked') or []
     next_total = section.get('next_total', len(next_items))
@@ -405,7 +407,7 @@ def build_projects_lane(results: dict[str, sources.Result], today: dt.date) -> L
         meta=join_context([focus.get('name'), counts]),
         rows=rows,
         total=next_total + blocked_total,
-        hints=['icb projects next'],
+        hints=['projects next'],
         reason=reason,
     )
 
@@ -425,7 +427,7 @@ def project_item_row(label: str, item: dict, focus: dict) -> Row:
         label,
         describe(item.get('title', ''), item.get('notes', '')),
         where,
-        handle=view_handle('icb projects items show', item, key='number'),
+        handle=view_handle('projects items show', item, key='number'),
     )
 
 
@@ -936,7 +938,6 @@ ICB_LANES = (
     (lanemodel.HABITS, build_habits_lane),
     ('books', build_books_lane),
     ('articles', build_articles_lane),
-    ('projects', build_projects_lane),
     (UPCOMING, build_upcoming_lane),
 )
 
@@ -1007,6 +1008,11 @@ def dotfiles_adapter(result: sources.Result) -> list[LaneView]:
     return [unavailable('dotfiles', 'DOTFILES', sources.reason('dotfiles', result))]
 
 
+def projects_adapter(result: sources.Result) -> list[LaneView]:
+    """projects' focus project and its queue, as one lane."""
+    return [build_projects_lane({'projects': result}, dt.date.today())]
+
+
 def learning_adapter(result: sources.Result) -> list[LaneView]:
     """learning's overview model, as one lane."""
     return [build_learning_lane({'learning': result}, dt.date.today())]
@@ -1018,6 +1024,7 @@ def learning_adapter(result: sources.Result) -> list[LaneView]:
 # cannot name is a lane nobody can find.
 SHIPPED_ADAPTERS = (
     ('icb', icb_adapter, tuple(name for name, _ in ICB_LANES)),
+    ('projects', projects_adapter, ('projects',)),
     ('learning', learning_adapter, ('learning',)),
     ('meso', meso_adapter, ('training',)),
     ('meso-feedback', meso_feedback_adapter, (MESO_FEEDBACK,)),

@@ -386,14 +386,14 @@ def test_a_resolve_skips_a_context_field_the_row_does_not_carry():
 
 def test_a_resolve_fills_the_offered_items_id_into_the_view_command():
     document = [{'title': 'Ship the CLI', 'id': '019fa297-0c01-7737-bb4f-8f05de2fe2cd'}]
-    config = {'label': 'title', 'id': 'id', 'view': 'icb projects items show {id}'}
+    config = {'label': 'title', 'id': 'id', 'view': 'projects items show {id}'}
 
-    assert resolution('build', config, document)['choices'][0]['view'] == 'icb projects items show 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
+    assert resolution('build', config, document)['choices'][0]['view'] == 'projects items show 019fa297-0c01-7737-bb4f-8f05de2fe2cd'
 
 
 def test_a_view_command_wanting_an_id_the_backend_withheld_is_not_printed():
     # A command shown with a hole in it reads as something you could run.
-    config = {'label': 'title', 'view': 'icb projects items show {id}'}
+    config = {'label': 'title', 'view': 'projects items show {id}'}
     assert resolution('build', config, [{'title': 'Ship the CLI'}])['choices'][0]['view'] == ''
 
 
