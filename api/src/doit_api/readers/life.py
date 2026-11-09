@@ -1,13 +1,13 @@
-"""What the service reads from icb: the overview the dashboard's lanes are drawn from, and what was completed over a window.
+"""What the service reads from life: the overview the dashboard's lanes are drawn from, and what was completed over a window.
 
-icb serves no overview route. Its CLI composes `icb overview --json` from one
+life serves no overview route. Its CLI composes `life overview --json` from one
 read per section, so the service composes the same document from the same reads,
 for the sections doit's lanes use. The document keeps the CLI's shape and schema
 version, so the lanes read it exactly as they read the CLI's.
 
 This module is therefore a copy of the CLI's composition: the order of the
 article queue and which countdowns show. A change to that
-composition in icb has to be made here too, until icb serves the document itself
+composition in life has to be made here too, until life serves the document itself
 and this module becomes one read of it.
 
 A section whose read fails keeps its empty shape and adds a warning naming it,
@@ -20,14 +20,14 @@ import datetime as dt
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
-from doit.dashboard import ICB_SCHEMA_VERSION
+from doit.dashboard import LIFE_SCHEMA_VERSION
 from doit.window import Bounds
 
 from .apps import App
 from .apps import ReadFailed
 from .apps import local_zone
 
-# Rows per section, matching what `icb overview` shows, so a lane reads the same from either.
+# Rows per section, matching what `life overview` shows, so a lane reads the same from either.
 OVERVIEW_LIMIT = 10
 
 ARTICLE_READ_WINDOW = dt.timedelta(days=30)
@@ -81,19 +81,19 @@ OVERVIEW_READS: tuple[tuple[str, str, str, Callable[[], dict]], ...] = (
 )
 
 
-def overview(icb: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
+def overview(life: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
     """The overview document, composed from one read per section, with a warning for each read that failed.
 
-    Two failures refuse the whole document, as they do from icb's CLI. One is
+    Two failures refuse the whole document, as they do from life's CLI. One is
     every read failing, since an overview of nothing but warnings would draw every
-    icb lane empty. The other is any section refusing the service's credential,
+    life lane empty. The other is any section refusing the service's credential,
     since a missing scope would otherwise draw that section as if it held nothing.
     """
 
     def read(entry: tuple[str, str, str, Callable[[], dict]]) -> object:
         section, label, path, query = entry
         try:
-            return icb.get(path, query())
+            return life.get(path, query())
         except ReadFailed as error:
             return error
 
@@ -125,7 +125,7 @@ def overview(icb: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
     events = rows('events')
     next_up = [book for book in owned if book.get('progress') == 'unread']
     return {
-        'schema_version': ICB_SCHEMA_VERSION,
+        'schema_version': LIFE_SCHEMA_VERSION,
         'generated_at': now.isoformat(),
         'tasks': {'items': capped(tasks, limit), 'total': len(tasks)},
         'habits': {
@@ -152,18 +152,18 @@ def overview(icb: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
 
 
 def window(bounds: Bounds, *, zoned: bool = False) -> dict[str, object]:
-    """A completions window as icb reads one: two RFC 3339 instants, and the zone where it reads days."""
+    """A completions window as life reads one: two RFC 3339 instants, and the zone where it reads days."""
     query: dict[str, object] = {'since': bounds.start.isoformat(), 'until': bounds.stop.isoformat()}
     if zoned:
         query['timezone'] = local_zone()
     return query
 
 
-# What each icb completions source reads over a window. The CLI command each
+# What each life completions source reads over a window. The CLI command each
 # twin answers for is the adapter's own, in `doit.happened`.
 COMPLETIONS: dict[str, Callable[[App, Bounds], object]] = {
-    'icb-habits': lambda icb, bounds: icb.get('/habits/completed', window(bounds, zoned=True)),
-    'icb-tasks': lambda icb, bounds: icb.get('/tasks', {'status': 'completed', **window(bounds)}),
-    'icb-articles': lambda icb, bounds: icb.get('/articles', window(bounds)),
-    'icb-books': lambda icb, bounds: icb.get('/books', window(bounds, zoned=True)),
+    'life-habits': lambda life, bounds: life.get('/habits/completed', window(bounds, zoned=True)),
+    'life-tasks': lambda life, bounds: life.get('/tasks', {'status': 'completed', **window(bounds)}),
+    'life-articles': lambda life, bounds: life.get('/articles', window(bounds)),
+    'life-books': lambda life, bounds: life.get('/books', window(bounds, zoned=True)),
 }

@@ -152,7 +152,7 @@ def test_dropping_evidence_from_a_pursuit_drops_its_answer():
 
 
 def test_a_declaration_without_a_time_field_is_not_evidence():
-    assert evidence.declared({'tasks': {'evidence': 'icb tasks list'}}) == {}
+    assert evidence.declared({'tasks': {'evidence': 'life tasks list'}}) == {}
     assert evidence.declared({'tasks': {'evidence_time': 'complete_date'}}) == {}
 
 

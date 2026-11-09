@@ -151,7 +151,7 @@ def test_a_file_with_no_completions_block_is_not_a_problem():
     A machine that never adds one gets `doit today` without its count rows
     rather than a warning it cannot act on.
     """
-    registry = parsed('sources:\n  icb:\n    command: [icb, overview, --json]\n')
+    registry = parsed('sources:\n  life:\n    command: [life, overview, --json]\n')
 
     assert registry.completions == {}
     assert registry.problems == []
@@ -186,7 +186,7 @@ def test_one_id_in_both_blocks_is_reported_and_the_completion_dropped():
 
 def test_a_block_that_is_not_a_mapping_names_itself():
     """Two blocks means the message has to say which one was wrong."""
-    registry = parsed('completions: [icb, tasks]\n')
+    registry = parsed('completions: [life, tasks]\n')
 
     assert any('completions' in problem for problem in registry.problems)
 
@@ -200,13 +200,13 @@ def test_source_order_is_the_files_order():
 
 def test_a_failing_source_shows_its_first_stderr_line():
     result = sources.Result(
-        source='icb',
+        source='life',
         exit_code=1,
-        stderr='error: not logged in — run `icb auth login`\nUsage:\n  icb overview [flags]',
+        stderr='error: not logged in — run `life auth login`\nUsage:\n  life overview [flags]',
         failure=sources.Failure.FAILED,
     )
 
-    assert sources.reason('icb', result) == 'error: not logged in — run `icb auth login`'
+    assert sources.reason('life', result) == 'error: not logged in — run `life auth login`'
 
 
 def test_each_answer_carries_its_block_and_verdict():

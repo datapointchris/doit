@@ -49,7 +49,7 @@ def habits_view():
     return lane_view(
         'habits',
         [GridCell('Floss', False, '2'), GridCell('Water', True, done_at='2026-07-24T13:00:00Z'), GridCell('Walk', False, '5')],
-        hints=['icb habits complete <id>'],
+        hints=['life habits complete <id>'],
     )
 
 
@@ -58,7 +58,7 @@ def test_a_habit_left_carries_the_command_that_completes_it():
     has one handle column, so the two arrive joined."""
     [left] = today.set_lanes([habits_view()], [])
 
-    assert [(row.label, row.handle) for row in left.rows] == [('Floss', 'icb habits complete 2'), ('Walk', 'icb habits complete 5')]
+    assert [(row.label, row.handle) for row in left.rows] == [('Floss', 'life habits complete 2'), ('Walk', 'life habits complete 5')]
 
 
 def test_a_grid_is_a_day_set_only_when_it_is_named_as_one():
@@ -69,7 +69,7 @@ def test_a_grid_is_a_day_set_only_when_it_is_named_as_one():
 
 def test_a_day_set_that_could_not_be_read_is_reported_where_it_is_owed():
     """Found by having a grid, a failed lane has none and would leave the due list without a word."""
-    [left] = today.set_lanes([lanes.unavailable('habits', 'HABITS', 'icb: not logged in')], [])
+    [left] = today.set_lanes([lanes.unavailable('habits', 'HABITS', 'life: not logged in')], [])
 
     assert (left.name, left.available) == ('habits', False)
 
@@ -78,10 +78,10 @@ def test_a_day_set_that_could_not_be_read_is_reported_where_it_is_owed():
 
 
 def upcoming_view(*rows):
-    return dashboard.LaneView(name='upcoming', title='UPCOMING', rows=list(rows), hints=['icb countdowns list', 'icb events list'])
+    return dashboard.LaneView(name='upcoming', title='UPCOMING', rows=list(rows), hints=['life countdowns list', 'life events list'])
 
 
-DENTIST = Row('today', 'Dentist', '24 Jul 2026', Urgency.DUE, 'icb events show 8')
+DENTIST = Row('today', 'Dentist', '24 Jul 2026', Urgency.DUE, 'life events show 8')
 
 
 def test_only_todays_rows_come_from_a_row_based_lane():
@@ -90,7 +90,7 @@ def test_only_todays_rows_come_from_a_row_based_lane():
     Learning marks DUE a fortnight out and PRs at three days, so a generic
     filter would put next week on a screen about this afternoon.
     """
-    upcoming = upcoming_view(DENTIST, Row('in 9d', 'Passport expires', '02 Aug 2026', Urgency.NONE, 'icb countdowns show 2'))
+    upcoming = upcoming_view(DENTIST, Row('in 9d', 'Passport expires', '02 Aug 2026', Urgency.NONE, 'life countdowns show 2'))
     learning = dashboard.LaneView(
         name='learning', title='LEARNING', rows=[Row('unit', 'Channels', 'in 11d', Urgency.DUE, 'learning show 4')]
     )
@@ -105,10 +105,10 @@ def test_an_appointment_says_how_late_in_its_note():
     """On the dashboard the gutter answers "how far away". Here every row is
     today or past, so that word is the note."""
     [lane] = today.appointment_lanes(
-        [upcoming_view(Row('3d ago', 'Renew permit', '21 Jul 2026', Urgency.OVERDUE, 'icb countdowns show 4'))]
+        [upcoming_view(Row('3d ago', 'Renew permit', '21 Jul 2026', Urgency.OVERDUE, 'life countdowns show 4'))]
     )
 
-    assert lane.rows == [Row('', 'Renew permit', '3d ago', Urgency.OVERDUE, 'icb countdowns show 4')]
+    assert lane.rows == [Row('', 'Renew permit', '3d ago', Urgency.OVERDUE, 'life countdowns show 4')]
 
 
 # --- the registers -----------------------------------------------------------
@@ -309,7 +309,7 @@ def test_a_long_label_leaves_the_text_its_floor_beside_an_inline_handle(monkeypa
 def test_a_group_that_answered_with_nothing_prints_nothing_while_one_that_failed_does(capsys):
     day = today.Day(
         done=[Lane(name='articles', title='ARTICLES'), happened.done_lane('tasks', 'TASKS', [done('Pumice Stone')], '')],
-        due=[Lane(name='practice', title='PRACTICE'), lanes.unavailable('habits', 'HABITS', 'icb: not logged in')],
+        due=[Lane(name='practice', title='PRACTICE'), lanes.unavailable('habits', 'HABITS', 'life: not logged in')],
     )
 
     today.render(day, TODAY)
@@ -318,7 +318,7 @@ def test_a_group_that_answered_with_nothing_prints_nothing_while_one_that_failed
     assert 'articles' not in out
     assert 'practice' not in out
     assert 'Pumice Stone' in out
-    assert 'unavailable — icb: not logged in' in out
+    assert 'unavailable — life: not logged in' in out
 
 
 def test_one_group_follows_another_with_no_blank_line_between(capsys):
@@ -337,7 +337,7 @@ def test_one_group_follows_another_with_no_blank_line_between(capsys):
 
 # --- the whole document, composed ---------------------------------------------
 
-HABITS_SOURCE = sources.Source(id='icb-habits', command=['icb'], adapter='icb-habits')
+HABITS_SOURCE = sources.Source(id='life-habits', command=['life'], adapter='life-habits')
 
 
 @pytest.fixture
@@ -348,7 +348,7 @@ def frozen(monkeypatch):
         monkeypatch.setattr(module, 'dt', SimpleNamespace(**vars(dt) | {'datetime': held}))
 
 
-HABITS_REGISTRY = sources.Registry(completions={'icb-habits': HABITS_SOURCE})
+HABITS_REGISTRY = sources.Registry(completions={'life-habits': HABITS_SOURCE})
 
 
 def assembled(kept: happened.Kept, registry: sources.Registry = HABITS_REGISTRY) -> today.Day:
@@ -358,7 +358,7 @@ def assembled(kept: happened.Kept, registry: sources.Registry = HABITS_REGISTRY)
     the sentence its own name makes while the composition above it breaks that
     same sentence.
     """
-    results = {'icb-habits': sources.Result('icb-habits', [{'name': 'Water', 'complete_date': TODAY.isoformat()}], 0, bounds=DAY)}
+    results = {'life-habits': sources.Result('life-habits', [{'name': 'Water', 'complete_date': TODAY.isoformat()}], 0, bounds=DAY)}
     return today.assemble(registry, results, [habits_view(), upcoming_view(DENTIST)], kept, DAY, NOW)
 
 
@@ -380,13 +380,13 @@ def test_each_list_keeps_its_groups_in_one_order(frozen):
     assert [cell.text for cell in day.done[0].grid] == ['Water'], 'the done habits are the fold, not the dashboard grid'
 
 
-def test_a_sources_yml_without_icb_habits_says_so_rather_than_losing_the_habit_done_today(frozen):
+def test_a_sources_yml_without_life_habits_says_so_rather_than_losing_the_habit_done_today(frozen):
     """The set no longer owes a habit ticked today, so with no done half it would sit in neither list."""
     day = assembled(kept_with(), sources.Registry())
 
     [done_half] = [lane for lane in day.done if lane.name == 'habits']
     assert not done_half.available
-    assert 'icb-habits' in done_half.reason
+    assert 'life-habits' in done_half.reason
     assert [row.label for row in day.due[-1].rows] == ['Floss', 'Walk']
     assert day.figures is not None
     assert [entry.unavailable for entry in day.figures.checklists if entry.name == 'habits'] == [done_half.reason]

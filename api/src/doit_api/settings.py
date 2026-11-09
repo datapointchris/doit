@@ -145,12 +145,12 @@ def app_settings(name: str, client_id: str, scopes: tuple[str, ...]) -> AppSetti
 
 # Each app's client and the scopes it is asked for: every read the service
 # makes of that app, and nothing it writes.
-ICB_SCOPES = (
-    'icb.overview.read',
-    'icb.habits.read',
-    'icb.tasks.read',
-    'icb.articles.read',
-    'icb.books.read',
+LIFE_SCOPES = (
+    'life.overview.read',
+    'life.habits.read',
+    'life.tasks.read',
+    'life.articles.read',
+    'life.books.read',
 )
 LEARNING_SCOPES = ('learning.overview.read', 'learning.completed.read')
 MESO_SCOPES = ('meso.cycles.read', 'meso.review.read', 'meso.feedback.read')
@@ -190,7 +190,7 @@ class Settings:
             ),
             draw_lifetime=parse_interval('DOIT_API_DRAW_LIFETIME', optional_env('DOIT_API_DRAW_LIFETIME', DEFAULT_DRAW_LIFETIME)),
             apps={
-                'icb': app_settings('icb', 'icb-svc-doit', ICB_SCOPES),
+                'life': app_settings('life', 'life-svc-doit', LIFE_SCOPES),
                 'learning': app_settings('learning', 'learning-svc-doit', LEARNING_SCOPES),
                 'meso': app_settings('meso', 'meso-svc-doit', MESO_SCOPES),
                 'nomad': app_settings('nomad', 'nomad-svc-doit', NOMAD_SCOPES),

@@ -345,7 +345,7 @@ def test_a_resolve_digs_into_a_nested_list():
 
 
 def test_a_resolve_accepts_a_single_object_where_a_list_would_do():
-    # icb overview hands back the next project item as an object, having already
+    # life overview hands back the next project item as an object, having already
     # picked it. The register should not need a wrapper command to unwrap that.
     document = {'projects': {'items': {'next': {'title': 'Ship the CLI', 'id': 'abc'}}}}
     resolved = resolution('build', {'items': 'projects.items.next', 'label': 'title', 'id': 'id'}, document)
@@ -402,7 +402,7 @@ def test_a_view_command_needing_no_id_is_printed_as_written():
 
 
 def test_view_without_resolve_is_refused(tmp_path):
-    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    view: icb tasks show {id}\n')
+    path = write_register(tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    view: life tasks show {id}\n')
     with pytest.raises(pursuits.RegisterError, match='view'):
         load(path)
 
@@ -410,7 +410,7 @@ def test_view_without_resolve_is_refused(tmp_path):
 def test_context_and_detail_without_a_label_are_refused(tmp_path):
     # Both read fields off a parsed row, and there is no row without `label`.
     path = write_register(
-        tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    resolve: {app: icb, path: /tasks}\n    context: repo\n'
+        tmp_path, 'pursuits:\n  a:\n    weight: 5\n    cadence: 3d\n    resolve: {app: life, path: /tasks}\n    context: repo\n'
     )
     with pytest.raises(pursuits.RegisterError, match='label'):
         load(path)
@@ -419,11 +419,11 @@ def test_context_and_detail_without_a_label_are_refused(tmp_path):
 @pytest.mark.parametrize(
     ('field', 'declared'),
     [
-        ('resolve', 'icb tasks list --json'),
-        ('evidence', 'icb tasks list --json'),
-        ('resolve', '{app: icb}'),
-        ('evidence', '{app: icb, path: /tasks, timeout: 3}'),
-        ('resolve', '{app: icb, path: /tasks, query: limit}'),
+        ('resolve', 'life tasks list --json'),
+        ('evidence', 'life tasks list --json'),
+        ('resolve', '{app: life}'),
+        ('evidence', '{app: life, path: /tasks, timeout: 3}'),
+        ('resolve', '{app: life, path: /tasks, query: limit}'),
     ],
 )
 def test_a_read_the_service_cannot_make_is_refused_naming_the_read_form(tmp_path, field, declared):
@@ -492,7 +492,7 @@ def test_on_log_is_not_run_under_no_input_even_on_a_terminal(tmp_path, monkeypat
 
 def test_on_log_is_skipped_when_the_item_has_no_id():
     # Nothing was offered, so there is nothing to complete — better than guessing.
-    config = {'on_log': 'icb tasks complete {id}'}
+    config = {'on_log': 'life tasks complete {id}'}
     assert pursuits.run_on_log(config, {'label': 'no id here'}, '', None, assume_yes=True) is None
 
 
@@ -665,7 +665,7 @@ def test_the_tally_sets_what_was_done_beside_what_was_asked():
 def test_a_pursuit_measured_in_minutes_refuses_an_app_source():
     """An app says which day, never how long. Crediting a day some guessed
     number of minutes paid a week's journal from one file saved twice."""
-    source = 'evidence: {app: icb, path: /tasks}\n    evidence_time: completed_at'
+    source = 'evidence: {app: life, path: /tasks}\n    evidence_time: completed_at'
     body = f'pursuits:\n  journal:\n    description: x\n    weight: 10\n    weekly_minutes: 60\n    {source}\n'
 
     with pytest.raises(pursuits.RegisterError, match='journal: weekly_minutes is paid by `doit pursuits log --minutes` only'):
@@ -751,12 +751,12 @@ def test_a_failed_row_carries_what_the_backend_said_and_nothing_else():
     is the only part that says which of the two happened.
     """
     state = built()
-    resolved = {'chores': {'error': 'error: unknown flag: --limit', 'backend': 'icb', 'choices': [{'label': 'stale'}]}}
+    resolved = {'chores': {'error': 'error: unknown flag: --limit', 'backend': 'life', 'choices': [{'label': 'stale'}]}}
 
     row = pursuits.offer('chores', state, resolved)
 
     assert row.failed
-    assert row.choices == ['icb: error: unknown flag: --limit']
+    assert row.choices == ['life: error: unknown flag: --limit']
 
 
 def test_format_elapsed_switches_unit_rather_than_format():
@@ -1384,7 +1384,7 @@ pursuits:
     description: Done inside its own app, never typed here
     weight: 25
     cadence: 3d
-    evidence: {app: icb, path: /tasks}
+    evidence: {app: life, path: /tasks}
     evidence_time: completed_at
 """
 
@@ -1484,7 +1484,7 @@ def resolving(rows: list[dict], **config) -> dict:
 
 def test_resolve_where_keeps_only_the_rows_that_are_this_pursuit():
     """A backend with no filter for the distinction returns everything and only
-    some of it is the pursuit. `icb tasks` carries no tag, so what marks a prompt
+    some of it is the pursuit. `life tasks` carries no tag, so what marks a prompt
     is its name."""
     rows = [
         {'name': 'Self Authoring', 'id': 344},

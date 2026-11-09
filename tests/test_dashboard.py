@@ -38,7 +38,7 @@ def ok(name: str, source: str = ''):
 
 def all_results() -> dict:
     return {
-        'icb': ok('icb-overview.json'),
+        'life': ok('life-overview.json'),
         'projects': ok('projects-next.json'),
         'learning': ok('learning-overview.json'),
         'review': ok('review-list.json'),
@@ -51,7 +51,7 @@ def lanes_by_name(results: dict) -> dict:
     The builders are called directly rather than through the adapters, because
     an adapter reads today's date and these fixtures are pinned to one.
     """
-    built = [build(results, TODAY) for _, build in dashboard.ICB_LANES]
+    built = [build(results, TODAY) for _, build in dashboard.LIFE_LANES]
     built.append(dashboard.build_projects_lane(results, TODAY))
     built.append(dashboard.build_learning_lane(results, TODAY))
     built.append(dashboard.build_maintenance_lane(results, TODAY))
@@ -61,7 +61,7 @@ def lanes_by_name(results: dict) -> dict:
 def test_every_lane_builds_from_fixtures():
     lanes = lanes_by_name(all_results())
 
-    covered = {name for name, _ in dashboard.ICB_LANES} | {'projects', 'learning', *dashboard.LOCAL_LANES}
+    covered = {name for name, _ in dashboard.LIFE_LANES} | {'projects', 'learning', *dashboard.LOCAL_LANES}
 
     assert set(lanes) == covered
     assert all(lane.available for lane in lanes.values())
@@ -72,7 +72,7 @@ def test_every_lane_builds_from_fixtures():
 # branch that builds rows, which is a different naming site from the one a
 # failure takes.
 ADAPTER_PAYLOADS: dict[str, dict | list] = {
-    'icb': {},
+    'life': {},
     'projects': {},
     'learning': {},
     'meso': [],
@@ -153,12 +153,12 @@ def test_tasks_lane_labels_a_pin_or_the_queue_position():
 
 def test_tasks_lane_labels_a_v2_row_by_position():
     """A v2 payload carries `priority` and no `pinned`; it still renders."""
-    payload = fixture('icb-overview.json')
+    payload = fixture('life-overview.json')
     payload['schema_version'] = 2
     for task in payload['tasks']['items']:
         del task['pinned']
         task['priority'] = task['id']
-    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+    results = {'life': sources.Result(source='life', payload=payload, exit_code=0)}
 
     lane = dashboard.build_tasks_lane(results, TODAY)
 
@@ -177,7 +177,7 @@ def test_habits_lane_shows_every_habit_as_a_grid():
 
 
 def test_habits_grid_carries_the_id_you_would_type():
-    """`icb habits complete` takes an id, so the grid has to show one."""
+    """`life habits complete` takes an id, so the grid has to show one."""
     lane = lanes_by_name(all_results())['habits']
 
     outstanding = {cell.text: cell.handle for cell in lane.grid if not cell.done}
@@ -204,9 +204,9 @@ def test_habits_grid_keeps_a_completed_habit_in_place():
     shuffles the rest out from under you."""
     before = dashboard.build_habits_lane(all_results(), TODAY)
 
-    payload = fixture('icb-overview.json')
+    payload = fixture('life-overview.json')
     stretch = payload['habits']['due_today'].pop(0)
-    # What icb records is a completion naming the habit, not the habit row itself.
+    # What life records is a completion naming the habit, not the habit row itself.
     payload['habits']['completed_today'].append(
         {
             'id': 91,
@@ -217,7 +217,7 @@ def test_habits_grid_keeps_a_completed_habit_in_place():
             'complete_date': '2026-07-24T13:00:00Z',
         }
     )
-    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+    results = {'life': sources.Result(source='life', payload=payload, exit_code=0)}
     after = dashboard.build_habits_lane(results, TODAY)
 
     assert [cell.text for cell in after.grid] == [cell.text for cell in before.grid]
@@ -227,7 +227,7 @@ def test_habits_grid_keeps_a_completed_habit_in_place():
 def test_habits_grid_sends_a_completion_with_no_habit_to_the_end():
     """A completion whose habit was deleted has no id to place it by, and going
     first would push every habit you still owe down a row."""
-    payload = fixture('icb-overview.json')
+    payload = fixture('life-overview.json')
     payload['habits']['completed_today'].append(
         {
             'id': 92,
@@ -237,7 +237,7 @@ def test_habits_grid_sends_a_completion_with_no_habit_to_the_end():
             'complete_date': '2026-07-24T14:00:00Z',
         }
     )
-    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+    results = {'life': sources.Result(source='life', payload=payload, exit_code=0)}
 
     lane = dashboard.build_habits_lane(results, TODAY)
 
@@ -278,10 +278,10 @@ def articles_lane_with(**fields) -> Lane:
     The committed fixture carries neither read field, so patching here is what
     keeps `test_articles_are_their_own_lane` a live guard on the older payload.
     """
-    payload = fixture('icb-overview.json')
+    payload = fixture('life-overview.json')
     payload['articles'].update(fields)
     results = all_results()
-    results['icb'] = sources.Result(source='', payload=payload, exit_code=0)
+    results['life'] = sources.Result(source='', payload=payload, exit_code=0)
     return lanes_by_name(results)['articles']
 
 
@@ -396,17 +396,17 @@ def test_every_lane_that_can_name_a_handle_does():
 def test_a_handle_is_the_read_verb_not_a_write():
     lanes = lanes_by_name(all_results())
 
-    assert lanes['tasks'].rows[0].handle.startswith('icb tasks show ')
-    assert lanes['books'].rows[0].handle.startswith('icb books show ')
-    assert lanes['articles'].rows[0].handle.startswith('icb articles show ')
+    assert lanes['tasks'].rows[0].handle.startswith('life tasks show ')
+    assert lanes['books'].rows[0].handle.startswith('life books show ')
+    assert lanes['articles'].rows[0].handle.startswith('life articles show ')
     assert lanes['learning'].rows[0].handle.startswith('learning resources show ')
     assert lanes['projects'].rows[0].handle.startswith('projects items show ')
 
 
 def test_a_row_whose_backend_gave_no_id_offers_no_handle():
     # A handle that would fail reads as something you can run.
-    assert dashboard.view_handle('icb tasks show', {'name': 'no id here'}) == ''
-    assert dashboard.view_handle('icb tasks show', {'id': 422}) == 'icb tasks show 422'
+    assert dashboard.view_handle('life tasks show', {'name': 'no id here'}) == ''
+    assert dashboard.view_handle('life tasks show', {'id': 422}) == 'life tasks show 422'
 
 
 def test_maintenance_rows_carry_the_command_that_does_them():
@@ -522,12 +522,12 @@ def test_totals_come_from_the_backend_not_the_row_count():
     lane = lanes_by_name(all_results())['tasks']
 
     assert len(lane.rows) == 4, 'the payload carries fewer rows than the true total'
-    assert lane.total == 12, "icb's --limit must not decide what the heading claims"
+    assert lane.total == 12, "life's --limit must not decide what the heading claims"
 
 
 def test_lane_is_unavailable_when_its_backend_is_missing():
     results = all_results()
-    results['icb'] = sources.Result(source='icb', stderr='icb did not answer within 15s', failure=sources.Failure.FAILED)
+    results['life'] = sources.Result(source='life', stderr='life did not answer within 15s', failure=sources.Failure.FAILED)
 
     lanes = lanes_by_name(results)
 
@@ -537,10 +537,10 @@ def test_lane_is_unavailable_when_its_backend_is_missing():
 
 
 def test_section_warning_degrades_only_its_own_lane():
-    payload = fixture('icb-overview.json')
+    payload = fixture('life-overview.json')
     payload['warnings'] = [{'section': 'books', 'message': 'books: API request failed (500)'}]
     results = all_results()
-    results['icb'] = sources.Result(source='icb', payload=payload, exit_code=0)
+    results['life'] = sources.Result(source='life', payload=payload, exit_code=0)
 
     lanes = lanes_by_name(results)
 
@@ -549,9 +549,9 @@ def test_section_warning_degrades_only_its_own_lane():
 
 
 def test_newer_schema_version_is_reported_rather_than_half_read():
-    payload = fixture('icb-overview.json')
-    payload['schema_version'] = dashboard.ICB_SCHEMA_VERSION + 1
-    results = {'icb': sources.Result(source='icb', payload=payload, exit_code=0)}
+    payload = fixture('life-overview.json')
+    payload['schema_version'] = dashboard.LIFE_SCHEMA_VERSION + 1
+    results = {'life': sources.Result(source='life', payload=payload, exit_code=0)}
 
     lane = dashboard.build_tasks_lane(results, TODAY)
 
@@ -927,8 +927,8 @@ NOMAD_OVERVIEW = {
     'warnings': [],
 }
 
-ICB_DATES = {
-    'schema_version': dashboard.ICB_SCHEMA_VERSION,
+LIFE_DATES = {
+    'schema_version': dashboard.LIFE_SCHEMA_VERSION,
     'countdowns': {
         'items': [{'id': 7, 'name': 'Dentist', 'due_date': TODAY.isoformat()}, {'id': 8, 'name': 'Passport', 'due_date': '2026-08-02'}],
         'total': 2,
@@ -946,7 +946,7 @@ def failed(source: str, said: str) -> sources.Result:
 
 
 def test_planned_trips_sit_among_the_dates_at_month_grain_and_one_past_its_month_is_owed() -> None:
-    results = {'icb': answered('icb', ICB_DATES), 'nomad': answered('nomad', NOMAD_OVERVIEW)}
+    results = {'life': answered('life', LIFE_DATES), 'nomad': answered('nomad', NOMAD_OVERVIEW)}
 
     lane = dashboard.build_upcoming_lane(results, TODAY)
 
@@ -963,25 +963,25 @@ def test_planned_trips_sit_among_the_dates_at_month_grain_and_one_past_its_month
 
 
 def test_a_source_that_cannot_answer_costs_only_its_own_rows_and_says_why() -> None:
-    icb, nomad = answered('icb', ICB_DATES), answered('nomad', NOMAD_OVERVIEW)
-    icb_down, nomad_down = failed('icb', 'icb did not answer'), failed('nomad', 'nomad answered 503 to GET /overview')
+    life, nomad = answered('life', LIFE_DATES), answered('nomad', NOMAD_OVERVIEW)
+    life_down, nomad_down = failed('life', 'life did not answer'), failed('nomad', 'nomad answered 503 to GET /overview')
 
-    without_trips = dashboard.build_upcoming_lane({'icb': icb, 'nomad': nomad_down}, TODAY)
-    without_dates = dashboard.build_upcoming_lane({'icb': icb_down, 'nomad': nomad}, TODAY)
-    without_either = dashboard.build_upcoming_lane({'icb': icb_down, 'nomad': nomad_down}, TODAY)
+    without_trips = dashboard.build_upcoming_lane({'life': life, 'nomad': nomad_down}, TODAY)
+    without_dates = dashboard.build_upcoming_lane({'life': life_down, 'nomad': nomad}, TODAY)
+    without_either = dashboard.build_upcoming_lane({'life': life_down, 'nomad': nomad_down}, TODAY)
 
     assert [row.text for row in without_trips.rows] == ['Dentist', 'Passport']
     assert without_trips.reason == 'nomad answered 503 to GET /overview'
     assert [row.note for row in without_dates.rows] == ['Apr 2026', 'Jul 2026', 'Mar 2027']
-    assert without_dates.reason == 'icb did not answer'
+    assert without_dates.reason == 'life did not answer'
     assert without_either.available is False
-    assert without_either.reason == 'icb did not answer; nomad answered 503 to GET /overview'
+    assert without_either.reason == 'life did not answer; nomad answered 503 to GET /overview'
 
 
 def test_a_newer_nomad_overview_is_reported_rather_than_half_read() -> None:
     newer = {**NOMAD_OVERVIEW, 'schema_version': dashboard.NOMAD_SCHEMA_VERSION + 1}
 
-    lane = dashboard.build_upcoming_lane({'icb': answered('icb', ICB_DATES), 'nomad': answered('nomad', newer)}, TODAY)
+    lane = dashboard.build_upcoming_lane({'life': answered('life', LIFE_DATES), 'nomad': answered('nomad', newer)}, TODAY)
 
     assert [row.text for row in lane.rows] == ['Dentist', 'Passport']
     assert 'newer than this dashboard' in lane.reason
@@ -991,14 +991,14 @@ def test_two_sources_of_upcoming_are_one_lane_where_the_first_stood() -> None:
     results = {
         'nomad': answered('nomad', NOMAD_OVERVIEW),
         'learning': answered('learning', {'plan_head': []}),
-        'icb': answered('icb', ICB_DATES),
+        'life': answered('life', LIFE_DATES),
     }
     document = {'sources': {name: {'adapter': name} for name in results}}
 
     built = dashboard.source_lanes(sources.registry_from_document(document), results)
 
     assert [lane.name for lane in built] == ['upcoming', 'learning', 'tasks', 'habits', 'books', 'articles']
-    assert {row.handle.split()[0] for row in built[0].rows} == {'icb', 'nomad'}
+    assert {row.handle.split()[0] for row in built[0].rows} == {'life', 'nomad'}
 
 
 def test_open_feedback_lists_each_body_and_says_where_it_was_raised() -> None:
