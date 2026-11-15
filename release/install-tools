@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the tools the release and the manifest check run, each at a pinned version and SHA-256.
+# Installs the tools the release runs, each at a pinned version and SHA-256.
 set -euo pipefail
 
 usage() {
@@ -8,7 +8,7 @@ Usage: install-tools <directory> <tool>...
 
 Downloads each tool's linux/amd64 release into <directory>, checks it against
 the SHA-256 pinned here, and leaves an executable named for the tool. The
-tools are kustomize, kubeconform, kube-linter, flux and cosign.
+tools are kustomize, flux and cosign.
 
 A bump edits a tool's version and its SHA-256 together.
 EOF
@@ -35,20 +35,6 @@ pin() {
       sha256=cb9e31198d3f63b44848bd0afc4c8efc56e6cfef9c93a4a39a211940e6decd61
       url=https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv$version/kustomize_v${version}_linux_amd64.tar.gz
       member=kustomize
-      ;;
-    kubeconform)
-      version=0.8.0
-      sha256=9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
-      url=https://github.com/yannh/kubeconform/releases/download/v$version/kubeconform-linux-amd64.tar.gz
-      member=kubeconform
-      ;;
-    # kube-linter publishes no checksum file. This is the digest its release's
-    # sigstore bundle signs, which Rekor's log records.
-    kube-linter)
-      version=0.8.3
-      sha256=618d299a3e2839c8ca9d86fce0db617be0fba41f0fecbbbfb7fbf1c04299fae1
-      url=https://github.com/stackrox/kube-linter/releases/download/v$version/kube-linter-linux
-      member=
       ;;
     flux)
       version=2.9.6
