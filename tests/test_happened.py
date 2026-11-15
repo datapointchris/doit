@@ -237,7 +237,7 @@ def test_a_pursuit_no_longer_in_the_register_still_counts():
 
 def test_a_register_lists_each_item_whose_latest_date_falls_in_the_window():
     review = next(entry for entry in happened.registers() if entry.name == 'review')
-    rows = [
+    rows: list[dict[str, str | None]] = [
         {'id': 'brew', 'desc': 'Upgrade brew', 'last': TODAY.isoformat()},
         {'id': 'certs', 'last': '2026-07-20'},
         {'id': 'never', 'last': None},

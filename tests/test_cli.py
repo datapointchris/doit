@@ -14,6 +14,9 @@ from pathlib import Path
 
 import pytest
 from jsonschema import Draft7Validator
+from typer._click.exceptions import NoSuchOption
+from typer.core import TyperCommand
+from typer.core import TyperGroup
 from typer.main import get_command
 from typer.models import CommandInfo
 from typer.testing import CliRunner
@@ -90,10 +93,14 @@ def visible_nodes(command, path=()):
 
 def test_every_root_command_sits_in_a_named_panel_at_its_place():
     """A command left out falls into a panel named Commands, at the foot of the screen."""
-    commands = get_command(app).commands
+    root = get_command(app)
+    assert isinstance(root, TyperGroup)
+    commands = root.commands
 
     assert set(commands) == set(ROOT_ORDER)
-    assert not [name for name, command in commands.items() if not command.rich_help_panel]
+    assert not [
+        name for name, command in commands.items() if not (isinstance(command, TyperCommand | TyperGroup) and command.rich_help_panel)
+    ]
 
 
 def test_every_screen_carries_examples_that_parse():
@@ -200,7 +207,7 @@ def test_unknown_command_exits_2(argv):
 
 def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
     """`doit next --no-input` is refused by `next`; the root is where it goes."""
-    with pytest.raises(Exception) as refused:
+    with pytest.raises(NoSuchOption) as refused:
         get_command(app).main(['next', '--no-input'], prog_name='doit', standalone_mode=False)
 
     assert accepted_placements(refused.value) == ['doit --no-input next']
@@ -208,7 +215,7 @@ def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
 
 def test_update_path_does_not_also_notify(monkeypatch):
     """`update` runs its own check, so notifying would ask the API twice."""
-    calls = []
+    calls: list[object] = []
     monkeypatch.setattr('doit.cli.notify', calls.append)
     monkeypatch.setattr('pyselfupdate.typercmd.run_update', lambda *args, **kwargs: None)
 
@@ -219,7 +226,7 @@ def test_update_path_does_not_also_notify(monkeypatch):
 
 def test_every_other_path_notifies(monkeypatch):
     """The notice is gated inside pyselfupdate, so it must be reached to gate."""
-    calls = []
+    calls: list[object] = []
     monkeypatch.setattr('doit.cli.notify', calls.append)
 
     runner.invoke(app, ['sources', 'list'])

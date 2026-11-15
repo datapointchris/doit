@@ -100,7 +100,7 @@ dataclasses = "dc"
 [tool.mypy]
 pretty = true
 ignore_missing_imports = true
-check_untyped_defs = false
+check_untyped_defs = true
 warn_return_any = false
 # tests/ and api/tests each hold a conftest.py and no __init__.py, so `mypy .`
 # maps both to the module `conftest` and aborts. Deriving names from the path
