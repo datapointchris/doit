@@ -216,8 +216,9 @@ doit sources contract          # the lane document a source may print, so it nee
 
 Each lane is ordered by the app that owns it, and no lane is comparable to the one beside it. An
 ordering over unlike things would be invented rather than meaningful, so the dashboard ranks across
-none of them. A lane of rows shows three, and tasks and learning show five. Naming one lane with
-`--lane` shows ten. A grid such as the habits is a set only useful whole, so it is never cut.
+none of them. A lane of rows shows three, unless `LANE_ROW_CAPS` in `src/doit/dashboard.py` gives
+it more. Naming one lane with `--lane` shows ten. A grid such as the habits is a set only useful
+whole, so it is never cut.
 
 The sources document declares which sources to ask, so turning one on or off is an edit, never a
 release. Each source names an adapter. The service reads the adapter's app over HTTP and the

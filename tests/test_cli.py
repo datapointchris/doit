@@ -112,6 +112,55 @@ def test_every_screen_carries_examples_that_parse():
         assert result.exit_code == 0, f'{example}: {result.output}'
 
 
+# A command printed for a person to run: after rich markup, in a code span or in
+# single quotes in the source, or on a line of a shell fence in the README. A
+# word running into a `/` or a `.` is a path argument, not a subcommand.
+REPO = Path(__file__).resolve().parents[1]
+WORDS = r'((?: [a-z][\w-]*(?![\w/.-]))+)'
+PRINTED_IN_SOURCE = re.compile(rf"(?:\]|`|')doit{WORDS}")
+SHELL_FENCE = re.compile(r'^```(?:bash|sh)\n(.*?)^```', re.MULTILINE | re.DOTALL)
+PRINTED_IN_FENCE = re.compile(rf'^doit{WORDS}', re.MULTILINE)
+# The zsh completion's heading over the verb list, which zsh shows and nobody runs.
+NOT_A_COMMAND = {('shell.py', ' command')}
+
+
+def printed_commands():
+    for source in sorted((REPO / 'src' / 'doit').rglob('*.py')):
+        for match in PRINTED_IN_SOURCE.finditer(source.read_text()):
+            if (source.name, match.group(1)) not in NOT_A_COMMAND:
+                yield source.name, match.group(1).split()
+    readme = (REPO / 'README.md').read_text()
+    for fence in SHELL_FENCE.finditer(readme):
+        for match in PRINTED_IN_FENCE.finditer(fence.group(1)):
+            yield 'README.md', match.group(1).split()
+    for match in PRINTED_IN_SOURCE.finditer(readme):
+        yield 'README.md', match.group(1).split()
+
+
+def test_every_command_it_prints_is_in_the_command_tree():
+    """A hint naming a command that was renamed sends its reader to an error.
+
+    The walk stops at a leaf, so the words after it are that command's arguments.
+    """
+    tree = get_command(app)
+    missing = []
+    walked = 0
+    for source, words in printed_commands():
+        walked += 1
+        command = tree
+        for word in words:
+            subcommands = getattr(command, 'commands', None)
+            if subcommands is None:
+                break
+            if word not in subcommands:
+                missing.append(f'{source}: doit {" ".join(words)}')
+                break
+            command = subcommands[word]
+
+    assert walked > 20
+    assert missing == []
+
+
 def test_config_show_says_where_each_setting_came_from(tmp_path, monkeypatch):
     """A plausible value is the failure this read exists to expose, so the layer sits beside it."""
     (tmp_path / 'doit').mkdir()

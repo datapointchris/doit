@@ -8,7 +8,8 @@ know is exactly what you remembered to retype, and a pursuit you do constantly
 through its own CLI reads as never done.
 
 A pursuit declares its evidence the same way it declares `resolve`, and for the
-same reason: doit must not know which apps exist. `evidence` is the read,
+same reason: doit must not know which app holds a pursuit's evidence, so the
+pursuit names it. `evidence` is the read,
 `evidence_time` names the timestamp field on each row, `evidence_items` names the
 key holding the rows when they are nested, and `evidence_where` filters rows to
 the ones that count. That last one is what makes a habit usable — twenty of them
