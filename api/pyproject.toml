@@ -1,10 +1,10 @@
 # doit's service: the store that holds the register, the review register, the
 # sources and the journal, and the API every view is computed behind.
 #
-# Its own project and lock, beside the CLI at the repo root, because the server
-# imports a web stack the CLI never needs and the CLI ships to every desk. It
-# runs the root package's view code rather than a copy of it, so a view and the
-# service's answer for it cannot drift.
+# A workspace member beside the CLI at the repo root, and a distribution of its
+# own, because the server imports a web stack the CLI never needs and the CLI
+# ships to every desk. It runs the root package's view code rather than a copy of
+# it, so a view and the service's answer for it cannot drift.
 [project]
 name = "doit-api"
 version = "0.1.0"
@@ -30,7 +30,7 @@ dependencies = [
 doit-api = "doit_api.main:serve"
 
 [tool.uv.sources]
-doit = { path = "..", editable = true }
+doit = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.9,<0.13.0"]

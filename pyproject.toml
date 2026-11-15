@@ -47,6 +47,9 @@ doit = "doit.cli:main"
 [tool.ruff]
 line-length = 140
 extend-exclude = ["*.md"]
+# Where isort finds the first-party packages: `doit` at the root and `doit_api`
+# in the workspace's api/ member.
+src = [".", "src", "api/src"]
 
 [tool.ruff.format]
 quote-style = "single"
@@ -99,9 +102,13 @@ pretty = true
 ignore_missing_imports = true
 check_untyped_defs = false
 warn_return_any = false
-# api/ is its own project, with its own environment and lock. CI type-checks it
-# there, where its web stack is installed.
-exclude = ['^api/']
+# tests/ and api/tests each hold a conftest.py and no __init__.py, so `mypy .`
+# maps both to the module `conftest` and aborts. Deriving names from the path
+# makes them tests.conftest and api.tests.conftest.
+explicit_package_bases = true
+# The src directories resolve `doit.*` and `doit_api.*` to the packages. Without
+# them, ignore_missing_imports turns every first-party import into `Any`.
+mypy_path = ["src", "api/src"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
@@ -189,6 +196,11 @@ style = "semver"
 # A new commit or tag changes the version, so it has to invalidate uv's cache.
 [tool.uv]
 cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
+
+# The service in api/ is a member, so the CLI and the service install from one
+# lock here. The CLI stays the root project and never pulls the service's web stack.
+[tool.uv.workspace]
+members = ["api"]
 
 [build-system]
 requires = ["hatchling", "uv-dynamic-versioning"]

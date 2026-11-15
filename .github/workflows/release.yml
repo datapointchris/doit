@@ -83,7 +83,7 @@ jobs:
           RELEASED: ${{ needs.release.outputs.released }}
           RELEASED_TAG: ${{ needs.release.outputs.tag }}
         run: |
-          echo "tag=sha-$(git log -1 --format=%H -- api/ src/ pyproject.toml | cut -c1-12)" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-$(git log -1 --format=%H -- api/ src/ pyproject.toml uv.lock | cut -c1-12)" >> "$GITHUB_OUTPUT"
           if [ "$RELEASED" = true ]; then
             version=$RELEASED_TAG
           else

@@ -6,6 +6,10 @@ from types import SimpleNamespace
 
 import httpx2
 import pytest
+from fastapi.testclient import TestClient
+from pyapiauth import Caller
+from pyapiauth import Rejected
+
 from doit_api.app import create_app
 from doit_api.computed_views import Views
 from doit_api.readers.apps import App
@@ -16,9 +20,6 @@ from doit_api.settings import ClickHouseSettings
 from doit_api.settings import GitHubSettings
 from doit_api.settings import Settings
 from doit_api.store import Store
-from fastapi.testclient import TestClient
-from pyapiauth import Caller
-from pyapiauth import Rejected
 
 NOW = dt.datetime(2026, 11, 2, 12, 0, tzinfo=dt.timezone(dt.timedelta(hours=-5)))
 TOKEN = 'person-token'

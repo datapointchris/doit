@@ -86,7 +86,7 @@ outstanding", which is the worst available failure.
 
 ## The service runs the root package's view code, never a copy
 
-`api/` is its own project and depends on the root package by path. Each method of
+`api/` is a uv workspace member and depends on the root package through the workspace. Each method of
 `doit_api.computed_views.Views` calls the root package's view function, handing in what it read
 from the store, and the CLI renders what the route answers. A rule therefore lives in one module,
 and nothing computes it twice. A change that has `api/` compute a balance, a due date or a lane

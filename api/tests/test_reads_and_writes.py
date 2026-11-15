@@ -9,6 +9,8 @@ from conftest import NOW
 from conftest import client_for
 from conftest import served
 from conftest import stand_in
+
+from doit import sources
 from doit_api.readers import clickhouse
 from doit_api.readers import life
 from doit_api.readers import projects
@@ -17,8 +19,6 @@ from doit_api.readers.declared_reads import Readers
 from doit_api.readers.github import GitHub
 from doit_api.settings import ClickHouseSettings
 from doit_api.settings import GitHubSettings
-
-from doit import sources
 
 SOURCES = 'sources:\n  life:\n    adapter: life\n  prs:\n    adapter: prs\n'
 
