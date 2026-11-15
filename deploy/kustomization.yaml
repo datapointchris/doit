@@ -14,5 +14,8 @@ labels:
     includeTemplates: true
 # The release sets newName and digest in its own copy of this directory before
 # it pushes it, with `kustomize edit set image`.
+# Until then each digest is zeros, so the committed base names an image
+# kube-linter accepts.
 images:
   - name: doit-api
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
