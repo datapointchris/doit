@@ -15,7 +15,10 @@ def test_the_published_schema_is_what_the_migrations_build(tmp_path: Path) -> No
     connection = sqlite3.connect(tmp_path / 'store.db')
     rows = connection.execute(f"SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' {TABLES_FIRST}").fetchall()
     connection.close()
-    built = ''.join(line.rstrip() + '\n' for (statement,) in rows for line in f'{statement};'.splitlines())
+    lines: list[str] = []
+    for (statement,) in rows:
+        lines.extend(f'{statement};'.splitlines())
+    built = ''.join(line.rstrip() + '\n' for line in lines)
     if os.environ.get('WRITE_STORE_SCHEMA'):
         SCHEMA_FILE.write_text(built)
     assert SCHEMA_FILE.read_text() == built, 'a migration changed the tables: rerun this test with WRITE_STORE_SCHEMA=1'
