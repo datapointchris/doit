@@ -48,14 +48,20 @@ its reason. A merge of every same-named lane was rejected, because it changes wh
 for every other source. Feedback stays the opposite way: one lane per app, never combined, so three
 apps draw three lanes.
 
-## The service runs no command, and the CLI starts exactly three processes
+## The service runs no command, and the CLI's own code starts three processes
 
-- **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`.
-- **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking.
-- **A review item's `show`**, in `review.run_show`, inside the nudge.
+- **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`, with no timeout.
+- **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking, with no timeout.
+- **A review item's `show`**, in `review.run_show`, inside the nudge, stopped after 10
+  seconds.
 
 A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit
 learns from another program arrives over HTTP through the wrappers below.
+
+The login and update libraries start processes of their own. pyclilogin runs a login's configured
+`token_command`, and opens the browser with `open` or `xdg-open`. pyselfupdate, behind `doit
+update` and its daily notice, runs `$GITHUB_TOKEN_COMMAND`, which defaults to `gh auth token`. To
+install a release it runs `git clone` and `uv`, each under the library's own timeout.
 
 ## Documents and records are the service's, and a machine keeps only its login and its caches
 
