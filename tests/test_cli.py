@@ -1,7 +1,7 @@
 """Tests for the command tree itself, not for what any command does.
 
 What is asserted here is the machine contract: the version line, help on a bare
-invocation at every level, and exit 2 for a usage error. Those come from typer
+node with no default, and exit 2 for a usage error. Those come from typer
 rather than from code in this repo, so these are the tests that would catch the
 tree being wired up in a way that loses them.
 """
@@ -61,7 +61,7 @@ def test_version_flag_prints_one_line(flag):
 
 @pytest.mark.parametrize('argv', [[], ['review'], ['forecast']])
 def test_every_node_shows_help_bare(argv):
-    """cli-design.md: no args shows help, at every level of the tree."""
+    """cli-design.md: a node with no bare default shows help."""
     result = runner.invoke(app, argv)
 
     assert 'Usage:' in result.output

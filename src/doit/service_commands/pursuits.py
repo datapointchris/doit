@@ -490,9 +490,9 @@ def skip_command(
 
 app = typer.Typer(
     name='pursuits',
-    no_args_is_help=True,
     help=(
-        'What `doit next` draws from: each pursuit, its goal and its weight.\n\n'
+        'What `doit next` draws from: each pursuit, its goal and its weight. '
+        'Bare `doit pursuits` lists them, as `doit pursuits list` does.\n\n'
         'A pursuit is something you mean to keep doing, at a pace you declare. Its weight orders what is owed '
         'and picks the rest of the draw. The register is the document holding them, which `doit pursuits edit` opens.'
     ),
@@ -516,6 +516,12 @@ def list_command(
 ) -> None:
     """Every pursuit, its weight, goal and when it is next due."""
     run(lambda: cmd_list(as_json))
+
+
+@app.callback(invoke_without_command=True)
+def list_when_bare(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(list_command)
 
 
 @app.command(
