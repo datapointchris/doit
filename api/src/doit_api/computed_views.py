@@ -17,7 +17,7 @@ import datetime as dt
 import logging
 from collections.abc import Callable
 
-import click
+import typer
 
 from doit import dashboard
 from doit import evidence
@@ -260,7 +260,7 @@ class Views:
             raise Conflict(f'{refusal}, so there is nothing to pass')
         try:
             days = pursuits.skip_span(body.get('for'), state['intervals'][name])
-        except click.BadParameter as error:
+        except typer.BadParameter as error:
             raise BadRequest(str(error.message)) from error
         expires = now + dt.timedelta(days=days)
         standing = self.standing_draw(now) or {}

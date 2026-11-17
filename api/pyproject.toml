@@ -24,6 +24,10 @@ dependencies = [
     # Signing the GitHub App's assertion. `crypto` is what signs RS256.
     "pyjwt[crypto]>=2.10",
     "pyyaml>=6.0",
+    # The root package's rules refuse a bad argument with typer.BadParameter, which
+    # a view turns into a 400. typer 0.27 and later carries its own Click, so the
+    # click package's class never matches it.
+    "typer>=0.26.0",
 ]
 
 [project.scripts]

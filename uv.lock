@@ -443,6 +443,7 @@ dependencies = [
     { name = "pyclilogin" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pyyaml" },
+    { name = "typer" },
     { name = "uvicorn" },
 ]
 
@@ -461,6 +462,7 @@ requires-dist = [
     { name = "pyclilogin", specifier = ">=0.1.1" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "typer", specifier = ">=0.26.0" },
     { name = "uvicorn", specifier = ">=0.38" },
 ]
 
