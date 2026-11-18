@@ -74,8 +74,8 @@ from doit.journal import checkoff_equivalent
 from doit.journal import days_since
 from doit.journal import latest_occurrence
 from doit.journal import new_id
+from doit.paths import cache_dir
 from doit.paths import machine_name
-from doit.paths import xdg_cache_home
 from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
@@ -86,7 +86,7 @@ from doit.render import span_text
 from doit.window import first_instant
 from doit.window import span
 
-CACHE_DIR = xdg_cache_home() / 'doit'
+CACHE_DIR = cache_dir()
 NAMES_CACHE = CACHE_DIR / 'next-names.txt'
 
 # How many of its own intervals a pursuit goes quiet for before it reads as dormant.

@@ -220,7 +220,7 @@ def signed(body: dict) -> dict:
 
 def kept_edit(name: str) -> Path:
     """Where an edit the service never took waits for the next `doit <name> edit`."""
-    return paths.xdg_state_home() / 'doit' / f'{name}-unsaved.yml'
+    return paths.state_dir() / f'{name}-unsaved.yml'
 
 
 def edit_document(name: str, template: str) -> bool:

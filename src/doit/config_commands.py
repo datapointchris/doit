@@ -79,7 +79,7 @@ def resolved_settings(login: Deployment) -> dict[str, Resolved]:
         'client_secret': Resolved('set', 'environment', f'${secret_variable}') if service.LOGIN.is_service() else Resolved(),
         'config_file': from_variable(login.path, 'XDG_CONFIG_HOME'),
         'cache_dir': from_variable(pursuits.CACHE_DIR, 'XDG_CACHE_HOME'),
-        'state_dir': from_variable(paths.xdg_state_home() / 'doit', 'XDG_STATE_HOME'),
+        'state_dir': from_variable(paths.state_dir(), 'XDG_STATE_HOME'),
         'editor': from_variable(editor.editor_command(), 'EDITOR'),
         'machine': Resolved(paths.machine_name(), 'hostname'),
         'actor': Resolved(actor.identity(), 'environment', actor.identity_source()),

@@ -21,6 +21,16 @@ def xdg_cache_home() -> Path:
     return Path(os.environ.get('XDG_CACHE_HOME') or Path.home() / '.cache')
 
 
+def state_dir() -> Path:
+    """doit's own directory under the XDG state base."""
+    return xdg_state_home() / 'doit'
+
+
+def cache_dir() -> Path:
+    """doit's own directory under the XDG cache base."""
+    return xdg_cache_home() / 'doit'
+
+
 def machine_name() -> str:
     """This machine's identity: the bare lowercased hostname, no platform prefix.
 

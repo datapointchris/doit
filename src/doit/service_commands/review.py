@@ -10,7 +10,7 @@ from rich.text import Text
 from doit import service
 from doit.cadence import is_due
 from doit.cadence import status_label
-from doit.paths import xdg_cache_home
+from doit.paths import cache_dir
 from doit.render import console
 from doit.render import error_console
 from doit.render import examples
@@ -28,13 +28,13 @@ from doit.review import warn_empty
 # The shell gate's files, read with no Python and no request. The interval is the
 # service's, as plain minutes. The marker's mtime is when this machine last asked.
 # The showing is what the last nudge printed, waiting for the next shell.
-NUDGE_INTERVAL = xdg_cache_home() / 'doit' / 'nudge-interval-minutes'
+NUDGE_INTERVAL = cache_dir() / 'nudge-interval-minutes'
 
 
-NUDGE_MARKER = xdg_cache_home() / 'doit' / 'nudge'
+NUDGE_MARKER = cache_dir() / 'nudge'
 
 
-NUDGE_SHOWING = xdg_cache_home() / 'doit' / 'nudge-showing.txt'
+NUDGE_SHOWING = cache_dir() / 'nudge-showing.txt'
 
 
 def cmd_due() -> int:
