@@ -404,26 +404,33 @@ today` that something completes, in each lane's own order:
 
 - **A pursuit** logs through `doit pursuits log`, in-process. Its `on_log` runs unasked, because
   the pick is the asking. A pursuit whose `on_log` completes one of its choices lists each choice
-  as its own row, such as `tasks · Bathe Dingo`, and the pick names it as `--item` does.
+  as its own row, such as `tasks · Bathe Dingo`, and the pick names it as `--item` does. Where
+  those choices could not be read, or there are none, the pursuit is a note, because a log naming
+  no choice completes nothing.
 - **A pursuit counted in minutes** opens one more step: log its usual amount, the one most often
-  logged, or step 5 minutes up or down. With nothing logged in minutes yet, it offers 15, 30, 45
-  and 60, and calls none of them usual.
+  logged, or step up or down by `MINUTES_STEP`. With nothing logged in minutes yet, it offers
+  `MINUTES_WITHOUT_USUAL`, both in `doit.desk_nudge`, and calls none of them usual.
 - **A review or practice entry** is marked done through `doit review done`, in-process. These rows
-  stop at three per register, as `doit today` shows them.
-- **A habit** runs `life habits complete <id>`, stopped after 30 seconds.
+  stop where `doit today` stops them.
+- **A habit** runs `life habits complete <id>`, stopped after `HABIT_SECONDS`.
 - **`upcoming` is left out**, because nothing completes a trip or a countdown.
 
-Every 5 minutes, at each firing and after each pick, the watch reads the rows from `/today` and
-`/pursuits` into `$XDG_CACHE_HOME/doit/desk-nudge-panel.json`, so the panel opens with no request.
-The cache holds what each row completes, never a command. After a pick, the watch also reads
-`/next`, which leaves out what was just logged, so the suggestion moves on. A read that fails keeps
-the last rows, and the first row says why: `rows from 14:05 — doit unreachable`, or `rows from
-14:05 — run doit auth login`.
+The watch reads the rows from `/today` and `/pursuits` into
+`$XDG_CACHE_HOME/doit/desk-nudge-panel.json`, so the panel opens with no request. It reads them at
+each firing, after each pick, and every `PANEL_REFRESH_SECONDS` while the desk is in use. Away from
+the desk the timed read waits, and the first tick back reads them. The cache holds what each row
+completes, never a command. After a pick, the watch also reads `/next`, which leaves out what was
+just logged, so the suggestion moves on. A suggestion carried into a later read stays only while
+today's lane still lists its pursuit. A read that fails keeps the last rows, and the first row says
+why: `rows from 14:05 — doit unreachable`, or `rows from 14:05 — run doit auth login`.
 
 A pick is taken once. Its row leaves the panel, and the same key is refused until the watch reads
-the rows again. A pick while a nudge is ready ends it, as an answer does, and restarts the clock. A
-pick at any other time leaves the clock alone. Each pick appends a `picked` line, and a notification
-confirms it or names what failed.
+the rows again after the completion ended. A completion that its owner refused frees the row at
+once, so it can be picked again. A pick that completes a row while a nudge is ready ends the nudge,
+as an answer does, and restarts the clock. Opening a minutes step ends nothing, and neither does a
+completion that failed. A pick at any other time leaves the clock alone. Each completing pick
+appends a `picked` line, and a notification confirms it or names what failed. An answer row is
+recorded and exits as `doit desk-nudge answer` records and exits it.
 
 `panel pick` prints the next step, or a `done` step saying what was completed, and exits 0 for
 either. It exits 2 where it will not act on the key, such as a row picked already, and nothing ran.

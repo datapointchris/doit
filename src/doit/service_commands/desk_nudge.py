@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import IO
 from typing import Annotated
 from typing import Any
+from typing import assert_never
 from urllib.parse import quote
 
 import typer
@@ -68,11 +69,11 @@ NEXT_BUDGET_SECONDS = 30.0
 PANEL_BUDGET_SECONDS = 30.0
 INTERVAL_BUDGET_SECONDS = 10.0
 ANSWER_BUDGET_SECONDS = 10.0
-# How long `life habits complete` may take, the one program that a panel pick starts.
+# How long `life habits complete` may take. It is the one panel program with a budget other than `PROGRAM_SECONDS`.
 HABIT_SECONDS = 30.0
 # Another desk's answers move the interval too, so the watch reads it again this often.
 INTERVAL_REFRESH_SECONDS = 300.0
-# Rows completed elsewhere leave the panel this often, beside each firing and each pick.
+# While the desk is in use, rows completed elsewhere leave the panel this often, beside each firing and each pick.
 PANEL_REFRESH_SECONDS = 300.0
 PICK_REFUSED_EXIT = 2
 PROC = Path('/proc')
@@ -203,7 +204,11 @@ def carry_out(change: desk_nudge.Change) -> None:
 
 
 class ProgramFailed(Exception):
-    """A program was missing, timed out or exited non-zero."""
+    """A program was missing, timed out or exited non-zero. One that timed out may have done its work."""
+
+    def __init__(self, message: str, *, timed_out: bool = False) -> None:
+        super().__init__(message)
+        self.timed_out = timed_out
 
 
 def run_program(argv: list[str], seconds: float = PROGRAM_SECONDS) -> str:
@@ -213,7 +218,7 @@ def run_program(argv: list[str], seconds: float = PROGRAM_SECONDS) -> str:
     except FileNotFoundError:
         raise ProgramFailed(f'{argv[0]} is not installed') from None
     except subprocess.TimeoutExpired:
-        raise ProgramFailed(f'{argv[0]} gave no answer within {seconds:g} s') from None
+        raise ProgramFailed(f'{argv[0]} gave no answer within {seconds:g} s', timed_out=True) from None
     except OSError as error:
         raise ProgramFailed(f'{argv[0]} could not start: {error}') from None
     if done.returncode != 0:
@@ -352,7 +357,7 @@ def listed_pursuits(client: service.Service) -> dict:
 
 
 def pursuit_item(client: service.Service, name: str) -> dict:
-    """What a pursuit means now, with its choices. A failed read lists the pursuit as one row, which logs no choice."""
+    """What a pursuit means now, with its choices. A failed read lists the pursuit as a note, which completes nothing."""
     try:
         return client.get(f'/pursuits/{quote(name, safe="")}/item', budget_seconds=PANEL_BUDGET_SECONDS).get('resolved') or {}
     except service.ServiceFailed as failed:
@@ -363,14 +368,17 @@ def rebuild_panel_cache(suggestion: dict | None = None, *, read_next: bool = Fal
     """Read the panel's rows again from `/today` and `/pursuits`, and write them for `panel show`.
 
     The suggestion is the one handed in, a fresh `/next` where `read_next` asks,
-    or else the one the rows last held. A failed read keeps the last rows and
-    names why, so the panel reads as old rather than as nothing owed.
+    or else the one the rows last held while today's lane still lists it. A
+    failed read keeps the last rows and names why, so the panel reads as old
+    rather than as nothing owed.
     """
     previous = read_panel_cache()
+    carried = not read_next and suggestion is None
     if read_next:
         suggestion = drawn_suggestion()
-    elif suggestion is None:
+    elif carried:
         suggestion = (previous or {}).get('suggestion')
+    read_at = now()
     try:
         client = service.client()
         today = client.get('/today', budget_seconds=PANEL_BUDGET_SECONDS)
@@ -380,7 +388,8 @@ def rebuild_panel_cache(suggestion: dict | None = None, *, read_next: bool = Fal
         log.warning(f'kept the panel rows this desk last read, because the service gave none: {error}')
         cache = desk_nudge.failed_panel_cache(previous, read_failure(error), str(error), suggestion, now())
     else:
-        cache = desk_nudge.panel_cache(today, listed, items, suggestion, now())
+        kept = desk_nudge.still_owed(suggestion, today) if carried else suggestion
+        cache = desk_nudge.panel_cache(today, listed, items, kept, read_at)
     replace_file(paths.desk_nudge_panel_cache_file(), cache)
 
 
@@ -408,6 +417,16 @@ class Answered:
     saved: bool
     queued: bool = False
     failure: Exception | None = None
+
+
+def answer_outcome(answered: Answered) -> tuple[int, str]:
+    """The exit code and the sentence for one answer, which `doit desk-nudge answer` and a panel pick both give."""
+    label = ANSWER_LABELS[Answer(answered.taken.row['answer'])]
+    if answered.saved:
+        late = ' It answers a nudge that had already ended, so the clock is left alone.' if answered.taken.late else ''
+        return 0, f'"{label}" is saved. The interval is {read_state()["interval_minutes"]:g} minutes.{late}'
+    kept = 'It is kept on this desk, and the watch sends it again.' if answered.queued else 'It was refused, so nothing sends it again.'
+    return service.exit_code(answered.failure) if answered.failure else 1, f'"{label}" is not saved: {answered.failure}. {kept}'
 
 
 def answer_nudge(answer: Answer, nudge_id: str | None = None, *, from_notification: bool = False) -> Answered:
@@ -544,7 +563,7 @@ class Watch:
         elif nudge and phase is Phase.READY:
             self.show(nudge, replaces=nudge['notification_id'])
         self.refresh_interval_when_due()
-        self.rebuild_panel_when_due(picked=False)
+        self.rebuild_panel_when_due(picked=False, in_use=True)
 
     def tick(self) -> None:
         """Count, expire, and start whatever the tick calls for off the loop."""
@@ -556,6 +575,7 @@ class Watch:
             ready = dict(state['nudge']) if state['phase'] == Phase.READY else None
             queued = bool(state['queued_answers'])
             picked = not alive(self.rebuilding) and desk_nudge.take_panel_rebuild(state)
+            in_use = Phase(state['phase']).desk_in_use
         carry_out(change)
         if firing:
             self.firing = self.background(self.fire, firing)
@@ -567,7 +587,7 @@ class Watch:
         if queued and not alive(self.resending):
             self.resending = self.background(resend_queued)
         self.refresh_interval_when_due()
-        self.rebuild_panel_when_due(picked)
+        self.rebuild_panel_when_due(picked, in_use)
 
     def refresh_interval_when_due(self) -> None:
         due = self.interval_read_at is None or time.monotonic() - self.interval_read_at >= INTERVAL_REFRESH_SECONDS
@@ -575,9 +595,14 @@ class Watch:
             self.interval_read_at = time.monotonic()
             self.refreshing = self.background(refresh_interval)
 
-    def rebuild_panel_when_due(self, picked: bool) -> None:
-        """Read the panel's rows again every `PANEL_REFRESH_SECONDS`, and after a pick with `/next`, which leaves out what was logged."""
-        due = self.panel_read_at is None or time.monotonic() - self.panel_read_at >= PANEL_REFRESH_SECONDS
+    def rebuild_panel_when_due(self, picked: bool, in_use: bool) -> None:
+        """Read the panel's rows again after a pick, with `/next`, which leaves out what was logged, and every `PANEL_REFRESH_SECONDS`.
+
+        The timed read waits while nobody is at the desk, because `/today` asks
+        every app. A desk coming back has rows older than the interval, so the
+        next tick reads them.
+        """
+        due = in_use and (self.panel_read_at is None or time.monotonic() - self.panel_read_at >= PANEL_REFRESH_SECONDS)
         if (picked or due) and not alive(self.rebuilding):
             self.panel_read_at = time.monotonic()
             self.rebuilding = self.background(self.rebuild_panel, None, picked)
@@ -811,15 +836,12 @@ def answer_command(
         answered = answer_nudge(answer, nudge)
     except NothingToAnswer as nothing:
         raise typer.BadParameter(f'{nothing}.', param_hint='--nudge') from None
-    label = ANSWER_LABELS[answer]
-    late = ' It answers a nudge that had already ended, so the clock is left alone.' if answered.taken.late else ''
-    if answered.saved:
-        state = read_state()
-        console.print(f'"{label}" is saved. The interval is {state["interval_minutes"]:g} minutes.{late}', soft_wrap=True)
-        raise typer.Exit(0)
-    kept = 'It is kept on this desk, and the watch sends it again.' if answered.queued else 'It was refused, so nothing sends it again.'
-    error_console.print(f'doit desk-nudge: "{label}" is not saved: {answered.failure}. {kept}', soft_wrap=True, markup=False)
-    raise typer.Exit(service.exit_code(answered.failure) if answered.failure else 1)
+    code, said = answer_outcome(answered)
+    if code:
+        error_console.print(f'doit desk-nudge: {said}', soft_wrap=True, markup=False)
+    else:
+        console.print(said, soft_wrap=True, markup=False)
+    raise typer.Exit(code)
 
 
 @app.command('pause', epilog=examples(('doit desk-nudge pause', 'hold the clock until resume')))
@@ -901,6 +923,8 @@ class Completion:
     summary: str
     body: str
     exit_code: int = 0
+    # Where the owner is known to have recorded nothing, so the row can be picked again at once.
+    recorded_nothing: bool = False
 
 
 class CompletionFailed(Exception):
@@ -919,10 +943,24 @@ def listed_row(cache: dict | None, state: dict, key: str) -> dict:
         raise PickRefused(f'the panel lists no row {key} now')
     if key in desk_nudge.picked_keys(state, cache):
         raise PickRefused(f'{row["text"]} is picked already, and is taken again once the watch reads the rows again')
-    # A source's lane names the habit, so its id reaches life as an argument only where it is one.
-    if row['kind'] == CompletionKind.HABIT and not re.fullmatch('[0-9]+', row['ref']):
-        raise PickRefused(f'{row["text"]} names habit {row["ref"]!r}, and a habit id is all digits')
+    if refusal := completion_refusal(row):
+        raise PickRefused(refusal)
     return row
+
+
+def pursuit_facts(cache: dict | None, row: dict) -> dict:
+    """What the rows know of a pursuit row's pursuit, and nothing for any other row."""
+    if row['kind'] != CompletionKind.PURSUIT:
+        return {}
+    return ((cache or {}).get('pursuits') or {}).get(row['ref']) or {}
+
+
+def timed_facts(cache: dict | None, row: dict) -> dict:
+    """The facts of a pursuit counted in minutes. Raises PickRefused for any other row, whose log carries no minutes."""
+    facts = pursuit_facts(cache, row)
+    if not facts.get('timed'):
+        raise PickRefused(f'{row["text"]} is not counted in minutes')
+    return facts
 
 
 def logged_pursuit(row: dict, minutes: int | None) -> Completion:
@@ -933,7 +971,9 @@ def logged_pursuit(row: dict, minutes: int | None) -> Completion:
     except Unrecorded as lost:
         return Completion(False, f'doit: {name} not recorded', '\n'.join(lost.lines()), service.exit_code(lost.failure))
     except (LogRefused, service.ServiceFailed, LoginError) as failed:
-        return Completion(False, f'doit: {name} not logged', str(failed), service.exit_code(failed))
+        # A send with no answer may have landed, so only a refusal frees the row.
+        refused = not isinstance(failed, service.NoAnswer)
+        return Completion(False, f'doit: {name} not logged', str(failed), service.exit_code(failed), recorded_nothing=refused)
     entry = logged.lines()[0]
     if logged.exit_code:
         return Completion(False, f'doit: {name} logged, and its on_log failed', f'{entry}\n{logged.ran} exited {logged.exit_code}', 1)
@@ -941,77 +981,97 @@ def logged_pursuit(row: dict, minutes: int | None) -> Completion:
 
 
 def marked_review_done(row: dict) -> Completion:
-    """`doit review done`, in-process, for a review or practice entry."""
+    """`doit review done`, in-process. The service keeps one completion a day for an entry, so a failure frees the row."""
     try:
         done = mark_done(row['ref'])
     except (service.ServiceFailed, LoginError) as failed:
-        return Completion(False, f'doit: {row["ref"]} not marked done', str(failed), service.exit_code(failed))
+        return Completion(False, f'doit: {row["ref"]} not marked done', str(failed), service.exit_code(failed), recorded_nothing=True)
     days = (done.get('status') or {}).get('cadence_days')
     return Completion(True, 'doit: marked done', f'{row["ref"]} ({done["done_on"]})' + (f' · due again in {days}d' if days else ''))
 
 
 def completed_habit(row: dict) -> Completion:
-    """`life habits complete <id>`, the one program that a pick starts, stopped after `HABIT_SECONDS`."""
+    """`life habits complete <id>`, stopped after `HABIT_SECONDS`. One that ran out of time may have landed, so it holds the row."""
     try:
         run_program(habit_completion_argv(row['ref']), HABIT_SECONDS)
     except ProgramFailed as failed:
-        return Completion(False, 'doit: habit not completed', str(failed), 1)
+        return Completion(False, 'doit: habit not completed', str(failed), 1, recorded_nothing=not failed.timed_out)
     return Completion(True, 'doit: habit completed', row['text'])
+
+
+def completion_refusal(row: dict) -> str | None:
+    """Why a row cannot be completed as it stands, checked before anything runs."""
+    match CompletionKind(row['kind']):
+        case CompletionKind.HABIT:
+            # A source's lane names the habit, so its id reaches life as an argument only where it is one.
+            return None if re.fullmatch('[0-9]+', row['ref']) else f'{row["text"]} names habit {row["ref"]!r}, and a habit id is all digits'
+        case CompletionKind.PURSUIT | CompletionKind.REVIEW | CompletionKind.PRACTICE:
+            return None
+        case _ as unmatched:
+            assert_never(unmatched)
 
 
 def completed(row: dict, minutes: int | None) -> Completion:
     """Complete one row through its owner, with what doit builds from the row's kind and ref."""
-    kind = CompletionKind(row['kind'])
-    if kind is CompletionKind.PURSUIT:
-        return logged_pursuit(row, minutes)
-    if kind is CompletionKind.HABIT:
-        return completed_habit(row)
-    return marked_review_done(row)
+    match CompletionKind(row['kind']):
+        case CompletionKind.PURSUIT:
+            return logged_pursuit(row, minutes)
+        case CompletionKind.HABIT:
+            return completed_habit(row)
+        case CompletionKind.REVIEW | CompletionKind.PRACTICE:
+            return marked_review_done(row)
+        case _ as unmatched:
+            assert_never(unmatched)
 
 
 def complete(row: dict, minutes: int | None, cache: dict | None) -> dict:
-    """Take the pick once, end a nudge in hand, complete the row, write `picked`, and ask the watch to read the rows again.
+    """Hold the pick, complete the row, then settle the pick, end a nudge in hand where it went through, and write `picked`.
 
-    Raises PickRefused where the key was picked already, and CompletionFailed
-    where the completion did not go through.
+    Raises PickRefused where the key is held already, and CompletionFailed
+    where the completion did not go through. A completion that recorded nothing
+    frees its row at once. Every other one holds it until a read that begins
+    after it ended, which the watch starts within a tick.
     """
     moment = now()
     with changed_state() as state:
-        taken = desk_nudge.take_pick(state, (cache or {}).get('built_at'), row['key'])
-        ended = desk_nudge.end_on_pick(state) if taken else None
+        taken = desk_nudge.take_pick(state, cache, row['key'], moment)
     if not taken:
         raise PickRefused(f'{row["text"]} is picked already, and is taken again once the watch reads the rows again')
-    carry_out(desk_nudge.Change(closes=ended))
     seen = snapshot()
-    outcome = completed(row, minutes)
+    try:
+        outcome = completed(row, minutes)
+    except Exception as error:
+        log.exception(f'completing {row["key"]} raised, so its row is held until the rows are read again')
+        outcome = Completion(False, 'doit: not completed', f'{type(error).__name__}: {error}', 1)
+    with changed_state() as state:
+        desk_nudge.settle_pick(state, row['key'], now(), recorded_nothing=outcome.recorded_nothing)
+        ended = desk_nudge.end_on_pick(state) if outcome.ok else None
+        desk_nudge.want_panel_rebuild(state)
+    carry_out(desk_nudge.Change(closes=ended))
+    notify(outcome.summary, outcome.body)
     nudge_id = ended['nudge_id'] if ended else None
     append_records([desk_nudge.picked_record(moment, nudge_id, row, minutes, None if outcome.ok else outcome.body, seen)])
-    with changed_state() as state:
-        desk_nudge.want_panel_rebuild(state)
-    notify(outcome.summary, outcome.body)
     if not outcome.ok:
         raise CompletionFailed(outcome)
     return desk_nudge.panel_step(PanelStep.DONE, [], outcome.body)
 
 
-def picked_answer(rest: str) -> dict:
-    """Answer through `answer_nudge`, as every answer goes, naming the nudge that showed the row."""
-    value, _, nudge_id = rest.partition(desk_nudge.KEY_SEPARATOR)
-    if value not in set(Answer):
-        raise PickRefused(f'{value!r} is not an answer')
-    answer = Answer(value)
+def picked_answer(key: desk_nudge.AnswerKey) -> dict:
+    """Answer through `answer_nudge`, which notifies a failure, and exit as `doit desk-nudge answer` exits for it."""
     try:
-        answered = answer_nudge(answer, nudge_id or None)
+        answered = answer_nudge(key.answer, key.nudge_id)
     except NothingToAnswer as nothing:
         raise PickRefused(str(nothing)) from None
-    label = ANSWER_LABELS[answer]
-    if answered.saved:
-        message = f'"{label}" is saved. The interval is {read_state()["interval_minutes"]:g} minutes.'
-    elif answered.queued:
-        message = f'"{label}" is kept on this desk, and the watch sends it again.'
-    else:
-        raise CompletionFailed(Completion(False, 'doit: answer refused', f'"{label}": {answered.failure}', 1))
-    return desk_nudge.panel_step(PanelStep.DONE, [], message)
+    code, said = answer_outcome(answered)
+    if code:
+        raise CompletionFailed(Completion(False, 'doit: answer not saved', said, code))
+    return desk_nudge.panel_step(PanelStep.DONE, [], said)
+
+
+def minutes_step(row: dict, minutes: int | None, cache: dict | None) -> dict:
+    """A timed pursuit's minutes step, centered on `minutes` or else on its usual amount."""
+    usual = timed_facts(cache, row).get('usual_minutes')
+    return desk_nudge.panel_step(PanelStep.MINUTES, desk_nudge.minutes_rows(row, minutes, usual))
 
 
 def pick(key: str) -> dict:
@@ -1020,23 +1080,25 @@ def pick(key: str) -> dict:
     Raises PickRefused before anything runs, and CompletionFailed after a
     completion that did not go through.
     """
-    kind, _, rest = key.partition(desk_nudge.KEY_SEPARATOR)
-    if kind == PanelRowKind.ANSWER:
-        return picked_answer(rest)
+    try:
+        parsed = desk_nudge.parse_key(key)
+    except desk_nudge.UnreadableKey as unreadable:
+        raise PickRefused(str(unreadable)) from None
+    if isinstance(parsed, desk_nudge.AnswerKey):
+        return picked_answer(parsed)
     cache, state = read_panel_cache(), read_state()
-    usual = (cache or {}).get('usual_minutes') or {}
-    if kind in (PanelRowKind.LOG_MINUTES, PanelRowKind.ADJUST_MINUTES):
-        amount, _, row_key = rest.partition(desk_nudge.KEY_SEPARATOR)
-        if not re.fullmatch('[1-9][0-9]*', amount):
-            raise PickRefused(f'{key} names no whole number of minutes')
-        row = listed_row(cache, state, row_key)
-        if kind == PanelRowKind.ADJUST_MINUTES:
-            return desk_nudge.panel_step(PanelStep.MINUTES, desk_nudge.minutes_rows(row, int(amount), usual.get(row['ref'])))
-        return complete(row, int(amount), cache)
-    row = listed_row(cache, state, key)
-    if row['kind'] == CompletionKind.PURSUIT and row['ref'] in usual:
-        return desk_nudge.panel_step(PanelStep.MINUTES, desk_nudge.minutes_rows(row, None, usual[row['ref']]))
-    return complete(row, None, cache)
+    match parsed:
+        case desk_nudge.MinutesKey(kind=PanelRowKind.ADJUST_MINUTES, minutes=minutes, row_key=row_key):
+            return minutes_step(listed_row(cache, state, row_key), minutes, cache)
+        case desk_nudge.MinutesKey(minutes=minutes, row_key=row_key):
+            row = listed_row(cache, state, row_key)
+            timed_facts(cache, row)
+            return complete(row, minutes, cache)
+        case desk_nudge.CompletionKey(key=row_key):
+            row = listed_row(cache, state, row_key)
+            return minutes_step(row, None, cache) if pursuit_facts(cache, row).get('timed') else complete(row, None, cache)
+        case _ as unmatched:
+            assert_never(unmatched)
 
 
 def print_step(step: dict, as_json: bool) -> None:

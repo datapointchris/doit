@@ -7,7 +7,6 @@ The watch runs on an injected clock, with `claude-sessions`, `hyprctl`,
 import datetime as dt
 import json
 import os
-import re
 import sys
 import time
 import uuid
@@ -162,10 +161,6 @@ class Desk:
         step = json.loads(ran.stdout)
         Draft7Validator(json.loads((SCHEMAS / desk_nudge.PANEL_SCHEMA_FILE).read_text())).validate(step)
         return step
-
-    def keys(self) -> dict[str, str]:
-        """Each row's key in `panel show`, by its text."""
-        return {row['text']: row['key'] for row in self.panel('show')['rows']}
 
 
 def until(condition: Callable[[], object], seconds: float = 15) -> None:
@@ -416,27 +411,29 @@ def test_the_panel_logs_a_task_by_item_and_a_timed_pursuit_by_its_usual_minutes(
     until(lambda: (commands.read_panel_cache() or {}).get('suggestion'))
     [nudge] = desk.records(Event.FIRED)
 
+    answers = [f'answer:{answer.value}:{nudge["nudge_id"]}' for answer in Answer]
+    tasks = ['pursuit:tasks:532', 'pursuit:tasks:533', 'pursuit:tasks:534']
     shown = desk.panel('show')['rows']
-    keys = {row['text']: row['key'] for row in shown}
-    assert [row['text'] for row in shown if row['kind'] == 'answer'] == ['good timing', 'too soon', 'too late', 'bothered me']
-    assert {'tasks · Bathe Dingo', 'tasks · Trim Dingo Nails', 'tasks · Unprogram Alexas'} <= set(keys)
-    assert not [text for text in keys if 'Concert' in text], 'nothing completes an upcoming row'
-    # The draw orders the two pursuits, and a suggested read carries its description.
-    [read] = [key for text, key in keys.items() if text.split(' · ')[0] == 'read']
+    assert [row['key'] for row in shown if row['kind'] == 'answer'] == answers
+    assert {row['key'] for row in shown} == {*answers, *tasks, 'pursuit:read'}, 'each task its own row, and no upcoming row'
 
-    assert desk.panel('pick', keys['tasks · Bathe Dingo'])['step'] == 'done'
+    assert desk.panel('pick', 'pursuit:tasks:532')['step'] == 'done'
     assert desk.calls('life') == [['tasks', 'complete', '532']]
     [picked] = desk.records(Event.PICKED)
     assert (picked['nudge_id'], picked['pick']['item_id'], picked['pick']['ok']) == (nudge['nudge_id'], '532', True)
     assert (desk.state()['phase'], desk.state()['present_seconds']) == (Phase.COUNTING, 0)
-    desk.panel('pick', keys['tasks · Bathe Dingo'], exit_code=2)
+    desk.panel('pick', 'pursuit:tasks:532', exit_code=2)
     assert desk.calls('life') == [['tasks', 'complete', '532']], 'a pick is taken once'
 
-    usual = desk.panel('pick', read)
-    assert [row['text'] for row in usual['rows']] == ['read · log 45 min (usual)', 'read · +5 → 50 min', 'read · −5 → 40 min']
-    more = desk.panel('pick', usual['rows'][1]['key'])
-    assert more['rows'][0]['text'] == 'read · log 50 min'
-    assert desk.panel('pick', more['rows'][0]['key'])['step'] == 'done'
+    usual = desk.panel('pick', 'pursuit:read')
+    assert [row['key'] for row in usual['rows']] == [
+        'log_minutes:45:pursuit:read',
+        'adjust_minutes:50:pursuit:read',
+        'adjust_minutes:40:pursuit:read',
+    ]
+    more = desk.panel('pick', 'adjust_minutes:50:pursuit:read')
+    assert more['rows'][0]['key'] == 'log_minutes:50:pursuit:read'
+    assert desk.panel('pick', 'log_minutes:50:pursuit:read')['step'] == 'done'
     newest = [record for record in store.journal() if record['event'] == journal.Event.DONE and record['pursuit'] == 'read'][-1]
     assert newest['duration_minutes'] == 50
 
@@ -455,15 +452,14 @@ def test_the_panel_completes_a_habit_and_a_review_and_names_a_failed_completion(
         '/api/v1/documents/review', json={'text': (REPO / 'tests' / 'fixtures' / 'review' / 'register.yml').read_text()}
     ).raise_for_status()
     commands.rebuild_panel_cache()
-    keys = desk.keys()
 
-    assert desk.panel('pick', keys['habit · Stretch'])['step'] == 'done'
+    assert desk.panel('pick', 'habit:7')['step'] == 'done'
     assert desk.calls('life') == [['habits', 'complete', '7']]
-    assert desk.panel('pick', keys['review · never-done'])['step'] == 'done'
+    assert desk.panel('pick', 'review:never-done')['step'] == 'done'
     assert client.get('/api/v1/review/never-done/completions').json(), 'the entry is recorded done'
 
     (desk.root / 'life-exit').touch()
-    desk.panel('pick', keys['habit · Yoga'], exit_code=1)
+    desk.panel('pick', 'habit:8', exit_code=1)
     failed = [record['pick'] for record in desk.records(Event.PICKED) if not record['pick']['ok']]
     assert [pick['ref'] for pick in failed] == ['8']
     assert 'life habits complete 8 exited 1' in failed[0]['error']
@@ -471,5 +467,6 @@ def test_the_panel_completes_a_habit_and_a_review_and_names_a_failed_completion(
 
     down[0] = True
     commands.rebuild_panel_cache()
-    first = desk.panel('show')['rows'][0]
-    assert (first['key'], re.fullmatch(r'rows from \d\d:\d\d — doit unreachable', first['text']) is not None) == (None, True)
+    shown = [(row['kind'], row['key']) for row in desk.panel('show')['rows']]
+    # Kept from the read before, less what was done since, and with habit 8 free again because life refused it.
+    assert shown == [('note', None), ('review', 'review:overdue-item'), ('review', 'review:fresh-item'), ('habit', 'habit:8')]

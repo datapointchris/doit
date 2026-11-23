@@ -21,10 +21,11 @@ from typing import Any
 
 from doit.lanes import CompletionKind
 from doit.pursuits import choice_lines
+from doit.pursuits import is_timed
 from doit.pursuits import settled_choice
+from doit.pursuits import writes_through
 from doit.today import CHECKLIST_GROUPS
-from doit.today import DUE_PER_GROUP
-from doit.today import ROUTINE_GROUPS
+from doit.today import due_row_cap
 
 STARTING_INTERVAL_MINUTES = 60
 
@@ -108,6 +109,11 @@ class Phase(StrEnum):
         """Whether a nudge is in hand, which `begin_firing` starts and `end_ready` ends."""
         return self in (Phase.FIRING, Phase.READY)
 
+    @property
+    def desk_in_use(self) -> bool:
+        """Whether someone may be at the desk. A pause holds the clock through a day block, and the desk is still used."""
+        return self not in (Phase.AWAY, Phase.NO_DESK)
+
 
 class SuggestionError(StrEnum):
     """Why a firing has no suggestion, each with its own message."""
@@ -186,8 +192,8 @@ def fresh_state() -> dict[str, Any]:
         'no_desk_since': None,
         'queued_answers': [],
         'recent_nudges': [],
-        # The panel's keys picked since its rows were built at `built_at`, and whether a pick asks the watch to read them again.
-        'panel': {'built_at': None, 'picked': [], 'rebuild_wanted': False},
+        # Each panel key picked, with when its completion ended, and whether a pick asks the watch to read the rows again.
+        'panel': {'picked': [], 'rebuild_wanted': False},
         'pill': {'text': '', 'class': Phase.COUNTING.value, 'stale_after': None},
     }
     state['pill'].update(pill_face(state))
@@ -674,23 +680,18 @@ def note_row(text: str) -> dict:
     return panel_row(None, PanelRowKind.NOTE, text)
 
 
-def writes_through(config: dict) -> bool:
-    """Whether a pursuit's log completes one of its choices in another app, so each choice is its own row."""
-    return bool(config.get('resolve') and config.get('on_log'))
-
-
 def completable(today: dict) -> list[tuple[dict, dict]]:
     """Each due lane's rows that something completes, in the lane's own order, beside the lane.
 
-    A lane that `doit today` caps at a few rows is capped at as many here, so a
-    backlog of review entries does not bury the day's pursuits and habits.
+    A backlog is capped as `doit today` caps it, so review entries do not bury
+    the day's pursuits and habits, and a routine group is listed whole.
     """
     found = []
     for lane in today.get('due') or []:
         if lane.get('status') == 'unavailable':
             continue
         rows = [row for row in lane.get('rows') or [] if isinstance(row.get('completes'), dict)]
-        found += [(lane, row) for row in (rows if lane.get('name') in ROUTINE_GROUPS else rows[:DUE_PER_GROUP])]
+        found += [(lane, row) for row in rows[: due_row_cap(str(lane.get('name')), whole_routine=True)]]
     return found
 
 
@@ -704,22 +705,58 @@ def choice_pursuits(today: dict, register: dict) -> list[str]:
 
 
 def cached_rows(row: dict, register: dict, items: dict[str, dict]) -> list[dict]:
-    """One of today's rows as the panel lists it. A pursuit that writes through lists each choice that carries an id."""
+    """One of today's rows as the panel lists it.
+
+    A pursuit that writes through lists each choice that carries an id. Where
+    its choices could not be read, or it has none, it is a note, because a log
+    naming no choice completes nothing in the app that owns them.
+    """
     kind, ref = str(row['completes'].get('kind')), str(row['completes'].get('ref'))
     if kind != CompletionKind.PURSUIT:
         return [completion_row(kind, ref, f'{kind} · {row.get("label") or ref}')]
-    choices = [choice for choice in (items.get(ref) or {}).get('choices') or [] if choice.get('id')]
-    if writes_through(register.get(ref) or {}) and choices:
-        return [completion_row(kind, ref, f'{ref} · {choice.get("label") or choice["id"]}', str(choice['id'])) for choice in choices]
-    return [completion_row(kind, ref, ref)]
+    if not writes_through(register.get(ref) or {}):
+        return [completion_row(kind, ref, ref)]
+    item = items.get(ref) or {}
+    if item.get('error'):
+        return [note_row(f'{ref} unavailable — {item["error"]}')]
+    choices = [choice for choice in item.get('choices') or [] if choice.get('id')]
+    if not choices:
+        return [note_row(f'{ref} has no choice to complete')]
+    return [completion_row(kind, ref, f'{ref} · {choice.get("label") or choice["id"]}', str(choice['id'])) for choice in choices]
 
 
-def panel_cache(today: dict, listed: dict, items: dict[str, dict], suggestion: dict | None, now: dt.datetime) -> dict:
+def pursuit_facts(register: dict, usual: dict) -> dict[str, dict]:
+    """What a pick needs to know of each pursuit, as `doit.pursuits` decides it when the rows are read."""
+    return {
+        name: {'timed': is_timed(config), 'writes_through': writes_through(config), 'usual_minutes': usual.get(name)}
+        for name, config in register.items()
+    }
+
+
+def still_owed(suggestion: dict | None, today: dict) -> dict | None:
+    """A suggestion carried into newer rows, kept only where today's pursuits lane still lists its pursuit.
+
+    A pursuit logged at a terminal or on another desk leaves the lane, and a
+    suggestion that outlived it would log it twice.
+    """
+    if not suggestion or 'pursuit' not in suggestion:
+        return suggestion
+    listed = {
+        row['completes'].get('ref')
+        for lane in today.get('due') or []
+        for row in lane.get('rows') or []
+        if isinstance(row.get('completes'), dict) and row['completes'].get('kind') == CompletionKind.PURSUIT
+    }
+    return suggestion if suggestion['pursuit'] in listed else None
+
+
+def panel_cache(today: dict, listed: dict, items: dict[str, dict], suggestion: dict | None, read_at: dt.datetime) -> dict:
     """The panel's rows as identities, from `/today`, `/pursuits` and each write-through pursuit's `/pursuits/{name}/item`.
 
     `upcoming` is left out, because nothing completes a trip or a countdown. A
     lane that something completes and that could not be read is named in a note,
-    because a lane dropped without a word reads as nothing owed.
+    because a lane dropped without a word reads as nothing owed. `read_at` is
+    when the read began, so a pick made while it ran outlives it.
     """
     register = listed.get('pursuits') or {}
     rows: list[dict] = []
@@ -730,17 +767,17 @@ def panel_cache(today: dict, listed: dict, items: dict[str, dict], suggestion: d
         rows += cached_rows(row, register, items)
     return {
         'version': PANEL_CACHE_VERSION,
-        'built_at': stamp(now),
+        'read_at': stamp(read_at),
         'failed': None,
         'suggestion': suggestion,
-        'usual_minutes': listed.get('usual_minutes') or {},
+        'pursuits': pursuit_facts(register, listed.get('usual_minutes') or {}),
         'rows': rows,
     }
 
 
 def failed_panel_cache(previous: dict | None, kind: SuggestionError, detail: str, suggestion: dict | None, now: dt.datetime) -> dict:
     """The rows last read, kept, with why they could not be read again."""
-    kept = previous or {'version': PANEL_CACHE_VERSION, 'built_at': None, 'usual_minutes': {}, 'rows': []}
+    kept = previous or {'version': PANEL_CACHE_VERSION, 'read_at': None, 'pursuits': {}, 'rows': []}
     return {**kept, 'suggestion': suggestion, 'failed': {'error': kind.value, 'detail': detail, 'at': stamp(now)}}
 
 
@@ -751,23 +788,34 @@ def panel_banner(cache: dict | None) -> str | None:
     failed = cache.get('failed')
     if not failed:
         return None
-    since = f'rows from {instant(cache["built_at"]):%H:%M}' if cache.get('built_at') else 'no rows yet'
+    since = f'rows from {instant(cache["read_at"]):%H:%M}' if cache.get('read_at') else 'no rows yet'
     return f'{since} — {PANEL_BANNERS.get(SuggestionError(failed["error"]), UNREACHABLE_BANNER)}'
 
 
-def suggestion_rows(suggestion: dict, listed: list[dict]) -> list[dict]:
-    """The suggestion as rows: the item it settled on, else each choice of its pursuit that the panel lists, else the pursuit.
+def suggestion_rows(suggestion: dict, cache: dict) -> list[dict]:
+    """The suggestion as rows, keyed as the lanes key the same completion.
 
-    A pursuit that writes through and settled no choice is listed by its
-    choices, because a log naming none of them completes nothing in the app
-    that owns them.
+    A pursuit that writes through is listed by the choice it settled, else by
+    each of its choices that the rows list, and by none where they list none.
+    Any other pursuit is one row under its own key, because its log names no
+    choice. A pursuit that the rows do not know is not listed.
     """
     name, item_id = suggestion['pursuit'], suggestion.get('item_id')
-    choices = [row for row in listed if row['kind'] == CompletionKind.PURSUIT and row['ref'] == name and row['item_id']]
-    if not item_id and choices:
-        return choices
+    facts = (cache.get('pursuits') or {}).get(name)
+    if facts is None:
+        return []
+    if facts['writes_through']:
+        rows = cache.get('rows') or []
+        choices = [row for row in rows if row['kind'] == CompletionKind.PURSUIT and row['ref'] == name and row['item_id']]
+        return [row for row in choices if row['item_id'] == item_id] or choices
     label = ' / '.join(line for line in (suggestion.get('label') or '').splitlines() if line)
-    return [completion_row(CompletionKind.PURSUIT, name, f'{name} · {label}' if label else name, item_id)]
+    return [completion_row(CompletionKind.PURSUIT, name, f'{name} · {label}' if label else name)]
+
+
+def read_since(cache: dict | None, moment: str) -> bool:
+    """Whether the rows were read at or after `moment`."""
+    read_at = maybe_instant((cache or {}).get('read_at'))
+    return read_at is not None and read_at >= instant(moment)
 
 
 def once_each(rows: list[dict]) -> list[dict]:
@@ -789,9 +837,11 @@ def answer_row_key(answer: Answer, nudge_id: str) -> str:
 def panel_today(cache: dict | None, state: dict) -> list[dict]:
     """The first step: why the rows are old, the suggestion, the answers while a nudge is ready, then every row that something completes.
 
-    A ready nudge's suggestion is the one it showed. Otherwise the suggestion is
-    the one the watch last read from `/next`, at a firing or after a pick. A
-    row that the suggestion already lists is not listed again in its lane.
+    A ready nudge's suggestion is the one it showed, until the watch reads the
+    rows after it fired. Otherwise the suggestion is the rows', which the watch
+    read from `/next` at a firing or after a pick, and drops once its pursuit
+    leaves today's lane. A row that the suggestion already lists is not listed
+    again in its lane.
     """
     rows = []
     banner = panel_banner(cache)
@@ -799,24 +849,28 @@ def panel_today(cache: dict | None, state: dict) -> list[dict]:
         rows.append(note_row(banner))
     listed = (cache or {}).get('rows') or []
     ready = state['nudge'] if state['phase'] == Phase.READY else None
-    suggestion = ready['suggestion'] if ready else (cache or {}).get('suggestion')
-    if suggestion and 'pursuit' in suggestion:
-        rows += suggestion_rows(suggestion, listed)
+    suggestion = ready['suggestion'] if ready and not read_since(cache, ready['fired_at']) else (cache or {}).get('suggestion')
+    if cache is not None and suggestion and 'pursuit' in suggestion:
+        rows += suggestion_rows(suggestion, cache)
     if ready:
         rows += [
             panel_row(answer_row_key(answer, ready['nudge_id']), PanelRowKind.ANSWER, ANSWER_LABELS[answer], answer.value)
             for answer in Answer
         ]
     rows += listed
-    if cache is not None and cache.get('built_at') and not any(row['kind'] in set(CompletionKind) for row in listed):
+    if cache is not None and cache.get('read_at') and not any(row['kind'] in set(CompletionKind) for row in listed):
         rows.append(note_row(NOTHING_LEFT))
     return once_each(rows)
 
 
+def held_picks(state: dict, cache: dict | None) -> list[dict]:
+    """The picks that these rows may still list: each one whose completion ended after the rows were read, or has not ended."""
+    read_at = maybe_instant((cache or {}).get('read_at'))
+    return [pick for pick in state['panel']['picked'] if read_at is None or instant(pick['at']) >= read_at]
+
+
 def picked_keys(state: dict, cache: dict | None) -> set[str]:
-    """The keys picked since these rows were built. A rebuild clears them, because its rows no longer list what was done."""
-    panel = state['panel']
-    return set(panel['picked']) if cache is not None and panel['built_at'] == cache.get('built_at') else set()
+    return {pick['key'] for pick in held_picks(state, cache)}
 
 
 def unpicked(rows: list[dict], state: dict, cache: dict | None) -> list[dict]:
@@ -824,15 +878,24 @@ def unpicked(rows: list[dict], state: dict, cache: dict | None) -> list[dict]:
     return [row for row in rows if row['key'] not in picked]
 
 
-def take_pick(state: dict, built_at: str | None, key: str) -> bool:
-    """Mark a key picked against the rows built at `built_at`. False where it already was, so a key is taken once per rebuild."""
-    panel = state['panel']
-    if panel['built_at'] != built_at:
-        panel.update(built_at=built_at, picked=[])
-    if key in panel['picked']:
+def take_pick(state: dict, cache: dict | None, key: str, now: dt.datetime) -> bool:
+    """Hold a key as picked. False where it is held already, so one completion runs once.
+
+    A pick whose completion ended before the rows were read is let go, because
+    those rows no longer list what it completed.
+    """
+    held = held_picks(state, cache)
+    state['panel']['picked'] = held
+    if any(pick['key'] == key for pick in held):
         return False
-    panel['picked'] = [*panel['picked'], key]
+    state['panel']['picked'] = [*held, {'key': key, 'at': stamp(now)}]
     return True
+
+
+def settle_pick(state: dict, key: str, now: dt.datetime, *, recorded_nothing: bool) -> None:
+    """Hold a pick until a read that begins after its completion ended, or let it go where the owner recorded nothing."""
+    others = [pick for pick in state['panel']['picked'] if pick['key'] != key]
+    state['panel']['picked'] = others if recorded_nothing else [*others, {'key': key, 'at': stamp(now)}]
 
 
 def end_on_pick(state: dict) -> dict | None:
@@ -852,7 +915,50 @@ def take_panel_rebuild(state: dict) -> bool:
 
 
 def minutes_key(kind: PanelRowKind, minutes: int, row_key: str) -> str:
+    """A minutes row's key names the row it logs last, so that row's own key keeps its separators."""
     return KEY_SEPARATOR.join([kind, str(minutes), row_key])
+
+
+@dataclass(frozen=True)
+class AnswerKey:
+    answer: Answer
+    nudge_id: str | None
+
+
+@dataclass(frozen=True)
+class MinutesKey:
+    kind: PanelRowKind
+    minutes: int
+    row_key: str
+
+
+@dataclass(frozen=True)
+class CompletionKey:
+    key: str
+
+
+class UnreadableKey(ValueError):
+    """A key that no panel row carries the shape of."""
+
+
+def parse_key(key: str) -> AnswerKey | MinutesKey | CompletionKey:
+    """A key, read as `answer_row_key`, `minutes_key` and `completion_key` write it.
+
+    A completion key stays whole, because a pick matches it against the rows
+    rather than reading its parts.
+    """
+    kind, _, rest = key.partition(KEY_SEPARATOR)
+    if kind == PanelRowKind.ANSWER:
+        value, _, nudge_id = rest.partition(KEY_SEPARATOR)
+        if value not in set(Answer):
+            raise UnreadableKey(f'{value!r} is not an answer')
+        return AnswerKey(Answer(value), nudge_id or None)
+    if kind in (PanelRowKind.LOG_MINUTES, PanelRowKind.ADJUST_MINUTES):
+        amount, _, row_key = rest.partition(KEY_SEPARATOR)
+        if not re.fullmatch('[1-9][0-9]*', amount):
+            raise UnreadableKey(f'{key} names no whole number of minutes')
+        return MinutesKey(PanelRowKind(kind), int(amount), row_key)
+    return CompletionKey(key)
 
 
 def minutes_rows(row: dict, minutes: int | None, usual: float | None) -> list[dict]:

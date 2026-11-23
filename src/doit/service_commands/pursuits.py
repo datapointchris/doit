@@ -43,6 +43,7 @@ from doit.pursuits import standing_from
 from doit.pursuits import unoffered
 from doit.pursuits import which_choice
 from doit.pursuits import write_names_cache
+from doit.pursuits import writes_through
 from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
@@ -176,7 +177,7 @@ def log_pursuit(
     item = client.get(f'/pursuits/{name}/item')['resolved'] if config.get('resolve') else {}
     choices = item.get('choices') or []
     if item_id is None:
-        index = which_choice(choices, bool(config.get('on_log')))
+        index = which_choice(choices, writes_through(config))
     else:
         if item.get('error'):
             raise LogRefused(f'{name} could not be read, so --item {item_id} cannot be checked: {item["error"]}')
