@@ -4,8 +4,11 @@
 client, and `doit auth login <url>` fills it in.
 
 A refusal reaches a command as `ServiceFailed`, carrying the service's own
-sentence, or the repair for a refused token. `NoAnswer` is the one failure the
-same command can outlast by running again later.
+sentence, or the repair for a refused token. `NoAnswer` is the one failure that
+the same command can outlast by running again unchanged, so `exit_code` gives it
+`NO_ANSWER_EXIT`. A write kept to send again outlasts more: a refused login,
+which `doit auth login` repairs, and a service error, which a release repairs.
+`later_send_can_store` names all three.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from typing import Any
 
 import httpx2
 from pyclilogin import DEFAULT_SCOPES
+from pyclilogin import LoginError
 from pyclilogin import Product
 from pyclilogin import TokenRefused
 from rich.text import Text
@@ -46,6 +50,8 @@ LONGEST_PAUSE_SECONDS = 20.0
 # Statuses a proxy or a busy service sends before the request is handled, so a
 # later attempt can be answered.
 RETRIED_STATUSES = frozenset({429, 502, 503, 504})
+# What a command exits with when no answer came, the one failure that the same command run later can outlast.
+NO_ANSWER_EXIT = 4
 
 # The keychain service is a deployed identifier: renaming it orphans every stored token.
 LOGIN = Product(
@@ -67,6 +73,22 @@ class ServiceFailed(Exception):
 
 class NoAnswer(ServiceFailed):
     """No answer came: the service was never reached, timed out, or was busy on every attempt."""
+
+
+def exit_code(failure: Exception) -> int:
+    """What a command exits with for a failure that reached it: `NO_ANSWER_EXIT` where no answer came, else 1."""
+    return NO_ANSWER_EXIT if isinstance(failure, NoAnswer) else 1
+
+
+def later_send_can_store(failure: Exception) -> bool:
+    """Whether the same write sent later could be stored: no answer came, the login was refused, or the service broke.
+
+    A refusal of the write itself is refused again however often it is sent.
+    """
+    if isinstance(failure, LoginError | NoAnswer):
+        return True
+    status = getattr(failure, 'status', None)
+    return status is None or status == 401 or status >= 500
 
 
 class BearerAuth(httpx2.Auth):

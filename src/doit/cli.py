@@ -243,9 +243,6 @@ def root(
 # still set names a target nothing reads, and is refused rather than ignored.
 RETIRED_VARIABLES = ('DOIT_JOURNAL_DIR', 'DOIT_REVIEW_STATE', 'DOIT_PURSUITS', 'DOIT_REGISTER', 'DOIT_SOURCES')
 
-# What a command exits with when no answer came, the one failure the same command run later can outlast.
-NO_ANSWER_EXIT = 4
-
 
 def retired_variable_set() -> str:
     """The refusal for the first retired variable still set, or '' where none is."""
@@ -263,4 +260,4 @@ def main() -> None:
         app()
     except (service.ServiceFailed, LoginError) as failure:
         error_console.print(f'doit: {failure}', soft_wrap=True, markup=False)
-        raise SystemExit(NO_ANSWER_EXIT if isinstance(failure, service.NoAnswer) else 1) from None
+        raise SystemExit(service.exit_code(failure)) from None
