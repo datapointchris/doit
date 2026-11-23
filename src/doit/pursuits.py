@@ -1869,6 +1869,23 @@ def which_choice(choices: list[dict], writes_through: bool) -> int:
         return -1
 
 
+def choice_carrying(choices: list[dict], item_id: str) -> int:
+    """The index of the choice whose id is ``item_id``, or -1 where none of the current choices carries it."""
+    return next((index for index, choice in enumerate(choices) if choice.get('id') == item_id), -1)
+
+
+def item_refusal(name: str, item: dict, item_id: str) -> str:
+    """Why ``item_id`` names none of the pursuit's current choices, naming the ids it does hold.
+
+    A cached id may be for an item completed elsewhere since, so the refusal
+    lists what is there now rather than guessing which one was meant.
+    """
+    held = [f'{choice["id"]} ({choice.get("label") or "no label"})' for choice in item.get('choices') or [] if choice.get('id')]
+    if held:
+        return f'{name} holds no item {item_id}. Its items now: {", ".join(held)}'
+    return f'{name} holds no item with an id, so --item {item_id} names nothing'
+
+
 def prompt_for_choice(choices: list[dict]) -> int:
     """Which of the offered choices was done, as an index. -1 where none of them was.
 

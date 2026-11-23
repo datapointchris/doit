@@ -236,6 +236,15 @@ def build_tasks_lane(results: dict[str, sources.Result], today: dt.date) -> Lane
     )
 
 
+def habit_completion_argv(habit_id: str) -> list[str]:
+    """The command that completes one habit in life, as an argv.
+
+    The habits lane's hint is built from it, and so is the desk nudge panel's
+    habit completion, so the command a row shows and the one a pick runs agree.
+    """
+    return ['life', 'habits', 'complete', habit_id]
+
+
 def build_habits_lane(results: dict[str, sources.Result], today: dt.date) -> LaneView:
     payload, reason = life_context(results, ('habits',))
     if payload is None:
@@ -268,7 +277,7 @@ def build_habits_lane(results: dict[str, sources.Result], today: dt.date) -> Lan
         title='HABITS',
         meta=f'{len(done)} of {current_total} done today',
         grid=grid,
-        hints=['life habits complete <id>'],
+        hints=[' '.join(habit_completion_argv('<id>'))],
         reason=reason,
     )
 

@@ -71,6 +71,8 @@ from doit.happened import ITEM_INDENT
 from doit.happened import group_heading
 from doit.happened import has_something
 from doit.happened import render_unavailable
+from doit.lanes import CompletionKind
+from doit.lanes import CompletionTarget
 from doit.lanes import Lane
 from doit.lanes import Row
 from doit.lanes import Urgency
@@ -138,6 +140,11 @@ def filled(template: str, handle: str) -> str:
     return handle
 
 
+def habit_target(habit_id: str) -> CompletionTarget | None:
+    """What picking a habit's row completes, or None where its cell names no habit."""
+    return CompletionTarget(CompletionKind.HABIT, habit_id) if habit_id else None
+
+
 def set_lanes(built: list[dashboard.LaneView], done: list[Lane]) -> list[Lane]:
     """What each day set still holds, or the set itself where it could not be read.
 
@@ -156,8 +163,11 @@ def set_lanes(built: list[dashboard.LaneView], done: list[Lane]) -> list[Lane]:
             if group.name == lane.name:
                 finished |= {cell.text for cell in group.grid}
         template = lane.hints[0] if lane.hints else ''
+        # An open cell's handle is the habit's id, which is what a pick completes.
         left = [
-            Row(cell.text, '', handle=filled(template, cell.handle)) for cell in lane.grid if not cell.done and cell.text not in finished
+            Row(cell.text, '', handle=filled(template, cell.handle), completes=habit_target(cell.handle))
+            for cell in lane.grid
+            if not cell.done and cell.text not in finished
         ]
         due.append(Lane(name=lane.name, title=lane.title, rows=left, total=len(left), hints=[f'doit dashboard --lane {lane.name}']))
     return due
@@ -198,6 +208,15 @@ def appointment_lanes(built: list[dashboard.LaneView]) -> list[Lane]:
     return found
 
 
+def register_target(register: happened.Register, row: dict) -> CompletionTarget | None:
+    """What picking a register entry's row completes: the entry `doit review done` marks, by its id.
+
+    Each register's name is its kind. An entry with no id has nothing that
+    `review done` could name, so its row completes nothing.
+    """
+    return CompletionTarget(CompletionKind(register.name), str(row['id'])) if row.get('id') else None
+
+
 def register_owed(register: happened.Register, rows: list[dict], bounds: Bounds, now: dt.datetime) -> Lane:
     """What a register still owes today, ranked the way the dashboard's MAINTENANCE lane ranks it.
 
@@ -207,13 +226,16 @@ def register_owed(register: happened.Register, rows: list[dict], bounds: Bounds,
     """
     ranked = sorted(
         (
-            dashboard.maintenance_row(happened.item_name(row), register.describe(row), row, register.act(row))
+            (
+                *dashboard.maintenance_row(happened.item_name(row), register.describe(row), row, register.act(row)),
+                register_target(register, row),
+            )
             for row in rows
             if not happened.lands_within(row.get('last'), bounds, now) and register.is_due(row)
         ),
         key=lambda entry: entry[0],
     )
-    owed = [row for _, row in ranked]
+    owed = [dc.replace(row, completes=target) for _, row, target in ranked]
     return Lane(name=register.name, title=register.title, rows=owed, total=len(owed), hints=[register.hint])
 
 
@@ -260,7 +282,9 @@ def pursuits_due(state: dict, bounds: Bounds) -> Lane:
             continue
         note = 'due today' if due_in is None or -1 < due_in <= 0 else f'{span_text(due_in)} overdue'
         described = state['active'][name].get('description', '')
-        rows.append(Row(name, described, note, Urgency.OVERDUE, f'doit pursuits log {name}'))
+        rows.append(
+            Row(name, described, note, Urgency.OVERDUE, f'doit pursuits log {name}', CompletionTarget(CompletionKind.PURSUIT, name))
+        )
     return Lane(name='pursuits', title='PURSUITS', rows=rows, total=len(rows), hints=['doit next --explain'])
 
 

@@ -50,6 +50,28 @@ class Urgency(StrEnum):
     OVERDUE = 'overdue'
 
 
+class CompletionKind(StrEnum):
+    """Which owner completes a row, and so which code builds the completion."""
+
+    PURSUIT = 'pursuit'
+    HABIT = 'habit'
+    REVIEW = 'review'
+    PRACTICE = 'practice'
+
+
+@dataclass(frozen=True)
+class CompletionTarget:
+    """What picking a row completes, as an identity rather than a command.
+
+    `ref` is the pursuit's name, the habit's id, or the register entry's id. doit
+    builds the command from the kind and the ref when the row is picked, so no
+    argv is ever read back from a document or a cache.
+    """
+
+    kind: CompletionKind
+    ref: str
+
+
 @dataclass(frozen=True)
 class Row:
     """One thing you could act on.
@@ -62,6 +84,10 @@ class Row:
     between a row you can read and a row you can do. A grid cell has carried one
     since the beginning; a row not having one is why a lane could name a thing to
     revisit while withholding the command that revisits it.
+
+    `completes` is the one field that a source never sets. Only doit's own builders of
+    today's rows fill it, and `row_from` never reads it, so a source's document
+    cannot choose what a pick completes.
     """
 
     label: str
@@ -69,6 +95,7 @@ class Row:
     note: str = ''
     urgency: Urgency = Urgency.NONE
     handle: str = ''
+    completes: CompletionTarget | None = None
 
 
 @dataclass(frozen=True)
@@ -239,9 +266,7 @@ def lane_to_dict(lane: Lane) -> dict:
         'alert': lane.alert,
         'omit_when_empty': lane.omit_when_empty,
         'reason': lane.reason or None,
-        'rows': [
-            {'label': row.label, 'text': row.text, 'note': row.note, 'urgency': str(row.urgency), 'handle': row.handle} for row in lane.rows
-        ],
+        'rows': [row_to_dict(row) for row in lane.rows],
         'grid': [
             {
                 'text': cell.text,
@@ -257,6 +282,20 @@ def lane_to_dict(lane: Lane) -> dict:
         'in_flight': lane.in_flight,
         'hints': lane.hints,
     }
+
+
+def row_to_dict(row: Row) -> dict:
+    """One row in the contract's shape, carrying `completes` only where a builder of today's rows set it."""
+    shaped: dict[str, str | dict[str, str]] = {
+        'label': row.label,
+        'text': row.text,
+        'note': row.note,
+        'urgency': str(row.urgency),
+        'handle': row.handle,
+    }
+    if row.completes is not None:
+        shaped['completes'] = {'kind': str(row.completes.kind), 'ref': row.completes.ref}
+    return shaped
 
 
 def dumps(lanes: list[Lane], generated_at: dt.datetime) -> str:

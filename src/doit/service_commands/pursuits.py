@@ -4,6 +4,7 @@ import datetime as dt
 import json
 import shlex
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Annotated
 
 import typer
@@ -17,12 +18,14 @@ from doit.pursuits import GUTTER
 from doit.pursuits import TEMPLATE
 from doit.pursuits import Abandoned
 from doit.pursuits import ask
+from doit.pursuits import choice_carrying
 from doit.pursuits import chosen_item
 from doit.pursuits import due_in_days
 from doit.pursuits import due_style
 from doit.pursuits import format_due
 from doit.pursuits import format_elapsed
 from doit.pursuits import goal_text
+from doit.pursuits import item_refusal
 from doit.pursuits import match_pursuit
 from doit.pursuits import minutes_refusal
 from doit.pursuits import offer
@@ -90,17 +93,148 @@ def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
     return 0
 
 
-def unrecorded(name: str, words: list[str], minutes: int | None, occurred: dt.datetime, downstream: dict) -> None:
-    """Say that on_log ran and the entry did not land, and the log that records it without running on_log again."""
-    again = ['doit', 'pursuits', 'log', name, '--no-write', *(['--minutes', str(minutes)] if minutes else []), *words]
-    error_console.print(Text(f'  on_log already ran: {downstream.get("command")}', style='yellow'), soft_wrap=True)
-    error_console.print(
-        Text(f'  Record it without running on_log again, adding --ago for the time since {occurred:%H:%M}:  {shlex.join(again)}'),
-        soft_wrap=True,
+class LogRefused(Exception):
+    """A log refused before anything ran or was written.
+
+    `flag` names the argument to change where the refusal is a usage error, and
+    is None where the arguments were fine and the pursuit could not be checked.
+    """
+
+    def __init__(self, message: str, flag: str | None = None) -> None:
+        super().__init__(message)
+        self.flag = flag
+
+
+class Unrecorded(Exception):
+    """A pursuit's on_log ran and its journal entry did not land.
+
+    `failure` is the service's refusal or silence. `repair` is the log that
+    records the entry without running on_log a second time.
+    """
+
+    def __init__(self, failure: service.ServiceFailed, command: str, repair: list[str], occurred: dt.datetime) -> None:
+        super().__init__(str(failure))
+        self.failure = failure
+        self.command = command
+        self.repair = repair
+        self.occurred = occurred
+
+    def lines(self) -> list[str]:
+        """What ran, then the log that records it without running it again."""
+        return [
+            f'on_log already ran: {self.command}',
+            f'Record it without running on_log again, adding --ago for the time since {self.occurred:%H:%M}:  {shlex.join(self.repair)}',
+        ]
+
+
+@dataclass(frozen=True)
+class Logged:
+    """One log as it landed: the entry's line, and the on_log command that ran with its exit code."""
+
+    summary: str
+    ran: str = ''
+    exit_code: int | None = None
+
+    def lines(self) -> list[str]:
+        """What `doit pursuits log` prints for it."""
+        return [f'Logged {self.summary}', *([f'Ran {self.ran}'] if self.ran else [])]
+
+
+def log_pursuit(
+    name: str,
+    item_id: str | None,
+    minutes: int | None,
+    note: str,
+    *,
+    occurred: dt.datetime | None = None,
+    assume_yes: bool = False,
+    no_write: bool = False,
+    register: dict | None = None,
+) -> Logged:
+    """Log the pursuit named exactly ``name``, completing the choice that carries ``item_id`` where one is named.
+
+    Asks nothing beyond what `which_choice` and `run_on_log` ask at a terminal,
+    so a caller with none runs it in-process. Without ``item_id`` a pursuit with
+    several choices names none of them, as `which_choice` decides. ``register``
+    is `/pursuits/register`'s answer where the caller already read it.
+
+    Raises `LogRefused` before anything runs, and `Unrecorded` where on_log ran
+    and the entry did not land.
+    """
+    client = service.client()
+    pursuits = (register or client.get('/pursuits/register'))['pursuits']
+    config = pursuits.get(name)
+    if config is None:
+        raise LogRefused(f'No pursuit named {name}.')
+    if refusal := minutes_refusal(name, config, minutes):
+        raise LogRefused(refusal, '--minutes')
+    occurred = occurred or dt.datetime.now().astimezone()
+
+    # The standing draw's entry is what was on screen, so the service answers with
+    # the concrete item this pursuit meant, and resolves afresh only where the draw
+    # failed, matched nothing or never offered it.
+    item = client.get(f'/pursuits/{name}/item')['resolved'] if config.get('resolve') else {}
+    choices = item.get('choices') or []
+    if item_id is None:
+        index = which_choice(choices, bool(config.get('on_log')))
+    else:
+        if item.get('error'):
+            raise LogRefused(f'{name} could not be read, so --item {item_id} cannot be checked: {item["error"]}')
+        index = choice_carrying(choices, item_id)
+        if index < 0:
+            raise LogRefused(item_refusal(name, item, item_id), '--item')
+    chosen = chosen_item(item, index)
+
+    downstream = None if no_write else run_on_log(config, chosen, note, minutes, assume_yes)
+
+    # Logging a pursuit says the pursuit happened. It does not say which of its
+    # candidates did unless you said so, and the note is prose. So the item is
+    # only named where naming it is a fact: the backend matched one row, you
+    # named it with --item, or the write-through completed the one you picked.
+    acted = bool((downstream or {}).get('ran'))
+    named = chosen if chosen and (item_id is not None or int(item.get('candidates') or 1) == 1 or acted) else {}
+
+    # The service marks the pursuit logged on the standing draw, so it is not
+    # offered again inside the window, and says when it next comes due.
+    body = {
+        'id': new_id(dt.datetime.now().astimezone()),
+        'pursuit': name,
+        'occurred_at': occurred.isoformat(),
+        'note': note or None,
+        'duration_minutes': minutes,
+        'item': named or None,
+        'downstream': downstream,
+    }
+    try:
+        days = client.post('/journal/done', service.signed(body), repeatable=True)['due_in_days']
+    except service.ServiceFailed as failure:
+        if acted:
+            # The repair carries no --item. on_log completed that item, so a fresh
+            # resolve leaves it out, and --item would be refused once the draw expires.
+            repair = [
+                *('doit', 'pursuits', 'log', name, '--no-write'),
+                *(['--minutes', str(minutes)] if minutes else []),
+                *([note] if note else []),
+            ]
+            raise Unrecorded(failure, str((downstream or {}).get('command')), repair, occurred) from failure
+        raise
+    label = f' — {named["label"]}' if named.get('label') else ''
+    return Logged(
+        f'{name}{label}' + ('' if days is None else f' · {format_due(days)}'),
+        str(downstream['command']) if acted and downstream else '',
+        (downstream or {}).get('exit_code'),
     )
 
 
-def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | None, assume_yes: bool, no_write: bool) -> int:
+def cmd_log(
+    name: str | None,
+    words: list[str],
+    ago: str | None,
+    minutes: int | None,
+    assume_yes: bool,
+    no_write: bool,
+    item_id: str | None = None,
+) -> int:
     """Record having done one, asking for whatever was not passed as a flag.
 
     Anything given on the command line is never asked about, so the fast path
@@ -145,48 +279,27 @@ def cmd_log(name: str | None, words: list[str], ago: str | None, minutes: int | 
             raise typer.BadParameter(f'--ago takes a span such as 30s, 90m, 3h, 2d or 1w, not {ago!r}.')
         occurred -= delta
 
-    # The standing draw's entry is what was on screen, so the service answers with
-    # the concrete item this pursuit meant, and resolves afresh only where the draw
-    # failed, matched nothing or never offered it.
-    item = client.get(f'/pursuits/{matched}/item')['resolved'] if pursuits[matched].get('resolve') else {}
-    chosen = chosen_item(item, which_choice(item.get('choices') or [], bool(pursuits[matched].get('on_log'))))
-
-    downstream = None
-    if not no_write:
-        downstream = run_on_log(pursuits[matched], chosen, ' '.join(words), minutes, assume_yes)
-
-    # Logging a pursuit says the pursuit happened. It does not say which of its
-    # candidates did unless you said so, and the note is prose. So the item is
-    # only named where naming it is a fact: the backend matched one row, or the
-    # write-through completed the one you picked.
-    acted = bool((downstream or {}).get('ran'))
-    named = chosen if chosen and (int(item.get('candidates') or 1) == 1 or acted) else {}
-
-    # The service marks the pursuit logged on the standing draw, so it is not
-    # offered again inside the window, and says when it next comes due.
-    body = {
-        'id': new_id(dt.datetime.now().astimezone()),
-        'pursuit': matched,
-        'occurred_at': occurred.isoformat(),
-        'note': ' '.join(words) or None,
-        'duration_minutes': minutes,
-        'item': named or None,
-        'downstream': downstream,
-    }
     try:
-        days = client.post('/journal/done', service.signed(body), repeatable=True)['due_in_days']
-    except service.ServiceFailed:
-        if acted:
-            unrecorded(matched, words, minutes, occurred, downstream or {})
-        raise
-    label = f' — {named["label"]}' if named.get('label') else ''
-    logged = Text.from_markup('[green]Logged[/] ')
-    logged.append(f'{matched}{label}' + ('' if days is None else f' · {format_due(days)}'))
-    console.print(logged)
-    if downstream and downstream.get('ran'):
-        ran = Text.from_markup('[green]Ran[/] ')
-        ran.append(downstream['command'])
-        console.print(ran)
+        logged = log_pursuit(
+            matched, item_id, minutes, ' '.join(words), occurred=occurred, assume_yes=assume_yes, no_write=no_write, register=standing
+        )
+    except LogRefused as refusal:
+        if refusal.flag:
+            raise typer.BadParameter(str(refusal), param_hint=refusal.flag) from None
+        error_console.print(Text(str(refusal)), soft_wrap=True)
+        return 1
+    except Unrecorded as lost:
+        ran, repair = lost.lines()
+        error_console.print(Text(f'  {ran}', style='yellow'), soft_wrap=True)
+        error_console.print(Text(f'  {repair}'), soft_wrap=True)
+        raise lost.failure from None
+    entry = Text.from_markup('[green]Logged[/] ')
+    entry.append(logged.summary)
+    console.print(entry)
+    if logged.ran:
+        ran_line = Text.from_markup('[green]Ran[/] ')
+        ran_line.append(logged.ran)
+        console.print(ran_line)
     return 0
 
 
@@ -467,6 +580,16 @@ def log_command(
     ] = None,
     assume_yes: Annotated[bool, typer.Option('-y', '--yes', help="Run the pursuit's on_log command without asking.")] = False,
     no_write: Annotated[bool, typer.Option('--no-write', help='Log only; never touch the owning app.')] = False,
+    item_id: Annotated[
+        str | None,
+        typer.Option(
+            '--item',
+            help=(
+                "The id of the choice you did, among the pursuit's current ones. Refused, naming the ids it holds, "
+                'where none carries it. Without it, several choices are asked about at a terminal and none is named otherwise.'
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Record having done one, writing through to the app that owns it.
 
@@ -474,7 +597,7 @@ def log_command(
     asked for, with the pursuits listed and the current draw marked. A field
     already passed is never asked about, and --no-input skips every question.
     """
-    run(lambda: cmd_log(pursuit, note or [], ago, minutes, assume_yes, no_write))
+    run(lambda: cmd_log(pursuit, note or [], ago, minutes, assume_yes, no_write, item_id))
 
 
 def skip_command(
@@ -639,6 +762,7 @@ app.command(
         ('doit pursuits log', 'pick the pursuit and answer what it asks'),
         ('doit pursuits log read --minutes 40 chapter three', 'all of it in one line, with a note'),
         ('doit pursuits log read --ago 3h --minutes 40', 'something you did earlier'),
+        ('doit pursuits log tasks --item 532 --yes', 'complete the drawn task 532 with no question asked'),
         ('doit pursuits log chore --no-write', "record it without running the pursuit's on_log command"),
     ),
 )(log_command)

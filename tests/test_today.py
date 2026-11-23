@@ -139,7 +139,8 @@ def test_a_register_owes_what_today_has_not_cleared():
 def test_a_review_item_is_named_by_what_it_is_for_and_carries_its_own_command():
     [review, _] = owed(review_rows=[{'id': 'certs', 'desc': 'Renew certs', 'command': 'certbot renew', 'overdue': 3, 'last': None}])
 
-    assert review.rows == [Row('certs', 'Renew certs', '3d overdue', Urgency.OVERDUE, 'certbot renew')]
+    completes = lanes.CompletionTarget(lanes.CompletionKind.REVIEW, 'certs')
+    assert review.rows == [Row('certs', 'Renew certs', '3d overdue', Urgency.OVERDUE, 'certbot renew', completes)]
 
 
 def test_an_item_due_today_reads_as_due_rather_than_late():
