@@ -1887,10 +1887,10 @@ def prompt_for_minutes() -> int:
 def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_yes: bool) -> dict | None:
     """Run the pursuit's write-through command against the item that was offered.
 
-    Prompts unless told not to, and never fires unattended: the draw it takes the
-    id from can be up to fifteen minutes old, and completing the wrong task is
-    expensive to notice. A prompt is one keystroke; a wrong completion is a
-    silent lie in another app's data.
+    Prompts before running, and with no terminal to prompt in it runs nothing,
+    because the draw it takes the id from can be up to fifteen minutes old. A
+    wrong completion is a silent lie in another app's data. `assume_yes` skips
+    the prompt and runs the command whether or not a terminal is attached.
     """
     template = config.get('on_log')
     if not template or not item:
