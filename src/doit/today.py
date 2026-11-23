@@ -449,9 +449,20 @@ def render_quota(figures: quota.Quota) -> None:
         console.print(line, no_wrap=True, overflow='ellipsis')
 
 
+def due_row_cap(lane_name: str, *, whole_routine: bool = False) -> int | None:
+    """How many of a due group's rows are shown, or None for all of them.
+
+    `whole_routine` lists a routine group whole, for a reader that completes
+    rows rather than reads them, and still caps every backlog.
+    """
+    if lane_name in ROUTINE_GROUPS:
+        return None if whole_routine else DUE_PER_ROUTINE_GROUP
+    return DUE_PER_GROUP
+
+
 def visible_rows(lane: Lane) -> list[Row]:
     """A group's first rows, then one saying how many more it holds and where."""
-    rows = lane.rows[: DUE_PER_ROUTINE_GROUP if lane.name in ROUTINE_GROUPS else DUE_PER_GROUP]
+    rows = lane.rows[: due_row_cap(lane.name)]
     hidden = max(lane.total, len(lane.rows)) - len(rows)
     if hidden > 0:
         rows = [*rows, Row(f'{hidden} more', '', handle=' · '.join(lane.hints))]

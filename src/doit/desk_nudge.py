@@ -19,8 +19,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from doit.lanes import CompletionKind
 from doit.pursuits import choice_lines
+from doit.pursuits import is_timed
 from doit.pursuits import settled_choice
+from doit.pursuits import writes_through
+from doit.today import CHECKLIST_GROUPS
+from doit.today import due_row_cap
 
 STARTING_INTERVAL_MINUTES = 60
 
@@ -45,8 +50,11 @@ REMEMBERED_NUDGES = 20
 STATE_VERSION = 1
 RECORD_SCHEMA_VERSION = 1
 STATUS_SCHEMA_VERSION = 1
+PANEL_SCHEMA_VERSION = 1
+PANEL_CACHE_VERSION = 1
 RECORD_SCHEMA_FILE = 'desk-nudge-record.schema.json'
 STATUS_SCHEMA_FILE = 'desk-nudge-status.schema.json'
+PANEL_SCHEMA_FILE = 'desk-nudge-panel.schema.json'
 
 
 class Answer(StrEnum):
@@ -100,6 +108,11 @@ class Phase(StrEnum):
     def holds_nudge(self) -> bool:
         """Whether a nudge is in hand, which `begin_firing` starts and `end_ready` ends."""
         return self in (Phase.FIRING, Phase.READY)
+
+    @property
+    def desk_in_use(self) -> bool:
+        """Whether someone may be at the desk. A pause holds the clock through a day block, and the desk is still used."""
+        return self not in (Phase.AWAY, Phase.NO_DESK)
 
 
 class SuggestionError(StrEnum):
@@ -179,6 +192,8 @@ def fresh_state() -> dict[str, Any]:
         'no_desk_since': None,
         'queued_answers': [],
         'recent_nudges': [],
+        # Each panel key picked, with when its completion ended, and whether a pick asks the watch to read the rows again.
+        'panel': {'picked': [], 'rebuild_wanted': False},
         'pill': {'text': '', 'class': Phase.COUNTING.value, 'stale_after': None},
     }
     state['pill'].update(pill_face(state))
@@ -605,6 +620,395 @@ def status_document(state: dict, now: dt.datetime) -> dict:
     }
 
 
+# --- the panel ---------------------------------------------------------------------
+#
+# The panel is rows that doit computes and rofi draws. Its cache holds each row's
+# identity, a kind and a ref, and never a command, so a file that anything else
+# can write never chooses what a pick runs. A key names what a row completes, so
+# one completion keeps one key wherever it is listed.
+
+MINUTES_STEP = 5
+# What a timed pursuit's minutes step offers where no entry ever kept minutes. None of them is labeled usual.
+MINUTES_WITHOUT_USUAL = (15, 30, 45, 60)
+# Where that step's ±5 rows count from.
+MINUTES_ADJUSTED_FROM = 30
+NOTHING_LEFT = 'nothing left today'
+# The due lanes whose rows something completes, each named where it could not be read.
+COMPLETED_LANES = ('pursuits', *CHECKLIST_GROUPS)
+KEY_SEPARATOR = ':'
+
+
+class PanelStep(StrEnum):
+    """Which step of the panel that a document holds: today's rows, a timed pursuit's minutes, or what a pick did."""
+
+    TODAY = 'today'
+    MINUTES = 'minutes'
+    DONE = 'done'
+
+
+class PanelRowKind(StrEnum):
+    """A row that completes nothing in an owner: a note, an answer, or a step through a timed pursuit's minutes."""
+
+    NOTE = 'note'
+    ANSWER = 'answer'
+    LOG_MINUTES = 'log_minutes'
+    ADJUST_MINUTES = 'adjust_minutes'
+
+
+PANEL_ROW_KINDS = (PanelRowKind.NOTE, PanelRowKind.ANSWER, *CompletionKind, PanelRowKind.LOG_MINUTES, PanelRowKind.ADJUST_MINUTES)
+
+# A menu draws these as they are, so they carry no markup.
+PANEL_BANNERS = {SuggestionError.LOGIN: 'run doit auth login'}
+UNREACHABLE_BANNER = 'doit unreachable'
+
+
+def completion_key(kind: str, ref: str, item_id: str | None = None) -> str:
+    """What a row completes, as its key: `pursuit:tasks:532`, `habit:17`, `review:prune-docker`."""
+    return KEY_SEPARATOR.join([kind, ref, *([item_id] if item_id else [])])
+
+
+def panel_row(key: str | None, kind: str, text: str, ref: str | None = None, item_id: str | None = None) -> dict:
+    return {'key': key, 'kind': str(kind), 'text': text, 'ref': ref, 'item_id': item_id}
+
+
+def completion_row(kind: str, ref: str, text: str, item_id: str | None = None) -> dict:
+    return panel_row(completion_key(kind, ref, item_id), kind, text, ref, item_id)
+
+
+def note_row(text: str) -> dict:
+    """A row that says something and completes nothing, so it has no key."""
+    return panel_row(None, PanelRowKind.NOTE, text)
+
+
+def completable(today: dict) -> list[tuple[dict, dict]]:
+    """Each due lane's rows that something completes, in the lane's own order, beside the lane.
+
+    A backlog is capped as `doit today` caps it, so review entries do not bury
+    the day's pursuits and habits, and a routine group is listed whole.
+    """
+    found = []
+    for lane in today.get('due') or []:
+        if lane.get('status') == 'unavailable':
+            continue
+        rows = [row for row in lane.get('rows') or [] if isinstance(row.get('completes'), dict)]
+        found += [(lane, row) for row in rows[: due_row_cap(str(lane.get('name')), whole_routine=True)]]
+    return found
+
+
+def choice_pursuits(today: dict, register: dict) -> list[str]:
+    """The due pursuits whose choices `/pursuits/{name}/item` is read for, because their log completes the one it names."""
+    return [
+        row['completes']['ref']
+        for _, row in completable(today)
+        if row['completes'].get('kind') == CompletionKind.PURSUIT and writes_through(register.get(row['completes']['ref']) or {})
+    ]
+
+
+def cached_rows(row: dict, register: dict, items: dict[str, dict]) -> list[dict]:
+    """One of today's rows as the panel lists it.
+
+    A pursuit that writes through lists each choice that carries an id. Where
+    its choices could not be read, or it has none, it is a note, because a log
+    naming no choice completes nothing in the app that owns them.
+    """
+    kind, ref = str(row['completes'].get('kind')), str(row['completes'].get('ref'))
+    if kind != CompletionKind.PURSUIT:
+        return [completion_row(kind, ref, f'{kind} · {row.get("label") or ref}')]
+    if not writes_through(register.get(ref) or {}):
+        return [completion_row(kind, ref, ref)]
+    item = items.get(ref) or {}
+    if item.get('error'):
+        return [note_row(f'{ref} unavailable — {item["error"]}')]
+    choices = [choice for choice in item.get('choices') or [] if choice.get('id')]
+    if not choices:
+        return [note_row(f'{ref} has no choice to complete')]
+    return [completion_row(kind, ref, f'{ref} · {choice.get("label") or choice["id"]}', str(choice['id'])) for choice in choices]
+
+
+def pursuit_facts(register: dict, usual: dict) -> dict[str, dict]:
+    """What a pick needs to know of each pursuit, as `doit.pursuits` decides it when the rows are read."""
+    return {
+        name: {'timed': is_timed(config), 'writes_through': writes_through(config), 'usual_minutes': usual.get(name)}
+        for name, config in register.items()
+    }
+
+
+def still_owed(suggestion: dict | None, today: dict) -> dict | None:
+    """A suggestion carried into newer rows, kept only where today's pursuits lane still lists its pursuit.
+
+    A pursuit logged at a terminal or on another desk leaves the lane, and a
+    suggestion that outlived it would log it twice.
+    """
+    if not suggestion or 'pursuit' not in suggestion:
+        return suggestion
+    listed = {
+        row['completes'].get('ref')
+        for lane in today.get('due') or []
+        for row in lane.get('rows') or []
+        if isinstance(row.get('completes'), dict) and row['completes'].get('kind') == CompletionKind.PURSUIT
+    }
+    return suggestion if suggestion['pursuit'] in listed else None
+
+
+def panel_cache(today: dict, listed: dict, items: dict[str, dict], suggestion: dict | None, read_at: dt.datetime) -> dict:
+    """The panel's rows as identities, from `/today`, `/pursuits` and each write-through pursuit's `/pursuits/{name}/item`.
+
+    `upcoming` is left out, because nothing completes a trip or a countdown. A
+    lane that something completes and that could not be read is named in a note,
+    because a lane dropped without a word reads as nothing owed. `read_at` is
+    when the read began, so a pick made while it ran outlives it.
+    """
+    register = listed.get('pursuits') or {}
+    rows: list[dict] = []
+    for lane in today.get('due') or []:
+        if lane.get('status') == 'unavailable' and lane.get('name') in COMPLETED_LANES:
+            rows.append(note_row(f'{lane["name"]} unavailable — {lane.get("reason") or "no reason given"}'))
+    for _, row in completable(today):
+        rows += cached_rows(row, register, items)
+    return {
+        'version': PANEL_CACHE_VERSION,
+        'read_at': stamp(read_at),
+        'failed': None,
+        'suggestion': suggestion,
+        'pursuits': pursuit_facts(register, listed.get('usual_minutes') or {}),
+        'rows': rows,
+    }
+
+
+def failed_panel_cache(previous: dict | None, kind: SuggestionError, detail: str, suggestion: dict | None, now: dt.datetime) -> dict:
+    """The rows last read, kept, with why they could not be read again."""
+    kept = previous or {'version': PANEL_CACHE_VERSION, 'read_at': None, 'pursuits': {}, 'rows': []}
+    return {**kept, 'suggestion': suggestion, 'failed': {'error': kind.value, 'detail': detail, 'at': stamp(now)}}
+
+
+def panel_banner(cache: dict | None) -> str | None:
+    """Why the rows are old or missing: `rows from 14:05 — doit unreachable`. None where the last read succeeded."""
+    if cache is None:
+        return 'no rows yet — the desk nudge watch reads them'
+    failed = cache.get('failed')
+    if not failed:
+        return None
+    since = f'rows from {instant(cache["read_at"]):%H:%M}' if cache.get('read_at') else 'no rows yet'
+    return f'{since} — {PANEL_BANNERS.get(SuggestionError(failed["error"]), UNREACHABLE_BANNER)}'
+
+
+def suggestion_rows(suggestion: dict, cache: dict) -> list[dict]:
+    """The suggestion as rows, keyed as the lanes key the same completion.
+
+    A pursuit that writes through is listed by the choice it settled, else by
+    each of its choices that the rows list, and by none where they list none.
+    Any other pursuit is one row under its own key, because its log names no
+    choice. A pursuit that the rows do not know is not listed.
+    """
+    name, item_id = suggestion['pursuit'], suggestion.get('item_id')
+    facts = (cache.get('pursuits') or {}).get(name)
+    if facts is None:
+        return []
+    if facts['writes_through']:
+        rows = cache.get('rows') or []
+        choices = [row for row in rows if row['kind'] == CompletionKind.PURSUIT and row['ref'] == name and row['item_id']]
+        return [row for row in choices if row['item_id'] == item_id] or choices
+    label = ' / '.join(line for line in (suggestion.get('label') or '').splitlines() if line)
+    return [completion_row(CompletionKind.PURSUIT, name, f'{name} · {label}' if label else name)]
+
+
+def read_since(cache: dict | None, moment: str) -> bool:
+    """Whether the rows were read at or after `moment`."""
+    read_at = maybe_instant((cache or {}).get('read_at'))
+    return read_at is not None and read_at >= instant(moment)
+
+
+def once_each(rows: list[dict]) -> list[dict]:
+    """Each key listed once, where it first appears, because one completion is one row."""
+    seen: set[str] = set()
+    kept = []
+    for row in rows:
+        if row['key'] is None or row['key'] not in seen:
+            kept.append(row)
+            seen.add(row['key'])
+    return kept
+
+
+def answer_row_key(answer: Answer, nudge_id: str) -> str:
+    """An answer row's key names its nudge, so a pick after the nudge ended answers it late."""
+    return KEY_SEPARATOR.join([PanelRowKind.ANSWER, answer.value, nudge_id])
+
+
+def panel_today(cache: dict | None, state: dict) -> list[dict]:
+    """The first step: why the rows are old, the suggestion, the answers while a nudge is ready, then every row that something completes.
+
+    A ready nudge's suggestion is the one it showed, until the watch reads the
+    rows after it fired. Otherwise the suggestion is the rows', which the watch
+    read from `/next` at a firing or after a pick, and drops once its pursuit
+    leaves today's lane. A row that the suggestion already lists is not listed
+    again in its lane.
+    """
+    rows = []
+    banner = panel_banner(cache)
+    if banner:
+        rows.append(note_row(banner))
+    listed = (cache or {}).get('rows') or []
+    ready = state['nudge'] if state['phase'] == Phase.READY else None
+    suggestion = ready['suggestion'] if ready and not read_since(cache, ready['fired_at']) else (cache or {}).get('suggestion')
+    if cache is not None and suggestion and 'pursuit' in suggestion:
+        rows += suggestion_rows(suggestion, cache)
+    if ready:
+        rows += [
+            panel_row(answer_row_key(answer, ready['nudge_id']), PanelRowKind.ANSWER, ANSWER_LABELS[answer], answer.value)
+            for answer in Answer
+        ]
+    rows += listed
+    if cache is not None and cache.get('read_at') and not any(row['kind'] in set(CompletionKind) for row in listed):
+        rows.append(note_row(NOTHING_LEFT))
+    return once_each(rows)
+
+
+def held_picks(state: dict, cache: dict | None) -> list[dict]:
+    """The picks that these rows may still list: each one whose completion ended after the rows were read, or has not ended."""
+    read_at = maybe_instant((cache or {}).get('read_at'))
+    return [pick for pick in state['panel']['picked'] if read_at is None or instant(pick['at']) >= read_at]
+
+
+def picked_keys(state: dict, cache: dict | None) -> set[str]:
+    return {pick['key'] for pick in held_picks(state, cache)}
+
+
+def unpicked(rows: list[dict], state: dict, cache: dict | None) -> list[dict]:
+    picked = picked_keys(state, cache)
+    return [row for row in rows if row['key'] not in picked]
+
+
+def take_pick(state: dict, cache: dict | None, key: str, now: dt.datetime) -> bool:
+    """Hold a key as picked. False where it is held already, so one completion runs once.
+
+    A pick whose completion ended before the rows were read is let go, because
+    those rows no longer list what it completed.
+    """
+    held = held_picks(state, cache)
+    state['panel']['picked'] = held
+    if any(pick['key'] == key for pick in held):
+        return False
+    state['panel']['picked'] = [*held, {'key': key, 'at': stamp(now)}]
+    return True
+
+
+def settle_pick(state: dict, key: str, now: dt.datetime, *, recorded_nothing: bool) -> None:
+    """Hold a pick until a read that begins after its completion ended, or let it go where the owner recorded nothing."""
+    others = [pick for pick in state['panel']['picked'] if pick['key'] != key]
+    state['panel']['picked'] = others if recorded_nothing else [*others, {'key': key, 'at': stamp(now)}]
+
+
+def end_on_pick(state: dict) -> dict | None:
+    """A pick ends the nudge in hand and restarts the clock, and leaves a clock with no nudge alone. Returns the nudge it ended."""
+    return end_ready(state) if in_hand(state) else None
+
+
+def want_panel_rebuild(state: dict) -> None:
+    state['panel']['rebuild_wanted'] = True
+
+
+def take_panel_rebuild(state: dict) -> bool:
+    """Whether a pick asked for the rows to be read again, clearing the ask."""
+    wanted = bool(state['panel'].get('rebuild_wanted'))
+    state['panel']['rebuild_wanted'] = False
+    return wanted
+
+
+def minutes_key(kind: PanelRowKind, minutes: int, row_key: str) -> str:
+    """A minutes row's key names the row it logs last, so that row's own key keeps its separators."""
+    return KEY_SEPARATOR.join([kind, str(minutes), row_key])
+
+
+@dataclass(frozen=True)
+class AnswerKey:
+    answer: Answer
+    nudge_id: str | None
+
+
+@dataclass(frozen=True)
+class MinutesKey:
+    kind: PanelRowKind
+    minutes: int
+    row_key: str
+
+
+@dataclass(frozen=True)
+class CompletionKey:
+    key: str
+
+
+class UnreadableKey(ValueError):
+    """A key that no panel row carries the shape of."""
+
+
+def parse_key(key: str) -> AnswerKey | MinutesKey | CompletionKey:
+    """A key, read as `answer_row_key`, `minutes_key` and `completion_key` write it.
+
+    A completion key stays whole, because a pick matches it against the rows
+    rather than reading its parts.
+    """
+    kind, _, rest = key.partition(KEY_SEPARATOR)
+    if kind == PanelRowKind.ANSWER:
+        value, _, nudge_id = rest.partition(KEY_SEPARATOR)
+        if value not in set(Answer):
+            raise UnreadableKey(f'{value!r} is not an answer')
+        return AnswerKey(Answer(value), nudge_id or None)
+    if kind in (PanelRowKind.LOG_MINUTES, PanelRowKind.ADJUST_MINUTES):
+        amount, _, row_key = rest.partition(KEY_SEPARATOR)
+        if not re.fullmatch('[1-9][0-9]*', amount):
+            raise UnreadableKey(f'{key} names no whole number of minutes')
+        return MinutesKey(PanelRowKind(kind), int(amount), row_key)
+    return CompletionKey(key)
+
+
+def minutes_rows(row: dict, minutes: int | None, usual: float | None) -> list[dict]:
+    """A timed pursuit's minutes step: log `minutes`, or reopen 5 above or below it.
+
+    Opened with no amount, it starts on the usual amount. With none usual, it
+    offers `MINUTES_WITHOUT_USUAL`, and its ±5 rows count from
+    `MINUTES_ADJUSTED_FROM`. No amount is ever taken from time away.
+    """
+    name = row['ref']
+    usual_whole = round(usual) if usual else None
+    center = minutes or usual_whole
+    amounts = [center] if center else list(MINUTES_WITHOUT_USUAL)
+    rows = [
+        panel_row(
+            minutes_key(PanelRowKind.LOG_MINUTES, amount, row['key']),
+            PanelRowKind.LOG_MINUTES,
+            f'{name} · log {amount} min' + (' (usual)' if amount == usual_whole else ''),
+        )
+        for amount in amounts
+    ]
+    around = center or MINUTES_ADJUSTED_FROM
+    for sign, amount in (('+', around + MINUTES_STEP), ('−', around - MINUTES_STEP)):
+        if amount > 0:
+            rows.append(
+                panel_row(
+                    minutes_key(PanelRowKind.ADJUST_MINUTES, amount, row['key']),
+                    PanelRowKind.ADJUST_MINUTES,
+                    f'{name} · {sign}{MINUTES_STEP} → {amount} min',
+                )
+            )
+    return rows
+
+
+def panel_step(step: PanelStep, rows: list[dict], message: str | None = None) -> dict:
+    """One step as `panel show --json` and `panel pick --json` print it, which `schemas/desk-nudge-panel.schema.json` describes."""
+    return {
+        'schema_version': PANEL_SCHEMA_VERSION,
+        'step': step.value,
+        'rows': [{'key': row['key'], 'kind': row['kind'], 'text': row['text']} for row in rows],
+        'message': message,
+    }
+
+
+def picked_record(now: dt.datetime, nudge_id: str | None, row: dict, minutes: int | None, error: str | None, snapshot: dict) -> dict:
+    """The `picked` line: what was completed, whether it went through, and the nudge it ended."""
+    pick = {'kind': row['kind'], 'ref': row['ref'], 'item_id': row.get('item_id'), 'minutes': minutes, 'ok': error is None, 'error': error}
+    return record(Event.PICKED, now, nudge_id=nudge_id, pick=pick, **snapshot)
+
+
 # --- records and their schemas ----------------------------------------------------
 
 
@@ -714,14 +1118,15 @@ RECORD_PROPERTIES: dict[str, dict] = {
     'pick': {
         'type': 'object',
         'additionalProperties': False,
-        'required': ['kind', 'ref', 'ok'],
+        'description': 'What a panel pick completed, and whether it went through.',
+        'required': ['kind', 'ref', 'item_id', 'minutes', 'ok', 'error'],
         'properties': {
-            'kind': {'type': 'string', 'description': 'The row picked: a pursuit, task, habit, review or practice.'},
-            'ref': {'type': 'string', 'description': "The row's identity within its kind."},
-            'item_id': {'type': ['string', 'null']},
-            'minutes': {'type': ['integer', 'null']},
+            'kind': {'enum': [kind.value for kind in CompletionKind], 'description': 'Which owner completes it.'},
+            'ref': {'type': 'string', 'description': "A pursuit's name, a habit's id, or a review register entry's id."},
+            'item_id': {'type': ['string', 'null'], 'description': "The pursuit's choice that its on_log completed, where it named one."},
+            'minutes': {'type': ['integer', 'null'], 'description': 'The minutes logged for a timed pursuit.'},
             'ok': {'type': 'boolean', 'description': 'Whether the completion went through.'},
-            'error': {'type': ['string', 'null']},
+            'error': {'type': ['string', 'null'], 'description': "Why it did not: the owner's refusal, or the command and how it failed."},
         },
     },
     'idle_after_seconds': {'type': 'integer', 'description': "The listener's timeout, which an away counts back from."},
@@ -826,11 +1231,57 @@ def status_schema() -> dict:
     }
 
 
+def panel_schema() -> dict:
+    """The JSON Schema of one panel step, as `panel show --json` and `panel pick --json` print it."""
+    return {
+        '$schema': 'http://json-schema.org/draft-07/schema#',
+        '$id': f'urn:doit:desk-nudge-panel:v{PANEL_SCHEMA_VERSION}',
+        'title': 'doit desk-nudge panel',
+        'description': (
+            "One step of the desk nudge's panel, read from the rows that the watch keeps in $XDG_CACHE_HOME/doit/desk-nudge-panel.json. "
+            'A menu draws each row and hands the picked key to `doit desk-nudge panel pick`, which prints the next step. '
+            'Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.'
+        ),
+        'type': 'object',
+        'additionalProperties': False,
+        'required': ['schema_version', 'step', 'rows', 'message'],
+        'properties': {
+            'schema_version': {'const': PANEL_SCHEMA_VERSION},
+            'step': {
+                'enum': [step.value for step in PanelStep],
+                'description': "today's rows, a timed pursuit's minutes, or done once a pick has acted.",
+            },
+            'rows': {
+                'type': 'array',
+                'description': 'What to draw, in order. Empty on a done step.',
+                'items': {
+                    'type': 'object',
+                    'additionalProperties': False,
+                    'required': ['key', 'kind', 'text'],
+                    'properties': {
+                        'key': {
+                            'type': ['string', 'null'],
+                            'description': 'What `panel pick` takes. Null on a note, which completes nothing.',
+                        },
+                        'kind': {
+                            'enum': [str(kind) for kind in PANEL_ROW_KINDS],
+                            'description': 'A note, an answer, what a completion completes, or a step through the minutes.',
+                        },
+                        'text': {'type': 'string', 'description': 'The line to draw.'},
+                    },
+                },
+            },
+            'message': {'type': ['string', 'null'], 'description': 'What a done step did. Null on every other step.'},
+        },
+    }
+
+
 def schema_text(schema: dict) -> str:
     return json.dumps(schema, indent=2, ensure_ascii=False) + '\n'
 
 
 def write_schemas(directory: Path) -> None:
-    """Write both schemas into `directory`, the repo's `schemas/`."""
+    """Write the record, status and panel schemas into `directory`, the repo's `schemas/`."""
     (directory / RECORD_SCHEMA_FILE).write_text(schema_text(record_schema()), encoding='utf-8')
     (directory / STATUS_SCHEMA_FILE).write_text(schema_text(status_schema()), encoding='utf-8')
+    (directory / PANEL_SCHEMA_FILE).write_text(schema_text(panel_schema()), encoding='utf-8')

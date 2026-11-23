@@ -556,6 +556,16 @@ def watched(pursuits: dict, today: dt.date) -> dict:
     return {name: config for name, config in pursuits.items() if is_active(config, today) or is_tracked(config, today)}
 
 
+def is_timed(config: dict) -> bool:
+    """Whether a pursuit is measured in minutes. Declaring weekly minutes is the only thing that makes it so."""
+    return bool(config.get('weekly_minutes'))
+
+
+def writes_through(config: dict) -> bool:
+    """Whether a pursuit's log completes one of its choices in another app, so a log is about one specific choice."""
+    return bool(config.get('resolve') and config.get('on_log'))
+
+
 def declared_minutes(register: dict) -> dict[str, float]:
     """Every timed pursuit's minutes a week, over the whole register rather than the active set.
 
@@ -563,7 +573,7 @@ def declared_minutes(register: dict) -> dict[str, float]:
     logged in minutes. Scoping this to the active set would report that history
     as a count of entries.
     """
-    return {name: float(config['weekly_minutes']) for name, config in register.items() if config.get('weekly_minutes')}
+    return {name: float(config['weekly_minutes']) for name, config in register.items() if is_timed(config)}
 
 
 # Where a record's time does not parse, it sorts before every dated one.
@@ -1151,11 +1161,10 @@ def offer_provenance(draw: dict, name: str) -> dict:
 def minutes_refusal(name: str, config: dict, minutes: int | None) -> str | None:
     """Why a log's minutes do not fit its pursuit, or None where they do.
 
-    Declaring weekly minutes is the only thing that makes a pursuit measured in
-    time. A tracked pursuit is measured against nothing, so it keeps what it is
-    given and needs none.
+    A tracked pursuit is measured against nothing, so it keeps what it is given
+    and needs none.
     """
-    timed = bool(config.get('weekly_minutes'))
+    timed = is_timed(config)
     if minutes is not None and not timed and paced(config):
         return f'{name} is counted in completions, so minutes have nothing to measure'
     if timed and minutes is None:

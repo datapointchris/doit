@@ -47,6 +47,11 @@ def desk_nudge_watch_lock_file() -> Path:
     return state_dir() / 'desk-nudge-watch.lock'
 
 
+def desk_nudge_panel_cache_file() -> Path:
+    """The desk nudge panel's rows as identities, which the watch rewrites and `panel show` reads with no request."""
+    return cache_dir() / 'desk-nudge-panel.json'
+
+
 def desk_nudge_records_file() -> Path:
     """One `doit.desk_nudge` record per line, appended and never rotated, for a log shipper to read."""
     return state_dir() / 'desk-nudge-events.jsonl'

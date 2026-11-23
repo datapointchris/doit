@@ -1,4 +1,4 @@
-"""`doit desk-nudge`: the watch that counts present time and fires the nudge, and the commands that answer, pause and report it.
+"""`doit desk-nudge`: the watch that counts present time and fires the nudge, the commands that answer, pause and report it, and its panel.
 
 Every rule is `doit.desk_nudge`'s. This module holds the effects around them: the
 state file and its lock, the record file, the service's reads and writes, and the
@@ -12,6 +12,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -27,6 +28,8 @@ from pathlib import Path
 from typing import IO
 from typing import Annotated
 from typing import Any
+from typing import assert_never
+from urllib.parse import quote
 
 import typer
 from pyclilogin import LoginError
@@ -37,16 +40,24 @@ from doit import desk_nudge
 from doit import paths
 from doit import service
 from doit import tool_version
+from doit.dashboard import habit_completion_argv
 from doit.desk_nudge import ANSWER_LABELS
 from doit.desk_nudge import Answer
 from doit.desk_nudge import Event
 from doit.desk_nudge import NothingToAnswer
+from doit.desk_nudge import PanelRowKind
+from doit.desk_nudge import PanelStep
 from doit.desk_nudge import Phase
 from doit.desk_nudge import SuggestionError
 from doit.journal import new_id
+from doit.lanes import CompletionKind
 from doit.render import console
 from doit.render import error_console
 from doit.render import examples
+from doit.service_commands.pursuits import LogRefused
+from doit.service_commands.pursuits import Unrecorded
+from doit.service_commands.pursuits import log_pursuit
+from doit.service_commands.review import mark_done
 
 log = logging.getLogger('doit.desk_nudge')
 
@@ -54,10 +65,17 @@ log = logging.getLogger('doit.desk_nudge')
 PROGRAM_SECONDS = 5.0
 # Outlasts the service's read of each app plus its read of the day's context, as `/next` makes them.
 NEXT_BUDGET_SECONDS = 30.0
+# `/today` asks every app that `/next` asks, and `/pursuits` builds the same state.
+PANEL_BUDGET_SECONDS = 30.0
 INTERVAL_BUDGET_SECONDS = 10.0
 ANSWER_BUDGET_SECONDS = 10.0
+# How long `life habits complete` may take. It is the one panel program with a budget other than `PROGRAM_SECONDS`.
+HABIT_SECONDS = 30.0
 # Another desk's answers move the interval too, so the watch reads it again this often.
 INTERVAL_REFRESH_SECONDS = 300.0
+# While the desk is in use, rows completed elsewhere leave the panel this often, beside each firing and each pick.
+PANEL_REFRESH_SECONDS = 300.0
+PICK_REFUSED_EXIT = 2
 PROC = Path('/proc')
 # `fcntl.lockf` excludes other processes and never this one's threads, so the watch's threads take this first.
 STATE_THREAD_LOCK = threading.Lock()
@@ -119,14 +137,13 @@ def set_aside(path: Path) -> Path:
     return aside
 
 
-def write_state(state: dict) -> None:
-    """Replace the state file whole, through a temporary file beside it, so no reader sees half of one."""
-    path = paths.desk_nudge_state_file()
+def replace_file(path: Path, document: dict) -> None:
+    """Replace a JSON file whole, through a temporary file beside it, so no reader sees half of one."""
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=path.parent, prefix='.desk-nudge-', suffix='.json')
     try:
         with os.fdopen(handle, 'w', encoding='utf-8') as file:
-            json.dump(state, file, indent=2, ensure_ascii=False)
+            json.dump(document, file, indent=2, ensure_ascii=False)
             file.write('\n')
         os.replace(temporary, path)
     except BaseException:
@@ -134,12 +151,16 @@ def write_state(state: dict) -> None:
         raise
 
 
+def write_state(state: dict) -> None:
+    replace_file(paths.desk_nudge_state_file(), state)
+
+
 @contextlib.contextmanager
 def changed_state() -> Iterator[dict]:
     """The state, read under `STATE_THREAD_LOCK` and `fcntl.lockf` and written back atomically with the pill redrawn.
 
-    The watch, `record-presence`, `answer`, `pause` and `resume` each change the
-    file this way. Hold it around the read, the change and the write alone. A
+    The watch, `record-presence`, `answer`, `pause`, `resume` and `panel pick` each
+    change the file this way. Hold it around the read, the change and the write alone. A
     block that raises writes nothing. A file that cannot be read is set aside, and
     the change starts from a fresh clock.
     """
@@ -183,7 +204,11 @@ def carry_out(change: desk_nudge.Change) -> None:
 
 
 class ProgramFailed(Exception):
-    """A program was missing, timed out or exited non-zero."""
+    """A program was missing, timed out or exited non-zero. One that timed out may have done its work."""
+
+    def __init__(self, message: str, *, timed_out: bool = False) -> None:
+        super().__init__(message)
+        self.timed_out = timed_out
 
 
 def run_program(argv: list[str], seconds: float = PROGRAM_SECONDS) -> str:
@@ -193,7 +218,7 @@ def run_program(argv: list[str], seconds: float = PROGRAM_SECONDS) -> str:
     except FileNotFoundError:
         raise ProgramFailed(f'{argv[0]} is not installed') from None
     except subprocess.TimeoutExpired:
-        raise ProgramFailed(f'{argv[0]} gave no answer within {seconds:g} s') from None
+        raise ProgramFailed(f'{argv[0]} gave no answer within {seconds:g} s', timed_out=True) from None
     except OSError as error:
         raise ProgramFailed(f'{argv[0]} could not start: {error}') from None
     if done.returncode != 0:
@@ -285,21 +310,87 @@ def find_hypridle(remembered: str | None = None) -> str | None:
 # --- the service ----------------------------------------------------------------
 
 
+def read_failure(error: Exception) -> SuggestionError:
+    """Why a read of the service failed: no answer came, or this desk's login was refused or is missing."""
+    if isinstance(error, service.NoAnswer):
+        return SuggestionError.UNREACHABLE
+    if isinstance(error, LoginError) or getattr(error, 'status', None) in (None, 401):
+        return SuggestionError.LOGIN
+    return SuggestionError.UNREACHABLE
+
+
 def drawn_suggestion() -> dict:
     """`/next`'s first offered pursuit, or why there is none. Reading it counts as an offer from this desk."""
     try:
         selection = service.client().get('/next', machine=paths.machine_name(), budget_seconds=NEXT_BUDGET_SECONDS)
-    except LoginError as refused:
-        return desk_nudge.failed_suggestion(SuggestionError.LOGIN, str(refused))
-    except service.NoAnswer as silent:
-        return desk_nudge.failed_suggestion(SuggestionError.UNREACHABLE, str(silent))
-    except service.ServiceFailed as failed:
-        if failed.status in (404, 409):
+    except (service.ServiceFailed, LoginError) as failed:
+        if getattr(failed, 'status', None) in (404, 409):
             return desk_nudge.failed_suggestion(SuggestionError.NOTHING_TO_DRAW, str(failed))
-        if failed.status in (None, 401):
-            return desk_nudge.failed_suggestion(SuggestionError.LOGIN, str(failed))
-        return desk_nudge.failed_suggestion(SuggestionError.UNREACHABLE, str(failed))
+        return desk_nudge.failed_suggestion(read_failure(failed), str(failed))
     return desk_nudge.suggestion_from(selection)
+
+
+# --- the panel's rows -------------------------------------------------------------
+
+
+def read_panel_cache() -> dict | None:
+    """The rows that the watch last wrote, or None where it has written none that this release can read."""
+    path = paths.desk_nudge_panel_cache_file()
+    try:
+        document = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as error:
+        log.warning(f'{path} cannot be read, so the panel has no rows until the watch writes it again: {error}')
+        return None
+    return document if isinstance(document, dict) and document.get('version') == desk_nudge.PANEL_CACHE_VERSION else None
+
+
+def listed_pursuits(client: service.Service) -> dict:
+    """`/pursuits`, for each pursuit's declaration and usual minutes. An empty register lists none."""
+    try:
+        return client.get('/pursuits', budget_seconds=PANEL_BUDGET_SECONDS)
+    except service.ServiceFailed as failed:
+        if failed.status == 404:
+            return {'pursuits': {}, 'usual_minutes': {}}
+        raise
+
+
+def pursuit_item(client: service.Service, name: str) -> dict:
+    """What a pursuit means now, with its choices. A failed read lists the pursuit as a note, which completes nothing."""
+    try:
+        return client.get(f'/pursuits/{quote(name, safe="")}/item', budget_seconds=PANEL_BUDGET_SECONDS).get('resolved') or {}
+    except service.ServiceFailed as failed:
+        return {'error': str(failed)}
+
+
+def rebuild_panel_cache(suggestion: dict | None = None, *, read_next: bool = False) -> None:
+    """Read the panel's rows again from `/today` and `/pursuits`, and write them for `panel show`.
+
+    The suggestion is the one handed in, a fresh `/next` where `read_next` asks,
+    or else the one the rows last held while today's lane still lists it. A
+    failed read keeps the last rows and names why, so the panel reads as old
+    rather than as nothing owed.
+    """
+    previous = read_panel_cache()
+    carried = not read_next and suggestion is None
+    if read_next:
+        suggestion = drawn_suggestion()
+    elif carried:
+        suggestion = (previous or {}).get('suggestion')
+    read_at = now()
+    try:
+        client = service.client()
+        today = client.get('/today', budget_seconds=PANEL_BUDGET_SECONDS)
+        listed = listed_pursuits(client)
+        items = {name: pursuit_item(client, name) for name in desk_nudge.choice_pursuits(today, listed.get('pursuits') or {})}
+    except (service.ServiceFailed, LoginError) as error:
+        log.warning(f'kept the panel rows this desk last read, because the service gave none: {error}')
+        cache = desk_nudge.failed_panel_cache(previous, read_failure(error), str(error), suggestion, now())
+    else:
+        kept = desk_nudge.still_owed(suggestion, today) if carried else suggestion
+        cache = desk_nudge.panel_cache(today, listed, items, kept, read_at)
+    replace_file(paths.desk_nudge_panel_cache_file(), cache)
 
 
 def refresh_interval() -> None:
@@ -326,6 +417,16 @@ class Answered:
     saved: bool
     queued: bool = False
     failure: Exception | None = None
+
+
+def answer_outcome(answered: Answered) -> tuple[int, str]:
+    """The exit code and the sentence for one answer, which `doit desk-nudge answer` and a panel pick both give."""
+    label = ANSWER_LABELS[Answer(answered.taken.row['answer'])]
+    if answered.saved:
+        late = ' It answers a nudge that had already ended, so the clock is left alone.' if answered.taken.late else ''
+        return 0, f'"{label}" is saved. The interval is {read_state()["interval_minutes"]:g} minutes.{late}'
+    kept = 'It is kept on this desk, and the watch sends it again.' if answered.queued else 'It was refused, so nothing sends it again.'
+    return service.exit_code(answered.failure) if answered.failure else 1, f'"{label}" is not saved: {answered.failure}. {kept}'
 
 
 def answer_nudge(answer: Answer, nudge_id: str | None = None, *, from_notification: bool = False) -> Answered:
@@ -426,10 +527,14 @@ class Watch:
         self.reading: threading.Thread | None = None
         self.resending: threading.Thread | None = None
         self.refreshing: threading.Thread | None = None
+        self.rebuilding: threading.Thread | None = None
         self.interval_read_at: float | None = None
+        self.panel_read_at: float | None = None
         self.shown: Shown | None = None
         self.hypridle_pid: str | None = None
         self.showing = threading.Lock()
+        # One rebuild of the panel's rows at a time, so a slower read never writes over a newer one.
+        self.panel_lock = threading.Lock()
 
     def background(self, target: Callable[..., None], *args: Any) -> threading.Thread:
         thread = threading.Thread(target=target, args=args, daemon=True)
@@ -458,6 +563,7 @@ class Watch:
         elif nudge and phase is Phase.READY:
             self.show(nudge, replaces=nudge['notification_id'])
         self.refresh_interval_when_due()
+        self.rebuild_panel_when_due(picked=False, in_use=True)
 
     def tick(self) -> None:
         """Count, expire, and start whatever the tick calls for off the loop."""
@@ -468,6 +574,8 @@ class Watch:
             firing = desk_nudge.begin_firing(state, moment, new_id(moment)) if change.fire else None
             ready = dict(state['nudge']) if state['phase'] == Phase.READY else None
             queued = bool(state['queued_answers'])
+            picked = not alive(self.rebuilding) and desk_nudge.take_panel_rebuild(state)
+            in_use = Phase(state['phase']).desk_in_use
         carry_out(change)
         if firing:
             self.firing = self.background(self.fire, firing)
@@ -479,6 +587,7 @@ class Watch:
         if queued and not alive(self.resending):
             self.resending = self.background(resend_queued)
         self.refresh_interval_when_due()
+        self.rebuild_panel_when_due(picked, in_use)
 
     def refresh_interval_when_due(self) -> None:
         due = self.interval_read_at is None or time.monotonic() - self.interval_read_at >= INTERVAL_REFRESH_SECONDS
@@ -486,8 +595,28 @@ class Watch:
             self.interval_read_at = time.monotonic()
             self.refreshing = self.background(refresh_interval)
 
+    def rebuild_panel_when_due(self, picked: bool, in_use: bool) -> None:
+        """Read the panel's rows again after a pick, with `/next`, which leaves out what was logged, and every `PANEL_REFRESH_SECONDS`.
+
+        The timed read waits while nobody is at the desk, because `/today` asks
+        every app. A desk coming back has rows older than the interval, so the
+        next tick reads them.
+        """
+        due = in_use and (self.panel_read_at is None or time.monotonic() - self.panel_read_at >= PANEL_REFRESH_SECONDS)
+        if (picked or due) and not alive(self.rebuilding):
+            self.panel_read_at = time.monotonic()
+            self.rebuilding = self.background(self.rebuild_panel, None, picked)
+
+    def rebuild_panel(self, suggestion: dict | None, read_next: bool) -> None:
+        """A failure that the read does not name keeps the last rows, because a stopped thread would leave them old with no word."""
+        with self.panel_lock:
+            try:
+                rebuild_panel_cache(suggestion, read_next=read_next)
+            except Exception:
+                log.exception("could not read the panel's rows again, so the panel keeps the last ones")
+
     def fire(self, nudge: dict) -> None:
-        """Read `/next`, take the snapshot, write `fired`, make the nudge ready, and show it.
+        """Read `/next`, take the snapshot, write `fired`, make the nudge ready, show it, and read the panel's rows under its suggestion.
 
         A failure that the read does not name still makes the nudge ready, because a
         nudge left firing holds the clock until the watch restarts.
@@ -512,6 +641,8 @@ class Watch:
             ready = desk_nudge.make_ready(state, now(), nudge['nudge_id'], suggestion)
         if ready:
             self.show(ready)
+        self.panel_read_at = time.monotonic()
+        self.rebuild_panel(suggestion, read_next=False)
 
     def show(self, nudge: dict, replaces: int | None = None) -> None:
         """Start `notify-send` as a child that the tick loop never waits on, with a thread that reads its id and its action."""
@@ -585,7 +716,7 @@ class Watch:
         if self.shown and self.shown.process.poll() is None:
             self.shown.replaced.set()
             self.shown.process.terminate()
-        for thread in (self.firing, self.reading, self.resending, self.refreshing):
+        for thread in (self.firing, self.reading, self.resending, self.refreshing, self.rebuilding):
             if thread is not None:
                 thread.join(timeout=10)
 
@@ -705,15 +836,12 @@ def answer_command(
         answered = answer_nudge(answer, nudge)
     except NothingToAnswer as nothing:
         raise typer.BadParameter(f'{nothing}.', param_hint='--nudge') from None
-    label = ANSWER_LABELS[answer]
-    late = ' It answers a nudge that had already ended, so the clock is left alone.' if answered.taken.late else ''
-    if answered.saved:
-        state = read_state()
-        console.print(f'"{label}" is saved. The interval is {state["interval_minutes"]:g} minutes.{late}', soft_wrap=True)
-        raise typer.Exit(0)
-    kept = 'It is kept on this desk, and the watch sends it again.' if answered.queued else 'It was refused, so nothing sends it again.'
-    error_console.print(f'doit desk-nudge: "{label}" is not saved: {answered.failure}. {kept}', soft_wrap=True, markup=False)
-    raise typer.Exit(service.exit_code(answered.failure) if answered.failure else 1)
+    code, said = answer_outcome(answered)
+    if code:
+        error_console.print(f'doit desk-nudge: {said}', soft_wrap=True, markup=False)
+    else:
+        console.print(said, soft_wrap=True, markup=False)
+    raise typer.Exit(code)
 
 
 @app.command('pause', epilog=examples(('doit desk-nudge pause', 'hold the clock until resume')))
@@ -778,3 +906,281 @@ def render_status(document: dict) -> None:
         console.print(line, soft_wrap=True)
     if not document['watch_running']:
         console.print(Text('  The watch is not running, so the clock stands still.', style='yellow'), soft_wrap=True)
+
+
+# --- the panel ----------------------------------------------------------------------
+
+
+class PickRefused(Exception):
+    """A key that the panel will not act on, such as one naming no row now or a row picked already. Nothing ran."""
+
+
+@dataclass(frozen=True)
+class Completion:
+    """How one completion through its owner ended, as its notification says it."""
+
+    ok: bool
+    summary: str
+    body: str
+    exit_code: int = 0
+    # Where the owner is known to have recorded nothing, so the row can be picked again at once.
+    recorded_nothing: bool = False
+
+
+class CompletionFailed(Exception):
+    """A completion that did not go through. Its notification is already shown, and its `picked` line written."""
+
+    def __init__(self, completion: Completion) -> None:
+        super().__init__(completion.body)
+        self.completion = completion
+
+
+def listed_row(cache: dict | None, state: dict, key: str) -> dict:
+    """The completion row that `key` names among the panel's rows now. Raises PickRefused where none does, or where it was picked."""
+    rows = desk_nudge.panel_today(cache, state)
+    row = next((row for row in rows if row['key'] == key and row['kind'] in set(CompletionKind)), None)
+    if row is None:
+        raise PickRefused(f'the panel lists no row {key} now')
+    if key in desk_nudge.picked_keys(state, cache):
+        raise PickRefused(f'{row["text"]} is picked already, and is taken again once the watch reads the rows again')
+    if refusal := completion_refusal(row):
+        raise PickRefused(refusal)
+    return row
+
+
+def pursuit_facts(cache: dict | None, row: dict) -> dict:
+    """What the rows know of a pursuit row's pursuit, and nothing for any other row."""
+    if row['kind'] != CompletionKind.PURSUIT:
+        return {}
+    return ((cache or {}).get('pursuits') or {}).get(row['ref']) or {}
+
+
+def timed_facts(cache: dict | None, row: dict) -> dict:
+    """The facts of a pursuit counted in minutes. Raises PickRefused for any other row, whose log carries no minutes."""
+    facts = pursuit_facts(cache, row)
+    if not facts.get('timed'):
+        raise PickRefused(f'{row["text"]} is not counted in minutes')
+    return facts
+
+
+def logged_pursuit(row: dict, minutes: int | None) -> Completion:
+    """`doit pursuits log`, in-process, naming the row's choice. Its on_log runs unasked, because the pick is the asking."""
+    name = row['ref']
+    try:
+        logged = log_pursuit(name, row.get('item_id'), minutes, '', assume_yes=True)
+    except Unrecorded as lost:
+        return Completion(False, f'doit: {name} not recorded', '\n'.join(lost.lines()), service.exit_code(lost.failure))
+    except (LogRefused, service.ServiceFailed, LoginError) as failed:
+        # A send with no answer may have landed, so only a refusal frees the row.
+        refused = not isinstance(failed, service.NoAnswer)
+        return Completion(False, f'doit: {name} not logged', str(failed), service.exit_code(failed), recorded_nothing=refused)
+    entry = logged.lines()[0]
+    if logged.exit_code:
+        return Completion(False, f'doit: {name} logged, and its on_log failed', f'{entry}\n{logged.ran} exited {logged.exit_code}', 1)
+    return Completion(True, 'doit: logged', '\n'.join(logged.lines()))
+
+
+def marked_review_done(row: dict) -> Completion:
+    """`doit review done`, in-process. The service keeps one completion a day for an entry, so a failure frees the row."""
+    try:
+        done = mark_done(row['ref'])
+    except (service.ServiceFailed, LoginError) as failed:
+        return Completion(False, f'doit: {row["ref"]} not marked done', str(failed), service.exit_code(failed), recorded_nothing=True)
+    days = (done.get('status') or {}).get('cadence_days')
+    return Completion(True, 'doit: marked done', f'{row["ref"]} ({done["done_on"]})' + (f' · due again in {days}d' if days else ''))
+
+
+def completed_habit(row: dict) -> Completion:
+    """`life habits complete <id>`, stopped after `HABIT_SECONDS`. One that ran out of time may have landed, so it holds the row."""
+    try:
+        run_program(habit_completion_argv(row['ref']), HABIT_SECONDS)
+    except ProgramFailed as failed:
+        return Completion(False, 'doit: habit not completed', str(failed), 1, recorded_nothing=not failed.timed_out)
+    return Completion(True, 'doit: habit completed', row['text'])
+
+
+def completion_refusal(row: dict) -> str | None:
+    """Why a row cannot be completed as it stands, checked before anything runs."""
+    match CompletionKind(row['kind']):
+        case CompletionKind.HABIT:
+            # A source's lane names the habit, so its id reaches life as an argument only where it is one.
+            return None if re.fullmatch('[0-9]+', row['ref']) else f'{row["text"]} names habit {row["ref"]!r}, and a habit id is all digits'
+        case CompletionKind.PURSUIT | CompletionKind.REVIEW | CompletionKind.PRACTICE:
+            return None
+        case _ as unmatched:
+            assert_never(unmatched)
+
+
+def completed(row: dict, minutes: int | None) -> Completion:
+    """Complete one row through its owner, with what doit builds from the row's kind and ref."""
+    match CompletionKind(row['kind']):
+        case CompletionKind.PURSUIT:
+            return logged_pursuit(row, minutes)
+        case CompletionKind.HABIT:
+            return completed_habit(row)
+        case CompletionKind.REVIEW | CompletionKind.PRACTICE:
+            return marked_review_done(row)
+        case _ as unmatched:
+            assert_never(unmatched)
+
+
+def complete(row: dict, minutes: int | None, cache: dict | None) -> dict:
+    """Hold the pick, complete the row, then settle the pick, end a nudge in hand where it went through, and write `picked`.
+
+    Raises PickRefused where the key is held already, and CompletionFailed
+    where the completion did not go through. A completion that recorded nothing
+    frees its row at once. Every other one holds it until a read that begins
+    after it ended, which the watch starts within a tick.
+    """
+    moment = now()
+    with changed_state() as state:
+        taken = desk_nudge.take_pick(state, cache, row['key'], moment)
+    if not taken:
+        raise PickRefused(f'{row["text"]} is picked already, and is taken again once the watch reads the rows again')
+    seen = snapshot()
+    try:
+        outcome = completed(row, minutes)
+    except Exception as error:
+        log.exception(f'completing {row["key"]} raised, so its row is held until the rows are read again')
+        outcome = Completion(False, 'doit: not completed', f'{type(error).__name__}: {error}', 1)
+    with changed_state() as state:
+        desk_nudge.settle_pick(state, row['key'], now(), recorded_nothing=outcome.recorded_nothing)
+        ended = desk_nudge.end_on_pick(state) if outcome.ok else None
+        desk_nudge.want_panel_rebuild(state)
+    carry_out(desk_nudge.Change(closes=ended))
+    notify(outcome.summary, outcome.body)
+    nudge_id = ended['nudge_id'] if ended else None
+    append_records([desk_nudge.picked_record(moment, nudge_id, row, minutes, None if outcome.ok else outcome.body, seen)])
+    if not outcome.ok:
+        raise CompletionFailed(outcome)
+    return desk_nudge.panel_step(PanelStep.DONE, [], outcome.body)
+
+
+def picked_answer(key: desk_nudge.AnswerKey) -> dict:
+    """Answer through `answer_nudge`, which notifies a failure, and exit as `doit desk-nudge answer` exits for it."""
+    try:
+        answered = answer_nudge(key.answer, key.nudge_id)
+    except NothingToAnswer as nothing:
+        raise PickRefused(str(nothing)) from None
+    code, said = answer_outcome(answered)
+    if code:
+        raise CompletionFailed(Completion(False, 'doit: answer not saved', said, code))
+    return desk_nudge.panel_step(PanelStep.DONE, [], said)
+
+
+def minutes_step(row: dict, minutes: int | None, cache: dict | None) -> dict:
+    """A timed pursuit's minutes step, centered on `minutes` or else on its usual amount."""
+    usual = timed_facts(cache, row).get('usual_minutes')
+    return desk_nudge.panel_step(PanelStep.MINUTES, desk_nudge.minutes_rows(row, minutes, usual))
+
+
+def pick(key: str) -> dict:
+    """Act on one panel row by its key, and return the next step.
+
+    Raises PickRefused before anything runs, and CompletionFailed after a
+    completion that did not go through.
+    """
+    try:
+        parsed = desk_nudge.parse_key(key)
+    except desk_nudge.UnreadableKey as unreadable:
+        raise PickRefused(str(unreadable)) from None
+    if isinstance(parsed, desk_nudge.AnswerKey):
+        return picked_answer(parsed)
+    cache, state = read_panel_cache(), read_state()
+    match parsed:
+        case desk_nudge.MinutesKey(kind=PanelRowKind.ADJUST_MINUTES, minutes=minutes, row_key=row_key):
+            return minutes_step(listed_row(cache, state, row_key), minutes, cache)
+        case desk_nudge.MinutesKey(minutes=minutes, row_key=row_key):
+            row = listed_row(cache, state, row_key)
+            timed_facts(cache, row)
+            return complete(row, minutes, cache)
+        case desk_nudge.CompletionKey(key=row_key):
+            row = listed_row(cache, state, row_key)
+            return minutes_step(row, None, cache) if pursuit_facts(cache, row).get('timed') else complete(row, None, cache)
+        case _ as unmatched:
+            assert_never(unmatched)
+
+
+def print_step(step: dict, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(step, indent=2, ensure_ascii=False))
+        return
+    if step['message']:
+        console.print(Text(step['message']), soft_wrap=True)
+    width = max((len(row['key'] or '') for row in step['rows']), default=0)
+    for row in step['rows']:
+        line = Text('  ')
+        line.append(f'{row["key"] or "":<{width}}  ', style='dim')
+        line.append(row['text'], style='yellow' if row['kind'] == PanelRowKind.NOTE else '')
+        console.print(line, soft_wrap=True)
+
+
+panel_app = typer.Typer(
+    name='panel',
+    no_args_is_help=True,
+    help=(
+        "The desk nudge's panel, which completes any of today's rows in one pick.\n\n"
+        'A menu such as rofi draws the rows that `panel show --json` prints, and hands the key picked to `panel pick`, '
+        'which prints the next step. doit builds every completion from the row it names, so the menu holds no rule.'
+    ),
+    epilog=examples(
+        ('doit desk-nudge panel show', "today's rows with the key that picks each"),
+        ('doit desk-nudge panel pick habit:17', 'complete habit 17 through life'),
+    ),
+)
+app.add_typer(panel_app, name='panel')
+
+
+@panel_app.command(
+    'show',
+    epilog=examples(
+        ('doit desk-nudge panel show', "today's rows with the key that picks each"),
+        ('doit desk-nudge panel show --json', 'the same step as data, for a menu to draw'),
+    ),
+)
+def panel_show_command(
+    as_json: Annotated[bool, typer.Option('--json', help='Output the step as JSON to stdout.')] = False,
+) -> None:
+    """The suggestion, the four answers while a nudge is ready, and every row that something can complete.
+
+    Read with no request from the rows that the watch keeps, so a row picked
+    since they were read is left out. Exits 0.
+    """
+    cache, state = read_panel_cache(), read_state()
+    rows = desk_nudge.unpicked(desk_nudge.panel_today(cache, state), state, cache)
+    print_step(desk_nudge.panel_step(PanelStep.TODAY, rows), as_json)
+    raise typer.Exit(0)
+
+
+@panel_app.command(
+    'pick',
+    epilog=examples(
+        ('doit desk-nudge panel pick pursuit:read', "open read's minutes, starting on the amount most often logged"),
+        ('doit desk-nudge panel pick review:prune-docker --json', 'mark a review entry done, and print the done step as data'),
+    ),
+)
+def panel_pick_command(
+    key: Annotated[str, typer.Argument(help='A row key that `panel show` printed.')],
+    as_json: Annotated[bool, typer.Option('--json', help='Output the next step as JSON to stdout.')] = False,
+) -> None:
+    """Act on one row: answer the nudge, open a timed pursuit's minutes, or complete the row through its owner.
+
+    Prints the next step, or a done step once something is completed, and exits
+    0 for either. Exits 2 where the panel will not act on the key, such as a row
+    picked already, and nothing ran. Exits 1 where the completion did not go
+    through, and 4 where the service gave no answer. A notification names the
+    error in each case, because a menu shows no stderr.
+    """
+    try:
+        step = pick(key)
+    except PickRefused as refused:
+        notify('doit: not picked', str(refused))
+        error_console.print(Text(f'doit desk-nudge panel pick: {refused}'), soft_wrap=True)
+        raise typer.Exit(PICK_REFUSED_EXIT) from None
+    except CompletionFailed as failed:
+        error_console.print(
+            Text(f'doit desk-nudge panel pick: {failed.completion.summary.removeprefix("doit: ")}: {failed}'), soft_wrap=True
+        )
+        raise typer.Exit(failed.completion.exit_code) from None
+    print_step(step, as_json)
+    raise typer.Exit(0)

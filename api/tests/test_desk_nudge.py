@@ -23,6 +23,8 @@ from jsonschema import Draft7Validator
 from typer.testing import CliRunner
 
 from doit import desk_nudge
+from doit import journal
+from doit import pursuits
 from doit import service
 from doit.cli import app as cli_app
 from doit.desk_nudge import Answer
@@ -69,6 +71,10 @@ elif name == 'gdbus':
     else:
         (here / f'closed-{args[-1]}').touch()
         print('()')
+elif name == 'life':
+    failing = here / 'life-exit'
+    if failing.exists():
+        sys.exit('the habit store is down')
 elif name == 'notify-send' and '-A' in args:
     shown = args[args.index('-r') + 1] if '-r' in args else 'NOTIFIED'
     print(shown, flush=True)
@@ -145,6 +151,17 @@ class Desk:
         Draft7Validator(json.loads((SCHEMAS / desk_nudge.STATUS_SCHEMA_FILE).read_text())).validate(document)
         return document
 
+    def panel(self, *args: str, exit_code: int = 0) -> dict:
+        """One `panel` command's step, checked against the committed schema, or {} where it exits non-zero and prints none."""
+        ran = CliRunner().invoke(cli_app, ['desk-nudge', 'panel', *args, '--json'])
+        assert ran.exit_code == exit_code, ran.output
+        if exit_code:
+            assert ran.stdout == ''
+            return {}
+        step = json.loads(ran.stdout)
+        Draft7Validator(json.loads((SCHEMAS / desk_nudge.PANEL_SCHEMA_FILE).read_text())).validate(step)
+        return step
+
 
 def until(condition: Callable[[], object], seconds: float = 15) -> None:
     deadline = time.monotonic() + seconds
@@ -155,13 +172,17 @@ def until(condition: Callable[[], object], seconds: float = 15) -> None:
 
 @pytest.fixture
 def desk(tmp_path, monkeypatch):
-    for name in (desk_nudge.RECORD_SCHEMA_FILE, desk_nudge.STATUS_SCHEMA_FILE):
-        built = desk_nudge.record_schema() if name == desk_nudge.RECORD_SCHEMA_FILE else desk_nudge.status_schema()
-        assert json.loads((SCHEMAS / name).read_text()) == built, f'schemas/{name} is stale: run `task schemas`'
+    built = {
+        desk_nudge.RECORD_SCHEMA_FILE: desk_nudge.record_schema(),
+        desk_nudge.STATUS_SCHEMA_FILE: desk_nudge.status_schema(),
+        desk_nudge.PANEL_SCHEMA_FILE: desk_nudge.panel_schema(),
+    }
+    for name, schema in built.items():
+        assert json.loads((SCHEMAS / name).read_text()) == schema, f'schemas/{name} is stale: run `task schemas`'
     root = tmp_path / 'desk'
     programs = root / 'bin'
     programs.mkdir(parents=True)
-    for program in ('claude-sessions', 'hyprctl', 'gdbus', 'notify-send'):
+    for program in ('claude-sessions', 'hyprctl', 'gdbus', 'notify-send', 'life'):
         script = programs / program
         script.write_text(STAND_IN.replace('PYTHON', sys.executable).replace('NOTIFIED', str(NOTIFIED)))
         script.chmod(0o755)
@@ -173,6 +194,7 @@ def desk(tmp_path, monkeypatch):
     monkeypatch.setenv('DESK_NUDGE_STAND_INS', str(root))
     monkeypatch.setenv('DESK_NUDGE_FIXTURES', str(FIXTURES))
     monkeypatch.setenv('XDG_STATE_HOME', str(root / 'state'))
+    monkeypatch.setenv('XDG_CACHE_HOME', str(root / 'cache'))
     monkeypatch.setenv('XDG_RUNTIME_DIR', str(root / 'run'))
     monkeypatch.delenv('HYPRLAND_INSTANCE_SIGNATURE', raising=False)
     monkeypatch.delenv('WAYLAND_DISPLAY', raising=False)
@@ -343,3 +365,108 @@ def test_an_answer_that_fails_to_save_is_sent_again_until_stored(store, monkeypa
     assert [line['saved'] for line in desk.records(Event.ANSWERED)] == [False, True]
     status = desk.status()
     assert (status['queued_answer_count'], status['interval_minutes'], status['minutes_left']) == (0, 66, 66)
+
+
+TASKS = [{'id': 532, 'name': 'Bathe Dingo'}, {'id': 533, 'name': 'Trim Dingo Nails'}, {'id': 534, 'name': 'Unprogram Alexas'}]
+TASKS_AND_READ = (
+    'pursuits:\n'
+    '  tasks:\n    description: Open tasks\n    weight: 30\n    cadence: 1d\n'
+    '    resolve: {app: life, path: /tasks}\n    label: name\n    id: id\n    on_log: life tasks complete {id}\n'
+    '  read:\n    description: Read what is on the shelf\n    weight: 30\n    weekly_minutes: 180\n'
+)
+LIFE_SOURCE = 'sources:\n  life:\n    adapter: life\n'
+
+
+def life_app(habits: list[dict]):
+    """life's API in the shapes it publishes: three open tasks, today's habits, and a concert tonight for the upcoming lane."""
+    tonight = dt.datetime.now().astimezone().replace(hour=23, minute=0, second=0, microsecond=0)
+    return stand_in(
+        'life',
+        {
+            '/tasks': lambda request: TASKS,
+            '/habits/day': lambda request: {'date': f'{tonight:%Y-%m-%d}', 'due': habits, 'completed': [], 'current_total': len(habits)},
+            '/events': lambda request: [{'id': 1, 'name': 'Concert', 'date': tonight.isoformat(), 'venue': 'Hall'}],
+        },
+    )
+
+
+def read_before(store, *minutes: int) -> None:
+    """`read` logged long before the register first saw it, so the entries set its usual minutes and pay none of what it owes."""
+    long_ago = dt.datetime.now().astimezone() - dt.timedelta(days=60)
+    entries = [
+        pursuits.new_record(
+            journal.Event.DONE, 'read', None, {'occurred_at': (long_ago + dt.timedelta(days=day)).isoformat(), 'duration_minutes': amount}
+        )
+        for day, amount in enumerate(minutes)
+    ]
+    store.append(entries, 'person-1', long_ago)
+
+
+def test_the_panel_logs_a_task_by_item_and_a_timed_pursuit_by_its_usual_minutes(store, monkeypatch, tmp_path, desk):
+    client = connected(store, monkeypatch, tmp_path, {'life': life_app([])})
+    client.put('/api/v1/documents/sources', json={'text': LIFE_SOURCE}).raise_for_status()
+    client.put('/api/v1/documents/pursuits', json={'text': TASKS_AND_READ}).raise_for_status()
+    read_before(store, 45, 30, 45)
+    fired(desk)
+    until(lambda: (commands.read_panel_cache() or {}).get('suggestion'))
+    [nudge] = desk.records(Event.FIRED)
+
+    answers = [f'answer:{answer.value}:{nudge["nudge_id"]}' for answer in Answer]
+    tasks = ['pursuit:tasks:532', 'pursuit:tasks:533', 'pursuit:tasks:534']
+    shown = desk.panel('show')['rows']
+    assert [row['key'] for row in shown if row['kind'] == 'answer'] == answers
+    assert {row['key'] for row in shown} == {*answers, *tasks, 'pursuit:read'}, 'each task its own row, and no upcoming row'
+
+    assert desk.panel('pick', 'pursuit:tasks:532')['step'] == 'done'
+    assert desk.calls('life') == [['tasks', 'complete', '532']]
+    [picked] = desk.records(Event.PICKED)
+    assert (picked['nudge_id'], picked['pick']['item_id'], picked['pick']['ok']) == (nudge['nudge_id'], '532', True)
+    assert (desk.state()['phase'], desk.state()['present_seconds']) == (Phase.COUNTING, 0)
+    desk.panel('pick', 'pursuit:tasks:532', exit_code=2)
+    assert desk.calls('life') == [['tasks', 'complete', '532']], 'a pick is taken once'
+
+    usual = desk.panel('pick', 'pursuit:read')
+    assert [row['key'] for row in usual['rows']] == [
+        'log_minutes:45:pursuit:read',
+        'adjust_minutes:50:pursuit:read',
+        'adjust_minutes:40:pursuit:read',
+    ]
+    more = desk.panel('pick', 'adjust_minutes:50:pursuit:read')
+    assert more['rows'][0]['key'] == 'log_minutes:50:pursuit:read'
+    assert desk.panel('pick', 'log_minutes:50:pursuit:read')['step'] == 'done'
+    newest = [record for record in store.journal() if record['event'] == journal.Event.DONE and record['pursuit'] == 'read'][-1]
+    assert newest['duration_minutes'] == 50
+
+
+def test_the_panel_completes_a_habit_and_a_review_and_names_a_failed_completion(store, monkeypatch, tmp_path, desk):
+    down = [False]
+
+    def unreachable_today(request, forward):
+        return unreachable() if down[0] and request.url.path == '/api/v1/today' else forward(request)
+
+    client = connected(
+        store, monkeypatch, tmp_path, {'life': life_app([{'id': 7, 'name': 'Stretch'}, {'id': 8, 'name': 'Yoga'}])}, unreachable_today
+    )
+    client.put('/api/v1/documents/sources', json={'text': LIFE_SOURCE}).raise_for_status()
+    client.put(
+        '/api/v1/documents/review', json={'text': (REPO / 'tests' / 'fixtures' / 'review' / 'register.yml').read_text()}
+    ).raise_for_status()
+    commands.rebuild_panel_cache()
+
+    assert desk.panel('pick', 'habit:7')['step'] == 'done'
+    assert desk.calls('life') == [['habits', 'complete', '7']]
+    assert desk.panel('pick', 'review:never-done')['step'] == 'done'
+    assert client.get('/api/v1/review/never-done/completions').json(), 'the entry is recorded done'
+
+    (desk.root / 'life-exit').touch()
+    desk.panel('pick', 'habit:8', exit_code=1)
+    failed = [record['pick'] for record in desk.records(Event.PICKED) if not record['pick']['ok']]
+    assert [pick['ref'] for pick in failed] == ['8']
+    assert 'life habits complete 8 exited 1' in failed[0]['error']
+    assert any('life habits complete 8 exited 1' in argv[-1] for argv in desk.calls('notify-send'))
+
+    down[0] = True
+    commands.rebuild_panel_cache()
+    shown = [(row['kind'], row['key']) for row in desk.panel('show')['rows']]
+    # Kept from the read before, less what was done since, and with habit 8 free again because life refused it.
+    assert shown == [('note', None), ('review', 'review:overdue-item'), ('review', 'review:fresh-item'), ('habit', 'habit:8')]
