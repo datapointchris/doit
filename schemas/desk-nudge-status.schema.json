@@ -1,0 +1,217 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:doit:desk-nudge-status:v1",
+  "title": "doit desk-nudge status",
+  "description": "Where the desk nudge's clock stands, read from this desk's state file with no request. Its pill is the state file's own pill object, which a status bar reads from the file. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "phase",
+    "watch_running",
+    "present_minutes",
+    "interval_minutes",
+    "minutes_left",
+    "nudge_id",
+    "fired_at",
+    "ready_until",
+    "suggestion",
+    "answer_counts",
+    "queued_answer_count",
+    "pill"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "phase": {
+      "enum": [
+        "counting",
+        "firing",
+        "ready",
+        "away",
+        "paused",
+        "no_desk"
+      ],
+      "description": "Where the clock stands."
+    },
+    "watch_running": {
+      "type": "boolean",
+      "description": "Whether the watch ticked within the pill's stale horizon."
+    },
+    "present_minutes": {
+      "type": "number",
+      "description": "The present time counted toward the interval."
+    },
+    "interval_minutes": {
+      "type": "number",
+      "description": "The interval last read from the service, or 60 where none was."
+    },
+    "minutes_left": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Present minutes still to count before a firing. Null while a nudge is firing or ready."
+    },
+    "nudge_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The nudge in hand."
+    },
+    "fired_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When the nudge in hand fired."
+    },
+    "ready_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When the ready nudge expires."
+    },
+    "suggestion": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pursuit",
+            "item_id",
+            "label"
+          ],
+          "properties": {
+            "pursuit": {
+              "type": "string",
+              "description": "The pursuit /next offered first."
+            },
+            "item_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The id of its one resolved choice. Null where it resolved none, or several that only a person can choose between."
+            },
+            "label": {
+              "type": "string",
+              "description": "What doit next shows for it: each resolved choice on its own line, else the pursuit's description."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error",
+            "message",
+            "detail"
+          ],
+          "properties": {
+            "error": {
+              "enum": [
+                "unreachable",
+                "login",
+                "nothing_to_draw",
+                "unreadable"
+              ],
+              "description": "Why /next drew nothing."
+            },
+            "message": {
+              "type": "string",
+              "description": "What the notification says instead."
+            },
+            "detail": {
+              "type": "string",
+              "description": "The service's or the client's own sentence."
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the nudge suggested: /next's first offered pursuit and what it stands for, or why none was drawn."
+    },
+    "answer_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "good_timing",
+        "too_soon",
+        "too_late",
+        "bothered"
+      ],
+      "properties": {
+        "good_timing": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "too_soon": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "too_late": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bothered": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "How many of each answer the service holds, as last read."
+    },
+    "queued_answer_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How many answers the service has not stored yet, which the watch sends again."
+    },
+    "pill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "class",
+        "stale_after"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "What a status bar prints."
+        },
+        "class": {
+          "enum": [
+            "counting",
+            "firing",
+            "ready",
+            "away",
+            "paused",
+            "no_desk"
+          ],
+          "description": "The pill's CSS class."
+        },
+        "stale_after": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "Past this, the pill reads `nudge stopped`."
+        }
+      }
+    }
+  }
+}

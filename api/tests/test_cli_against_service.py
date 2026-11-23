@@ -96,7 +96,7 @@ def test_a_refusal_exits_1_with_the_services_sentence_and_a_service_that_never_a
     down[0] = True
     with pytest.raises(SystemExit) as unanswered:
         cli.main()
-    assert unanswered.value.code == cli.NO_ANSWER_EXIT
+    assert unanswered.value.code == service.NO_ANSWER_EXIT
 
 
 def test_next_gives_every_active_pursuit_a_row_from_the_register_the_service_holds(api, capsys, monkeypatch):

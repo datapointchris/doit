@@ -48,22 +48,32 @@ its reason. A merge of every same-named lane was rejected, because it changes wh
 for every other source. Feedback stays the opposite way: one lane per app, never combined, so three
 apps draw three lanes.
 
-## The service runs no command, and the CLI's own code starts three processes
+## The service runs no command, and the CLI's own code starts the processes below
 
 - **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`, with no timeout.
 - **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking, with no timeout.
 - **A review item's `show`**, in `review.run_show`, inside the nudge, stopped after 10
   seconds.
+- **`claude-sessions --json`**, in `service_commands.desk_nudge.claude_sessions`, at each desk
+  nudge firing and answer.
+- **`hyprctl`**, in `service_commands.desk_nudge.focused_window`, at the same moments: `instances
+  -j`, then `-i <instance> activewindow -j`. A unit started at login never has
+  `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
+- **`notify-send`**, in `Watch.show`, as a child that the desk nudge's tick loop never waits on,
+  open until clicked, and in `notify` for a passing notice.
+- **`gdbus`**, in `close_notification` and `notification_bus_owner`.
 
-A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit
-learns from another program arrives over HTTP through the wrappers below.
+The desk nudge programs are named in `service_commands.desk_nudge`, and each one but the open
+notification is stopped after `PROGRAM_SECONDS`. Every one runs outside the state file's lock. A pursuit's `view` is printed for the reader to run, and nothing
+starts it. Everything else doit learns from another program arrives over HTTP through the wrappers
+below.
 
 The login and update libraries start processes of their own. pyclilogin runs a login's configured
 `token_command`, and opens the browser with `open` or `xdg-open`. pyselfupdate, behind `doit
 update` and its daily notice, runs `$GITHUB_TOKEN_COMMAND`, which defaults to `gh auth token`. To
 install a release it runs `git clone` and `uv`, each under the library's own timeout.
 
-## Documents and records are the service's, and a machine keeps only its login and its caches
+## Documents and records are the service's, and a machine keeps its login, its caches and its desk nudge
 
 - **Documents** — the pursuits, the review register and the sources. The service stores each as its
   text, so comments and layout survive, and `service.edit_document` round-trips it through
@@ -75,6 +85,9 @@ install a release it runs `git clone` and `uv`, each under the library's own tim
   machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no Python and no request,
   each file rewritten by the command that fetches it. `doit config show` prints each of these with
   where it came from, and a value doit newly resolves gets a row there.
+- **The desk nudge's clock** — present time is a fact of one desk, so `$XDG_STATE_HOME/doit/`
+  holds the nudge's state file and its record file, which a log shipper reads. Only its answers
+  go to the service, so the interval follows the login to any desk.
 
 ## Which sources are asked is configuration, and how each is read is code
 

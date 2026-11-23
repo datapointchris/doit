@@ -1595,8 +1595,13 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
     # sized by the longest title anywhere on screen, so an eight-character title
     # beside a thirty-five-character one puts its place most of a pane away from
     # the thing it places.
-    lines = [join_context([choice.get('label'), choice.get('context')]) for choice in detail.get('choices') or []]
+    lines = choice_lines(detail.get('choices') or [])
     return Offer(name, due, due_style(days), lines or [config.get('description') or ''], False, **columns)
+
+
+def choice_lines(choices: list[dict]) -> list[str]:
+    """Each resolved choice as `doit next` shows it: its title, then its place."""
+    return [join_context([choice.get('label'), choice.get('context')]) for choice in choices]
 
 
 def unoffered(name: str, state: dict) -> Offer:
@@ -1851,15 +1856,23 @@ def prompt_for_pursuit(pursuits: dict, offered: list[str]) -> str:
             error_console.print(f'  No pursuit starts with {answer}.')
 
 
+def settled_choice(choices: list[dict]) -> dict | None:
+    """The choice that a pursuit stands for with nobody asked: the only one offered, or None where there are several or none.
+
+    One choice is the answer by itself. Several are a question only you can
+    answer, and guessing it is a wrong completion in another app's data.
+    """
+    return choices[0] if len(choices) == 1 else None
+
+
 def which_choice(choices: list[dict], writes_through: bool) -> int:
     """The index of the choice a log is about, or -1 where it is about none of them.
 
-    One choice is the answer by itself. Several are a question only you can
-    answer, and it is asked only where the answer does something — a
-    write-through completes one specific item. Where nobody is there to ask, the
-    answer is none: guessing it is a wrong completion in another app's data.
+    Where `settled_choice` leaves it open, it is asked only where the answer does
+    something, because a write-through completes one specific item. Where nobody
+    is there to ask, the answer is none.
     """
-    if len(choices) <= 1:
+    if not choices or settled_choice(choices) is not None:
         return 0
     if not writes_through or not can_prompt():
         return -1

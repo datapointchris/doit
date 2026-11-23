@@ -105,6 +105,7 @@ _doit() {{
     'shell:What your shell loads from doit'
     'auth:Log this machine in to the doit service'
     'config:Where this machine points doit, and the files it keeps'
+    'desk-nudge:The nudge when a long stretch at the desk runs past the interval'
     'update:Update doit to the latest release'
   )
 

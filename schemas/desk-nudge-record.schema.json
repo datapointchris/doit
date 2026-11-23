@@ -1,0 +1,443 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:doit:desk-nudge-record:v1",
+  "title": "doit.desk_nudge",
+  "description": "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, appended and never rotated, for a log shipper to read. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "ts",
+    "event",
+    "fleet.schema_version"
+  ],
+  "properties": {
+    "ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When it happened, in UTC."
+    },
+    "event": {
+      "enum": [
+        "started",
+        "fired",
+        "answered",
+        "dismissed",
+        "expired",
+        "picked",
+        "away",
+        "back",
+        "gap",
+        "paused",
+        "resumed"
+      ],
+      "description": "What happened."
+    },
+    "fleet.schema_version": {
+      "const": 1,
+      "description": "This line's shape."
+    },
+    "doit_version": {
+      "type": "string",
+      "description": "The doit release the watch runs."
+    },
+    "phase": {
+      "enum": [
+        "counting",
+        "firing",
+        "ready",
+        "away",
+        "paused",
+        "no_desk"
+      ],
+      "description": "Where the clock stood when the watch started."
+    },
+    "nudge_id": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The firing's UUIDv7, which joins its answers and the service's row. Null where no nudge was in hand."
+    },
+    "interval_minutes": {
+      "type": "number",
+      "description": "The interval in force."
+    },
+    "present_minutes": {
+      "type": "number",
+      "description": "The present time counted."
+    },
+    "suggestion": {
+      "description": "What the nudge suggested: /next's first offered pursuit and what it stands for, or why none was drawn.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "pursuit",
+            "item_id",
+            "label"
+          ],
+          "properties": {
+            "pursuit": {
+              "type": "string",
+              "description": "The pursuit /next offered first."
+            },
+            "item_id": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The id of its one resolved choice. Null where it resolved none, or several that only a person can choose between."
+            },
+            "label": {
+              "type": "string",
+              "description": "What doit next shows for it: each resolved choice on its own line, else the pursuit's description."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error",
+            "message",
+            "detail"
+          ],
+          "properties": {
+            "error": {
+              "enum": [
+                "unreachable",
+                "login",
+                "nothing_to_draw",
+                "unreadable"
+              ],
+              "description": "Why /next drew nothing."
+            },
+            "message": {
+              "type": "string",
+              "description": "What the notification says instead."
+            },
+            "detail": {
+              "type": "string",
+              "description": "The service's or the client's own sentence."
+            }
+          }
+        }
+      ]
+    },
+    "sessions": {
+      "description": "Every row of `claude-sessions --json`, whole, or why it could not be read.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "error": {
+              "type": "string",
+              "description": "Why the read failed or timed out."
+            }
+          }
+        }
+      ]
+    },
+    "focused_window": {
+      "description": "The focused window, read through `hyprctl -i <instance> activewindow -j`, or why it could not be read.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "class",
+            "title"
+          ],
+          "properties": {
+            "class": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "error": {
+              "type": "string",
+              "description": "Why the read failed or timed out."
+            }
+          }
+        }
+      ]
+    },
+    "answer": {
+      "enum": [
+        "good_timing",
+        "too_soon",
+        "too_late",
+        "bothered"
+      ],
+      "description": "What the person said of the nudge."
+    },
+    "seconds_since_fired": {
+      "type": "number",
+      "description": "From the firing to the answer."
+    },
+    "saved": {
+      "type": "boolean",
+      "description": "Whether the service stored the answer."
+    },
+    "queued": {
+      "type": "boolean",
+      "description": "Whether the answer is kept on the desk to send again. A kept answer is written again once, with saved true once stored, or with both false once the service refuses it."
+    },
+    "late": {
+      "type": "boolean",
+      "description": "Whether its nudge had already ended, which leaves the clock alone."
+    },
+    "pick": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "ref",
+        "ok"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "The row picked: a pursuit, task, habit, review or practice."
+        },
+        "ref": {
+          "type": "string",
+          "description": "The row's identity within its kind."
+        },
+        "item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "minutes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ok": {
+          "type": "boolean",
+          "description": "Whether the completion went through."
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "idle_after_seconds": {
+      "type": "integer",
+      "description": "The listener's timeout, which an away counts back from."
+    },
+    "away_seconds": {
+      "type": "number",
+      "description": "How long the absence had run, from the last input."
+    },
+    "fired_while_idle": {
+      "type": "boolean",
+      "description": "Whether a nudge fired inside the idle window."
+    },
+    "gap_seconds": {
+      "type": "number",
+      "description": "The time between two ticks, counted as absence past two tick periods."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "started"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "doit_version",
+          "phase",
+          "present_minutes",
+          "interval_minutes"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "fired"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nudge_id",
+          "interval_minutes",
+          "present_minutes",
+          "suggestion",
+          "sessions",
+          "focused_window"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "answered"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nudge_id",
+          "answer",
+          "seconds_since_fired",
+          "saved",
+          "queued",
+          "late"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "dismissed"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nudge_id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "expired"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nudge_id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "picked"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nudge_id",
+          "pick",
+          "sessions",
+          "focused_window"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "away"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "idle_after_seconds",
+          "away_seconds",
+          "fired_while_idle",
+          "nudge_id"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "back"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "idle_after_seconds",
+          "away_seconds",
+          "fired_while_idle"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "gap"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "gap_seconds"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "paused"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nudge_id"
+        ]
+      }
+    }
+  ]
+}

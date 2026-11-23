@@ -1,0 +1,44 @@
+{
+  "address": "0x5550000000a0",
+  "mapped": true,
+  "hidden": false,
+  "visible": true,
+  "acceptsInput": true,
+  "at": [
+    7,
+    47
+  ],
+  "size": [
+    3826,
+    2106
+  ],
+  "workspace": {
+    "address": "D",
+    "type": "normal",
+    "name": "D"
+  },
+  "floating": false,
+  "monitor": 0,
+  "class": "com.mitchellh.ghostty",
+  "title": "Terminal — project-1",
+  "initialClass": "com.mitchellh.ghostty",
+  "initialTitle": "Terminal",
+  "pid": 2000,
+  "xwayland": false,
+  "pinned": false,
+  "pinFullscreened": false,
+  "fullscreen": 1,
+  "fullscreenClient": 1,
+  "fullscreenHandler": "default",
+  "allowedOverFullscreen": true,
+  "grouped": [],
+  "tags": [],
+  "swallowing": "0x0",
+  "focusHistoryID": 0,
+  "inhibitingIdle": false,
+  "xdgTag": "",
+  "xdgDescription": "",
+  "contentType": "none",
+  "tearingHint": false,
+  "stableId": "10000001"
+}

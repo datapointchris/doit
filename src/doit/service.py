@@ -4,8 +4,11 @@
 client, and `doit auth login <url>` fills it in.
 
 A refusal reaches a command as `ServiceFailed`, carrying the service's own
-sentence, or the repair for a refused token. `NoAnswer` is the one failure the
-same command can outlast by running again later.
+sentence, or the repair for a refused token. `NoAnswer` is the one failure that
+the same command can outlast by running again unchanged, so `exit_code` gives it
+`NO_ANSWER_EXIT`. A write kept to send again outlasts more: a refused login,
+which `doit auth login` repairs, and a service error, which a release repairs.
+`later_send_can_store` names all three.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from typing import Any
 
 import httpx2
 from pyclilogin import DEFAULT_SCOPES
+from pyclilogin import LoginError
 from pyclilogin import Product
 from pyclilogin import TokenRefused
 from rich.text import Text
@@ -46,6 +50,8 @@ LONGEST_PAUSE_SECONDS = 20.0
 # Statuses a proxy or a busy service sends before the request is handled, so a
 # later attempt can be answered.
 RETRIED_STATUSES = frozenset({429, 502, 503, 504})
+# What a command exits with when no answer came, the one failure that the same command run later can outlast.
+NO_ANSWER_EXIT = 4
 
 # The keychain service is a deployed identifier: renaming it orphans every stored token.
 LOGIN = Product(
@@ -67,6 +73,22 @@ class ServiceFailed(Exception):
 
 class NoAnswer(ServiceFailed):
     """No answer came: the service was never reached, timed out, or was busy on every attempt."""
+
+
+def exit_code(failure: Exception) -> int:
+    """What a command exits with for a failure that reached it: `NO_ANSWER_EXIT` where no answer came, else 1."""
+    return NO_ANSWER_EXIT if isinstance(failure, NoAnswer) else 1
+
+
+def later_send_can_store(failure: Exception) -> bool:
+    """Whether the same write sent later could be stored: no answer came, the login was refused, or the service broke.
+
+    A refusal of the write itself is refused again however often it is sent.
+    """
+    if isinstance(failure, LoginError | NoAnswer):
+        return True
+    status = getattr(failure, 'status', None)
+    return status is None or status == 401 or status >= 500
 
 
 class BearerAuth(httpx2.Auth):
@@ -143,14 +165,24 @@ class Service:
     def where(self) -> str:
         return f'the doit service at {self.base}' + (f' ({self.chosen_by})' if self.chosen_by else '')
 
-    def send(self, method: str, path: str, *, repeatable: bool, timeout: httpx2.Timeout = TIMEOUT, **keywords: Any) -> Any:
+    def send(
+        self,
+        method: str,
+        path: str,
+        *,
+        repeatable: bool,
+        timeout: httpx2.Timeout = TIMEOUT,
+        budget_seconds: float = BUDGET_SECONDS,
+        **keywords: Any,
+    ) -> Any:
         """One request, tried again where a later attempt can be answered and cannot do the write twice.
 
         A refused connection never reached the service, so anything is sent
         again. After a timeout, a reset or a busy answer, only a `repeatable`
         request is: a read, a PUT, or a write the service stores once by its key.
+        Every attempt and pause together end within `budget_seconds`.
         """
-        give_up = time.monotonic() + BUDGET_SECONDS
+        give_up = time.monotonic() + budget_seconds
         reason, attempt = 'the budget ran out', 0
         while attempt < ATTEMPTS and (remaining := give_up - time.monotonic()) > 0:
             attempt += 1
@@ -187,12 +219,16 @@ class Service:
         except ValueError:
             raise ServiceFailed(f'{self.where()} answered HTTP {status} with a body that is not JSON', status) from None
 
-    def get(self, path: str, **query: Any) -> Any:
-        return self.send('GET', path, repeatable=True, params={key: value for key, value in query.items() if value is not None})
+    def get(self, path: str, *, budget_seconds: float = BUDGET_SECONDS, **query: Any) -> Any:
+        """A read, with every attempt ending within `budget_seconds`."""
+        params = {key: value for key, value in query.items() if value is not None}
+        return self.send('GET', path, repeatable=True, budget_seconds=budget_seconds, params=params)
 
-    def post(self, path: str, body: dict, *, repeatable: bool = False, timeout: httpx2.Timeout = TIMEOUT) -> Any:
+    def post(
+        self, path: str, body: dict, *, repeatable: bool = False, timeout: httpx2.Timeout = TIMEOUT, budget_seconds: float = BUDGET_SECONDS
+    ) -> Any:
         """A write. `repeatable` where the service stores it once by a key the body carries."""
-        return self.send('POST', path, repeatable=repeatable, json=body, timeout=timeout)
+        return self.send('POST', path, repeatable=repeatable, json=body, timeout=timeout, budget_seconds=budget_seconds)
 
     def put(self, path: str, body: dict) -> Any:
         return self.send('PUT', path, repeatable=True, json=body)
