@@ -33,6 +33,7 @@ from pydantic import ConfigDict
 from pydantic import Field
 
 from doit import journal
+from doit.desk_nudge import Answer
 
 from . import documents
 from .computed_views import Views
@@ -104,6 +105,16 @@ class CompletionBody(Strict):
 class NudgeBody(Strict):
     interval_minutes: int | None = Field(None, gt=0)
     last_nudged_at: str | None = Field(None, description='When the nudge last showed, ISO 8601 with an offset. Only moves later.')
+
+
+class DeskNudgeAnswerBody(Strict):
+    """One answer to one desk nudge. Sent again with the same nudge and answer, it is stored once."""
+
+    nudge_id: uuid.UUID = Field(description="The firing's UUIDv7, minted by the desk when the nudge fired.")
+    answer: Answer
+    fired_at: str = Field(description='When the nudge fired, ISO 8601 with an offset.')
+    answered_at: str | None = Field(None, description='When the answer was picked, ISO 8601 with an offset. Now when omitted.')
+    machine: str | None = Field(None, description='The desk that showed the nudge. The service names itself when omitted.')
 
 
 class ForecastBody(Strict):
@@ -297,6 +308,14 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     @api.put('/review/nudge')
     def review_nudge_set(body: NudgeBody, caller: Person) -> dict:
         return views.set_nudge(body.interval_minutes, body.last_nudged_at)
+
+    @api.get('/desk-nudge')
+    def desk_nudge_interval(caller: Person) -> dict:
+        return views.desk_nudge_interval()
+
+    @api.post('/desk-nudge/answers', status_code=201)
+    def desk_nudge_answer(body: DeskNudgeAnswerBody, caller: Person) -> dict:
+        return views.answer_desk_nudge(body.model_dump(), caller.who)
 
     @api.get('/dashboard')
     def dashboard(caller: Person, lane: Annotated[list[str] | None, Query(description='Only these lanes.')] = None) -> dict:

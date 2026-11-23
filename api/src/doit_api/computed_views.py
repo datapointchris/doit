@@ -20,6 +20,7 @@ from collections.abc import Callable
 import typer
 
 from doit import dashboard
+from doit import desk_nudge
 from doit import evidence
 from doit import forecast
 from doit import happened
@@ -413,6 +414,33 @@ class Views:
         with self.store.write() as connection:
             self.store.set_nudge(connection, interval_minutes=interval_minutes, last_nudged_at=stamp(stamped) if stamped else None)
         return self.store.nudge()
+
+    # --- the desk nudge -------------------------------------------------------
+
+    def desk_nudge_interval(self) -> dict:
+        """The interval the desk nudge waits, computed from every answer, and how many of each answer were given."""
+        given = self.store.desk_nudge_answers()
+        return {'interval_minutes': desk_nudge.interval_minutes(given), 'answer_counts': desk_nudge.answer_counts(given)}
+
+    def answer_desk_nudge(self, body: dict, recorded_by: str) -> dict:
+        """Store one answer to a nudge, and say the interval that follows. An answer sent again answers the row first stored."""
+        now = self.now()
+        instant(body['fired_at'], 'fired_at')
+        answered = instant(body.get('answered_at'), 'answered_at') or now
+        if answered > now + FUTURE_SKEW:
+            raise BadRequest(f'answered_at={body["answered_at"]!r} is later than now, and an answer records what was said')
+        row = {
+            'nudge_id': str(body['nudge_id']),
+            'answer': str(body['answer']),
+            'fired_at': body['fired_at'],
+            'answered_at': body.get('answered_at') or now.isoformat(),
+            'machine': paths.canonical_machine(str(body.get('machine') or MACHINE)),
+            'recorded_by': recorded_by,
+            'stored_at': stamp(now),
+        }
+        with self.store.write() as connection:
+            stored, added = self.store.add_desk_nudge_answer(connection, row)
+        return {**self.desk_nudge_interval(), 'stored': stored, 'added': added}
 
     # --- the lanes ------------------------------------------------------------
 

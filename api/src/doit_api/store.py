@@ -11,9 +11,10 @@ into `<table>_history` with the `valid_to` that closed it. SQLite has no native
 system versioning, so the triggers are the mechanism. The table can then be read
 as of any instant, and two reads diff.
 
-**Records, appended.** The journal and forecast readings are events. Each is keyed
-on what identifies it, a journal entry's UUIDv7 and a reading's machine and moment,
-so a write sent again adds nothing.
+**Records, appended.** The journal, forecast readings and the desk nudge's answers
+are events. Each is keyed on what identifies it: a journal entry's UUIDv7, a
+reading's machine and moment, and an answer's nudge and answer. So a write sent
+again adds nothing.
 
 **Review completions, appended and versioned.** A completion is an event a person
 can get wrong, so one can be taken back. Its table carries the same triggers as the
@@ -234,12 +235,27 @@ CREATE TABLE offer_counts_by_day (
 );
 """
 
+# One row per nudge and answer, because timing and bother are separate axes that one nudge can both take.
+DESK_NUDGE_ANSWERS_SCHEMA = """
+CREATE TABLE desk_nudge_answers (
+    nudge_id TEXT NOT NULL,
+    answer TEXT NOT NULL CHECK (answer IN ('good_timing', 'too_soon', 'too_late', 'bothered')),
+    fired_at TEXT NOT NULL,
+    answered_at TEXT NOT NULL,
+    machine TEXT NOT NULL,
+    recorded_by TEXT NOT NULL,
+    stored_at TEXT NOT NULL,
+    PRIMARY KEY (nudge_id, answer)
+);
+"""
+
 # Applied in order, each once. `PRAGMA user_version` holds how many have run. A
 # change to the schema is appended here, never made to an entry a database has run.
 MIGRATIONS = (
     ''.join(versioned_schema(table) for table in FIRST_VERSIONED_TABLES) + RECORDS_SCHEMA,
     COMPLETION_HISTORY_SCHEMA,
     OFFERS_BY_DAY_SCHEMA,
+    DESK_NUDGE_ANSWERS_SCHEMA,
 )
 
 
@@ -572,6 +588,30 @@ class Store:
                 """,
                 (json.dumps(payload), stamp(now)),
             )
+
+    # --- the desk nudge's answers ----------------------------------------------
+
+    def desk_nudge_answers(self) -> list[str]:
+        """Every answer given to a desk nudge, in the order the store took them."""
+        with self.connect() as connection:
+            rows = connection.execute('SELECT answer FROM desk_nudge_answers ORDER BY stored_at, nudge_id').fetchall()
+        return [row['answer'] for row in rows]
+
+    @staticmethod
+    def add_desk_nudge_answer(connection: sqlite3.Connection, row: dict) -> tuple[dict, bool]:
+        """Store one answer unless its nudge already holds it, and return the row that the store holds and whether this added it."""
+        cursor = connection.execute(
+            """
+            INSERT INTO desk_nudge_answers (nudge_id, answer, fired_at, answered_at, machine, recorded_by, stored_at)
+            VALUES (:nudge_id, :answer, :fired_at, :answered_at, :machine, :recorded_by, :stored_at)
+            ON CONFLICT (nudge_id, answer) DO NOTHING
+            """,
+            row,
+        )
+        held = connection.execute(
+            'SELECT * FROM desk_nudge_answers WHERE nudge_id = ? AND answer = ?', (row['nudge_id'], row['answer'])
+        ).fetchone()
+        return dict(held), cursor.rowcount == 1
 
     # --- the nudge ------------------------------------------------------------
 

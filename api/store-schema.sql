@@ -1,3 +1,13 @@
+CREATE TABLE desk_nudge_answers (
+    nudge_id TEXT NOT NULL,
+    answer TEXT NOT NULL CHECK (answer IN ('good_timing', 'too_soon', 'too_late', 'bothered')),
+    fired_at TEXT NOT NULL,
+    answered_at TEXT NOT NULL,
+    machine TEXT NOT NULL,
+    recorded_by TEXT NOT NULL,
+    stored_at TEXT NOT NULL,
+    PRIMARY KEY (nudge_id, answer)
+);
 CREATE TABLE documents (
         name TEXT PRIMARY KEY CHECK (name IN ('pursuits', 'review', 'sources')),
         text TEXT NOT NULL,

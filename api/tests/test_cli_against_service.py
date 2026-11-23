@@ -11,12 +11,11 @@ import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx2
 import pytest
-from conftest import TOKEN
-from conftest import client_for
+from conftest import Forward
+from conftest import connected
 from conftest import stand_in
 from fastapi.testclient import TestClient
 from jsonschema import Draft7Validator
@@ -42,48 +41,6 @@ from doit.service_commands import today as today_commands
 FIXTURES = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures'
 SCHEMAS = Path(__file__).resolve().parents[2] / 'schemas'
 TASKS = [{'name': 'Face Mud', 'id': 501}, {'name': 'Return hoodies', 'id': 512}, {'name': 'Journal', 'id': 474}]
-
-
-@pytest.fixture
-def api(store, monkeypatch, tmp_path) -> TestClient:
-    return connected(store, monkeypatch, tmp_path)
-
-
-Forward = Callable[[httpx2.Request], httpx2.Response]
-
-
-def connected(
-    store, monkeypatch, tmp_path, apps=None, around: Callable[[httpx2.Request, Forward], httpx2.Response] | None = None
-) -> TestClient:
-    """The service, with every CLI command in this test asking it and caching into the test's own directory.
-
-    ``around`` stands between the CLI and the service, to lose an answer or answer in its place.
-    """
-    client = client_for(store, apps, clock=None)
-
-    def forward(request: httpx2.Request) -> httpx2.Response:
-        answer = client.request(
-            request.method,
-            request.url.path,
-            params=dict(request.url.params),
-            content=request.content,
-            headers={key: value for key, value in request.headers.items() if key.lower() != 'host'},
-        )
-        return httpx2.Response(answer.status_code, headers=dict(answer.headers), content=answer.content)
-
-    def transport(request: httpx2.Request) -> httpx2.Response:
-        return forward(request) if around is None else around(request, forward)
-
-    tokens = SimpleNamespace(token=lambda: SimpleNamespace(access_token=TOKEN))
-    monkeypatch.setattr(
-        service,
-        'client',
-        lambda: service.Service('https://doit.test', tokens, transport=httpx2.MockTransport(transport), pause=lambda seconds: None),
-    )
-    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
-    monkeypatch.setattr(pursuits, 'NAMES_CACHE', tmp_path / 'cache' / 'next-names.txt')
-    monkeypatch.setattr(review_commands, 'NUDGE_INTERVAL', tmp_path / 'cache' / 'nudge-interval-minutes')
-    return client
 
 
 def at_terminal(monkeypatch, there: bool) -> None:
