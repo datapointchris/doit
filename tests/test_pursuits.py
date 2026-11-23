@@ -1550,6 +1550,19 @@ def test_the_register_wide_minutes_map_covers_a_pursuit_the_active_set_drops():
     assert pursuits.declared_minutes(register) == {'read': 30.0, 'gone': 45.0}
 
 
+@pytest.mark.parametrize(
+    ('logged', 'usual'),
+    [
+        pytest.param([(2.0, None), (1.0, None)], None, id='no logged minutes'),
+        pytest.param([(3.0, 30), (2.0, 45), (1.0, 30)], 30.0, id='one most frequent amount'),
+        pytest.param([(1.0, 30), (2.0, 45)], 30.0, id='a tie goes to the latest'),
+    ],
+)
+def test_usual_minutes(logged, usual):
+    register = {'read': {'weight': 1, 'weekly_minutes': 30}}
+    assert pursuits.usual_minutes(register, [done('read', days_ago, minutes) for days_ago, minutes in logged]) == {'read': usual}
+
+
 def test_a_row_the_register_dropped_renders_rather_than_crashing():
     """The draw outlives the register by up to a quarter of an hour, so pausing a
     drawn pursuit inside that window left `doit next` dying on a traceback."""

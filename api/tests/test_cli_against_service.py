@@ -173,7 +173,7 @@ def test_a_reason_reaches_every_read_of_a_pursuit_and_its_json(api, capsys):
         assert ' '.join(capsys.readouterr().out.split()).count(reason) == 1
 
 
-def test_a_log_asks_for_what_was_not_passed_and_minutes_only_of_a_timed_pursuit(api, store, monkeypatch):
+def test_a_log_asks_for_what_was_not_passed_and_minutes_only_of_a_timed_pursuit(api, store, monkeypatch, capsys):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
     asked = answers(monkeypatch, 'read-library', '', '45', '')
 
@@ -184,6 +184,10 @@ def test_a_log_asks_for_what_was_not_passed_and_minutes_only_of_a_timed_pursuit(
     assert asked == ['pursuit:', 'note, or Enter to skip:', 'minutes:', 'note, or Enter to skip:']
     entries = [(record['pursuit'], record['duration_minutes'], record['note']) for record in logged(store)]
     assert entries == [('read-library', 45, None), ('chores', None, None), ('read-library', 20, 'trimmed')]
+
+    capsys.readouterr()
+    assert pursuit_commands.cmd_list(as_json=True) == 0
+    assert json.loads(capsys.readouterr().out)['usual_minutes'] == {'read-library': 20.0}, 'the latest of two amounts logged once each'
 
 
 @pytest.mark.parametrize('arguments', [['chores', '--minutes', '20'], ['read-library', '--minutes', '-5'], ['read-library']])

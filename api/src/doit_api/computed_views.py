@@ -138,7 +138,11 @@ class Views:
         """`doit pursuits list --json`: every pursuit and the state behind it."""
         config, now = self.registered(), self.now()
         state = self.state(config, now)
-        return {'pursuits': config.pursuits, 'state': pursuits.explain_payload(state)}
+        return {
+            'pursuits': config.pursuits,
+            'state': pursuits.explain_payload(state),
+            'usual_minutes': pursuits.usual_minutes(config.pursuits, state['records']),
+        }
 
     def matched(self, needle: str, register: dict) -> str:
         found = pursuits.match_pursuit(needle, register)

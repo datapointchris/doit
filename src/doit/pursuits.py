@@ -566,6 +566,28 @@ def declared_minutes(register: dict) -> dict[str, float]:
     return {name: float(config['weekly_minutes']) for name, config in register.items() if config.get('weekly_minutes')}
 
 
+# Where a record's time does not parse, it sorts before every dated one.
+EARLIEST_INSTANT = dt.datetime.min.replace(tzinfo=dt.UTC)
+
+
+def usual_minutes(register: dict, records: list[dict]) -> dict[str, float | None]:
+    """Each timed pursuit's most often logged minutes, the latest breaking a tie, or None where no entry kept minutes.
+
+    None rather than a default, because a default offered and logged would enter
+    the journal as a measurement.
+    """
+    timed = declared_minutes(register)
+    done = [record for record in records if record.get('event') == journal.Event.DONE and record.get('pursuit') in timed]
+    # Ranked by (times logged, position of the latest), so the newer of two equal counts wins.
+    ranked: dict[str, dict[float, tuple[int, int]]] = {name: {} for name in timed}
+    for position, record in enumerate(sorted(done, key=lambda record: journal.occurred(record) or EARLIEST_INSTANT)):
+        minutes = journal.recorded_minutes(record)
+        if minutes is not None:
+            amounts = ranked[record['pursuit']]
+            amounts[minutes] = (amounts.get(minutes, (0, 0))[0] + 1, position)
+    return {name: max(amounts, key=amounts.__getitem__, default=None) for name, amounts in ranked.items()}
+
+
 def pace(config: dict) -> tuple[float, float]:
     """A pursuit's interval in days and the size of one checkoff, from the pace it declares.
 
