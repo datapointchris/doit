@@ -25,6 +25,7 @@ from doit.render import error_console
 from doit.render import examples
 from doit.render import set_no_input
 from doit.service_commands import dashboard
+from doit.service_commands import desk_nudge
 from doit.service_commands import forecast
 from doit.service_commands import happened
 from doit.service_commands import pursuits
@@ -72,7 +73,21 @@ THIS_MACHINE = 'This machine'
 # Typer lists a group's commands ahead of its sub-apps and draws each panel where
 # its first command falls. Left alone, `update` would put This machine above What
 # you declared.
-ROOT_ORDER = ('next', 'today', 'dashboard', 'happened', 'forecast', 'pursuits', 'review', 'sources', 'auth', 'config', 'shell', 'update')
+ROOT_ORDER = (
+    'next',
+    'today',
+    'dashboard',
+    'happened',
+    'forecast',
+    'pursuits',
+    'review',
+    'sources',
+    'auth',
+    'config',
+    'shell',
+    'desk-nudge',
+    'update',
+)
 
 
 class RootGroup(TyperGroup):
@@ -174,6 +189,7 @@ app.add_typer(review.app, name='review', rich_help_panel=WHAT_YOU_DECLARED)
 app.add_typer(sources.app, name='sources', rich_help_panel=WHAT_YOU_DECLARED)
 app.add_typer(config_commands.app, name='config', rich_help_panel=THIS_MACHINE)
 app.add_typer(shell.app, name='shell', rich_help_panel=THIS_MACHINE)
+app.add_typer(desk_nudge.app, name='desk-nudge', rich_help_panel=THIS_MACHINE)
 
 auth = add_auth_commands(app, service.LOGIN, rich_help_panel=THIS_MACHINE)
 auth.info.epilog = examples(

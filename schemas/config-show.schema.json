@@ -38,7 +38,7 @@
         "client_secret": {"$ref": "#/definitions/setting", "description": "Whether a service client's secret is set."},
         "config_file": {"$ref": "#/definitions/setting", "description": "The file holding api, issuer and client_id."},
         "cache_dir": {"$ref": "#/definitions/setting", "description": "Where doit keeps what the shell reads with no request."},
-        "state_dir": {"$ref": "#/definitions/setting", "description": "Where doit keeps an edit the service never took."},
+        "state_dir": {"$ref": "#/definitions/setting", "description": "Where doit keeps an edit the service never took, and the desk nudge's clock and records."},
         "editor": {"$ref": "#/definitions/setting", "description": "The program each edit verb opens."},
         "machine": {"$ref": "#/definitions/setting", "description": "The name written on every journal record from this machine."},
         "actor": {"$ref": "#/definitions/setting", "description": "The identity written on every journal record from this process."}

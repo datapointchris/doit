@@ -143,14 +143,24 @@ class Service:
     def where(self) -> str:
         return f'the doit service at {self.base}' + (f' ({self.chosen_by})' if self.chosen_by else '')
 
-    def send(self, method: str, path: str, *, repeatable: bool, timeout: httpx2.Timeout = TIMEOUT, **keywords: Any) -> Any:
+    def send(
+        self,
+        method: str,
+        path: str,
+        *,
+        repeatable: bool,
+        timeout: httpx2.Timeout = TIMEOUT,
+        budget_seconds: float = BUDGET_SECONDS,
+        **keywords: Any,
+    ) -> Any:
         """One request, tried again where a later attempt can be answered and cannot do the write twice.
 
         A refused connection never reached the service, so anything is sent
         again. After a timeout, a reset or a busy answer, only a `repeatable`
         request is: a read, a PUT, or a write the service stores once by its key.
+        Every attempt and pause together end within `budget_seconds`.
         """
-        give_up = time.monotonic() + BUDGET_SECONDS
+        give_up = time.monotonic() + budget_seconds
         reason, attempt = 'the budget ran out', 0
         while attempt < ATTEMPTS and (remaining := give_up - time.monotonic()) > 0:
             attempt += 1
@@ -187,12 +197,16 @@ class Service:
         except ValueError:
             raise ServiceFailed(f'{self.where()} answered HTTP {status} with a body that is not JSON', status) from None
 
-    def get(self, path: str, **query: Any) -> Any:
-        return self.send('GET', path, repeatable=True, params={key: value for key, value in query.items() if value is not None})
+    def get(self, path: str, *, budget_seconds: float = BUDGET_SECONDS, **query: Any) -> Any:
+        """A read, with every attempt ending within `budget_seconds`."""
+        params = {key: value for key, value in query.items() if value is not None}
+        return self.send('GET', path, repeatable=True, budget_seconds=budget_seconds, params=params)
 
-    def post(self, path: str, body: dict, *, repeatable: bool = False, timeout: httpx2.Timeout = TIMEOUT) -> Any:
+    def post(
+        self, path: str, body: dict, *, repeatable: bool = False, timeout: httpx2.Timeout = TIMEOUT, budget_seconds: float = BUDGET_SECONDS
+    ) -> Any:
         """A write. `repeatable` where the service stores it once by a key the body carries."""
-        return self.send('POST', path, repeatable=repeatable, json=body, timeout=timeout)
+        return self.send('POST', path, repeatable=repeatable, json=body, timeout=timeout, budget_seconds=budget_seconds)
 
     def put(self, path: str, body: dict) -> Any:
         return self.send('PUT', path, repeatable=True, json=body)

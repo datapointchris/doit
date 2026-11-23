@@ -94,8 +94,9 @@ flag that would have answered.
 | What is due to revisit or practice | `review due` | the review register and its completions |
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |
 | What is this machine set to, and who set it | `config show` | the config file, the environment and the defaults, asking no service |
+| How long have I been at the desk | `desk-nudge status` | this desk's clock, asking no service |
 
-The service answers every row, reading what the row names.
+The service answers every row but the last two, reading what the row names.
 
 `dashboard`, `today` and `next` are three densities over the same records, not three subjects.
 `dashboard` ranks across nothing. `next` ranks across everything, because you declared the
@@ -338,6 +339,52 @@ practice:
     command: howto labs show rg-search-code
 ```
 
+## `desk-nudge` — a nudge when a long stretch at the desk runs past the interval
+
+```bash
+doit desk-nudge watch                      # the loop that a desk's user service runs
+doit desk-nudge status                     # where the clock stands, and what the nudge suggests
+doit desk-nudge answer too_soon            # answer the nudge that is showing
+doit desk-nudge record-presence away 120   # what an idle listener runs after 120 s with no input
+doit desk-nudge pause                      # hold the clock until resume
+```
+
+The watch ticks every 15 seconds and counts the time you are present. When that reaches the
+interval, it reads `doit next` and shows a notification naming the first pursuit offered, with four
+answers: good timing, too soon, too late and bothered me. The nudge stays ready for 10 minutes. An
+answer, those 10 minutes, leaving the desk or `pause` ends it, and the clock restarts at zero. A
+left click closes the notification and leaves the nudge ready.
+
+The interval starts at 60 minutes. Each too soon multiplies it by 1.1, and each too late divides it
+by 1.1. The service stores every answer and computes the interval from all of them, so it follows
+the login to any desk. An answer that the service does not store is kept on the desk, and the watch
+sends it again every tick.
+
+Present time counts only what the desk shows:
+
+- A tick adds at most 30 seconds, so a suspend or a stopped watch counts as absence.
+- An idle listener runs `record-presence away 120` after 120 seconds with no input, and `back` on
+  the next input. The away takes those 120 seconds back.
+- An absence of 5 minutes or more is a break, and restarts the clock. A shorter one pauses it.
+- The clock counts only while a Hyprland socket exists under `$XDG_RUNTIME_DIR/hypr/` and
+  `hypridle` runs. Otherwise the phase is `no_desk`.
+
+`$XDG_STATE_HOME/doit/desk-nudge.json` holds the clock, and the pill's `text`, `class` and
+`stale_after`. A status bar prints the text and the class, and reads `nudge stopped` once the time is
+past `stale_after`. `status --json` reads the same file, and `schemas/desk-nudge-status.schema.json`
+describes it.
+
+Each firing, answer, dismissal, expiry, absence, gap, pause and resume appends one JSON line to
+`$XDG_STATE_HOME/doit/desk-nudge-events.jsonl`, which `schemas/desk-nudge-record.schema.json`
+describes. A firing's line carries every row that `claude-sessions --json` prints and the focused
+window that `hyprctl` names, so a later rule can learn when a nudge lands well. `task schemas`
+writes both schemas from `doit.desk_nudge`.
+
+`answer` exits 0 once the service stores the answer. It exits 4 where no answer came, and 1 where
+the login or the service failed, and the watch sends a kept answer again in both cases. `watch`
+exits 1 where another watch already runs, and 0 once a newer doit is installed, so that the user
+service starts it.
+
 ## The service — one store, and every view computed behind it
 
 `api/` is doit as a service: a FastAPI app over one SQLite database. It holds the three
@@ -436,7 +483,8 @@ needs none of them.
 
 - **Config** is `$XDG_CONFIG_HOME/doit/config.toml`. It names the service, its issuer and this
   machine's client, which `doit auth login` writes. The login's tokens are in the system keychain.
-- **State** is `$XDG_STATE_HOME/doit/`. It holds any edit the service never took.
+- **State** is `$XDG_STATE_HOME/doit/`. It holds any edit the service never took, and the desk
+  nudge's clock and records.
 - **Cache** is `$XDG_CACHE_HOME/doit/`. It holds what the shell's completion and startup gate read
   without starting Python or asking the service. Each file is rewritten by the command that fetches
   it.
