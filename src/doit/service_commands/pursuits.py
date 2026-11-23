@@ -258,7 +258,7 @@ def cmd_log(
             matched = match_pursuit(name, pursuits) or ''
             if not matched:
                 error_console.print(f'No pursuit named {name}. See:  [cyan]doit pursuits list[/]')
-                return 1
+                return 2
         if minutes is not None and (refusal := minutes_refusal(matched, pursuits[matched], minutes)):
             raise typer.BadParameter(refusal)
         if not words and can_prompt():
@@ -322,7 +322,7 @@ def cmd_skip(name: str | None, duration: str | None) -> int:
             matched = match_pursuit(name, pursuits) or ''
             if not matched:
                 error_console.print(f'No pursuit named {name}.')
-                return 1
+                return 2
     except Abandoned:
         error_console.print('  Nothing skipped.')
         return 1
