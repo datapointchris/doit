@@ -222,31 +222,42 @@
     "pick": {
       "type": "object",
       "additionalProperties": false,
+      "description": "What a panel pick completed, and whether it went through.",
       "required": [
         "kind",
         "ref",
-        "ok"
+        "item_id",
+        "minutes",
+        "ok",
+        "error"
       ],
       "properties": {
         "kind": {
-          "type": "string",
-          "description": "The row picked: a pursuit, task, habit, review or practice."
+          "enum": [
+            "pursuit",
+            "habit",
+            "review",
+            "practice"
+          ],
+          "description": "Which owner completes it."
         },
         "ref": {
           "type": "string",
-          "description": "The row's identity within its kind."
+          "description": "A pursuit's name, a habit's id, or a review register entry's id."
         },
         "item_id": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "The pursuit's choice that its on_log completed, where it named one."
         },
         "minutes": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "The minutes logged for a timed pursuit."
         },
         "ok": {
           "type": "boolean",
@@ -256,7 +267,8 @@
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Why it did not: the owner's refusal, or the command and how it failed."
         }
       }
     },

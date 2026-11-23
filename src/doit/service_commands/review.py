@@ -3,6 +3,7 @@
 import datetime as dt
 import json
 from typing import Annotated
+from urllib.parse import quote
 
 import typer
 from rich.text import Text
@@ -96,11 +97,16 @@ def reads_now(status: dict | None) -> str:
     return f' Now: {status_label(status.get("overdue"))}{last}.'
 
 
-def cmd_done(item_id: str, on: dt.date | None = None) -> int:
+def mark_done(item_id: str, on: dt.date | None = None) -> dict:
+    """Record an entry done on `on`, today by default, and return the service's answer with the entry's new status."""
     # The desk's own day, because the service's clock may sit in another zone.
     # One completion per item and day, so sending it again records nothing new.
     day = (on or dt.date.today()).isoformat()
-    done = service.client().post(f'/review/{item_id}/completions', {'day': day}, repeatable=True)
+    return service.client().post(f'/review/{quote(item_id, safe="")}/completions', {'day': day}, repeatable=True)
+
+
+def cmd_done(item_id: str, on: dt.date | None = None) -> int:
+    done = mark_done(item_id, on)
     line = Text.from_markup('[green]✓[/] Marked ')
     line.append(item_id, style='yellow')
     days = (done.get('status') or {}).get('cadence_days')

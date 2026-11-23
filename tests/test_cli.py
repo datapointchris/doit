@@ -127,8 +127,9 @@ WORDS = r'((?: [a-z][\w-]*(?![\w/.-]))+)'
 PRINTED_IN_SOURCE = re.compile(rf"(?:\]|`|')doit{WORDS}")
 SHELL_FENCE = re.compile(r'^```(?:bash|sh)\n(.*?)^```', re.MULTILINE | re.DOTALL)
 PRINTED_IN_FENCE = re.compile(rf'^doit{WORDS}', re.MULTILINE)
-# The zsh completion's heading over the verb list, which zsh shows and nobody runs.
-NOT_A_COMMAND = {('shell.py', ' command')}
+# Text that a screen shows and nobody runs: the zsh completion's heading over the
+# verb list, and the desk nudge panel's banner over rows that could not be read again.
+NOT_A_COMMAND = {('shell.py', ' command'), ('desk_nudge.py', ' unreachable')}
 
 
 def printed_commands():

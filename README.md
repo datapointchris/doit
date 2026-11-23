@@ -95,6 +95,7 @@ flag that would have answered.
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |
 | What is this machine set to, and who set it | `config show` | the config file, the environment and the defaults, asking no service |
 | How long have I been at the desk | `desk-nudge status` | this desk's clock, asking no service |
+| What can I mark done from here | `desk-nudge panel show` | the rows that the desk nudge's watch last read from `today` and `pursuits`, asking no service |
 
 The service answers every row except those marked asking no service, reading what the row names.
 
@@ -192,7 +193,8 @@ minutes, so running `next` again while deciding does not reshuffle the list unde
 A pursuit whose `resolve` read matches several rows offers the first three, stacked under its
 name. One row is a decision the register made. Several are a choice you make, so `doit pursuits log` asks
 which one wherever the pursuit's `on_log` would complete it. Enter names none, and so does a log
-with nobody there to ask.
+with nobody there to ask. `--item <id>` names one without asking, and is refused, naming the ids it
+holds, where no current choice carries that id.
 
 `doit next` is one table with a row for every active pursuit. Each row states the weight, the goal,
 what was done of what the goal asked since its zero point and over how many days, and when it next
@@ -347,6 +349,8 @@ doit desk-nudge status                     # where the clock stands, and what th
 doit desk-nudge answer too_soon            # answer the nudge that is showing
 doit desk-nudge record-presence away 120   # what an idle listener runs after 120 s with no input
 doit desk-nudge pause                      # hold the clock until resume
+doit desk-nudge panel show --json          # the panel's rows, read with no request
+doit desk-nudge panel pick habit:17 --json # complete one row, and print the next step
 ```
 
 The watch ticks every 15 seconds and counts the time you are present. When that reaches the
@@ -379,17 +383,52 @@ The rest of the file is the watch's own. `status --json` carries the same `pill`
 cannot be read is moved aside, with `.unreadable-` and the time added to its name, and the clock
 starts fresh.
 
-Each firing, answer, dismissal, expiry, absence, gap, pause and resume appends one JSON line to
+Each firing, answer, pick, dismissal, expiry, absence, gap, pause and resume appends one JSON line to
 `$XDG_STATE_HOME/doit/desk-nudge-events.jsonl`, which `schemas/desk-nudge-record.schema.json`
 describes. A firing's line carries every row that `claude-sessions --json` prints and the focused
 window that `hyprctl` names, so a later rule can learn when a nudge lands well. `task schemas`
-writes both schemas from `doit.desk_nudge`.
+writes the record, status and panel schemas from `doit.desk_nudge`.
 
 `answer` exits 0 once the service stores the answer. It exits 4 where no answer came, and 1 where
 the login or the service failed. The answer is then kept on the desk, and the watch sends it again.
 It exits 1 where the service refuses the answer itself, which keeps nothing, and 2 where no nudge is
 there to answer. `watch` exits 1 where another watch already runs, and 0 once another doit release
 is installed, so that the user service starts it.
+
+### The panel completes any of today's rows in one pick
+
+A menu such as rofi draws the rows that `panel show --json` prints, and hands the picked row's key
+to `panel pick`. doit computes every row and builds every completion, so the menu holds no rule.
+The suggestion comes first, then the four answers while a nudge is ready, then every row of `doit
+today` that something completes, in each lane's own order:
+
+- **A pursuit** logs through `doit pursuits log`, in-process. Its `on_log` runs unasked, because
+  the pick is the asking. A pursuit whose `on_log` completes one of its choices lists each choice
+  as its own row, such as `tasks · Bathe Dingo`, and the pick names it as `--item` does.
+- **A pursuit counted in minutes** opens one more step: log its usual amount, the one most often
+  logged, or step 5 minutes up or down. With nothing logged in minutes yet, it offers 15, 30, 45
+  and 60, and calls none of them usual.
+- **A review or practice entry** is marked done through `doit review done`, in-process. These rows
+  stop at three per register, as `doit today` shows them.
+- **A habit** runs `life habits complete <id>`, stopped after 30 seconds.
+- **`upcoming` is left out**, because nothing completes a trip or a countdown.
+
+Every 5 minutes, at each firing and after each pick, the watch reads the rows from `/today` and
+`/pursuits` into `$XDG_CACHE_HOME/doit/desk-nudge-panel.json`, so the panel opens with no request.
+The cache holds what each row completes, never a command. After a pick, the watch also reads
+`/next`, which leaves out what was just logged, so the suggestion moves on. A read that fails keeps
+the last rows, and the first row says why: `rows from 14:05 — doit unreachable`, or `rows from
+14:05 — run doit auth login`.
+
+A pick is taken once. Its row leaves the panel, and the same key is refused until the watch reads
+the rows again. A pick while a nudge is ready ends it, as an answer does, and restarts the clock. A
+pick at any other time leaves the clock alone. Each pick appends a `picked` line, and a notification
+confirms it or names what failed.
+
+`panel pick` prints the next step, or a `done` step saying what was completed, and exits 0 for
+either. It exits 2 where it will not act on the key, such as a row picked already, and nothing ran.
+It exits 1 where the completion did not go through, and 4 where the service gave no answer.
+`schemas/desk-nudge-panel.schema.json` describes each step.
 
 ## The service — one store, and every view computed behind it
 
@@ -492,5 +531,5 @@ needs none of them.
 - **State** is `$XDG_STATE_HOME/doit/`. It holds any edit the service never took, and the desk
   nudge's clock and records.
 - **Cache** is `$XDG_CACHE_HOME/doit/`. It holds what the shell's completion and startup gate read
-  without starting Python or asking the service. Each file is rewritten by the command that fetches
-  it.
+  without starting Python or asking the service, and the desk nudge panel's rows. Each file is
+  rewritten by the command that fetches it.

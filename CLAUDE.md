@@ -51,21 +51,25 @@ apps draw three lanes.
 ## The service runs no command, and the CLI's own code starts the processes below
 
 - **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`, with no timeout.
-- **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking, with no timeout.
+- **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking, with no timeout. A desk nudge
+  panel pick runs it unasked, because the pick is the asking.
 - **A review item's `show`**, in `review.run_show`, inside the nudge, stopped after 10
   seconds.
 - **`claude-sessions --json`**, in `service_commands.desk_nudge.claude_sessions`, at each desk
-  nudge firing and answer.
+  nudge firing, answer and panel pick.
 - **`hyprctl`**, in `service_commands.desk_nudge.focused_window`, at the same moments: `instances
   -j`, then `-i <instance> activewindow -j`. A unit started at login never has
   `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
 - **`notify-send`**, in `Watch.show`, as a child that the desk nudge's tick loop never waits on,
   open until clicked, and in `notify` for a passing notice.
 - **`gdbus`**, in `close_notification` and `notification_bus_owner`.
+- **`life habits complete <id>`**, in `service_commands.desk_nudge.completed_habit`, at a panel
+  pick on a habit, stopped after `HABIT_SECONDS`. Its argv is `dashboard.habit_completion_argv`,
+  built from the habit's id in doit's code, never read from the panel's cache.
 
 The desk nudge programs are named in `service_commands.desk_nudge`, and each one but the open
-notification is stopped after `PROGRAM_SECONDS`. Every one runs outside the state file's lock. A pursuit's `view` is printed for the reader to run, and nothing
-starts it. Everything else doit learns from another program arrives over HTTP through the wrappers
+notification and `life habits complete` is stopped after `PROGRAM_SECONDS`. Every one runs outside
+the state file's lock. A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit learns from another program arrives over HTTP through the wrappers
 below.
 
 The login and update libraries start processes of their own. pyclilogin runs a login's configured
@@ -83,7 +87,8 @@ install a release it runs `git clone` and `uv`, each under the library's own tim
   one module that makes a request.
 - **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer and the
   machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no Python and no request,
-  each file rewritten by the command that fetches it. `doit config show` prints each of these with
+  each file rewritten by the command that fetches it, and the desk nudge panel's rows, which the
+  watch rewrites and `panel show` reads. `doit config show` prints each of these with
   where it came from, and a value doit newly resolves gets a row there.
 - **The desk nudge's clock** — present time is a fact of one desk, so `$XDG_STATE_HOME/doit/`
   holds the nudge's state file and its record file, which a log shipper reads. Only its answers
