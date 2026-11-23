@@ -96,7 +96,7 @@ flag that would have answered.
 | What is this machine set to, and who set it | `config show` | the config file, the environment and the defaults, asking no service |
 | How long have I been at the desk | `desk-nudge status` | this desk's clock, asking no service |
 
-The service answers every row but the last two, reading what the row names.
+The service answers every row except those marked asking no service, reading what the row names.
 
 `dashboard`, `today` and `next` are three densities over the same records, not three subjects.
 `dashboard` ranks across nothing. `next` ranks across everything, because you declared the
@@ -352,27 +352,32 @@ doit desk-nudge pause                      # hold the clock until resume
 The watch ticks every 15 seconds and counts the time you are present. When that reaches the
 interval, it reads `doit next` and shows a notification naming the first pursuit offered, with four
 answers: good timing, too soon, too late and bothered me. The nudge stays ready for 10 minutes. An
-answer, those 10 minutes, leaving the desk or `pause` ends it, and the clock restarts at zero. A
-left click closes the notification and leaves the nudge ready.
+answer, those 10 minutes, leaving the desk or `pause` ends it, and the clock restarts at zero. The
+answers are the notification's actions, which the notification server offers its own way. A
+notification closed with no answer leaves the nudge ready.
 
 The interval starts at 60 minutes. Each too soon multiplies it by 1.1, and each too late divides it
 by 1.1. The service stores every answer and computes the interval from all of them, so it follows
-the login to any desk. An answer that the service does not store is kept on the desk, and the watch
-sends it again every tick.
+the login to any desk. An answer that the service could store later is kept on the desk, and the
+watch sends it again each tick. One that the service refuses is recorded and dropped.
 
 Present time counts only what the desk shows:
 
 - A tick adds at most 30 seconds, so a suspend or a stopped watch counts as absence.
-- An idle listener runs `record-presence away 120` after 120 seconds with no input, and `back` on
-  the next input. The away takes those 120 seconds back.
+- An idle listener runs `record-presence away 120` after 120 seconds with no input, ignoring
+  inhibitors, and `back` on the next input. The away takes those 120 seconds back.
 - An absence of 5 minutes or more is a break, and restarts the clock. A shorter one pauses it.
 - The clock counts only while a Hyprland socket exists under `$XDG_RUNTIME_DIR/hypr/` and
   `hypridle` runs. Otherwise the phase is `no_desk`.
+- An away ends once the `hypridle` that reported it is gone, as after a logout or a reboot, because
+  no `back` will come for it.
 
-`$XDG_STATE_HOME/doit/desk-nudge.json` holds the clock, and the pill's `text`, `class` and
-`stale_after`. A status bar prints the text and the class, and reads `nudge stopped` once the time is
-past `stale_after`. `status --json` reads the same file, and `schemas/desk-nudge-status.schema.json`
-describes it.
+`$XDG_STATE_HOME/doit/desk-nudge.json` holds the clock. A status bar reads only its `pill` object:
+it prints the `text` and the `class`, and reads `nudge stopped` once the time is past `stale_after`.
+The rest of the file is the watch's own. `status --json` carries the same `pill`, and
+`schemas/desk-nudge-status.schema.json` describes it with the rest of the status. A state file that
+cannot be read is moved aside, with `.unreadable-` and the time added to its name, and the clock
+starts fresh.
 
 Each firing, answer, dismissal, expiry, absence, gap, pause and resume appends one JSON line to
 `$XDG_STATE_HOME/doit/desk-nudge-events.jsonl`, which `schemas/desk-nudge-record.schema.json`
@@ -381,9 +386,10 @@ window that `hyprctl` names, so a later rule can learn when a nudge lands well. 
 writes both schemas from `doit.desk_nudge`.
 
 `answer` exits 0 once the service stores the answer. It exits 4 where no answer came, and 1 where
-the login or the service failed, and the watch sends a kept answer again in both cases. `watch`
-exits 1 where another watch already runs, and 0 once a newer doit is installed, so that the user
-service starts it.
+the login or the service failed. The answer is then kept on the desk, and the watch sends it again.
+It exits 1 where the service refuses the answer itself, which keeps nothing, and 2 where no nudge is
+there to answer. `watch` exits 1 where another watch already runs, and 0 once another doit release
+is installed, so that the user service starts it.
 
 ## The service — one store, and every view computed behind it
 

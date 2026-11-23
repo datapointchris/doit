@@ -13,18 +13,24 @@ NUDGE = '019aad00-0000-7000-8000-000000000001'
 TICK = dt.timedelta(seconds=desk_nudge.TICK_SECONDS)
 
 
-def ticked(state: dict, start: dt.datetime, end: dt.datetime) -> dt.datetime:
-    """A tick every 15 seconds after `start` through `end`, as the watch makes them on a live desk."""
+HYPRIDLE, NEW_HYPRIDLE = '100', '200'
+
+
+def ticked(state: dict, start: dt.datetime, end: dt.datetime, live: bool = True) -> dt.datetime:
+    """A tick every `TICK_SECONDS` after `start` through `end`, as the watch makes them."""
     moment = start
     while moment + TICK <= end:
         moment += TICK
-        desk_nudge.tick(state, moment, True)
+        desk_nudge.tick(state, moment, live, HYPRIDLE if live else None)
     return moment
 
 
-def outcome(away_seconds: int, gap_seconds: int, phase: str, live: bool) -> tuple[str, float, bool | None, bool]:
+def outcome(away_seconds: int, gap_seconds: int, phase: str, live: bool, back: str) -> tuple[str, float, bool | None, bool]:
     """The clock after the last input at 40 present minutes: an away of `away_seconds` from that input, then one tick `gap_seconds` on.
 
+    `back` is how the away ends: `input` reports it back, `gone desk` ends the
+    session for the rest of the away, and `stopped watch` stops the watch. Both
+    of those end with a new hypridle at the last tick, which never reports back.
     Returns the outcome, the present minutes, the `fired_while_idle` of the away
     where there was one, and whether a `gap` was written.
     """
@@ -38,10 +44,13 @@ def outcome(away_seconds: int, gap_seconds: int, phase: str, live: bool) -> tupl
     moment = LAST_INPUT
     if away_seconds:
         moment = ticked(state, moment, LAST_INPUT + dt.timedelta(seconds=desk_nudge.IDLE_AFTER_SECONDS))
-        records += desk_nudge.went_away(state, moment, desk_nudge.IDLE_AFTER_SECONDS).records
-        moment = ticked(state, moment, LAST_INPUT + dt.timedelta(seconds=away_seconds))
-        records += desk_nudge.came_back(state, moment, desk_nudge.IDLE_AFTER_SECONDS).records
-    records += desk_nudge.tick(state, moment + dt.timedelta(seconds=gap_seconds), live).records
+        records += desk_nudge.went_away(state, moment, desk_nudge.IDLE_AFTER_SECONDS, HYPRIDLE).records
+        if back != 'stopped watch':
+            moment = ticked(state, moment, LAST_INPUT + dt.timedelta(seconds=away_seconds), live=back == 'input')
+        if back == 'input':
+            records += desk_nudge.came_back(state, moment, desk_nudge.IDLE_AFTER_SECONDS).records
+    reporter = HYPRIDLE if back == 'input' else NEW_HYPRIDLE
+    records += desk_nudge.tick(state, moment + dt.timedelta(seconds=gap_seconds), live, reporter).records
 
     away = next((line for line in records if line['event'] == Event.AWAY), None)
     if state['phase'] == Phase.NO_DESK:
@@ -57,24 +66,27 @@ def outcome(away_seconds: int, gap_seconds: int, phase: str, live: bool) -> tupl
 
 
 @pytest.mark.parametrize(
-    ('away_seconds', 'gap_seconds', 'phase', 'live', 'expected', 'present_minutes', 'fired_while_idle'),
+    ('away_seconds', 'gap_seconds', 'phase', 'live', 'back', 'expected', 'present_minutes', 'fired_while_idle'),
     [
-        (0, 15, 'counting', True, 'resumes', 40.25, None),
-        (0, 60, 'counting', True, 'resumes', 40.5, None),
-        (0, 360, 'counting', True, 'restarts', 0, None),
-        (0, 15, 'counting', False, 'no desk', 40, None),
-        (180, 15, 'counting', True, 'resumes', 40.25, False),
-        (300, 15, 'counting', True, 'restarts', 0.25, False),
-        (600, 15, 'counting', True, 'restarts', 0.25, False),
-        (180, 15, 'counting', False, 'no desk', 40, False),
-        (180, 15, 'ready', True, 'ends ready', 0.25, False),
-        (180, 15, 'ready, fired while idle', True, 'ends ready', 0.25, True),
+        (0, 15, 'counting', True, 'input', 'resumes', 40.25, None),
+        (0, 60, 'counting', True, 'input', 'resumes', 40.5, None),
+        (0, 360, 'counting', True, 'input', 'restarts', 0, None),
+        (0, 15, 'counting', False, 'input', 'no desk', 40, None),
+        (180, 15, 'counting', True, 'input', 'resumes', 40.25, False),
+        (300, 15, 'counting', True, 'input', 'restarts', 0.25, False),
+        (600, 15, 'counting', True, 'input', 'restarts', 0.25, False),
+        (180, 15, 'counting', False, 'input', 'no desk', 40, False),
+        (180, 15, 'ready', True, 'input', 'ends ready', 0.25, False),
+        (180, 15, 'ready, fired while idle', True, 'input', 'ends ready', 0.25, True),
+        (180, 15, 'counting', True, 'gone desk', 'resumes', 40, False),
+        (600, 15, 'counting', True, 'gone desk', 'restarts', 0, False),
+        (120, 3600, 'counting', True, 'stopped watch', 'restarts', 0, False),
     ],
 )
 def test_an_absence_resumes_restarts_or_ends_ready_and_an_away_takes_its_idle_seconds_back(
-    away_seconds, gap_seconds, phase, live, expected, present_minutes, fired_while_idle
+    away_seconds, gap_seconds, phase, live, back, expected, present_minutes, fired_while_idle
 ):
-    assert outcome(away_seconds, gap_seconds, phase, live) == (
+    assert outcome(away_seconds, gap_seconds, phase, live, back) == (
         expected,
         present_minutes,
         fired_while_idle,

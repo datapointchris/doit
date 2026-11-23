@@ -52,14 +52,15 @@ log = logging.getLogger('doit.desk_nudge')
 
 # How long `claude-sessions`, `hyprctl`, `gdbus` and a passing `notify-send` may each take.
 PROGRAM_SECONDS = 5.0
-# Outlasts the service's 10-second read of an app plus its read of the day's context.
+# Outlasts the service's read of each app plus its read of the day's context, as `/next` makes them.
 NEXT_BUDGET_SECONDS = 30.0
 INTERVAL_BUDGET_SECONDS = 10.0
 ANSWER_BUDGET_SECONDS = 10.0
 # Another desk's answers move the interval too, so the watch reads it again this often.
 INTERVAL_REFRESH_SECONDS = 300.0
 PROC = Path('/proc')
-NO_ANSWER_EXIT = 4
+# `fcntl.lockf` excludes other processes and never this one's threads, so the watch's threads take this first.
+STATE_THREAD_LOCK = threading.Lock()
 
 NOTIFICATIONS = ['--dest', 'org.freedesktop.Notifications', '--object-path', '/org/freedesktop/Notifications']
 BUS = ['--dest', 'org.freedesktop.DBus', '--object-path', '/org/freedesktop/DBus']
@@ -88,18 +89,34 @@ def now() -> dt.datetime:
 # --- the state file -----------------------------------------------------------
 
 
-def read_state() -> dict:
-    """The state file, or a fresh desk's state where there is none. A file that is not JSON starts a fresh clock."""
-    path = paths.desk_nudge_state_file()
+def parsed_state(path: Path) -> dict:
+    """The state file's state, or a fresh desk's where there is none. Raises UnreadableState."""
     try:
         text = path.read_text(encoding='utf-8')
     except FileNotFoundError:
         return desk_nudge.fresh_state()
     try:
-        return desk_nudge.loaded_state(json.loads(text))
+        document = json.loads(text)
     except ValueError as error:
-        log.error(f'{path} is not JSON ({error}), so the desk nudge starts from a fresh clock')
+        raise desk_nudge.UnreadableState(f'it is not JSON ({error})') from None
+    return desk_nudge.loaded_state(document)
+
+
+def read_state() -> dict:
+    """The state, for a reader that changes nothing. A file that cannot be read reads as a fresh desk's."""
+    path = paths.desk_nudge_state_file()
+    try:
+        return parsed_state(path)
+    except desk_nudge.UnreadableState as error:
+        log.error(f'{path} cannot be read, so it reads as a fresh clock: {error}')
         return desk_nudge.fresh_state()
+
+
+def set_aside(path: Path) -> Path:
+    """Move an unreadable state file beside itself, so the answers it kept stay on disk for a person."""
+    aside = path.with_name(f'{path.name}.unreadable-{now():%Y%m%dT%H%M%S}')
+    os.replace(path, aside)
+    return aside
 
 
 def write_state(state: dict) -> None:
@@ -119,17 +136,23 @@ def write_state(state: dict) -> None:
 
 @contextlib.contextmanager
 def changed_state() -> Iterator[dict]:
-    """The state, read under `fcntl.lockf` and written back atomically with the pill redrawn.
+    """The state, read under `STATE_THREAD_LOCK` and `fcntl.lockf` and written back atomically with the pill redrawn.
 
     The watch, `record-presence`, `answer`, `pause` and `resume` each change the
     file this way. Hold it around the read, the change and the write alone. A
-    block that raises writes nothing.
+    block that raises writes nothing. A file that cannot be read is set aside, and
+    the change starts from a fresh clock.
     """
     lock_path = paths.desk_nudge_state_lock_file()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open('a') as lock:
+    with STATE_THREAD_LOCK, lock_path.open('a') as lock:
         fcntl.lockf(lock, fcntl.LOCK_EX)
-        state = read_state()
+        path = paths.desk_nudge_state_file()
+        try:
+            state = parsed_state(path)
+        except desk_nudge.UnreadableState as error:
+            log.error(f'{path} cannot be read, so it is moved to {set_aside(path)} and the clock starts fresh: {error}')
+            state = desk_nudge.fresh_state()
         yield state
         state['pill'].update(desk_nudge.pill_face(state))
         write_state(state)
@@ -248,6 +271,17 @@ def process_name(pid: str) -> str:
         return ''
 
 
+def find_hypridle(remembered: str | None = None) -> str | None:
+    """hypridle's pid, checking the pid found last before reading every process's name."""
+    if remembered and process_name(remembered) == 'hypridle':
+        return remembered
+    try:
+        pids = [entry.name for entry in PROC.iterdir() if entry.name.isdigit()]
+    except OSError:
+        return None
+    return next((pid for pid in pids if process_name(pid) == 'hypridle'), None)
+
+
 # --- the service ----------------------------------------------------------------
 
 
@@ -284,17 +318,6 @@ def send_answer(row: dict) -> dict:
     return service.client().post('/desk-nudge/answers', row, repeatable=True, budget_seconds=ANSWER_BUDGET_SECONDS)
 
 
-def resending_can_store(error: Exception) -> bool:
-    """Whether the same answer sent later could be stored: no answer came, the login failed, or the service broke.
-
-    A refusal of the answer itself would refuse it again on every tick.
-    """
-    if isinstance(error, LoginError | service.NoAnswer):
-        return True
-    status = getattr(error, 'status', None)
-    return status is None or status == 401 or status >= 500
-
-
 @dataclass(frozen=True)
 class Answered:
     """What became of one answer: taken on the desk, then stored by the service or not."""
@@ -306,25 +329,33 @@ class Answered:
 
 
 def answer_nudge(answer: Answer, nudge_id: str | None = None, *, from_notification: bool = False) -> Answered:
-    """Take one answer, end the nudge it answers, and store it, queueing it where the service does not.
+    """Take one answer, end the nudge it answers, and store it, keeping it to send again where a later send could store it.
 
-    The one path for every answer: the notification's action, the panel's rows and
-    `doit desk-nudge answer`. With no id it answers the ready nudge. Raises
-    NothingToAnswer where none is ready and the id names none that this desk fired.
+    The one path for every answer to a nudge. With no id it answers the ready
+    nudge. Raises NothingToAnswer where none is ready and the id names none that
+    this desk fired. An answer already kept on this desk is sent as it was kept,
+    because that row is the one the service stores. One `saved: true` line is
+    written per answer, by the writer that drops it from the queue or whose send
+    the service added.
     """
     with changed_state() as state:
         taken = desk_nudge.take_answer(state, now(), answer, nudge_id, paths.machine_name())
+        kept = desk_nudge.queued_entry(state, taken.row)
+    if kept:
+        taken = desk_nudge.Taken(kept['row'], kept['late'], taken.closes)
     if taken.closes and taken.closes.get('notification_id') and not from_notification:
         close_notification(taken.closes['notification_id'])
-    seen = snapshot()
+    seen = None if kept else snapshot()
     try:
         answered = send_answer(taken.row)
     except (service.ServiceFailed, LoginError) as error:
-        queued = resending_can_store(error)
-        if queued:
-            with changed_state() as state:
+        queued = service.later_send_can_store(error)
+        with changed_state() as state:
+            if queued:
                 desk_nudge.queue_answer(state, taken)
-        append_records([desk_nudge.answered_record(now(), taken.row, taken.late, saved=False, snapshot=seen)])
+            ended = not queued and desk_nudge.unqueue_answer(state, taken.row)
+        if not kept or ended:
+            append_records([desk_nudge.answered_record(now(), taken.row, taken.late, saved=False, queued=queued, snapshot=seen)])
         label = ANSWER_LABELS[answer]
         if queued:
             notify('doit: answer not saved yet', f'"{label}" is kept on this desk, and the watch sends it again.')
@@ -332,26 +363,41 @@ def answer_nudge(answer: Answer, nudge_id: str | None = None, *, from_notificati
             notify('doit: answer refused', f'"{label}": {error}')
         return Answered(taken, saved=False, queued=queued, failure=error)
     with changed_state() as state:
+        ended = desk_nudge.unqueue_answer(state, taken.row)
         desk_nudge.took_interval(state, answered)
-    append_records([desk_nudge.answered_record(now(), taken.row, taken.late, saved=True, snapshot=seen)])
+    # An answer that the service already held has its line from whoever stored it.
+    if ended or (not kept and answered.get('added', True)):
+        append_records([desk_nudge.answered_record(now(), taken.row, taken.late, saved=True, queued=False, snapshot=seen)])
     return Answered(taken, saved=True)
 
 
 def resend_queued() -> None:
-    """Send each queued answer again. The send that stores one writes `answered` with `saved: true`."""
+    """Send each queued answer again, in order, until a send fails in a way that a later send could outlast.
+
+    The send that stores one writes `answered` with `saved: true`. One that the
+    service refuses is dropped and written with `saved: false`, so it holds up
+    none of the answers behind it.
+    """
     with changed_state() as state:
         queued = list(state['queued_answers'])
     for entry in queued:
         try:
             answered = send_answer(entry['row'])
         except (service.ServiceFailed, LoginError) as error:
-            log.warning(f'{len(queued)} desk nudge answer(s) still not saved: {error}')
-            return
+            if service.later_send_can_store(error):
+                log.warning(f'{len(queued)} desk nudge answer(s) still not saved: {error}')
+                return
+            with changed_state() as state:
+                dropped = desk_nudge.unqueue_answer(state, entry['row'])
+            if dropped:
+                log.error(f'the service refused a kept {entry["row"]["answer"]} answer, so it is dropped: {error}')
+                append_records([desk_nudge.answered_record(now(), entry['row'], entry['late'], saved=False, queued=False)])
+            continue
         with changed_state() as state:
             dropped = desk_nudge.unqueue_answer(state, entry['row'])
             desk_nudge.took_interval(state, answered)
         if dropped:
-            append_records([desk_nudge.answered_record(now(), entry['row'], entry['late'], saved=True)])
+            append_records([desk_nudge.answered_record(now(), entry['row'], entry['late'], saved=True, queued=False)])
 
 
 # --- the watch --------------------------------------------------------------------
@@ -372,7 +418,7 @@ def alive(thread: threading.Thread | None) -> bool:
 
 
 class Watch:
-    """A tick every 15 seconds, and a thread for everything that waits on a request or a program."""
+    """A tick every `TICK_SECONDS`, and a thread for everything that waits on a request or a program."""
 
     def __init__(self) -> None:
         self.version = __version__
@@ -418,7 +464,7 @@ class Watch:
         moment = now()
         live = self.live_desk()
         with changed_state() as state:
-            change = desk_nudge.tick(state, moment, live)
+            change = desk_nudge.tick(state, moment, live, self.hypridle_pid)
             firing = desk_nudge.begin_firing(state, moment, new_id(moment)) if change.fire else None
             ready = dict(state['nudge']) if state['phase'] == Phase.READY else None
             queued = bool(state['queued_answers'])
@@ -441,8 +487,16 @@ class Watch:
             self.refreshing = self.background(refresh_interval)
 
     def fire(self, nudge: dict) -> None:
-        """Steps two to six: read `/next`, take the snapshot, write `fired`, make it ready, and show it."""
-        suggestion = drawn_suggestion()
+        """Read `/next`, take the snapshot, write `fired`, make the nudge ready, and show it.
+
+        A failure that the read does not name still makes the nudge ready, because a
+        nudge left firing holds the clock until the watch restarts.
+        """
+        try:
+            suggestion = drawn_suggestion()
+        except Exception as error:
+            log.exception('could not read what /next drew, so the nudge suggests a break')
+            suggestion = desk_nudge.failed_suggestion(SuggestionError.UNREADABLE, f'{type(error).__name__}: {error}')
         seen = snapshot()
         fired = desk_nudge.record(
             Event.FIRED,
@@ -466,7 +520,7 @@ class Watch:
             try:
                 process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True)
             except OSError as error:
-                log.warning(f'could not show the nudge, so the pill and the panel carry it alone: {error}')
+                log.warning(f'could not show the nudge, so only the pill and `doit desk-nudge status` show it: {error}')
                 return
             earlier, self.shown = self.shown, Shown(process, nudge['nudge_id'])
             if earlier and earlier.process.poll() is None:
@@ -482,7 +536,8 @@ class Watch:
             shown.process.wait()
             if not shown.replaced.is_set():
                 log.warning(
-                    f'notify-send printed no id and exited {shown.process.returncode}, so the pill and the panel carry the nudge alone'
+                    f'notify-send printed no id and exited {shown.process.returncode}, '
+                    'so only the pill and `doit desk-nudge status` show the nudge'
                 )
             return
         owner = notification_bus_owner()
@@ -509,14 +564,8 @@ class Watch:
         return hyprland_socket_exists() and self.hypridle_running()
 
     def hypridle_running(self) -> bool:
-        """Whether hypridle runs, checking the pid found last before reading every process's name."""
-        if self.hypridle_pid and process_name(self.hypridle_pid) == 'hypridle':
-            return True
-        try:
-            pids = [entry.name for entry in PROC.iterdir() if entry.name.isdigit()]
-        except OSError:
-            pids = []
-        self.hypridle_pid = next((pid for pid in pids if process_name(pid) == 'hypridle'), None)
+        """Whether hypridle runs, keeping its pid for the tick to judge an away by."""
+        self.hypridle_pid = find_hypridle(self.hypridle_pid)
         return self.hypridle_pid is not None
 
     def run(self) -> int:
@@ -592,8 +641,8 @@ def watch_command() -> None:
     """Count present time and fire the nudge at the interval, until stopped.
 
     The desk's user service runs this. It exits 1 where another watch already
-    runs on this desk, and 0 once a newer doit is installed, so that the unit
-    starts the new release.
+    runs on this desk, and 0 once another doit release is installed, so that the
+    unit starts it.
     """
     log_to_stderr()
     held = hold_watch_lock()
@@ -624,9 +673,10 @@ def record_presence_command(
 ) -> None:
     """Record that the desk went idle or came back, which pauses, restarts or ends the nudge."""
     moment = now()
+    reporter = find_hypridle() if change is Presence.AWAY else None
     with changed_state() as state:
         if change is Presence.AWAY:
-            made = desk_nudge.went_away(state, moment, seconds)
+            made = desk_nudge.went_away(state, moment, seconds, reporter)
         else:
             made = desk_nudge.came_back(state, moment, seconds)
     carry_out(made)
@@ -646,16 +696,15 @@ def answer_command(
 ) -> None:
     """Answer a nudge, which ends it and restarts the clock.
 
-    Exits 0 once the service stores it. Where the service does not, the answer is
-    kept on this desk and the watch sends it again: exit 4 where no answer came,
-    and 1 where the login or the service failed. Exits 1 where there is no nudge
-    to answer.
+    Exits 0 once the service stores the answer. Exits 4 where no answer came, and
+    1 where the login or the service failed: the answer is then kept on this desk,
+    and the watch sends it again. Exits 1 where the service refuses the answer
+    itself, which keeps nothing. Exits 2 where there is no nudge to answer.
     """
     try:
         answered = answer_nudge(answer, nudge)
     except NothingToAnswer as nothing:
-        error_console.print(f'doit desk-nudge: {nothing}.')
-        raise typer.Exit(1) from None
+        raise typer.BadParameter(f'{nothing}.', param_hint='--nudge') from None
     label = ANSWER_LABELS[answer]
     late = ' It answers a nudge that had already ended, so the clock is left alone.' if answered.taken.late else ''
     if answered.saved:
@@ -664,10 +713,10 @@ def answer_command(
         raise typer.Exit(0)
     kept = 'It is kept on this desk, and the watch sends it again.' if answered.queued else 'It was refused, so nothing sends it again.'
     error_console.print(f'doit desk-nudge: "{label}" is not saved: {answered.failure}. {kept}', soft_wrap=True, markup=False)
-    raise typer.Exit(NO_ANSWER_EXIT if isinstance(answered.failure, service.NoAnswer) else 1)
+    raise typer.Exit(service.exit_code(answered.failure) if answered.failure else 1)
 
 
-@app.command('pause', epilog=examples(('doit desk-nudge pause', 'hold the clock, as a running day block does')))
+@app.command('pause', epilog=examples(('doit desk-nudge pause', 'hold the clock until resume')))
 def pause_command() -> None:
     """Hold the clock where it stands, ending a nudge that is showing, until `resume`."""
     with changed_state() as state:
@@ -719,8 +768,8 @@ def render_status(document: dict) -> None:
     if suggestion:
         rows.append(('suggestion', suggestion['message'] if 'error' in suggestion else f'{suggestion["pursuit"]} · {suggestion["label"]}'))
     rows.append(('answers', ' · '.join(f'{ANSWER_LABELS[Answer(name)]} {count}' for name, count in document['answer_counts'].items())))
-    if document['queued_answers']:
-        rows.append(('not saved', f'{document["queued_answers"]}, which the watch sends again'))
+    if document['queued_answer_count']:
+        rows.append(('not saved', f'{document["queued_answer_count"]}, which the watch sends again'))
     width = max(len(name) for name, _ in rows)
     for name, value in rows:
         line = Text('  ')

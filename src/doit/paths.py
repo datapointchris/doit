@@ -48,7 +48,7 @@ def desk_nudge_watch_lock_file() -> Path:
 
 
 def desk_nudge_records_file() -> Path:
-    """One `doit.desk_nudge` record per line, which the desk's Alloy ships to the warehouse."""
+    """One `doit.desk_nudge` record per line, appended and never rotated, for a log shipper to read."""
     return state_dir() / 'desk-nudge-events.jsonl'
 
 

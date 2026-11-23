@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:doit:desk-nudge-status:v1",
   "title": "doit desk-nudge status",
-  "description": "The desk nudge's clock as this desk's state file holds it, read with no request. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
+  "description": "Where the desk nudge's clock stands, read from this desk's state file with no request. Its pill is the state file's own pill object, which a status bar reads from the file. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,7 +17,7 @@
     "ready_until",
     "suggestion",
     "answer_counts",
-    "queued_answers",
+    "queued_answer_count",
     "pill"
   ],
   "properties": {
@@ -103,11 +103,11 @@
                 "string",
                 "null"
               ],
-              "description": "Its first resolved choice's id, where it has one."
+              "description": "The id of its one resolved choice. Null where it resolved none, or several that only a person can choose between."
             },
             "label": {
               "type": "string",
-              "description": "That choice's label, else the pursuit's description."
+              "description": "What doit next shows for it: each resolved choice on its own line, else the pursuit's description."
             }
           }
         },
@@ -124,7 +124,8 @@
               "enum": [
                 "unreachable",
                 "login",
-                "nothing_to_draw"
+                "nothing_to_draw",
+                "unreadable"
               ],
               "description": "Why /next drew nothing."
             },
@@ -142,7 +143,7 @@
           "type": "null"
         }
       ],
-      "description": "What the nudge suggested: /next's first offered pursuit with its first resolved choice, or why none was drawn."
+      "description": "What the nudge suggested: /next's first offered pursuit and what it stands for, or why none was drawn."
     },
     "answer_counts": {
       "type": "object",
@@ -173,10 +174,10 @@
       },
       "description": "How many of each answer the service holds, as last read."
     },
-    "queued_answers": {
+    "queued_answer_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "Answers the service has not stored yet."
+      "description": "How many answers the service has not stored yet, which the watch sends again."
     },
     "pill": {
       "type": "object",
@@ -189,7 +190,7 @@
       "properties": {
         "text": {
           "type": "string",
-          "description": "What the waybar pill prints."
+          "description": "What a status bar prints."
         },
         "class": {
           "enum": [

@@ -19,6 +19,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from doit.pursuits import choice_lines
+from doit.pursuits import settled_choice
+
 STARTING_INTERVAL_MINUTES = 60
 
 # Each too soon multiplies the interval by this, and each too late divides it.
@@ -49,8 +52,8 @@ STATUS_SCHEMA_FILE = 'desk-nudge-status.schema.json'
 class Answer(StrEnum):
     """What a person says of one nudge. Timing and bother are separate axes, so one nudge can take two.
 
-    `good_timing` and `bothered` move nothing yet. They are kept so that a later
-    rule can weigh when to interrupt.
+    `good_timing` and `bothered` move no interval. They are stored with the
+    others, for a rule that weighs when to interrupt.
     """
 
     GOOD_TIMING = 'good_timing'
@@ -93,6 +96,11 @@ class Phase(StrEnum):
     PAUSED = 'paused'
     NO_DESK = 'no_desk'
 
+    @property
+    def holds_nudge(self) -> bool:
+        """Whether a nudge is in hand, which `begin_firing` starts and `end_ready` ends."""
+        return self in (Phase.FIRING, Phase.READY)
+
 
 class SuggestionError(StrEnum):
     """Why a firing has no suggestion, each with its own message."""
@@ -100,12 +108,14 @@ class SuggestionError(StrEnum):
     UNREACHABLE = 'unreachable'
     LOGIN = 'login'
     NOTHING_TO_DRAW = 'nothing_to_draw'
+    UNREADABLE = 'unreadable'
 
 
 SUGGESTION_MESSAGES = {
     SuggestionError.UNREACHABLE: 'The doit service could not be reached, so take a break.',
     SuggestionError.LOGIN: "doit refused this desk's login. Run `doit auth login`, and take a break.",
     SuggestionError.NOTHING_TO_DRAW: 'Nothing is due, so take a break.',
+    SuggestionError.UNREADABLE: "The service's draw could not be read, so take a break.",
 }
 
 PILL_TEXT = {Phase.AWAY: 'away', Phase.PAUSED: 'paused', Phase.NO_DESK: 'no desk'}
@@ -122,7 +132,7 @@ def answer_counts(answers: Iterable[str]) -> dict[str, int]:
 
 
 def interval_minutes(answers: Iterable[str]) -> float:
-    """60 minutes, times 1.1 for each too soon and divided by 1.1 for each too late, to the hundredth of a minute.
+    """`STARTING_INTERVAL_MINUTES`, times `ANSWER_STEP` for each too soon and divided by it for each too late, to the hundredth of a minute.
 
     It has no floor or ceiling. The order of the answers does not matter, so a too
     soon and a too late cancel.
@@ -148,7 +158,7 @@ def maybe_instant(text: str | None) -> dt.datetime | None:
 
 
 def record_stamp(moment: dt.datetime) -> str:
-    """An instant as a record holds it, in UTC to the millisecond, as desk presence writes it."""
+    """An instant as a record holds it, in UTC to the millisecond."""
     return moment.astimezone(dt.UTC).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 
@@ -175,9 +185,20 @@ def fresh_state() -> dict[str, Any]:
     return state
 
 
+class UnreadableState(ValueError):
+    """A state file that is not this release's state: not JSON, not an object, or another `version`."""
+
+
 def loaded_state(document: object) -> dict[str, Any]:
-    """A state file's document over a fresh state, so a field it lacks reads as a fresh desk's."""
-    return {**fresh_state(), **document} if isinstance(document, dict) else fresh_state()
+    """A state file's document over a fresh state, so a field it lacks reads as a fresh desk's. Raises UnreadableState."""
+    if not isinstance(document, dict) or document.get('version') != STATE_VERSION:
+        raise UnreadableState(f'it holds no version {STATE_VERSION} state')
+    return {**fresh_state(), **document}
+
+
+def in_hand(state: dict) -> dict | None:
+    """The nudge that is firing or ready, or None where the phase holds none."""
+    return state['nudge'] if Phase(state['phase']).holds_nudge else None
 
 
 @dataclass
@@ -202,12 +223,19 @@ def end_ready(state: dict) -> dict:
     return nudge
 
 
-def tick(state: dict, now: dt.datetime, live_desk: bool) -> Change:
+def away_outlived(state: dict, hypridle_pid: str | None) -> bool:
+    """Whether the hypridle that reported the away has gone, so that no `back` will come for it."""
+    away = state['away']
+    return bool(away and away.get('hypridle_pid') and hypridle_pid and hypridle_pid != away['hypridle_pid'])
+
+
+def tick(state: dict, now: dt.datetime, live_desk: bool, hypridle_pid: str | None = None) -> Change:
     """One tick of the watch: present time added, a ready nudge expired, the desk checked, and a firing called.
 
-    A tick adds the seconds since the last one, capped at two tick periods. A
+    A tick adds the seconds since the last one, capped at `TICK_CAP_SECONDS`. A
     longer gap writes `gap`, and one of `BREAK_SECONDS` or more restarts the clock.
-    A desk that has been gone that long restarts it too when it returns.
+    A desk that has been gone that long restarts it too when it returns. An away
+    whose hypridle has gone, as after a logout or a reboot, ends as a `back` would.
     """
     change = Change()
     last = maybe_instant(state['last_tick'])
@@ -222,21 +250,28 @@ def tick(state: dict, now: dt.datetime, live_desk: bool) -> Change:
         change.closes = end_ready(state)
         change.records.append(record(Event.EXPIRED, now, nudge_id=change.closes['nudge_id']))
         phase = Phase.COUNTING
-    if phase in (Phase.PAUSED, Phase.FIRING, Phase.READY):
+    if phase is Phase.PAUSED or phase.holds_nudge:
         return change
     if not live_desk:
         if phase is not Phase.NO_DESK:
             state['no_desk_since'] = stamp(last or now)
             state['phase'] = Phase.NO_DESK.value
         return change
-    if phase is Phase.NO_DESK:
-        gone = now - (maybe_instant(state['no_desk_since']) or now)
+    returned = phase is Phase.NO_DESK
+    if returned:
+        began = min(
+            (moment for moment in (maybe_instant(state['no_desk_since']), maybe_instant((state['away'] or {}).get('since'))) if moment),
+            default=now,
+        )
         state['no_desk_since'] = None
-        if gone.total_seconds() >= BREAK_SECONDS:
+        if (now - began).total_seconds() >= BREAK_SECONDS:
             state['present_seconds'] = 0.0
         state['phase'] = (Phase.AWAY if state['away'] else Phase.COUNTING).value
+        phase = Phase(state['phase'])
+    if phase is Phase.AWAY and away_outlived(state, hypridle_pid):
+        change.records += came_back(state, now, state['away']['idle_after_seconds']).records
         return change
-    if phase is Phase.AWAY:
+    if returned or phase is Phase.AWAY:
         return change
     if gap >= BREAK_SECONDS:
         state['present_seconds'] = 0.0
@@ -263,7 +298,7 @@ def begin_firing(state: dict, now: dt.datetime, nudge_id: str) -> dict:
 
 
 def make_ready(state: dict, now: dt.datetime, nudge_id: str, suggestion: dict) -> dict | None:
-    """Step five: the nudge ready for ten minutes, where it is still the one firing. Returns it, or None where it ended meanwhile."""
+    """The nudge ready for `READY_SECONDS`, where it is still the one firing. Returns it, or None where it ended meanwhile."""
     nudge = state['nudge']
     if state['phase'] != Phase.FIRING or not nudge or nudge['nudge_id'] != nudge_id:
         return None
@@ -275,23 +310,24 @@ def make_ready(state: dict, now: dt.datetime, nudge_id: str, suggestion: dict) -
 
 def held_nudge(state: dict, nudge_id: str) -> dict | None:
     """The nudge in hand, where it is the one named."""
-    nudge = state['nudge']
+    nudge = in_hand(state)
     return nudge if nudge and nudge['nudge_id'] == nudge_id else None
 
 
-def went_away(state: dict, now: dt.datetime, idle_after_seconds: int) -> Change:
+def went_away(state: dict, now: dt.datetime, idle_after_seconds: int, hypridle_pid: str | None = None) -> Change:
     """hypridle's listener saw no input for `idle_after_seconds`, so the desk has been away since the last input.
 
     Counting gives those seconds back. A nudge in hand ends, and the record says
     whether it fired inside the idle window. A paused clock or a gone desk only
-    remembers when the absence began.
+    remembers when the absence began. The away keeps the pid of the hypridle that
+    reported it, so a tick can end it once that hypridle is gone.
     """
     since = now - dt.timedelta(seconds=idle_after_seconds)
     fired_while_idle = False
     nudge_id = None
     change = Change()
     phase = Phase(state['phase'])
-    if phase in (Phase.READY, Phase.FIRING):
+    if phase.holds_nudge:
         change.closes = end_ready(state)
         nudge_id = change.closes['nudge_id']
         fired_while_idle = instant(change.closes['fired_at']) >= since
@@ -304,6 +340,7 @@ def went_away(state: dict, now: dt.datetime, idle_after_seconds: int) -> Change:
         'since': earlier['since'] if earlier else stamp(since),
         'idle_after_seconds': idle_after_seconds,
         'fired_while_idle': fired_while_idle or bool(earlier and earlier['fired_while_idle']),
+        'hypridle_pid': hypridle_pid or (earlier or {}).get('hypridle_pid'),
     }
     change.records.append(
         record(
@@ -345,7 +382,7 @@ def pause(state: dict, now: dt.datetime) -> Change:
     if state['phase'] == Phase.PAUSED:
         return Change()
     change = Change()
-    if state['phase'] in (Phase.READY, Phase.FIRING):
+    if in_hand(state):
         change.closes = end_ready(state)
     state['phase'] = Phase.PAUSED.value
     change.records.append(record(Event.PAUSED, now, nudge_id=change.closes['nudge_id'] if change.closes else None))
@@ -374,9 +411,9 @@ def take_answer(state: dict, now: dt.datetime, answer: Answer, nudge_id: str | N
 
     With no id it answers the nudge in hand. Raises NothingToAnswer where there is none.
     """
-    nudge = state['nudge']
+    nudge = in_hand(state)
     closes = None
-    if nudge and state['phase'] in (Phase.READY, Phase.FIRING) and nudge_id in (None, nudge['nudge_id']):
+    if nudge and nudge_id in (None, nudge['nudge_id']):
         answered_id, fired_at, late = nudge['nudge_id'], nudge['fired_at'], False
         closes = end_ready(state)
     elif nudge_id is None:
@@ -397,29 +434,37 @@ def take_answer(state: dict, now: dt.datetime, answer: Answer, nudge_id: str | N
 
 
 def took_interval(state: dict, answered: dict) -> None:
-    """The interval and the counts the service answered, which the clock fires on from now."""
-    state['interval_minutes'] = float(answered['interval_minutes'])
-    state['answer_counts'] = dict(answered['answer_counts'])
+    """The interval and the counts the service answered, which the clock fires on from now. A field that the reply lacks keeps its value."""
+    state['interval_minutes'] = float(answered.get('interval_minutes', state['interval_minutes']))
+    state['answer_counts'] = dict(answered.get('answer_counts', state['answer_counts']))
+
+
+def answer_key(row: dict) -> tuple[str, str]:
+    """What the service stores an answer under, once."""
+    return row['nudge_id'], row['answer']
+
+
+def queued_entry(state: dict, row: dict) -> dict | None:
+    """The queued answer that the service would store in place of `row`, which is the first one kept under its key."""
+    return next((queued for queued in state['queued_answers'] if answer_key(queued['row']) == answer_key(row)), None)
 
 
 def queue_answer(state: dict, taken: Taken) -> None:
     """Keep an answer that the service did not store, so each tick sends it again."""
-    key = (taken.row['nudge_id'], taken.row['answer'])
-    if all((queued['row']['nudge_id'], queued['row']['answer']) != key for queued in state['queued_answers']):
+    if queued_entry(state, taken.row) is None:
         state['queued_answers'] = [*state['queued_answers'], {'row': taken.row, 'late': taken.late}]
 
 
 def unqueue_answer(state: dict, row: dict) -> bool:
-    """Drop a queued answer now stored. False where another writer already dropped it, so only one writes `saved: true`."""
-    key = (row['nudge_id'], row['answer'])
-    kept = [queued for queued in state['queued_answers'] if (queued['row']['nudge_id'], queued['row']['answer']) != key]
+    """Drop a queued answer once stored or refused. False where another writer already dropped it, so only one writes its line."""
+    kept = [queued for queued in state['queued_answers'] if answer_key(queued['row']) != answer_key(row)]
     dropped = len(kept) != len(state['queued_answers'])
     state['queued_answers'] = kept
     return dropped
 
 
-def answered_record(now: dt.datetime, row: dict, late: bool, saved: bool, snapshot: dict | None = None) -> dict:
-    """The `answered` line. A resend that stores a queued answer carries no snapshot, because its moment has passed."""
+def answered_record(now: dt.datetime, row: dict, late: bool, saved: bool, queued: bool, snapshot: dict | None = None) -> dict:
+    """The `answered` line. A resend that stores or drops a queued answer carries no snapshot, because its moment has passed."""
     since_fired = (instant(row['answered_at']) - instant(row['fired_at'])).total_seconds()
     return record(
         Event.ANSWERED,
@@ -428,6 +473,7 @@ def answered_record(now: dt.datetime, row: dict, late: bool, saved: bool, snapsh
         answer=row['answer'],
         seconds_since_fired=round(since_fired, 3),
         saved=saved,
+        queued=queued,
         late=late,
         **(snapshot or {}),
     )
@@ -450,28 +496,25 @@ def dismissal(state: dict, now: dt.datetime, nudge_id: str) -> list[dict]:
     return [record(Event.DISMISSED, now, nudge_id=nudge_id)]
 
 
-def needs_showing_again(state: dict, bus_owner: str | None) -> dict | None:
-    """The ready nudge, where the notification server changed owner since showing it, as a dunst restart does."""
-    nudge = state['nudge']
-    if state['phase'] != Phase.READY or not nudge or not nudge['bus_owner'] or not bus_owner:
-        return None
-    return dict(nudge) if bus_owner != nudge['bus_owner'] else None
-
-
 # --- what the firing reads and shows -------------------------------------------
 
 
 def suggestion_from(selection: dict) -> dict:
-    """The first pursuit `/next` offers, with its first resolved choice, or its description where it resolves none."""
+    """The first pursuit `/next` offers, with the item it stands for where `settled_choice` settles one.
+
+    The label is what `doit next` shows for it: each resolved choice on its own
+    line, else the pursuit's description.
+    """
     offered = selection.get('offered') or []
     if not offered:
         return failed_suggestion(SuggestionError.NOTHING_TO_DRAW, 'the draw offered nothing')
     name = offered[0]
     entry = (selection.get('resolved') or {}).get(name) or {}
     choices = [] if entry.get('error') else entry.get('choices') or []
-    first = choices[0] if choices else {}
+    settled = settled_choice(choices)
     description = ((selection.get('pursuits') or {}).get(name) or {}).get('description') or ''
-    return {'pursuit': name, 'item_id': first.get('id'), 'label': first.get('label') or description}
+    item_id = settled.get('id') if settled else None
+    return {'pursuit': name, 'item_id': item_id, 'label': '\n'.join(choice_lines(choices)) or description}
 
 
 def failed_suggestion(kind: SuggestionError, detail: str) -> dict:
@@ -486,7 +529,7 @@ def topic(suggestion: dict | None) -> str:
 def notification_text(nudge: dict) -> tuple[str, str]:
     """The notification's summary and body."""
     suggestion = nudge['suggestion'] or {}
-    foot = f'{round(nudge["present_minutes"])} min at the desk · middle-click to answer'
+    foot = f'{round(nudge["present_minutes"])} min at the desk'
     if 'pursuit' not in suggestion:
         return 'Time for a break', f'{suggestion.get("message") or SUGGESTION_MESSAGES[SuggestionError.NOTHING_TO_DRAW]}\n{foot}'
     label = suggestion.get('label')
@@ -543,22 +586,21 @@ def pill_face(state: dict) -> dict[str, str]:
 
 def status_document(state: dict, now: dt.datetime) -> dict:
     """`doit desk-nudge status --json`, which `schemas/desk-nudge-status.schema.json` describes."""
-    nudge = state['nudge'] or {}
+    nudge = in_hand(state) or {}
     stale_after = maybe_instant(state['pill']['stale_after'])
-    holding = state['phase'] not in (Phase.READY, Phase.FIRING)
     return {
         'schema_version': STATUS_SCHEMA_VERSION,
         'phase': state['phase'],
         'watch_running': stale_after is not None and now < stale_after,
         'present_minutes': round(state['present_seconds'] / 60, 2),
         'interval_minutes': state['interval_minutes'],
-        'minutes_left': minutes_left(state) if holding else None,
+        'minutes_left': None if nudge else minutes_left(state),
         'nudge_id': nudge.get('nudge_id'),
         'fired_at': nudge.get('fired_at'),
         'ready_until': nudge.get('ready_until'),
         'suggestion': nudge.get('suggestion'),
         'answer_counts': state['answer_counts'],
-        'queued_answers': len(state['queued_answers']),
+        'queued_answer_count': len(state['queued_answers']),
         'pill': state['pill'],
     }
 
@@ -575,7 +617,7 @@ def record(event: Event, now: dt.datetime, **fields: Any) -> dict:
 RECORD_FIELDS: dict[Event, tuple[str, ...]] = {
     Event.STARTED: ('doit_version', 'phase', 'present_minutes', 'interval_minutes'),
     Event.FIRED: ('nudge_id', 'interval_minutes', 'present_minutes', 'suggestion', 'sessions', 'focused_window'),
-    Event.ANSWERED: ('nudge_id', 'answer', 'seconds_since_fired', 'saved', 'late'),
+    Event.ANSWERED: ('nudge_id', 'answer', 'seconds_since_fired', 'saved', 'queued', 'late'),
     Event.DISMISSED: ('nudge_id',),
     Event.EXPIRED: ('nudge_id',),
     Event.PICKED: ('nudge_id', 'pick', 'sessions', 'focused_window'),
@@ -594,7 +636,7 @@ FAILED_READ = {
 }
 
 SUGGESTION_SCHEMA = {
-    'description': "What the nudge suggested: /next's first offered pursuit with its first resolved choice, or why none was drawn.",
+    'description': "What the nudge suggested: /next's first offered pursuit and what it stands for, or why none was drawn.",
     'oneOf': [
         {
             'type': 'object',
@@ -602,8 +644,16 @@ SUGGESTION_SCHEMA = {
             'required': ['pursuit', 'item_id', 'label'],
             'properties': {
                 'pursuit': {'type': 'string', 'description': 'The pursuit /next offered first.'},
-                'item_id': {'type': ['string', 'null'], 'description': "Its first resolved choice's id, where it has one."},
-                'label': {'type': 'string', 'description': "That choice's label, else the pursuit's description."},
+                'item_id': {
+                    'type': ['string', 'null'],
+                    'description': (
+                        'The id of its one resolved choice. Null where it resolved none, or several that only a person can choose between.'
+                    ),
+                },
+                'label': {
+                    'type': 'string',
+                    'description': "What doit next shows for it: each resolved choice on its own line, else the pursuit's description.",
+                },
             },
         },
         {
@@ -629,7 +679,7 @@ RECORD_PROPERTIES: dict[str, dict] = {
     'phase': {'enum': [phase.value for phase in Phase], 'description': 'Where the clock stood when the watch started.'},
     'nudge_id': {
         'oneOf': [NUDGE_ID, {'type': 'null'}],
-        'description': "The firing's UUIDv7, which joins its answers, its picks and the service's row. Null where no nudge was in hand.",
+        'description': "The firing's UUIDv7, which joins its answers and the service's row. Null where no nudge was in hand.",
     },
     'interval_minutes': {'type': 'number', 'description': 'The interval in force.'},
     'present_minutes': {'type': 'number', 'description': 'The present time counted.'},
@@ -652,7 +702,14 @@ RECORD_PROPERTIES: dict[str, dict] = {
     },
     'answer': {'enum': [answer.value for answer in Answer], 'description': 'What the person said of the nudge.'},
     'seconds_since_fired': {'type': 'number', 'description': 'From the firing to the answer.'},
-    'saved': {'type': 'boolean', 'description': 'Whether the service stored the answer. A queued one is written again once stored.'},
+    'saved': {'type': 'boolean', 'description': 'Whether the service stored the answer.'},
+    'queued': {
+        'type': 'boolean',
+        'description': (
+            'Whether the answer is kept on the desk to send again. A kept answer is written again once, '
+            'with saved true once stored, or with both false once the service refuses it.'
+        ),
+    },
     'late': {'type': 'boolean', 'description': 'Whether its nudge had already ended, which leaves the clock alone.'},
     'pick': {
         'type': 'object',
@@ -681,7 +738,7 @@ def record_schema() -> dict:
         '$id': f'urn:doit:desk-nudge-record:v{RECORD_SCHEMA_VERSION}',
         'title': 'doit.desk_nudge',
         'description': (
-            "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, which the desk's Alloy ships under kind doit.desk_nudge. "
+            'One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, appended and never rotated, for a log shipper to read. '
             'Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.'
         ),
         'type': 'object',
@@ -704,7 +761,8 @@ def status_schema() -> dict:
         '$id': f'urn:doit:desk-nudge-status:v{STATUS_SCHEMA_VERSION}',
         'title': 'doit desk-nudge status',
         'description': (
-            "The desk nudge's clock as this desk's state file holds it, read with no request. "
+            "Where the desk nudge's clock stands, read from this desk's state file with no request. Its pill is the state file's "
+            'own pill object, which a status bar reads from the file. '
             'Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.'
         ),
         'type': 'object',
@@ -721,7 +779,7 @@ def status_schema() -> dict:
             'ready_until',
             'suggestion',
             'answer_counts',
-            'queued_answers',
+            'queued_answer_count',
             'pill',
         ],
         'properties': {
@@ -729,7 +787,10 @@ def status_schema() -> dict:
             'phase': {'enum': [phase.value for phase in Phase], 'description': 'Where the clock stands.'},
             'watch_running': {'type': 'boolean', 'description': "Whether the watch ticked within the pill's stale horizon."},
             'present_minutes': {'type': 'number', 'description': 'The present time counted toward the interval.'},
-            'interval_minutes': {'type': 'number', 'description': 'The interval last read from the service, or 60 where none was.'},
+            'interval_minutes': {
+                'type': 'number',
+                'description': f'The interval last read from the service, or {STARTING_INTERVAL_MINUTES} where none was.',
+            },
             'minutes_left': {
                 'type': ['integer', 'null'],
                 'minimum': 0,
@@ -746,13 +807,17 @@ def status_schema() -> dict:
                 'properties': {answer.value: {'type': 'integer', 'minimum': 0} for answer in Answer},
                 'description': 'How many of each answer the service holds, as last read.',
             },
-            'queued_answers': {'type': 'integer', 'minimum': 0, 'description': 'Answers the service has not stored yet.'},
+            'queued_answer_count': {
+                'type': 'integer',
+                'minimum': 0,
+                'description': 'How many answers the service has not stored yet, which the watch sends again.',
+            },
             'pill': {
                 'type': 'object',
                 'additionalProperties': False,
                 'required': ['text', 'class', 'stale_after'],
                 'properties': {
-                    'text': {'type': 'string', 'description': 'What the waybar pill prints.'},
+                    'text': {'type': 'string', 'description': 'What a status bar prints.'},
                     'class': {'enum': [phase.value for phase in Phase], 'description': "The pill's CSS class."},
                     'stale_after': {**nullable_stamp, 'description': 'Past this, the pill reads `nudge stopped`.'},
                 },

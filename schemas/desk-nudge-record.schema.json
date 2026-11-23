@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:doit:desk-nudge-record:v1",
   "title": "doit.desk_nudge",
-  "description": "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, which the desk's Alloy ships under kind doit.desk_nudge. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
+  "description": "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, appended and never rotated, for a log shipper to read. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -61,7 +61,7 @@
           "type": "null"
         }
       ],
-      "description": "The firing's UUIDv7, which joins its answers, its picks and the service's row. Null where no nudge was in hand."
+      "description": "The firing's UUIDv7, which joins its answers and the service's row. Null where no nudge was in hand."
     },
     "interval_minutes": {
       "type": "number",
@@ -72,7 +72,7 @@
       "description": "The present time counted."
     },
     "suggestion": {
-      "description": "What the nudge suggested: /next's first offered pursuit with its first resolved choice, or why none was drawn.",
+      "description": "What the nudge suggested: /next's first offered pursuit and what it stands for, or why none was drawn.",
       "oneOf": [
         {
           "type": "object",
@@ -92,11 +92,11 @@
                 "string",
                 "null"
               ],
-              "description": "Its first resolved choice's id, where it has one."
+              "description": "The id of its one resolved choice. Null where it resolved none, or several that only a person can choose between."
             },
             "label": {
               "type": "string",
-              "description": "That choice's label, else the pursuit's description."
+              "description": "What doit next shows for it: each resolved choice on its own line, else the pursuit's description."
             }
           }
         },
@@ -113,7 +113,8 @@
               "enum": [
                 "unreachable",
                 "login",
-                "nothing_to_draw"
+                "nothing_to_draw",
+                "unreadable"
               ],
               "description": "Why /next drew nothing."
             },
@@ -208,7 +209,11 @@
     },
     "saved": {
       "type": "boolean",
-      "description": "Whether the service stored the answer. A queued one is written again once stored."
+      "description": "Whether the service stored the answer."
+    },
+    "queued": {
+      "type": "boolean",
+      "description": "Whether the answer is kept on the desk to send again. A kept answer is written again once, with saved true once stored, or with both false once the service refuses it."
     },
     "late": {
       "type": "boolean",
@@ -323,6 +328,7 @@
           "answer",
           "seconds_since_fired",
           "saved",
+          "queued",
           "late"
         ]
       }
