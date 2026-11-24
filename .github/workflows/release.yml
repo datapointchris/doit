@@ -45,20 +45,28 @@ jobs:
       username: ${{ secrets.PYPI_ICB_USERNAME }}
       password: ${{ secrets.PYPI_ICB_PASSWORD }}
 
-  # The TUI's own stream, tagged cli/vX.Y.Z from the conventional commits under
-  # cli/. `go install github.com/datapointchris/doit/cli/cmd/doit-tui@latest`
-  # resolves the newest of these tags through the module proxy, so the release
-  # is the tag and a GitHub release naming it, and nothing is built here. The
-  # release is not marked latest, so the package's own stays the one GitHub
-  # shows.
-  cli-release:
+  # The Go doit's stream, tagged cli/vX.Y.Z from the conventional commits under
+  # cli/. Its release carries doit_<version>_<os>_<arch>.tar.gz for each desk,
+  # with the binary at the archive's root, and checksums.txt. `doit update` and
+  # a machine's package manager install from those. `go install
+  # .../cli/cmd/doit-tui@latest` still resolves the same tags through the
+  # module proxy. The release is not marked latest, so the Python package's own
+  # stays the one GitHub shows.
+  #
+  # The tag is not pushed here. It lands with the release, so a failed build
+  # leaves no tag, and the next run cuts the same version again.
+  cli-version:
+    name: Resolve the Go doit's version
     needs: validate
     runs-on: ubuntu-26.04
     defaults:
       run:
         shell: bash
     permissions:
-      contents: write
+      contents: read
+    outputs:
+      tag: ${{ steps.cli.outputs.tag }}
+      previous: ${{ steps.cli.outputs.previous }}
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -72,18 +80,120 @@ jobs:
           release/install-tools "$RUNNER_TEMP/bin" svu
           echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
 
-      - name: Resolve and tag the TUI's version
+      - name: Resolve the Go doit's version
         id: cli
-        run: release/resolve-version --prefix cli/v --push --path cli >>"$GITHUB_OUTPUT"
+        run: release/resolve-version --prefix cli/v --path cli >>"$GITHUB_OUTPUT"
 
-      - name: Publish the TUI's release
-        if: steps.cli.outputs.tag != ''
+  cli-build:
+    name: Build the Go doit for ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: cli-version
+    if: needs.cli-version.outputs.tag != ''
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      # goselfupdate matches the OS and the Go arch as delimited words in an
+      # asset's name, so the underscores are what make it findable. CGO is off,
+      # so the binary runs on a desk without the build host's libc.
+      - name: Build and archive
+        working-directory: cli
         env:
-          TAG: ${{ steps.cli.outputs.tag }}
-          PREVIOUS: ${{ steps.cli.outputs.previous }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          TAG: ${{ needs.cli-version.outputs.tag }}
         run: |
-          git log --no-merges --pretty='- %s (%h)' "${PREVIOUS:+${PREVIOUS}..}${TAG}" -- cli >"$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --latest=false --verify-tag
+          version="${TAG#cli/}"
+          mkdir -p ../dist
+          go build -trimpath -ldflags "-s -w -X main.version=${version}" -o ../dist/doit ./cmd/doit
+          tar -czf "../dist/doit_${version#v}_${GOOS}_${GOARCH}.tar.gz" -C ../dist doit
+          rm ../dist/doit
+
+      # The publish job attaches these in this run, so a day outlives every use.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: doit-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  # After the Python release, whose doit-python a desk installs before this
+  # binary takes the name doit.
+  cli-publish:
+    name: Publish the Go doit's release
+    needs: [release, cli-version, cli-build]
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.cli-version.outputs.tag }}
+      PREVIOUS: ${{ needs.cli-version.outputs.previous }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: doit-*
+          path: dist
+          merge-multiple: true
+
+      # `--` rather than `./*`, because sha256sum echoes its argument and the
+      # release asset is named `name`, not `./name`.
+      - name: Generate checksums
+        run: cd dist && sha256sum -- *.tar.gz >checksums.txt
+
+      - name: Build release notes
+        run: |
+          git log --no-merges --pretty='- %s (%h)' "${PREVIOUS:+${PREVIOUS}..}HEAD" -- cli >"$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+
+      # The run for a newer push resolves from the same previous tag, so it
+      # releases these commits too. A tag already on this commit was left by a
+      # publish GitHub failed partway, and the newer run refuses to version past
+      # it, so this run publishes it whatever the tip.
+      - name: Leave the release to a newer push
+        id: tip
+        run: |
+          tagged=$(git ls-remote origin "refs/tags/$TAG" | tail -n 1 | cut -f1)
+          if [ "$tagged" = "$GITHUB_SHA" ]; then
+            echo "$TAG already names ${GITHUB_SHA} with no release, so this run publishes it"
+            exit 0
+          fi
+          tip=$(git ls-remote --exit-code origin "$GITHUB_REF" | cut -f1)
+          [ -n "$tip" ] || { echo "origin names no commit for $GITHUB_REF" >&2; exit 1; }
+          if [ "$tip" != "$GITHUB_SHA" ]; then
+            echo "$GITHUB_REF is at ${tip}, past ${GITHUB_SHA}; the run for ${tip} releases these commits"
+            echo "superseded=true" >>"$GITHUB_OUTPUT"
+          fi
+
+      # gh uploads every asset to a draft and publishes it last, creating the
+      # tag on this commit as it does.
+      - name: Publish the release
+        if: steps.tip.outputs.superseded != 'true'
+        run: |
+          release/publish-github-release "$TAG" dist/* --target "$GITHUB_SHA" --title "$TAG" \
+            --notes-file "$RUNNER_TEMP/notes.md" --latest=false
 
   # The service's image, built from the repository root because it runs the
   # root package's view code. It is tagged by the last commit touching anything

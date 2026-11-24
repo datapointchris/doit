@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Publishes the GitHub release for a tag, retrying a bounded few times where GitHub fails partway.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: publish-github-release <tag> [gh release create flags and assets...]
+
+Runs `gh release create <tag>` with the rest of the arguments. GitHub can
+answer 5xx after doing part of the work, so before each attempt this reads
+what GitHub holds for <tag>. A published release ends the run. A draft an
+earlier attempt left is deleted with its assets, and the tag is kept, so the
+next attempt starts clean. Waits 15 s before the second attempt and doubles
+the wait after each, for four attempts.
+
+Exits 1 once every attempt failed, naming the tag.
+EOF
+}
+
+die() {
+  printf 'publish-github-release: %s\n' "$*" >&2
+  exit 1
+}
+
+[ $# -ge 1 ] || {
+  usage >&2
+  exit 2
+}
+case $1 in -h | --help)
+  usage
+  exit 0
+  ;;
+esac
+tag=$1
+shift
+
+attempts=4
+delay=15
+for attempt in $(seq 1 "$attempts"); do
+  if is_draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+    if [ "$is_draft" = false ]; then
+      echo "$tag is published"
+      exit 0
+    fi
+    echo "$tag has a draft an earlier attempt left; deleting it and keeping the tag"
+    gh release delete "$tag" --yes || true
+  fi
+  if gh release create "$tag" "$@"; then
+    exit 0
+  fi
+  [ "$attempt" -lt "$attempts" ] || break
+  printf 'publish-github-release: attempt %d of %d for %s failed; retrying in %ds\n' \
+    "$attempt" "$attempts" "$tag" "$delay" >&2
+  sleep "$delay"
+  delay=$((delay * 2))
+done
+die "GitHub refused all $attempts attempts to publish $tag"
