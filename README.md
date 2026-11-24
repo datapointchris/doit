@@ -492,6 +492,13 @@ is one copy of each.
   A read that fails becomes the reason on its lane or row, and the service logs it at error as
   `source_failed` with the source's name.
 - **A forecast is taken on an interval inside the process**, every `DOIT_API_FORECAST_INTERVAL`.
+- **The desk panel view answers every part of the desk nudge's panel.** `GET
+  /api/v1/desk-panel-view` computes each part with the root package's rules in `doit.desk_panel`. It carries the suggestion with its choices and usual
+  minutes, the nudge's answers and today's figures. It also carries each pursuit, every habit with
+  its checklist items, and the due lanes that are neither pursuits nor habits. Every row that a pick
+  completes carries its key and what it completes. With `draw=true` it draws as `/next` does.
+  Without it, it reads the standing draw, and saves no draw and counts no offer.
+  `schemas/desk-panel-view.schema.json` is its contract.
 
 Every `/api/v1` route answers a person's login, verified as an RFC 9068 access token from the
 issuer. `/health`, `/ready` and `/.well-known/oauth-protected-resource` answer anyone.

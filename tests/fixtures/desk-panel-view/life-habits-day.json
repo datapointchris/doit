@@ -1,0 +1,206 @@
+{
+  "date": "2026-11-02",
+  "timezone": "America/New_York",
+  "due": [
+    {
+      "id": 1,
+      "name": "Brush teeth",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 3,
+      "name": "Drink water",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 4,
+      "name": "Take vitamins",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 6,
+      "name": "Stretch",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 7,
+      "name": "Exercise",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 8,
+      "name": "Meditate",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 9,
+      "name": "Tidy the desk",
+      "category_id": 2,
+      "category": {
+        "id": 2,
+        "name": "Home",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 10,
+      "name": "Water the plants",
+      "category_id": 2,
+      "category": {
+        "id": 2,
+        "name": "Home",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 11,
+      "name": "Plan tomorrow",
+      "category_id": 2,
+      "category": {
+        "id": 2,
+        "name": "Home",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 12,
+      "name": "Read before bed",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 13,
+      "name": "Walk outside",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    },
+    {
+      "id": 14,
+      "name": "Journal",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "is_current": true
+    }
+  ],
+  "completed": [
+    {
+      "id": 902,
+      "habit_id": 2,
+      "name": "Floss",
+      "category_id": 1,
+      "category": {
+        "id": 1,
+        "name": "Health",
+        "is_current": true
+      },
+      "complete_date": "2026-11-02"
+    },
+    {
+      "id": 905,
+      "habit_id": 5,
+      "name": "Make the bed",
+      "category_id": 2,
+      "category": {
+        "id": 2,
+        "name": "Home",
+        "is_current": true
+      },
+      "complete_date": "2026-11-02"
+    }
+  ],
+  "current_total": 14,
+  "checklists": [
+    {
+      "habit_id": 7,
+      "name": "Exercise",
+      "date": "2026-11-02",
+      "complete": false,
+      "items": [
+        {
+          "id": 1,
+          "name": "Squat",
+          "daily_target": 5,
+          "ticks": [
+            {
+              "id": 40,
+              "item_id": 1,
+              "habit_id": 7,
+              "name": "Squat",
+              "tick_date": "2026-11-02",
+              "ticked_at": "2026-11-02T10:00:00Z"
+            },
+            {
+              "id": 41,
+              "item_id": 1,
+              "habit_id": 7,
+              "name": "Squat",
+              "tick_date": "2026-11-02",
+              "ticked_at": "2026-11-02T11:00:00Z"
+            }
+          ],
+          "done": false
+        },
+        {
+          "id": 2,
+          "name": "Lunge",
+          "daily_target": 5,
+          "ticks": [],
+          "done": false
+        }
+      ]
+    }
+  ]
+}
