@@ -61,11 +61,11 @@ apps draw three lanes.
   seconds.
 - **`claude-sessions --json`**, in `service_commands.desk_nudge.claude_sessions`, at each desk
   nudge firing, answer and panel pick.
-- **`hyprctl`**, in `service_commands.desk_nudge.focused_window`, at the same moments: `instances
-  -j`, then `-i <instance> activewindow -j`. A unit started at login never has
-  `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
+- **`hyprctl`**, in `service_commands.desk_nudge.hyprctl`: `instances -j`, then `-i <instance>
+  activewindow -j` at the same moments, and `-i <instance> monitors -j` as a nudge turns ready. A
+  unit started at login never has `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
 - **`canberra-gtk-play --id <CHIME_SOUND>`**, in `service_commands.desk_nudge.chime`, once as a
-  nudge turns ready. A firing opens nothing else.
+  nudge turns ready, unless every display is off. A firing opens nothing else.
 - **`notify-send`**, in `notify`, for a passing notice after an answer or a panel pick.
 - **`loginctl show-session auto -p IdleHint --value`**, in `service_commands.desk_nudge.session_idle`,
   before each timed read of the desk nudge panel's rows. It never moves the clock.

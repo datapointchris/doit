@@ -230,19 +230,33 @@ def claude_sessions() -> list | dict:
     return rows if isinstance(rows, list) else {'error': 'claude-sessions --json printed no list'}
 
 
-def focused_window() -> dict:
-    """The focused window's class and title, read through `hyprctl -i` from the instance `hyprctl instances` lists.
+def hyprctl(query: str):
+    """`hyprctl -i <instance> <query> -j`, parsed, on the instance `hyprctl instances` lists.
 
     A unit started at login never has HYPRLAND_INSTANCE_SIGNATURE, so the instance
-    is always named.
+    is always named. Raises ProgramFailed, or ValueError on output that is not JSON.
     """
+    instance = desk_nudge.chosen_instance(json.loads(run_program(['hyprctl', 'instances', '-j'])), os.environ.get('WAYLAND_DISPLAY'))
+    if instance is None:
+        raise ProgramFailed('hyprctl instances -j lists no Hyprland instance')
+    return json.loads(run_program(['hyprctl', '-i', instance, query, '-j']))
+
+
+def focused_window() -> dict:
+    """The focused window's class and title, or why it could not be read."""
     try:
-        instance = desk_nudge.chosen_instance(json.loads(run_program(['hyprctl', 'instances', '-j'])), os.environ.get('WAYLAND_DISPLAY'))
-        if instance is None:
-            return {'error': 'hyprctl instances -j lists no Hyprland instance'}
-        return desk_nudge.focused_window_from(json.loads(run_program(['hyprctl', '-i', instance, 'activewindow', '-j'])))
+        return desk_nudge.focused_window_from(hyprctl('activewindow'))
     except (ProgramFailed, ValueError) as error:
         return {'error': str(error)}
+
+
+def screens_off() -> bool:
+    """Whether every display is off, as hypridle leaves them overnight. A failed read says on."""
+    try:
+        monitors = hyprctl('monitors')
+    except (ProgramFailed, ValueError):
+        return False
+    return isinstance(monitors, list) and bool(monitors) and not any(m.get('dpmsStatus', True) for m in monitors)
 
 
 def snapshot() -> dict:
@@ -251,7 +265,13 @@ def snapshot() -> dict:
 
 
 def chime() -> None:
-    """Play `CHIME_SOUND` through `canberra-gtk-play`. A failure logs at warning, and the flashing pill still shows the nudge."""
+    """Play `CHIME_SOUND` through `canberra-gtk-play`, unless every display is off.
+
+    A failure logs at warning, and the flashing pill still shows the nudge.
+    """
+    if screens_off():
+        log.info('every display is off, so the nudge fires without its chime')
+        return
     try:
         run_program(['canberra-gtk-play', '--id', CHIME_SOUND, '--description', 'desk nudge'])
     except ProgramFailed as error:

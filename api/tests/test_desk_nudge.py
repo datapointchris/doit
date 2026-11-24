@@ -62,6 +62,8 @@ elif name == 'hyprctl':
         print(instances)
     elif args == ['-i', json.loads(instances)[0]['instance'], 'activewindow', '-j']:
         print((fixtures / 'hyprctl-activewindow.json').read_text())
+    elif args == ['-i', json.loads(instances)[0]['instance'], 'monitors', '-j']:
+        print(json.dumps([{'name': 'DP-1', 'dpmsStatus': True}]))
     else:
         sys.exit('HYPRLAND_INSTANCE_SIGNATURE not set! (is hyprland running?)')
 elif name == 'loginctl':
@@ -228,7 +230,8 @@ def test_the_interval_fires_the_nudge_with_the_draws_first_item(store, monkeypat
     assert (record['counted_minutes'], record['interval_minutes']) == (30, 30)
     assert record['sessions'] == json.loads((FIXTURES / 'claude-sessions.json').read_text())
     assert record['focused_window'] == {'class': 'com.mitchellh.ghostty', 'title': 'Terminal — project-1'}
-    assert desk.calls('hyprctl') == [['instances', '-j'], ['-i', INSTANCE, 'activewindow', '-j']]
+    window, monitors = ['-i', INSTANCE, 'activewindow', '-j'], ['-i', INSTANCE, 'monitors', '-j']
+    assert desk.calls('hyprctl') == [['instances', '-j'], window, ['instances', '-j'], monitors]
     assert desk.calls('canberra-gtk-play') == [['--id', commands.CHIME_SOUND, '--description', 'desk nudge']]
     assert desk.calls('notify-send') == [], 'a firing shows no notification'
     status = desk.status()
