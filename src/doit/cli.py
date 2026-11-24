@@ -21,6 +21,7 @@ from doit import __version__
 from doit import config_commands
 from doit import service
 from doit import shell
+from doit import tui
 from doit.render import error_console
 from doit.render import examples
 from doit.render import set_no_input
@@ -77,6 +78,7 @@ ROOT_ORDER = (
     'next',
     'today',
     'dashboard',
+    'tui',
     'happened',
     'forecast',
     'pursuits',
@@ -182,6 +184,7 @@ AUTH_EXAMPLES = {
 app.command('next', rich_help_panel=WHAT_TO_DO_NOW, epilog=pursuits.NEXT_EXAMPLES)(pursuits.next_command)
 app.command('today', rich_help_panel=WHAT_TO_DO_NOW, epilog=today.TODAY_EXAMPLES)(today.today_command)
 app.command('dashboard', rich_help_panel=WHAT_TO_DO_NOW, epilog=dashboard.DASHBOARD_EXAMPLES)(dashboard.dashboard_command)
+app.command('tui', rich_help_panel=WHAT_TO_DO_NOW, epilog=tui.TUI_EXAMPLES)(tui.tui_command)
 app.command('happened', rich_help_panel=WHAT_CAME_OF_IT, epilog=happened.HAPPENED_EXAMPLES)(happened.happened_command)
 app.add_typer(forecast.app, name='forecast', rich_help_panel=WHAT_CAME_OF_IT)
 app.add_typer(pursuits.app, name='pursuits', rich_help_panel=WHAT_YOU_DECLARED)

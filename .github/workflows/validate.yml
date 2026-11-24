@@ -96,6 +96,43 @@ jobs:
           if [ "$code" -eq 0 ] || [ "$code" -eq 5 ]; then exit 0; fi
           exit 1
 
+  go-cli:
+    name: "Go tests and vulnerabilities in cli"
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+
+      - name: Check out the commit
+        uses: actions/checkout@v7
+
+      # generated:go-cli
+      # Shared by the go job and the hooks job, whose go-vet, go-build,
+      # go-mod-tidy and go-test hooks call the go on PATH.
+      - name: Install the Go cli/go.mod names
+        uses: actions/setup-go@v7
+        with:
+          # Action inputs resolve from the workspace root, not the job's
+          # working-directory, so this needs the component path.
+          go-version-file: "cli/go.mod"
+          cache: true
+          cache-dependency-path: "cli/go.sum"
+
+      # The whole suite. The go-test hook runs only what -short leaves in, which
+      # is what a commit can afford.
+      - run: go test ./...
+
+      # Two classes of advisory this catches and a lockfile scan does not. An
+      # unmaintained transitive dependency reaches a repo through something it
+      # imports rather than through anything it declares. And the `go` directive
+      # picks the toolchain that compiles the binary, so a stale one takes a
+      # stale standard library with it.
+      - name: Vulnerabilities
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          govulncheck ./...
+
   hooks:
     name: "Pre-commit hooks"
     runs-on: ubuntu-26.04
@@ -105,6 +142,17 @@ jobs:
         uses: actions/checkout@v7
 
       # generated:hooks
+      # Shared by the go job and the hooks job, whose go-vet, go-build,
+      # go-mod-tidy and go-test hooks call the go on PATH.
+      - name: Install the Go cli/go.mod names
+        uses: actions/setup-go@v7
+        with:
+          # Action inputs resolve from the workspace root, not the job's
+          # working-directory, so this needs the component path.
+          go-version-file: "cli/go.mod"
+          cache: true
+          cache-dependency-path: "cli/go.sum"
+
       # Every hook in the repo's committed pre-commit config. A push from a
       # checkout that never ran `pre-commit
       # install`, or a merge in the web UI, passes every hook by not running it,
@@ -504,6 +552,36 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash "$RUNNER_TEMP/run-hook" mypy
+
+      - name: pre-commit run gofumpt
+        if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/run-hook" gofumpt
+
+      - name: pre-commit run golangci-lint
+        if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/run-hook" golangci-lint
+
+      - name: pre-commit run go-vet-repo-mod
+        if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/run-hook" go-vet-repo-mod
+
+      - name: pre-commit run go-build-repo-mod
+        if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/run-hook" go-build-repo-mod
+
+      - name: pre-commit run go-mod-tidy-repo
+        if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/run-hook" go-mod-tidy-repo
 
       - name: pre-commit run jactionlint
         if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}

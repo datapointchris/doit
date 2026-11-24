@@ -35,6 +35,8 @@ SCHEMA_VERSION = 1
 # The day set's lane, under one name for the grid of the whole set and for the
 # group of those done, because `doit today` matches the two by it.
 HABITS = 'habits'
+# The due pursuits' lane.
+PURSUITS = 'pursuits'
 
 
 class Urgency(StrEnum):

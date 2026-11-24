@@ -95,7 +95,7 @@ flag that would have answered.
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |
 | What is this machine set to, and who set it | `config show` | the config file, the environment and the defaults, asking no service |
 | How long have I been at the desk | `desk-nudge status` | this desk's clock, asking no service |
-| What can I mark done from here | `desk-nudge panel show` | the rows that the desk nudge's watch last read from `today` and `pursuits`, asking no service |
+| What can I mark done from here | `desk-nudge panel show`, or `tui` to click them done | the rows that the desk nudge's watch last read from `today` and `pursuits`, asking no service |
 
 The service answers every row except those marked asking no service, reading what the row names.
 
@@ -394,9 +394,9 @@ is installed, so that the user service starts it.
 
 ### The panel completes any of today's rows in one pick
 
-A menu such as rofi draws the rows that `panel show --json` prints, and hands the picked row's key
-to `panel pick`. doit computes every row and builds every completion, so the menu holds no rule.
-The suggestion comes first, then the four answers while a nudge is ready, then every row of `doit
+`doit tui` draws the rows that `panel show --json` prints, and hands the picked row's key to `panel
+pick`. doit computes every row and builds every completion, so the screen holds no rule. The
+suggestion comes first, then the four answers while a nudge is ready, then every row of `doit
 today` that something completes, in each lane's own order:
 
 - **A pursuit** logs through `doit pursuits log`, in-process. Its `on_log` runs unasked, because
@@ -434,6 +434,29 @@ recorded and exits as `doit desk-nudge answer` records and exits it.
 either. It exits 2 where it will not act on the key, such as a row picked already, and nothing ran.
 It exits 1 where the completion did not go through, and 4 where the service gave no answer.
 `schemas/desk-nudge-panel.schema.json` describes each step.
+
+### `doit tui` draws the panel as a page that a click drives
+
+```bash
+doit tui                                  # open doit's screens
+doit tui --tab now                        # open on the panel by name
+COLUMNS=120 LINES=30 doit tui --once      # print the screen it opens on, then exit
+```
+
+`doit tui` hands the terminal to `doit-tui`, a Go program on Bubble Tea built from this
+repository's `cli/` module. Install it with
+`go install github.com/datapointchris/doit/cli/cmd/doit-tui@latest`, which takes the newest
+`cli/vX.Y.Z` tag. Its `now` tab draws the suggestion under `up next`, then each row under the `doit
+today` lane it came from. A click puts the cursor on a row, and a second click or enter completes
+it. A timed pursuit opens its minutes under its row, where `+` and `-` take the step that doit
+offers above or below, and enter logs them. Enter on another row closes those minutes first and
+completes nothing. While a nudge is ready, each answer sits on a number key and a footer hint that a
+click also runs. A note, such as why the rows are old, draws above the table.
+
+It reruns `doit desk-nudge panel show --json` on a timer and runs `panel pick <key> --json` for each
+pick. Each row carries its group, its minutes and whether it is suggested, so the board parses no
+key and doit keeps every rule about what a row is and what a pick does. The board refuses a step
+whose `schema_version` it does not read, and names whether doit or `doit-tui` needs upgrading.
 
 ## The service — one store, and every view computed behind it
 

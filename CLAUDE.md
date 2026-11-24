@@ -52,9 +52,21 @@ its reason. A merge of every same-named lane was rejected, because it changes wh
 for every other source. Feedback stays the opposite way: one lane per app, never combined, so three
 apps draw three lanes.
 
+**Keep `doit-tui` reading the desk nudge panel through `doit desk-nudge panel`.** The panel's rows
+live in this desk's cache, its picks take the desk nudge's state lock, and a pick runs `life habits
+complete` and a pursuit's `on_log`, none of which the service runs. A Go copy of any of it would be a
+second owner of the state file and of every completion rule. When doit's CLI moves to Go, the tab
+moves with it and calls the same code in process. Only the panel has this reason, so a tab over the
+service's data reads the service's API. The board parses no key and lists no kind. Where it needs
+another fact about a row, the row carries it, as `group`, `minutes` and `suggested` do.
+
 ## The service runs no command, and the CLI's own code starts the processes below
 
 - **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`, with no timeout.
+- **`doit-tui`**, in `tui.tui_command`, which replaces the process with it. `doit-tui` is the Go
+  program in `cli/`. It starts `doit desk-nudge panel show --json` on a timer and `panel pick <key>
+  --json` for each pick, each in a session of its own, so every rule about a row stays in this
+  package.
 - **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking, with no timeout. A desk nudge
   panel pick runs it unasked, because the pick is the asking.
 - **A review item's `show`**, in `review.run_show`, inside the nudge, stopped after 10

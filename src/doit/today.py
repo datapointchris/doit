@@ -106,7 +106,7 @@ DUE_PER_GROUP = 3
 
 # The groups whose rows are the day's plan rather than a backlog. Ten shows a
 # routine whole without letting it push every register off the screen.
-ROUTINE_GROUPS = (*DAY_SET_LANES, 'pursuits')
+ROUTINE_GROUPS = (*DAY_SET_LANES, lanes.PURSUITS)
 DUE_PER_ROUTINE_GROUP = 10
 
 # A review slug or a Lab id is the longest label here and fits. A longer one is
@@ -285,13 +285,13 @@ def pursuits_due(state: dict, bounds: Bounds) -> Lane:
         rows.append(
             Row(name, described, note, Urgency.OVERDUE, f'doit pursuits log {name}', CompletionTarget(CompletionKind.PURSUIT, name))
         )
-    return Lane(name='pursuits', title='PURSUITS', rows=rows, total=len(rows), hints=['doit next --explain'])
+    return Lane(name=lanes.PURSUITS, title='PURSUITS', rows=rows, total=len(rows), hints=['doit next --explain'])
 
 
 def pursuit_lanes(kept: happened.Kept, bounds: Bounds) -> list[Lane]:
     """The pursuits' due group, or why the register would not load; nothing where it is empty."""
     if kept.state_error:
-        return [lanes.unavailable('pursuits', 'PURSUITS', kept.state_error)]
+        return [lanes.unavailable(lanes.PURSUITS, 'PURSUITS', kept.state_error)]
     if kept.state is None:
         return []
     return [pursuits_due(kept.state, bounds)]
@@ -318,7 +318,7 @@ def checklists(done: list[Lane], due: list[Lane]) -> list[quota.Checklist]:
 
 def day_quota(state: dict | None, done: list[Lane], due: list[Lane]) -> quota.Quota:
     """The figures above both lists, with the pursuits named as unavailable where their group could not be read."""
-    failed = next((lane.reason for lane in due if lane.name == 'pursuits' and not lane.available), '')
+    failed = next((lane.reason for lane in due if lane.name == lanes.PURSUITS and not lane.available), '')
     return quota.build(state, checklists(done, due), failed)
 
 

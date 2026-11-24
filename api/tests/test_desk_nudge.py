@@ -376,6 +376,7 @@ def test_the_panel_logs_a_task_by_item_and_a_timed_pursuit_by_its_usual_minutes(
     shown = desk.panel('show')['rows']
     assert [row['key'] for row in shown if row['kind'] == 'answer'] == answers
     assert {row['key'] for row in shown} == {*answers, *tasks, 'pursuit:read'}, 'each task its own row, and no upcoming row'
+    assert {row['group'] for row in shown if row['kind'] == 'pursuit'} == {'pursuits'}
 
     assert desk.panel('pick', 'pursuit:tasks:532')['step'] == 'done'
     assert desk.calls('life') == [['tasks', 'complete', '532']]
@@ -386,10 +387,10 @@ def test_the_panel_logs_a_task_by_item_and_a_timed_pursuit_by_its_usual_minutes(
     assert desk.calls('life') == [['tasks', 'complete', '532']], 'a pick is taken once'
 
     usual = desk.panel('pick', 'pursuit:read')
-    assert [row['key'] for row in usual['rows']] == [
-        'log_minutes:45:pursuit:read',
-        'adjust_minutes:50:pursuit:read',
-        'adjust_minutes:40:pursuit:read',
+    assert [(row['key'], row['minutes'], row['suggested']) for row in usual['rows']] == [
+        ('log_minutes:45:pursuit:read', 45, True),
+        ('adjust_minutes:50:pursuit:read', 50, False),
+        ('adjust_minutes:40:pursuit:read', 40, False),
     ]
     more = desk.panel('pick', 'adjust_minutes:50:pursuit:read')
     assert more['rows'][0]['key'] == 'log_minutes:50:pursuit:read'
