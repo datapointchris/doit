@@ -14,12 +14,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"net/url"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -30,29 +28,29 @@ import (
 	"github.com/datapointchris/doit/cli/internal/login"
 )
 
-// Prefix is where every route sits, the OpenAPI document among them. The
-// cluster's edge forwards nothing else to the service but its login metadata.
+// Prefix is where every route sits, the OpenAPI document among them.
+// deploy/api.yaml names the paths the cluster routes to the service.
 const Prefix = "/api/v1"
 
 const userAgent = "doit-cli (+https://github.com/datapointchris/doit)"
 
-// A view reads each app within its own bound, and a read here outlasts the
-// longest of those. A slow app then costs the view one lane rather than the
-// whole answer.
+// The bounds of one attempt, as doit.service.TIMEOUT sets them for Python's
+// client. A view answers once each app it reads has answered or timed out, so a
+// source's timeout past answerTimeout is cut off here.
 const (
-	readTimeout    = 60 * time.Second
+	answerTimeout  = 60 * time.Second
 	connectTimeout = 10 * time.Second
 )
 
-// One read with its retries ends within budget. Each retried status is a proxy
-// or a busy service answering before the request was handled.
+// One read with its retries ends within budget, and a read of the version
+// within versionWait.
 const (
-	budget       = 90 * time.Second
-	attempts     = 3
-	longestPause = 20 * time.Second
-	versionWait  = 10 * time.Second
+	budget      = 90 * time.Second
+	versionWait = 10 * time.Second
 )
 
+// retriedStatuses are a proxy or a busy service answering before the request
+// was handled.
 var retriedStatuses = []int{
 	http.StatusTooManyRequests,
 	http.StatusBadGateway,
@@ -66,7 +64,6 @@ type Client struct {
 	where  string
 	repair string
 	http   *http.Client
-	pause  func(context.Context, time.Duration)
 }
 
 // New is a client of the service at base, sending source's token. chosenBy says
@@ -75,6 +72,7 @@ func New(base string, source oauth2.TokenSource, chosenBy, repair string) *Clien
 	dialer := &net.Dialer{Timeout: connectTimeout}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DialContext = dialer.DialContext
+	transport.ResponseHeaderTimeout = answerTimeout
 	where := "the doit service at " + strings.TrimRight(base, "/")
 	if chosenBy != "" {
 		where += " (" + chosenBy + ")"
@@ -84,13 +82,14 @@ func New(base string, source oauth2.TokenSource, chosenBy, repair string) *Clien
 		where:  where,
 		repair: repair,
 		http: &http.Client{
-			Transport: &oauth2.Transport{Source: source, Base: goclikit.TraceForwardingTransport(transport)},
-			Timeout:   readTimeout,
+			Transport: retryingTransport{
+				next:  &oauth2.Transport{Source: source, Base: goclikit.TraceForwardingTransport(transport)},
+				pause: randomPause,
+			},
 			CheckRedirect: func(*http.Request, []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
 		},
-		pause: sleep,
 	}
 }
 
@@ -199,8 +198,8 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 	return document.Info.Version, nil
 }
 
-// read is one GET, tried again where a later attempt can be answered, with
-// every attempt and pause ending within limit.
+// read is one GET through the retrying transport, with every attempt and
+// pause ending within limit.
 func (c *Client) read(ctx context.Context, route string, query url.Values, limit time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
@@ -208,42 +207,23 @@ func (c *Client) read(ctx context.Context, route string, query url.Values, limit
 	if len(query) > 0 {
 		target += "?" + query.Encode()
 	}
-	reason := "the budget ran out"
-	attempt := 0
-	for attempt < attempts && ctx.Err() == nil {
-		attempt++
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
-		if err != nil {
-			return nil, err
-		}
-		request.Header.Set("User-Agent", userAgent)
-		request.Header.Set("Accept", "application/json")
-		response, err := c.http.Do(request)
-		var wait time.Duration
-		switch {
-		case err != nil && goclilogin.IsSessionRejected(err):
-			return nil, &Refused{Message: fmt.Sprintf("the identity provider no longer honors this machine's login. %s", c.repair)}
-		case err != nil:
-			reason = err.Error()
-		case slices.Contains(retriedStatuses, response.StatusCode):
-			reason = "HTTP " + strconv.Itoa(response.StatusCode)
-			wait = retryAfter(response)
-			_ = response.Body.Close()
-		default:
-			return c.answered(response, route)
-		}
-		if attempt < attempts {
-			if wait == 0 {
-				wait = jitter(attempt)
-			}
-			c.pause(ctx, wait)
-		}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, http.NoBody)
+	if err != nil {
+		return nil, err
 	}
-	plural := "s"
-	if attempt == 1 {
-		plural = ""
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept", "application/json")
+	response, err := c.http.Do(request)
+	switch {
+	case err != nil && goclilogin.IsSessionRejected(err):
+		return nil, &Refused{Message: fmt.Sprintf("the identity provider no longer honors this machine's login. %s", c.repair)}
+	case err != nil:
+		return nil, &NoAnswer{Message: fmt.Sprintf("no answer from %s: %v", c.where, err)}
+	case slices.Contains(retriedStatuses, response.StatusCode):
+		_ = response.Body.Close()
+		return nil, &NoAnswer{Message: fmt.Sprintf("no answer from %s: HTTP %d on each of %d attempts", c.where, response.StatusCode, requestAttempts)}
 	}
-	return nil, &NoAnswer{Message: fmt.Sprintf("no answer from %s: %s, %d attempt%s", c.where, reason, attempt, plural)}
+	return c.answered(response, route)
 }
 
 // answered is the body of an answer, or the service's refusal.
@@ -267,28 +247,4 @@ func (c *Client) answered(response *http.Response, route string) ([]byte, error)
 		return nil, &Refused{Status: status, Message: said.Message}
 	}
 	return body, nil
-}
-
-// retryAfter is the service's Retry-After in seconds, bounded, or 0 where it sent none.
-func retryAfter(response *http.Response) time.Duration {
-	seconds, err := strconv.ParseFloat(response.Header.Get("Retry-After"), 64)
-	if err != nil || seconds < 0 {
-		return 0
-	}
-	return min(time.Duration(seconds*float64(time.Second)), longestPause)
-}
-
-// jitter is a random fraction of 2^(attempt-1) seconds, bounded.
-func jitter(attempt int) time.Duration {
-	ceiling := min(time.Duration(1<<(attempt-1))*time.Second, longestPause)
-	return time.Duration(rand.Int64N(int64(ceiling) + 1))
-}
-
-func sleep(ctx context.Context, wait time.Duration) {
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
 }
