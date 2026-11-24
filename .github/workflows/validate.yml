@@ -108,8 +108,8 @@ jobs:
         uses: actions/checkout@v7
 
       # generated:go-cli
-      # Shared by the go job and the hooks job, whose go-vet, go-build,
-      # go-mod-tidy and go-test hooks call the go on PATH.
+      # The go on PATH, which this job's tests or its Go hooks call. Each
+      # job that needs Go installs it here.
       - name: Install the Go cli/go.mod names
         uses: actions/setup-go@v7
         with:
@@ -142,8 +142,8 @@ jobs:
         uses: actions/checkout@v7
 
       # generated:hooks
-      # Shared by the go job and the hooks job, whose go-vet, go-build,
-      # go-mod-tidy and go-test hooks call the go on PATH.
+      # The go on PATH, which this job's tests or its Go hooks call. Each
+      # job that needs Go installs it here.
       - name: Install the Go cli/go.mod names
         uses: actions/setup-go@v7
         with:
