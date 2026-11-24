@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:doit:auth-status:v1",
+  "title": "doit auth status",
+  "description": "Where this machine's doit is pointed and whether it holds a credential the provider honors. It reports what the machine holds, not what a token claims.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "logged_in",
+    "configured",
+    "config_file",
+    "type",
+    "api",
+    "client_id",
+    "issuer",
+    "expires_at",
+    "expired",
+    "session",
+    "backend",
+    "keyring_note"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "The version of this document's shape. A field added keeps it, and a field reshaped or removed raises it."
+    },
+    "logged_in": {
+      "type": "boolean",
+      "description": "A token is stored for this machine's client. For a handed token, token_command granted one just now."
+    },
+    "configured": {
+      "type": "boolean",
+      "description": "The config file sets every value its credential type needs."
+    },
+    "config_file": { "type": "string" },
+    "type": {
+      "type": "string",
+      "enum": ["authorized_user", "external_account"],
+      "description": "A person's device login, or a token that token_command hands."
+    },
+    "api": { "type": "string", "description": "Empty where the config file sets none." },
+    "client_id": { "type": "string" },
+    "issuer": { "type": "string" },
+    "expires_at": { "type": ["string", "null"], "format": "date-time" },
+    "expired": { "type": "boolean" },
+    "session": {
+      "type": ["string", "null"],
+      "enum": ["live", "rejected", "unverified", null],
+      "description": "What asking the provider for a token found. Null where nothing was asked."
+    },
+    "backend": {
+      "type": ["string", "null"],
+      "enum": ["OS keyring", "file", null],
+      "description": "Where the token is kept. Null where none is stored."
+    },
+    "keyring_note": {
+      "type": ["string", "null"],
+      "description": "The keyring's own failure, where it is why no token was found."
+    }
+  }
+}

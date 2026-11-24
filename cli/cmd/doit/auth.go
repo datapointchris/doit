@@ -196,22 +196,34 @@ const (
 	externalAccount credentialType = "external_account"
 )
 
-// statusReport is `auth status --json`. It reports what this machine holds and
-// whether the provider honors it, never what the token claims about itself.
+// statusReport is `auth status --json`, and schemas/auth-status.schema.json is
+// its shape. It reports what this machine holds and whether the provider honors
+// it, never what the token claims about itself.
 type statusReport struct {
-	LoggedIn   bool                    `json:"logged_in"`
-	Configured bool                    `json:"configured"`
-	ConfigFile string                  `json:"config_file"`
-	Type       credentialType          `json:"type"`
-	API        string                  `json:"api"`
-	ClientID   string                  `json:"client_id"`
-	Issuer     string                  `json:"issuer"`
-	ExpiresAt  string                  `json:"expires_at,omitempty"`
-	Expired    bool                    `json:"expired"`
-	Session    goclilogin.SessionState `json:"session"`
-	Backend    goclilogin.Backend      `json:"backend,omitempty"`
+	SchemaVersion int            `json:"schema_version"`
+	LoggedIn      bool           `json:"logged_in"`
+	Configured    bool           `json:"configured"`
+	ConfigFile    string         `json:"config_file"`
+	Type          credentialType `json:"type"`
+	API           string         `json:"api"`
+	ClientID      string         `json:"client_id"`
+	Issuer        string         `json:"issuer"`
+	ExpiresAt     *string        `json:"expires_at"`
+	Expired       bool           `json:"expired"`
+	// Session is what asking the provider for a token found, and null where
+	// nothing was asked: no config, or no token stored.
+	Session *goclilogin.SessionState `json:"session"`
+	// Backend is where the token is kept, and null where none is stored.
+	Backend *goclilogin.Backend `json:"backend"`
 	// KeyringNote is the keyring's own failure, where it is why no token was found.
-	KeyringNote string `json:"keyring_note,omitempty"`
+	KeyringNote *string `json:"keyring_note"`
+}
+
+func (r statusReport) session() goclilogin.SessionState {
+	if r.Session == nil {
+		return ""
+	}
+	return *r.Session
 }
 
 func newAuthStatusCommand() *cobra.Command {
@@ -233,12 +245,13 @@ func newAuthStatusCommand() *cobra.Command {
 				return loadErr
 			}
 			report := statusReport{
-				Configured: loadErr == nil,
-				ConfigFile: deployment.Path,
-				Type:       authorizedUser,
-				API:        deployment.API.Value,
-				ClientID:   deployment.ClientID.Value,
-				Issuer:     deployment.Issuer.Value,
+				SchemaVersion: 1,
+				Configured:    loadErr == nil,
+				ConfigFile:    deployment.Path,
+				Type:          authorizedUser,
+				API:           deployment.API.Value,
+				ClientID:      deployment.ClientID.Value,
+				Issuer:        deployment.Issuer.Value,
 			}
 			switch {
 			case !report.Configured:
@@ -262,7 +275,7 @@ func newAuthStatusCommand() *cobra.Command {
 			// A rejected session exits 1 as being logged out does: nothing run
 			// next works until a login. An unverified one exits 0, because its
 			// stored token may still work.
-			if !report.Configured || !report.LoggedIn || report.Session == goclilogin.SessionRejected {
+			if !report.Configured || !report.LoggedIn || report.session() == goclilogin.SessionRejected {
 				return exitCode(1)
 			}
 			return nil
@@ -282,7 +295,8 @@ func loginStatus(ctx context.Context, d goclilogin.Deployment, report *statusRep
 		// A host with no Secret Service is fixed by a login, and a locked
 		// keychain is not, so the keyring's own failure is kept where it is why.
 		if detail := strings.TrimPrefix(err.Error(), goclilogin.ErrNotLoggedIn.Error()); detail != "" {
-			report.KeyringNote = strings.Trim(detail, " ()")
+			note := strings.Trim(detail, " ()")
+			report.KeyringNote = &note
 		}
 		return nil
 	case err != nil:
@@ -290,12 +304,12 @@ func loginStatus(ctx context.Context, d goclilogin.Deployment, report *statusRep
 	default:
 	}
 	report.LoggedIn = true
-	report.Backend = backend
+	report.Backend = &backend
 	// Asking for a token the way a command does is the one thing that tells a
 	// lapsed token from a revoked grant. A live token answers with no call to
 	// the issuer, and a lapsed one makes the refresh the next command would.
 	session, verified := goclilogin.VerifySession(ctx, config, store)
-	report.Session = session
+	report.Session = &session
 	if verified == nil {
 		verified = stored
 	}
@@ -311,8 +325,9 @@ func handedStatus(ctx context.Context, d goclilogin.Deployment, report *statusRe
 	if err == nil {
 		token, err = source.Token()
 	}
-	report.Session, token = goclilogin.ClassifySession(token, err)
-	report.LoggedIn = report.Session == goclilogin.SessionLive
+	session, token := goclilogin.ClassifySession(token, err)
+	report.Session = &session
+	report.LoggedIn = session == goclilogin.SessionLive
 	expiry(token, report)
 }
 
@@ -320,15 +335,13 @@ func expiry(token *oauth2.Token, report *statusReport) {
 	if token == nil || token.Expiry.IsZero() {
 		return
 	}
-	report.ExpiresAt = token.Expiry.Format(time.RFC3339)
+	expires := token.Expiry.Format(time.RFC3339)
+	report.ExpiresAt = &expires
 	report.Expired = time.Now().After(token.Expiry)
 }
 
 // printStatus leads with the verdict on a line of its own, so a script checking
 // a login reads the first line alone.
-//
-// WriteDeployment pads its keys to the widest, client_id, plus two, and the
-// rows after it pad to the same column.
 func printStatus(out io.Writer, r statusReport, d goclilogin.Deployment, loadErr error) {
 	switch {
 	case !r.Configured:
@@ -339,16 +352,17 @@ func printStatus(out io.Writer, r statusReport, d goclilogin.Deployment, loadErr
 		_, _ = fmt.Fprintf(out, "token_command handed no token. Check what %q hands out.\n", d.TokenCommand)
 	case !r.LoggedIn:
 		_, _ = fmt.Fprintf(out, "Not logged in as %s. Run `doit auth login` to authenticate.\n", r.ClientID)
-	case r.Session == goclilogin.SessionRejected:
+	case r.session() == goclilogin.SessionRejected:
 		_, _ = fmt.Fprintf(out, "Session refused by %s. Run `doit auth login` to authenticate.\n", r.Issuer)
 	default:
 		_, _ = fmt.Fprintln(out, "Logged in")
 	}
 	goclilogin.WriteDeployment(out, d)
-	if r.KeyringNote != "" {
-		_, _ = fmt.Fprintf(out, "  %-11s%s\n", "note", r.KeyringNote)
+	width := deploymentKeyWidth(d)
+	if r.KeyringNote != nil {
+		_, _ = fmt.Fprintf(out, "  %-*s%s\n", width, "note", *r.KeyringNote)
 	}
-	if r.ExpiresAt != "" {
+	if r.ExpiresAt != nil {
 		state := "valid"
 		switch {
 		case r.Type == externalAccount:
@@ -356,12 +370,21 @@ func printStatus(out io.Writer, r statusReport, d goclilogin.Deployment, loadErr
 		case r.Expired:
 			state = "expired, and refreshed on the next command"
 		}
-		_, _ = fmt.Fprintf(out, "  %-11s%s (expires %s)\n", "token", state, r.ExpiresAt)
+		_, _ = fmt.Fprintf(out, "  %-*s%s (expires %s)\n", width, "token", state, *r.ExpiresAt)
 	}
-	if r.Backend == goclilogin.BackendFile {
-		_, _ = fmt.Fprintf(out, "  %-11s%s, because this host has no OS keyring\n", "storage", r.Backend)
+	if r.Backend != nil && *r.Backend == goclilogin.BackendFile {
+		_, _ = fmt.Fprintf(out, "  %-*s%s, because this host has no OS keyring\n", width, "storage", *r.Backend)
 	}
-	if r.Session == goclilogin.SessionUnverified && r.LoggedIn {
-		_, _ = fmt.Fprintf(out, "  %-11sunverified, because %s could not be reached\n", "session", r.Issuer)
+	if r.session() == goclilogin.SessionUnverified && r.LoggedIn {
+		_, _ = fmt.Fprintf(out, "  %-*sunverified, because %s could not be reached\n", width, "session", r.Issuer)
 	}
+}
+
+// deploymentKeyWidth is the column WriteDeployment starts its values at: the
+// widest key among the rows it prints for d, and its two spaces of padding.
+func deploymentKeyWidth(d goclilogin.Deployment) int {
+	if d.HandsTokens() {
+		return len("token_command") + 2
+	}
+	return len("client_id") + 2
 }
