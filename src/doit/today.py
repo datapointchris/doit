@@ -311,7 +311,8 @@ def checklists(done: list[Lane], due: list[Lane]) -> list[quota.Checklist]:
         if failed is not None:
             found.append(quota.Checklist(lane.name, unavailable=failed.reason))
             continue
-        finished = sum(len(cleared.grid) for cleared in cleared_groups)
+        # A member done twice today counts once, as `set_lanes` matches the done group by name.
+        finished = len({cell.text for cleared in cleared_groups for cell in cleared.grid})
         found.append(quota.Checklist(lane.name, finished, finished + len(lane.rows)))
     return sorted(found, key=lambda entry: CHECKLIST_GROUPS.index(entry.name))
 

@@ -93,18 +93,12 @@ class Readers:
             raise ReadFailed(f'the service reads no app named {name}; it reads {", ".join(sorted(self.apps))}')
         return self.apps[name]
 
-    def reads(self, *, whole_habits: bool) -> dict[str, Callable[[Bounds, dt.datetime], tuple[object, str]]]:
-        """The read for each adapter. `whole_habits` reads life's overview with every habit, not the first ten."""
-        if not whole_habits:
-            return self.adapter_reads
-        return {**self.adapter_reads, 'life': lambda bounds, now: (life.overview(self.app('life'), now, whole_habits=True), '')}
-
-    def result(self, source: Source, bounds: Bounds, now: dt.datetime, *, whole_habits: bool = False) -> Result:
+    def result(self, source: Source, bounds: Bounds, now: dt.datetime) -> Result:
         """One source's answer, as the adapter that draws its lanes reads it."""
         try:
             if not source.adapter:
                 raise ReadFailed(f'{source.id} runs `{" ".join(source.command)}`, and the service reads apps over HTTP only')
-            read = self.reads(whole_habits=whole_habits).get(source.adapter)
+            read = self.adapter_reads.get(source.adapter)
             if read is None:
                 raise ReadFailed(f'the service has no HTTP read for the {source.adapter} adapter')
             payload, said = read(bounds, now)
@@ -118,13 +112,12 @@ class Readers:
             return Result(source=source.id, stderr=reason, failure=Failure.FAILED, bounds=bounds)
         return Result(source=source.id, payload=payload, exit_code=0, stderr=said, bounds=bounds)
 
-    def results(self, sources: list[Source], bounds: Bounds, now: dt.datetime, *, whole_habits: bool = False) -> dict[str, Result]:
+    def results(self, sources: list[Source], bounds: Bounds, now: dt.datetime) -> dict[str, Result]:
         """Every source asked at once, keyed by id."""
         if not sources:
             return {}
         with ThreadPoolExecutor(max_workers=len(sources)) as pool:
-            answers = pool.map(lambda source: self.result(source, bounds, now, whole_habits=whole_habits), sources)
-            return {result.source: result for result in answers}
+            return {result.source: result for result in pool.map(lambda source: self.result(source, bounds, now), sources)}
 
     def declared(self, declaration: dict) -> object:
         return self.app(str(declaration['app'])).get(str(declaration['path']), declaration.get('query') or {})

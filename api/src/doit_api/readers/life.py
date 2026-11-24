@@ -5,10 +5,17 @@ read per section, so the service composes the same document from the same reads,
 for the sections doit's lanes use. The document keeps the CLI's shape and schema
 version, so the lanes read it exactly as they read the CLI's.
 
+It departs from the CLI's document in two ways. The habits section lists every
+habit, where the CLI cuts it as it cuts every section, because the day's habits
+meter counts the rows it is given. It also carries the board's `checklists`, which the desk
+panel view lists under each habit.
+
 This module is therefore a copy of the CLI's composition: the order of the
 article queue and which countdowns show. A change to that
 composition in life has to be made here too, until life serves the document itself
-and this module becomes one read of it.
+and this module becomes one read of it. That document has to list habits whole
+and carry the checklists, or the habits meter undercounts and every habit's
+items read empty.
 
 A section whose read fails keeps its empty shape and adds a warning naming it,
 as the CLI does. Its lane degrades and the rest of the dashboard does not.
@@ -27,7 +34,7 @@ from .apps import App
 from .apps import ReadFailed
 from .apps import local_zone
 
-# Rows per section, matching what `life overview` shows, so a lane reads the same from either.
+# Rows per section but habits, matching what `life overview` shows, so a lane reads the same from either.
 OVERVIEW_LIMIT = 10
 
 ARTICLE_READ_WINDOW = dt.timedelta(days=30)
@@ -43,10 +50,7 @@ def instant(text: object) -> dt.datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.UTC)
 
 
-def capped(rows: list, limit: int | None) -> list:
-    """The first `limit` rows, or every row where `limit` is None."""
-    if limit is None:
-        return list(rows)
+def capped(rows: list, limit: int) -> list:
     return list(rows[:limit]) if limit > 0 else []
 
 
@@ -84,19 +88,14 @@ OVERVIEW_READS: tuple[tuple[str, str, str, Callable[[], dict]], ...] = (
 )
 
 
-def overview(life: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT, *, whole_habits: bool = False) -> dict:
+def overview(life: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT) -> dict:
     """The overview document, composed from one read per section, with a warning for each read that failed.
 
     Two failures refuse the whole document, as they do from life's CLI. One is
     every read failing, since an overview of nothing but warnings would draw every
     life lane empty. The other is any section refusing the service's credential,
     since a missing scope would otherwise draw that section as if it held nothing.
-
-    The habits section carries the board's `checklists` whole. `whole_habits`
-    lists every habit, for the desk panel view, whose habit rows and habits
-    meter both come from this one read.
     """
-    habits_limit = None if whole_habits else limit
 
     def read(entry: tuple[str, str, str, Callable[[], dict]]) -> object:
         section, label, path, query = entry
@@ -137,8 +136,8 @@ def overview(life: App, now: dt.datetime, limit: int = OVERVIEW_LIMIT, *, whole_
         'generated_at': now.isoformat(),
         'tasks': {'items': capped(tasks, limit), 'total': len(tasks)},
         'habits': {
-            'due_today': capped(board.get('due') or [], habits_limit),
-            'completed_today': capped(board.get('completed') or [], habits_limit),
+            'due_today': list(board.get('due') or []),
+            'completed_today': list(board.get('completed') or []),
             'current_total': board.get('current_total') or 0,
             'checklists': [checklist for checklist in board.get('checklists') or [] if isinstance(checklist, dict)],
         },

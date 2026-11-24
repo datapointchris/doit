@@ -64,7 +64,8 @@ def panel(client, **query) -> dict:
 
 
 def test_the_desk_panel_view_carries_each_part_from_a_recorded_store(store):
-    view = panel(seeded(store), draw='true', machine='desk')
+    client = seeded(store)
+    view = panel(client, draw='true', machine='desk')
 
     suggestion = view['suggestion']
     assert (suggestion['pursuit'], suggestion['unit'], suggestion['key']) == ('tasks', 'checkoffs', None)
@@ -73,15 +74,15 @@ def test_the_desk_panel_view_carries_each_part_from_a_recorded_store(store):
         ('pursuit:tasks:533', 'Return the library books', 'Errands'),
         ('pursuit:tasks:534', 'Descale the kettle', 'Home'),
     ]
-    assert [answer['label'] for answer in view['answers']] == ['good timing', 'too soon', 'too late', 'bothered me']
 
     totals = view['totals']
+    assert totals == client.get('/api/v1/today').json()['quota'], 'the figures are the ones `doit today` prints'
     assert totals['minutes']['behind'] > 0 and totals['checkoffs']['behind'] == 10, 'behind is said in each unit'
     assert [(entry['name'], entry['done'], entry['total']) for entry in totals['checklists']] == [
         ('habits', 2, 14),
         ('review', 0, 4),
         ('practice', 0, 1),
-    ], 'the habits meter counts all fourteen habits, past the overview cap of ten'
+    ], 'the habits meter counts all fourteen habits'
 
     rows = {row['name']: row for row in view['pursuits']['rows']}
     assert [(name, row['unit'], row['owed'], row['key'], row['usual_minutes']) for name, row in rows.items()] == [
@@ -116,7 +117,6 @@ def test_a_read_without_draw_saves_no_draw_and_bumps_no_offer_and_nothing_to_dra
 
     quiet = panel(client)
     assert quiet['suggestion'] is None
-    assert quiet['suggestion_reason'] == 'no draw from the last 15 minutes stands, and this read did not ask for one'
     assert (store.newest_draw(), store.offer_counts()) == (None, {})
 
     drawn = panel(client, draw='true', machine='desk')['suggestion']

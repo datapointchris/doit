@@ -492,12 +492,12 @@ class Views:
             return {'text': f'pursuits unavailable — {error}', 'unavailable': True}
         return {'text': line, 'unavailable': False} if line else None
 
-    def day(self, config: documents.Config, now: dt.datetime, *, whole_habits: bool = False) -> tuple[today.Day, dict, happened.Kept]:
+    def day(self, config: documents.Config, now: dt.datetime) -> tuple[today.Day, dict, happened.Kept]:
         """Today's two lists and figures, from one round of the day's sources, with that round's answers and what doit keeps."""
         bounds = window.day_of(now)
         registry = today.day_registry(config.registry)
         everything = [*registry.sources.values(), *registry.completions.values()]
-        results = self.readers.results(everything, bounds, now, whole_habits=whole_habits)
+        results = self.readers.results(everything, bounds, now)
         built = dashboard.arranged([*dashboard.source_lanes(registry, results), self.maintenance_lane(config, now)], None)
         kept = self.kept(config, now)
         return today.assemble(registry, results, built, kept, bounds, now), results, kept
@@ -523,9 +523,10 @@ class Views:
         standing draw, and saves no draw and counts no offer.
         """
         config, now = self.config(), self.now()
-        day, results, kept = self.day(config, now, whole_habits=True)
+        day, results, kept = self.day(config, now)
         selection, reason = self.panel_draw(config, kept.state, now, machine, draw)
-        items = self.choices(desk_panel.item_pursuits(day, config.pursuits), config, selection)
+        suggested = ((selection or {}).get('offered') or [])[:1]
+        items = self.choices(list(dict.fromkeys([*desk_panel.item_pursuits(day, config.pursuits), *suggested])), config, selection)
         life_source = next((source.id for source in config.registry.sources.values() if source.adapter == 'life'), None)
         return desk_panel.view(
             now=now,

@@ -80,14 +80,14 @@
       "description": "One due lane under doit's lane contract, with each row's key.",
       "required": ["name", "title", "meta", "status", "alert", "omit_when_empty", "reason", "rows", "grid", "total", "in_flight", "hints"],
       "properties": {
-        "name": {"type": "string", "description": "review, practice or upcoming."},
+        "name": {"type": "string", "description": "A register lane or a day-shaped lane, as `doit today` names it."},
         "title": {"type": "string"},
         "meta": {"type": "string"},
         "status": {"$ref": "#/definitions/part_status"},
         "alert": {"type": "boolean"},
         "omit_when_empty": {"type": "boolean"},
         "reason": {"type": ["string", "null"], "description": "Why the lane could not be read, or what part of it could not."},
-        "rows": {"type": "array", "items": {"$ref": "#/definitions/lane_row"}, "description": "The rows that `doit today` lists: three of a backlog."},
+        "rows": {"type": "array", "items": {"$ref": "#/definitions/lane_row"}, "description": "The rows that `doit today` lists, cut as it cuts a backlog. `total` counts them all."},
         "grid": {"type": "array", "items": {"type": "object"}},
         "total": {"type": "integer", "minimum": 0, "description": "How many rows the lane holds before the cut."},
         "in_flight": {"type": "integer", "minimum": 0},
@@ -260,7 +260,7 @@
             "additionalProperties": false,
             "required": ["id", "name", "category", "done", "key", "completes", "items"],
             "properties": {
-              "id": {"type": ["integer", "null"], "description": "Life's habit id. Null on a completion whose habit was deleted."},
+              "id": {"type": ["integer", "null"], "description": "Life's habit id. Null on a completion row that names none."},
               "name": {"type": "string"},
               "category": {"type": "string"},
               "done": {"type": "boolean", "description": "Whether it was completed today. A done habit carries no key."},
@@ -289,7 +289,7 @@
     },
     "lanes": {
       "type": "array",
-      "description": "Each of review, practice and upcoming that the service reads, in the order `doit today` lists them.",
+      "description": "Each register lane and day-shaped lane that the service reads, in the order `doit today` lists them.",
       "items": {"$ref": "#/definitions/lane"}
     },
     "problems": {"type": "array", "items": {"type": "string"}, "description": "What is wrong in the sources document."}

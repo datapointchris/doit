@@ -327,7 +327,10 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
         draw: Annotated[
             bool,
             Query(
-                description='Draw as /next does, replacing a draw that aged out. Without it the standing draw is read and nothing is saved.'
+                description=(
+                    'Draw as /next does, replacing a draw that aged out. '
+                    'Without it the standing draw is read, and no draw is saved and no offer counted.'
+                )
             ),
         ] = False,
     ) -> dict:
