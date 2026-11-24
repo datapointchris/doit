@@ -38,9 +38,9 @@ in the same change, so no verb has two implementations.
 - **`cli/internal/service` is the Go client of the service.** A route's call is a method that names
   the path and the Go type of its answer. Each field that type declares without `omitempty` is one
   the verb needs, and an answer lacking it is refused with the service's version, never drawn empty.
-- **The `cli/` release stream** builds `doit_<version>_<os>_<arch>.tar.gz` for linux and darwin on
-  amd64 and arm64, with `checksums.txt`. `doit update` installs from it, and so does a machine's
-  own package manager. `doit-tui` still installs with `go install` from the same tags.
+- **The `cli/` release stream** builds `doit_<version>_<os>_<arch>.tar.gz` for each platform in
+  `cli-build`'s matrix, with `checksums.txt`. `doit update` installs from it, and so does a
+  machine's own package manager. `doit-tui` installs with `go install` from these tags.
 
 ## What will look like a bug and is not
 
