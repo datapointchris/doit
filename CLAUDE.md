@@ -121,12 +121,11 @@ The Go binary starts these:
 
 - **`doit-python`**, in `passthrough.Exec`, which replaces the process with it for every command line
   that `owns` turns down.
-- **`gh auth token`**, in `githubToken`, for `doit update` and its daily notice where neither
-  `$GITHUB_TOKEN` nor `$GH_TOKEN` is set, stopped after 10 seconds.
 - **The browser**, through pkg/browser's `xdg-open` or `open`, at `doit auth login`.
 
-The login libraries start a process of their own: pyclilogin and goclilogin each run a login's
-configured `token_command`.
+The libraries start processes of their own. pyclilogin and goclilogin each run a login's configured
+`token_command`. goselfupdate runs `$GITHUB_TOKEN_COMMAND`, which defaults to `gh auth token`, for
+`doit update` and its daily notice where neither `$GITHUB_TOKEN` nor `$GH_TOKEN` is set.
 
 ## Documents and records are the service's, and a machine keeps its login, its caches and its desk nudge
 
