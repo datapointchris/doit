@@ -11,7 +11,7 @@ require (
 	github.com/datapointchris/goclikit v0.7.0
 	github.com/datapointchris/goclilogin v0.9.2
 	github.com/datapointchris/goselfupdate v0.11.0
-	github.com/datapointchris/gotermboard v0.60.0
+	github.com/datapointchris/gotermboard v0.61.1
 	github.com/datapointchris/gotermstyle v0.7.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/spf13/cobra v1.10.2
