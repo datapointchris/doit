@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -38,16 +39,16 @@ func newRootCommand() *cobra.Command {
 		Short: "doit's screens, where a click or a key completes a row",
 		Long: `doit's screens, where a click or a key completes a row.
 
-The now tab holds the suggestion, the four answers while a desk nudge is ready, and
-every row of today that something completes, grouped by what completes it. Click a
-row, then click it again or press enter, to complete it. A timed pursuit opens its
-minutes under its row: + and - move them by five, and enter logs them. A click on a
-footer hint does what its key does.
+The now tab holds the suggestion, the answers while a desk nudge is ready, and every
+row of today that something completes, grouped as doit groups them. Click a row, then
+click it again or press enter, to complete it. A timed pursuit opens its minutes under
+its row: + and - change them, and enter logs them. A click on a footer hint does what
+its key does.
 
 It reads and picks through doit desk-nudge panel, so doit holds every rule about
 what a row is and what a pick does.`,
 		Example: `  doit-tui                               open on the now tab
-  doit-tui --tab now                     the same, as the desk nudge pill opens it
+  doit-tui --tab now                     open on the now tab by name
   COLUMNS=120 LINES=30 doit-tui --once   print the screen it opens on, then exit`,
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
@@ -62,9 +63,14 @@ what a row is and what a pick does.`,
 }
 
 func run(out io.Writer, tab string, once bool) error {
-	board := newNowBoard(doitPanel{})
+	tabs := []gotermboard.Tab{{Name: nowTab, Board: newNowBoard(doitPanel{})}}
+	opening, err := tabNamed(tabs, tab)
+	if err != nil {
+		return err
+	}
 	pal := gotermstyle.PaletteFor(os.Stdout)
 	if once {
+		board := opening.Board
 		gotermboard.RefreshAll(context.Background(), board.Sources()...)
 		width, height := gotermboard.OnceSize(onceFallbackWidth, onceFallbackHeight)
 		frame := gotermboard.Once(board, pal, width, height)
@@ -74,10 +80,25 @@ func run(out io.Writer, tab string, once bool) error {
 		_, err := fmt.Fprintln(out, frame)
 		return err
 	}
-	tabs, err := gotermboard.NewTabs([]gotermboard.Tab{{Name: nowTab, Board: board}}, pal, tab)
+	model, err := gotermboard.NewTabs(tabs, pal, tab)
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(tabs).Run()
+	_, err = tea.NewProgram(model).Run()
 	return err
+}
+
+// tabNamed is the tab that --tab names, or the first where it names none.
+func tabNamed(tabs []gotermboard.Tab, name string) (gotermboard.Tab, error) {
+	if name == "" {
+		return tabs[0], nil
+	}
+	names := make([]string, 0, len(tabs))
+	for _, tab := range tabs {
+		if tab.Name == name {
+			return tab, nil
+		}
+		names = append(names, tab.Name)
+	}
+	return gotermboard.Tab{}, fmt.Errorf("no tab %q: the tabs are %s", name, strings.Join(names, ", "))
 }

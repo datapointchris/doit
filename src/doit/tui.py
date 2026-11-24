@@ -13,13 +13,13 @@ TUI_BINARY = 'doit-tui'
 
 TUI_EXAMPLES = examples(
     ('doit tui', "open doit's screens"),
-    ('doit tui --tab now', 'open on what can be completed now, as the desk nudge pill does'),
+    ('doit tui --tab now', 'open on what can be completed now'),
     ('COLUMNS=120 LINES=30 doit tui --once', 'print the screen it opens on, then exit'),
 )
 
 
 def tui_command(
-    tab: Annotated[str | None, typer.Option('--tab', help='The tab to open on: now.')] = None,
+    tab: Annotated[str | None, typer.Option('--tab', help='The tab to open on, by name. doit-tui --help lists them.')] = None,
     once: Annotated[bool, typer.Option('--once', help='Print the screen it opens on at COLUMNS by LINES, then exit.')] = False,
 ) -> None:
     """Open doit's screens, where a click or a key completes a row.
