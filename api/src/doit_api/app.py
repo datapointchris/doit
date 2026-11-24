@@ -3,9 +3,9 @@
 Every route parses its request, calls a view or a write, and returns what that
 returned. Nothing here computes a view, reads an app or opens the store itself.
 
-`/health`, `/ready` and the RFC 9728 metadata answer anyone. Everything under
-`/api/v1` answers a person's login, because every route reads or writes one
-person's register and journal. A write records the caller as `recorded_by`,
+`/health`, `/ready`, the RFC 9728 metadata and the OpenAPI document answer
+anyone. Every other route, under `/api/v1`, answers a person's login, because
+each reads or writes one person's register and journal. A write records the caller as `recorded_by`,
 beside the machine and actor the client names.
 
 `create_app` takes every collaborator as an argument. Production passes the ones
@@ -137,6 +137,11 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
         summary="doit's register, review register, sources and journal with their history, and every view computed from them.",
         version=version('doit-api'),
         lifespan=lifespan,
+        # Under the prefix, because the cluster's edge forwards nothing else. A
+        # client names this document's info.version when an answer lacks a field.
+        openapi_url='/api/v1/openapi.json',
+        docs_url='/api/v1/docs',
+        redoc_url='/api/v1/redoc',
     )
     install_error_handlers(app)
 
