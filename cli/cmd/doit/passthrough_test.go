@@ -1,0 +1,118 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// runAsDoit makes this test binary run main, so a test runs doit as a process
+// with the os.Args, PATH and stdin that it chooses.
+const runAsDoit = "DOIT_TEST_RUN_AS_DOIT"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(runAsDoit) == "1" {
+		main()
+		return
+	}
+	os.Exit(m.Run())
+}
+
+// fakePython writes a doit-python that records its argv one NUL-ended word at
+// a time, echoes stdin, and exits 7. Only shell builtins run, so PATH needs
+// nothing beyond the fake.
+func fakePython(t *testing.T) (dir, argvFile string) {
+	t.Helper()
+	dir = t.TempDir()
+	argvFile = filepath.Join(t.TempDir(), "argv")
+	script := "#!/bin/sh\n" +
+		": >\"$FAKE_ARGV\"\n" +
+		"for word in \"$@\"; do printf '%s\\0' \"$word\" >>\"$FAKE_ARGV\"; done\n" +
+		"while IFS= read -r line; do printf 'python read %s\\n' \"$line\"; done\n" +
+		"exit 7\n"
+	if err := os.WriteFile(filepath.Join(dir, "doit-python"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir, argvFile
+}
+
+type doitRun struct {
+	stdout, stderr string
+	exit           int
+}
+
+func runDoit(t *testing.T, path, argvFile string, args ...string) doitRun {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), os.Args[0], args...)
+	cmd.Env = []string{
+		runAsDoit + "=1",
+		"PATH=" + path,
+		"FAKE_ARGV=" + argvFile,
+		"HOME=" + t.TempDir(),
+		"XDG_STATE_HOME=" + t.TempDir(),
+		"XDG_CONFIG_HOME=" + t.TempDir(),
+	}
+	cmd.Stdin = strings.NewReader("one line\n")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	var exited *exec.ExitError
+	if err != nil && !errors.As(err, &exited) {
+		t.Fatalf("doit %v: %v", args, err)
+	}
+	return doitRun{stdout.String(), stderr.String(), cmd.ProcessState.ExitCode()}
+}
+
+func passedArgv(t *testing.T, argvFile string) ([]string, bool) {
+	t.Helper()
+	data, err := os.ReadFile(argvFile)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	words := strings.Split(string(data), "\x00")
+	return words[:len(words)-1], true
+}
+
+func TestAnUnportedVerbExecsDoitPythonWithTheSameArgvAndExitCodeAndAMissingOneIsNamed(t *testing.T) {
+	fake, argvFile := fakePython(t)
+
+	for _, args := range [][]string{
+		{"pursuits", "log", "read", "--minutes", "40", "a note with spaces"},
+		{"auth", "status", "--bogus"},
+		{"--no-input", "auth", "bogus"},
+		{},
+		{"--help"},
+	} {
+		_ = os.Remove(argvFile)
+		run := runDoit(t, fake, argvFile, args...)
+		got, reached := passedArgv(t, argvFile)
+		if !reached || !slices.Equal(got, args) {
+			t.Errorf("doit %q: doit-python got %q (reached %v), want the argv unchanged", args, got, reached)
+		}
+		if run.exit != 7 || run.stdout != "python read one line\n" {
+			t.Errorf("doit %q: exit %d, stdout %q; want doit-python's exit 7 and its read of stdin", args, run.exit, run.stdout)
+		}
+	}
+
+	for _, args := range [][]string{{"--version"}, {"-V"}, {"auth", "--help"}} {
+		_ = os.Remove(argvFile)
+		run := runDoit(t, fake, argvFile, args...)
+		if _, reached := passedArgv(t, argvFile); reached || run.exit != 0 {
+			t.Errorf("doit %q: reached doit-python %v, exit %d; want the Go doit to answer: %s", args, reached, run.exit, run.stderr)
+		}
+	}
+
+	run := runDoit(t, t.TempDir(), argvFile, "pursuits", "list")
+	want := "doit: doit-python is not installed, and pursuits is not yet in the Go doit\n"
+	if run.exit != 1 || run.stderr != want {
+		t.Errorf("with no doit-python on PATH: exit %d, stderr %q; want exit 1 and %q", run.exit, run.stderr, want)
+	}
+}

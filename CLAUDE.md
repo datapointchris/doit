@@ -15,6 +15,24 @@ to do, not build tasks that claude is going to do".
 howto carries the cards, the Labs and the tool registry, and doit reads nothing from it. A practice
 entry's `command` is text in the review document, which doit shows and never runs.
 
+## `doit` is the Go binary, and doit-python runs each verb it has not ported
+
+The CLI is moving to Go one verb at a time, as a strangler fig. `cli/cmd/doit` builds `doit`, and
+`owns` in its `root.go` decides which command lines it runs. It execs `doit-python`, the Python
+console script, with the same argv for everything else: an unported verb, a flag Go does not parse,
+bare `doit` and `doit --help`. A port adds its verb to cobra's tree and deletes the Python command
+in the same change, so no verb has two implementations.
+
+- **`cli/internal/login` holds pyclilogin's identifiers for the product `doit`**: the config file,
+  the keychain service `doit-cli`, and `$XDG_STATE_HOME/doit` for the fallback token file and the
+  refresh lock. Changing any one logs every desk out of one side.
+- **`cli/internal/service` is the Go client of the service.** A route's call is a method that names
+  the path and the Go type of its answer. Each field that type declares without `omitempty` is one
+  the verb needs, and an answer lacking it is refused with the service's version, never drawn empty.
+- **The `cli/` release stream** builds `doit_<version>_<os>_<arch>.tar.gz` for linux and darwin on
+  amd64 and arm64, with `checksums.txt`. `doit update` installs from it, and so does a machine's
+  own package manager. `doit-tui` still installs with `go install` from the same tags.
+
 ## What will look like a bug and is not
 
 **Keep the dashboard's duplicate of due-ness.** It imports nothing from the cadence module and
@@ -90,10 +108,16 @@ complete` is stopped after `PROGRAM_SECONDS`. Every one runs outside
 the state file's lock. A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit learns from another program arrives over HTTP through the wrappers
 below.
 
-The login and update libraries start processes of their own. pyclilogin runs a login's configured
-`token_command`, and opens the browser with `open` or `xdg-open`. pyselfupdate, behind `doit
-update` and its daily notice, runs `$GITHUB_TOKEN_COMMAND`, which defaults to `gh auth token`. To
-install a release it runs `git clone` and `uv`, each under the library's own timeout.
+The Go binary starts these:
+
+- **`doit-python`**, in `passthrough.Exec`, which replaces the process with it for every command line
+  that `owns` turns down.
+- **`gh auth token`**, in `githubToken`, for `doit update` and its daily notice where neither
+  `$GITHUB_TOKEN` nor `$GH_TOKEN` is set, stopped after 10 seconds.
+- **The browser**, through pkg/browser's `xdg-open` or `open`, at `doit auth login`.
+
+The login libraries start a process of their own: pyclilogin and goclilogin each run a login's
+configured `token_command`.
 
 ## Documents and records are the service's, and a machine keeps its login, its caches and its desk nudge
 

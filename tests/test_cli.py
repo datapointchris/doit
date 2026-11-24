@@ -22,7 +22,6 @@ from typer.models import CommandInfo
 from typer.testing import CliRunner
 
 import doit
-import doit.cli
 from doit import __version__
 from doit.cli import ROOT_ORDER
 from doit.cli import accepted_placements
@@ -31,18 +30,6 @@ from doit.service_commands import pursuits as pursuit_commands
 
 runner = CliRunner()
 SCHEMAS = Path(__file__).resolve().parents[1] / 'schemas'
-
-
-@pytest.fixture(autouse=True)
-def never_check_for_updates(monkeypatch):
-    """Keep the releases API out of the suite.
-
-    pyselfupdate's own gates already decline here — a captured stream is not a
-    TTY and a checkout is not an installed tool — but a test that reaches the
-    network only when two of someone else's gates both hold is a test that fails
-    on a machine, not in CI.
-    """
-    monkeypatch.setattr('doit.cli.notify', lambda config: None)
 
 
 def command_name(command: CommandInfo) -> str:
@@ -214,36 +201,12 @@ def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
     assert accepted_placements(refused.value) == ['doit --no-input next']
 
 
-def test_update_path_does_not_also_notify(monkeypatch):
-    """`update` runs its own check, so notifying would ask the API twice."""
-    calls: list[object] = []
-    monkeypatch.setattr('doit.cli.notify', calls.append)
-    monkeypatch.setattr('pyselfupdate.typercmd.run_update', lambda *args, **kwargs: None)
+def test_a_line_the_go_doit_passed_on_names_its_help_and_runs_nothing():
+    """The Go doit hands on a flag it does not take, and Python has no copy of the verb to run it."""
+    result = runner.invoke(app, ['update', '--chek'])
 
-    runner.invoke(app, ['update', '--check'])
-
-    assert calls == []
-
-
-def test_every_other_path_notifies(monkeypatch):
-    """The notice is gated inside pyselfupdate, so it must be reached to gate."""
-    calls: list[object] = []
-    monkeypatch.setattr('doit.cli.notify', calls.append)
-
-    runner.invoke(app, ['sources', 'list'])
-
-    assert calls == [doit.cli.UPDATE_CONFIG]
-
-
-def test_the_credential_is_left_to_pyselfupdate():
-    """pyselfupdate runs `gh auth token` itself, and `$GITHUB_TOKEN_COMMAND` is
-    what redirects or empties it — a lever that belongs to whoever runs doit.
-
-    A helper here would be a second implementation of that, and the reason the
-    library grew one is that eleven tools never pasted it.
-    """
-    assert doit.cli.UPDATE_CONFIG.token == ''
-    assert doit.cli.UPDATE_CONFIG.token_func is None
+    assert result.exit_code == 2
+    assert 'doit update --help' in result.output
 
 
 def test_version_is_unknown_without_installed_metadata(monkeypatch):

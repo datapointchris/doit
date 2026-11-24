@@ -393,7 +393,6 @@ source = { editable = "." }
 dependencies = [
     { name = "httpx2" },
     { name = "pyclilogin" },
-    { name = "pyselfupdate", extra = ["typer"] },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "typer" },
@@ -414,7 +413,6 @@ dev = [
 requires-dist = [
     { name = "httpx2", specifier = ">=2.9.1" },
     { name = "pyclilogin", specifier = ">=0.2.0" },
-    { name = "pyselfupdate", extras = ["typer"], specifier = ">=0.5.4" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "typer", specifier = ">=0.26.0" },
@@ -1047,20 +1045,6 @@ wheels = [
 [package.optional-dependencies]
 crypto = [
     { name = "cryptography" },
-]
-
-[[package]]
-name = "pyselfupdate"
-version = "0.7.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/4c/1a/085df106b285cc1cb0b4a3a05c3e817d77b2ba881bbb7feef7074a47223f/pyselfupdate-0.7.0.tar.gz", hash = "sha256:4469f76c2618855a8604a3fa78492979151eef82b6eb38197892839ce761c247", size = 38695, upload-time = "2026-11-10T09:44:15.306Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/8e/fa69338a2cf6beca01aac3bfeb1c0e2450b4b53a468aeafac11dd1424887/pyselfupdate-0.7.0-py3-none-any.whl", hash = "sha256:c70aee3ab5daba96136dd02689ef4e09fcdfbb8332f170ba976d3f88d16c2ea7", size = 43967, upload-time = "2026-11-10T09:44:14.129Z" },
-]
-
-[package.optional-dependencies]
-typer = [
-    { name = "typer" },
 ]
 
 [[package]]

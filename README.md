@@ -17,22 +17,30 @@ those agents read, and no pursuit or daily list carries it.
 
 ## Install
 
+doit's CLI is moving from Python to Go one verb at a time, so it installs as two programs. `doit` is
+a Go binary. It runs the verbs it has ported, and hands every other command line to `doit-python`
+unchanged, so stdin, stdout and the exit code are the Python CLI's. Bare `doit` and `doit --help`
+go to `doit-python` too, whose help lists every verb.
+
 ```bash
-uv tool install --index https://pypi.ichrisbirch.com/simple/ doit   # the newest release
-doit --version                                                       # the release that installed
-doit update --check                                                  # whether a newer one exists
+uv tool install --index https://pypi.ichrisbirch.com/simple/ doit   # doit-python, the Python CLI
+doit --version                                                       # the Go binary's release
+doit update --check                                                  # whether a newer Go release exists
 ```
 
-Every release is published to that package index. Name it on the install: without it uv asks PyPI,
-where `doit` is a different project. uv records the index beside the tool, which is where
-`doit update` reads it back.
+The Go binary comes from the newest `cli/vX.Y.Z` release on GitHub. It carries
+`doit_<version>_<os>_<arch>.tar.gz` for linux and darwin on amd64 and arm64, with `doit` at the
+archive's root, and `checksums.txt`. Put `doit` on `PATH`. Without `doit-python` there, an unported
+verb exits 1 and names itself.
 
-`doit update` installs the newest release over the running one. It refuses an install from a
-branch, a commit or a local checkout, because none of them carries a release version to compare.
-Every other command checks for a newer release at most once a day, and names one it finds in a line
-on stderr.
+Every Python release is published to that package index. Name it on the install: without it uv asks
+PyPI, where `doit` is a different project. `uv tool upgrade doit` updates `doit-python`, and uv
+fetches the Python it needs.
 
-uv fetches the Python doit needs.
+`doit update` replaces the Go binary with its newest release, checked against the release's
+checksums. It refuses a local build, which carries no release version to compare. On a verb it runs
+itself, the Go binary checks for a newer release at most once a day, and names one it finds in a
+line on stderr.
 
 ## Starting from scratch
 

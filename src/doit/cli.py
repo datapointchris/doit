@@ -5,14 +5,11 @@ from typer. Each subcommand module owns its own `app`, and this file assembles t
 """
 
 import os
+import shlex
 from typing import Annotated
 
 import typer
 from pyclilogin import LoginError
-from pyclilogin.typercmd import add_auth_commands
-from pyselfupdate import Config
-from pyselfupdate import notify
-from pyselfupdate.typercmd import add_update_command
 from typer._click.core import Context
 from typer._click.exceptions import NoSuchOption
 from typer.core import TyperGroup
@@ -72,7 +69,7 @@ WHAT_YOU_DECLARED = 'What you declared'
 THIS_MACHINE = 'This machine'
 
 # Typer lists a group's commands ahead of its sub-apps and draws each panel where
-# its first command falls. Left alone, `update` would put This machine above What
+# its first command falls. Left alone, `auth` would put This machine above What
 # you declared.
 ROOT_ORDER = (
     'next',
@@ -156,29 +153,6 @@ app = typer.Typer(
 )
 
 
-# Notify-only by house rule: one check per 24h, one line to stderr, and
-# `doit update` is the only thing that writes anything. The notice and the
-# command share this one config so they cannot advertise a release the command
-# then refuses.
-#
-# No credential is configured because pyselfupdate authenticates itself, running
-# `gh auth token` when a request is about to be made. `$GITHUB_TOKEN_COMMAND`
-# redirects that or empties it, and it is the user's lever rather than ours.
-UPDATE_CONFIG = Config(tool='doit', owner='datapointchris')
-
-AUTH_EXAMPLES = {
-    'login': examples(
-        ('doit auth login https://doit.example.com', 'log a new machine in to that service'),
-        ('doit auth login', 'log in again to the service the config file names'),
-    ),
-    'logout': examples(('doit auth logout', "forget this machine's token")),
-    'token': examples(('doit auth token', 'an access token, for calling the service directly')),
-    'status': examples(
-        ('doit auth status', 'whether this machine is logged in, and to what'),
-        ('doit auth status --json', 'the same as data'),
-    ),
-}
-
 # The draw sits at the root because it is typed most. Logging and skipping live
 # under `pursuits`, beside the file they write to.
 app.command('next', rich_help_panel=WHAT_TO_DO_NOW, epilog=pursuits.NEXT_EXAMPLES)(pursuits.next_command)
@@ -194,22 +168,52 @@ app.add_typer(config_commands.app, name='config', rich_help_panel=THIS_MACHINE)
 app.add_typer(shell.app, name='shell', rich_help_panel=THIS_MACHINE)
 app.add_typer(desk_nudge.app, name='desk-nudge', rich_help_panel=THIS_MACHINE)
 
-auth = add_auth_commands(app, service.LOGIN, rich_help_panel=THIS_MACHINE)
-auth.info.epilog = examples(
-    ('doit auth status', 'whether this machine is logged in, and to what'),
-    ('doit auth login https://doit.example.com', 'log a new machine in to that service'),
-)
-for auth_command in auth.registered_commands:
-    auth_command.epilog = AUTH_EXAMPLES[auth_command.name or '']
+# The verbs the Go doit runs, each with its summary and examples. The Go binary
+# hands `doit --help` to this tree, so each is listed here for the help to name
+# every verb. A command line reaching one came from a person running doit-python
+# directly, or from the Go doit passing on a flag it does not take.
+RUN_BY_GO = {
+    'auth': (
+        "Log this machine in to doit's service, and out.",
+        examples(
+            ('doit auth status', 'whether this machine is logged in, and to what'),
+            ('doit auth login https://doit.example.com', 'log a new machine in to that service'),
+        ),
+    ),
+    'update': (
+        'Update doit to the latest release.',
+        examples(
+            ('doit update --check', 'whether a newer release exists, installing nothing'),
+            ('doit update', 'install the newest release over this one'),
+        ),
+    ),
+}
 
-# pyselfupdate takes no panel or epilog, so its command is given them once registered.
-add_update_command(app, UPDATE_CONFIG)
-update_command = app.registered_commands[-1]
-update_command.rich_help_panel = THIS_MACHINE
-update_command.epilog = examples(
-    ('doit update --check', 'whether a newer release exists, installing nothing'),
-    ('doit update', 'install the newest release over this one'),
-)
+
+def run_by_go(name: str):
+    """The command for a verb the Go doit runs, which refuses as a usage error and names the Go help."""
+
+    def refuse(ctx: typer.Context) -> None:
+        typed = shlex.join(['doit', name, *ctx.args])
+        error_console.print(
+            f'doit: the Go doit runs `doit {name}`, and doit-python does not, so `{typed}` ran nothing. '
+            f'`doit {name} --help` lists what it takes.',
+            soft_wrap=True,
+            markup=False,
+        )
+        raise SystemExit(2)
+
+    return refuse
+
+
+for verb, (summary, verb_examples) in RUN_BY_GO.items():
+    app.command(
+        verb,
+        help=summary,
+        epilog=verb_examples,
+        rich_help_panel=THIS_MACHINE,
+        context_settings={'ignore_unknown_options': True, 'allow_extra_args': True},
+    )(run_by_go(verb))
 
 
 def version_callback(asked: bool) -> None:
@@ -222,7 +226,6 @@ def version_callback(asked: bool) -> None:
 
 @app.callback()
 def root(
-    ctx: typer.Context,
     version: Annotated[
         bool | None,
         typer.Option('--version', '-V', callback=version_callback, is_eager=True, help='Show the installed version and exit.'),
@@ -234,12 +237,6 @@ def root(
 ) -> None:
     """Root callback, hosting the app-level options."""
     set_no_input(no_input)
-
-    # `update` runs its own check, so notifying too would ask the releases API
-    # twice for one command and let the notice contradict what `--check` just
-    # printed. Every other path is gated locally before it reaches the network.
-    if ctx.invoked_subcommand != 'update':
-        notify(UPDATE_CONFIG)
 
 
 # Each chose the files doit read and wrote. The service holds that data, so one
@@ -259,8 +256,10 @@ def main() -> None:
     if refusal := retired_variable_set():
         error_console.print(f'doit: {refusal}', soft_wrap=True, markup=False)
         raise SystemExit(2)
+    # The console script is doit-python, and a person typed doit, so every
+    # usage line and refusal names doit.
     try:
-        app()
+        app(prog_name='doit')
     except (service.ServiceFailed, LoginError) as failure:
         error_console.print(f'doit: {failure}', soft_wrap=True, markup=False)
         raise SystemExit(service.exit_code(failure)) from None
