@@ -353,11 +353,12 @@ doit desk-nudge panel pick habit:17 --json # complete one row, and print the nex
 ```
 
 The watch ticks every 15 seconds and counts the time since the last nudge ended. When that reaches
-the interval, it reads `doit next` and shows a notification naming the first pursuit offered, with
-four answers: good timing, too soon, too late and bothered me. The nudge stays ready for 10 minutes.
-An answer, a completing panel pick, those 10 minutes or `pause` ends it, and the clock restarts at
-zero. The answers are the notification's actions, which the notification server offers its own way.
-A notification closed with no answer leaves the nudge ready.
+the interval, it reads `doit next`, turns the pill to `ready` with the first pursuit offered, and
+plays the sound theme's `message-new-instant` through `canberra-gtk-play`. A status bar flashes the
+pill while its class is `ready`. Nothing opens and nothing takes focus. The nudge stays ready for
+10 minutes. An answer, a completing panel pick, those 10 minutes or `pause` ends it, and the clock
+restarts at zero. The panel offers four answers while a nudge is ready: good timing, too soon, too
+late and bothered me.
 
 The interval starts at 30 minutes. Each too soon multiplies it by 1.1, and each too late divides it
 by 1.1. The service stores every answer and computes the interval from all of them, so it follows
@@ -378,7 +379,7 @@ The rest of the file is the watch's own. `status --json` carries the same `pill`
 cannot be read is moved aside, with `.unreadable-` and the time added to its name, and the clock
 starts fresh.
 
-Each firing, answer, pick, dismissal, expiry, gap, pause and resume appends one JSON line to
+Each firing, answer, pick, expiry, gap, pause and resume appends one JSON line to
 `$XDG_STATE_HOME/doit/desk-nudge-events.jsonl`, which `schemas/desk-nudge-record.schema.json`
 describes. A firing's line carries every row that `claude-sessions --json` prints and the focused
 window that `hyprctl` names, so a later rule can learn when a nudge lands well. `task schemas`

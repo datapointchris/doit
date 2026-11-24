@@ -130,7 +130,7 @@
             },
             "message": {
               "type": "string",
-              "description": "What the notification says instead."
+              "description": "What the panel says instead."
             },
             "detail": {
               "type": "string",

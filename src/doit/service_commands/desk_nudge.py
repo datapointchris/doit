@@ -22,7 +22,6 @@ import time
 from collections.abc import Callable
 from collections.abc import Iterator
 from dataclasses import dataclass
-from dataclasses import field
 from pathlib import Path
 from typing import IO
 from typing import Annotated
@@ -60,8 +59,10 @@ from doit.service_commands.review import mark_done
 
 log = logging.getLogger('doit.desk_nudge')
 
-# How long `claude-sessions`, `hyprctl`, `gdbus`, `loginctl` and a passing `notify-send` may each take.
+# How long `claude-sessions`, `hyprctl`, `loginctl`, the chime and a passing `notify-send` may each take.
 PROGRAM_SECONDS = 5.0
+# The XDG sound theme's event that a firing plays, read by name so the desk's own theme chooses the sound.
+CHIME_SOUND = 'message-new-instant'
 # Outlasts the service's read of each app plus its read of the day's context, as `/next` makes them.
 NEXT_BUDGET_SECONDS = 30.0
 # `/today` asks every app that `/next` asks, and `/pursuits` builds the same state.
@@ -78,15 +79,12 @@ PICK_REFUSED_EXIT = 2
 # `fcntl.lockf` excludes other processes and never this one's threads, so the watch's threads take this first.
 STATE_THREAD_LOCK = threading.Lock()
 
-NOTIFICATIONS = ['--dest', 'org.freedesktop.Notifications', '--object-path', '/org/freedesktop/Notifications']
-BUS = ['--dest', 'org.freedesktop.DBus', '--object-path', '/org/freedesktop/DBus']
-
 app = typer.Typer(
     name='desk-nudge',
     no_args_is_help=True,
     help=(
         'A nudge every interval at the desk, suggesting what `doit next` offers first.\n\n'
-        'The watch counts the time since the last nudge ended and fires a notification at the interval. Your answers to it '
+        'The watch counts the time since the last nudge ended, then flashes its pill and chimes at the interval. Your answers to it '
         'tune the interval, and every firing, answer and pick is recorded for the warehouse.'
     ),
     epilog=examples(
@@ -192,10 +190,8 @@ def append_records(records: list[dict]) -> None:
 
 
 def carry_out(change: desk_nudge.Change) -> None:
-    """Write a change's records, and close the notification of the nudge it ended."""
+    """Write a change's records."""
     append_records(change.records)
-    if change.closes and change.closes.get('notification_id'):
-        close_notification(change.closes['notification_id'])
 
 
 # --- the programs that the watch starts ----------------------------------------
@@ -254,23 +250,12 @@ def snapshot() -> dict:
     return {'sessions': claude_sessions(), 'focused_window': focused_window()}
 
 
-def close_notification(notification_id: int) -> None:
-    """Close one notification by its id. A failure logs at warning, and the notification may stay up."""
-    method = ['--method', 'org.freedesktop.Notifications.CloseNotification', str(notification_id)]
+def chime() -> None:
+    """Play `CHIME_SOUND` through `canberra-gtk-play`. A failure logs at warning, and the flashing pill still shows the nudge."""
     try:
-        run_program(['gdbus', 'call', '--session', *NOTIFICATIONS, *method])
+        run_program(['canberra-gtk-play', '--id', CHIME_SOUND, '--description', 'desk nudge'])
     except ProgramFailed as error:
-        log.warning(f'could not close notification {notification_id}, so it may stay up: {error}')
-
-
-def notification_bus_owner() -> str | None:
-    """Which connection owns org.freedesktop.Notifications. It changes when dunst restarts."""
-    method = ['--method', 'org.freedesktop.DBus.GetNameOwner', 'org.freedesktop.Notifications']
-    try:
-        return desk_nudge.bus_owner_from(run_program(['gdbus', 'call', '--session', *BUS, *method]))
-    except ProgramFailed as error:
-        log.warning(f'could not read who owns org.freedesktop.Notifications: {error}')
-        return None
+        log.warning(f'could not play the chime, so only the pill shows the nudge: {error}')
 
 
 def notify(summary: str, body: str) -> None:
@@ -418,7 +403,7 @@ def answer_outcome(answered: Answered) -> tuple[int, str]:
     return service.exit_code(answered.failure) if answered.failure else 1, f'"{label}" is not saved: {answered.failure}. {kept}'
 
 
-def answer_nudge(answer: Answer, nudge_id: str | None = None, *, from_notification: bool = False) -> Answered:
+def answer_nudge(answer: Answer, nudge_id: str | None = None) -> Answered:
     """Take one answer, end the nudge it answers, and store it, keeping it to send again where a later send could store it.
 
     The one path for every answer to a nudge. With no id it answers the ready
@@ -433,8 +418,6 @@ def answer_nudge(answer: Answer, nudge_id: str | None = None, *, from_notificati
         kept = desk_nudge.queued_entry(state, taken.row)
     if kept:
         taken = desk_nudge.Taken(kept['row'], kept['late'], taken.closes)
-    if taken.closes and taken.closes.get('notification_id') and not from_notification:
-        close_notification(taken.closes['notification_id'])
     seen = None if kept else snapshot()
     try:
         answered = send_answer(taken.row)
@@ -493,16 +476,6 @@ def resend_queued() -> None:
 # --- the watch --------------------------------------------------------------------
 
 
-@dataclass
-class Shown:
-    """One `notify-send` child and the nudge it shows."""
-
-    process: subprocess.Popen
-    nudge_id: str
-    # Set where a later showing replaced this one, whose exit is then no dismissal.
-    replaced: threading.Event = field(default_factory=threading.Event)
-
-
 def alive(thread: threading.Thread | None) -> bool:
     return thread is not None and thread.is_alive()
 
@@ -513,14 +486,11 @@ class Watch:
     def __init__(self) -> None:
         self.version = __version__
         self.firing: threading.Thread | None = None
-        self.reading: threading.Thread | None = None
         self.resending: threading.Thread | None = None
         self.refreshing: threading.Thread | None = None
         self.rebuilding: threading.Thread | None = None
         self.interval_read_at: float | None = None
         self.panel_read_at: float | None = None
-        self.shown: Shown | None = None
-        self.showing = threading.Lock()
         # One rebuild of the panel's rows at a time, so a slower read never writes over a newer one.
         self.panel_lock = threading.Lock()
 
@@ -530,7 +500,7 @@ class Watch:
         return thread
 
     def start(self) -> None:
-        """Write `started`, then finish a nudge that a stopped watch left firing, or show a ready one again."""
+        """Write `started`, then finish a nudge that a stopped watch left firing. A ready one stays on the pill, unchimed."""
         moment = now()
         with changed_state() as state:
             # A restarted watch keeps the last tick, so its first tick counts the time it was stopped as absence.
@@ -548,8 +518,6 @@ class Watch:
         append_records([started])
         if nudge and phase is Phase.FIRING:
             self.firing = self.background(self.fire, nudge)
-        elif nudge and phase is Phase.READY:
-            self.show(nudge, replaces=nudge['notification_id'])
         self.refresh_interval_when_due()
         self.rebuild_panel_when_due(picked=False)
 
@@ -560,17 +528,11 @@ class Watch:
         with changed_state() as state:
             change = desk_nudge.tick(state, moment, live)
             firing = desk_nudge.begin_firing(state, moment, new_id(moment)) if change.fire else None
-            ready = dict(state['nudge']) if state['phase'] == Phase.READY else None
             queued = bool(state['queued_answers'])
             picked = not alive(self.rebuilding) and desk_nudge.take_panel_rebuild(state)
         carry_out(change)
         if firing:
             self.firing = self.background(self.fire, firing)
-        if ready and ready['bus_owner']:
-            owner = notification_bus_owner()
-            if owner and owner != ready['bus_owner']:
-                log.info(f'the notification server is now {owner}, so the nudge is shown again')
-                self.show(ready, replaces=ready['notification_id'])
         if queued and not alive(self.resending):
             self.resending = self.background(resend_queued)
         self.refresh_interval_when_due()
@@ -606,7 +568,9 @@ class Watch:
                 log.exception("could not read the panel's rows again, so the panel keeps the last ones")
 
     def fire(self, nudge: dict) -> None:
-        """Read `/next`, take the snapshot, write `fired`, make the nudge ready, show it, and read the panel's rows under its suggestion.
+        """Read `/next`, take the snapshot, write `fired`, make the nudge ready, chime, and read the panel's rows under its suggestion.
+
+        Ready is the pill's class that flashes, so the chime and the flash begin together.
 
         A failure that the read does not name still makes the nudge ready, because a
         nudge left firing holds the clock until the watch restarts.
@@ -630,55 +594,9 @@ class Watch:
         with changed_state() as state:
             ready = desk_nudge.make_ready(state, now(), nudge['nudge_id'], suggestion)
         if ready:
-            self.show(ready)
+            chime()
         self.panel_read_at = time.monotonic()
         self.rebuild_panel(suggestion, read_next=False)
-
-    def show(self, nudge: dict, replaces: int | None = None) -> None:
-        """Start `notify-send` as a child that the tick loop never waits on, with a thread that reads its id and its action."""
-        argv = desk_nudge.notification_argv(nudge, replaces)
-        with self.showing:
-            try:
-                process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, text=True)
-            except OSError as error:
-                log.warning(f'could not show the nudge, so only the pill and `doit desk-nudge status` show it: {error}')
-                return
-            earlier, self.shown = self.shown, Shown(process, nudge['nudge_id'])
-            if earlier and earlier.process.poll() is None:
-                earlier.replaced.set()
-                earlier.process.terminate()
-            self.reading = self.background(self.read_notification, self.shown)
-
-    def read_notification(self, shown: Shown) -> None:
-        """Keep the notification's id, then take its action: an answer, or `dismissed` where it closed with none."""
-        assert shown.process.stdout is not None
-        first = shown.process.stdout.readline().strip()
-        if not first.isdigit():
-            shown.process.wait()
-            if not shown.replaced.is_set():
-                log.warning(
-                    f'notify-send printed no id and exited {shown.process.returncode}, '
-                    'so only the pill and `doit desk-nudge status` show the nudge'
-                )
-            return
-        owner = notification_bus_owner()
-        with changed_state() as state:
-            desk_nudge.attach_notification(state, shown.nudge_id, int(first), owner)
-        action = shown.process.stdout.readline().strip()
-        shown.process.wait()
-        if shown.replaced.is_set():
-            return
-        if action in set(Answer):
-            try:
-                answer_nudge(Answer(action), shown.nudge_id, from_notification=True)
-            except NothingToAnswer as nothing:
-                log.warning(f'the notification answered {action}, and {nothing}')
-            return
-        if owner and notification_bus_owner() != owner:
-            return
-        with changed_state() as state:
-            records = desk_nudge.dismissal(state, now(), shown.nudge_id)
-        append_records(records)
 
     def run(self) -> int:
         """Tick until the installed doit is another release, then exit so that the unit starts it."""
@@ -693,11 +611,8 @@ class Watch:
             time.sleep(max(desk_nudge.TICK_SECONDS - (time.monotonic() - began), 0.0))
 
     def close(self) -> None:
-        """Stop the notification child and wait on the threads, for a watch that ends inside a process that goes on."""
-        if self.shown and self.shown.process.poll() is None:
-            self.shown.replaced.set()
-            self.shown.process.terminate()
-        for thread in (self.firing, self.reading, self.resending, self.refreshing, self.rebuilding):
+        """Wait on the threads, for a watch that ends inside a process that goes on."""
+        for thread in (self.firing, self.resending, self.refreshing, self.rebuilding):
             if thread is not None:
                 thread.join(timeout=10)
 

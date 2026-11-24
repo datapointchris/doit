@@ -44,7 +44,7 @@ STALE_AFTER_SECONDS = 4 * TICK_SECONDS
 REMEMBERED_NUDGES = 20
 
 STATE_VERSION = 2
-RECORD_SCHEMA_VERSION = 2
+RECORD_SCHEMA_VERSION = 3
 STATUS_SCHEMA_VERSION = 2
 PANEL_SCHEMA_VERSION = 1
 PANEL_CACHE_VERSION = 1
@@ -80,7 +80,6 @@ class Event(StrEnum):
     STARTED = 'started'
     FIRED = 'fired'
     ANSWERED = 'answered'
-    DISMISSED = 'dismissed'
     EXPIRED = 'expired'
     PICKED = 'picked'
     GAP = 'gap'
@@ -207,7 +206,7 @@ class Change:
     """What one change to the state asks of the effects around it."""
 
     records: list[dict] = field(default_factory=list)
-    # The nudge that this change ended, whose notification is closed by its id.
+    # The nudge that this change ended.
     closes: dict | None = None
     # Present time reached the interval, so a firing begins.
     fire: bool = False
@@ -268,8 +267,6 @@ def begin_firing(state: dict, now: dt.datetime, nudge_id: str) -> dict:
         'interval_minutes': state['interval_minutes'],
         'suggestion': None,
         'ready_until': None,
-        'notification_id': None,
-        'bus_owner': None,
     }
     return dict(state['nudge'])
 
@@ -283,12 +280,6 @@ def make_ready(state: dict, now: dt.datetime, nudge_id: str, suggestion: dict) -
     nudge['ready_until'] = stamp(now + dt.timedelta(seconds=READY_SECONDS))
     state['phase'] = Phase.READY.value
     return dict(nudge)
-
-
-def held_nudge(state: dict, nudge_id: str) -> dict | None:
-    """The nudge in hand, where it is the one named."""
-    nudge = in_hand(state)
-    return nudge if nudge and nudge['nudge_id'] == nudge_id else None
 
 
 def pause(state: dict, now: dt.datetime) -> Change:
@@ -393,23 +384,6 @@ def answered_record(now: dt.datetime, row: dict, late: bool, saved: bool, queued
     )
 
 
-def attach_notification(state: dict, nudge_id: str, notification_id: int, bus_owner: str | None) -> bool:
-    """The notification's id and the bus owner that showed it, kept on the nudge still in hand."""
-    nudge = held_nudge(state, nudge_id)
-    if nudge is None:
-        return False
-    nudge['notification_id'] = notification_id
-    nudge['bus_owner'] = bus_owner
-    return True
-
-
-def dismissal(state: dict, now: dt.datetime, nudge_id: str) -> list[dict]:
-    """A notification closed with no answer while its nudge is ready: `dismissed`, and the nudge stays ready."""
-    if state['phase'] != Phase.READY or held_nudge(state, nudge_id) is None:
-        return []
-    return [record(Event.DISMISSED, now, nudge_id=nudge_id)]
-
-
 # --- what the firing reads and shows -------------------------------------------
 
 
@@ -440,22 +414,6 @@ def topic(suggestion: dict | None) -> str:
     return suggestion['pursuit'] if suggestion and 'pursuit' in suggestion else 'break'
 
 
-def notification_text(nudge: dict) -> tuple[str, str]:
-    """The notification's summary and body."""
-    suggestion = nudge['suggestion'] or {}
-    if 'pursuit' not in suggestion:
-        return 'Time for a break', suggestion.get('message') or SUGGESTION_MESSAGES[SuggestionError.NOTHING_TO_DRAW]
-    return f'Up for {suggestion["pursuit"]}', suggestion.get('label') or ''
-
-
-def notification_argv(nudge: dict, replaces: int | None = None) -> list[str]:
-    """`notify-send`, printing its id and then the action chosen, open until clicked, with the four answers."""
-    summary, body = notification_text(nudge)
-    actions = [part for answer in Answer for part in ('-A', f'{answer.value}={ANSWER_LABELS[answer]}')]
-    replacing = ['-r', str(replaces)] if replaces else []
-    return ['notify-send', '-p', '-t', '0', '-a', 'doit', *replacing, *actions, summary, body]
-
-
 def chosen_instance(instances: object, wayland_display: str | None) -> str | None:
     """The Hyprland instance that `hyprctl instances -j` lists on this desk's display, else the newest one."""
     rows = [row for row in instances if isinstance(row, dict) and row.get('instance')] if isinstance(instances, list) else []
@@ -469,12 +427,6 @@ def focused_window_from(window: object) -> dict:
     if not isinstance(window, dict):
         return {'error': 'hyprctl activewindow -j printed no object'}
     return {'class': window.get('class') or None, 'title': window.get('title') or None}
-
-
-def bus_owner_from(reply: str) -> str | None:
-    """The unique name in gdbus's reply to GetNameOwner, such as `(':1.42',)`."""
-    found = re.search(r"'([^']+)'", reply)
-    return found.group(1) if found else None
 
 
 # --- the pill and the status -----------------------------------------------------
@@ -919,7 +871,6 @@ RECORD_FIELDS: dict[Event, tuple[str, ...]] = {
     Event.STARTED: ('doit_version', 'phase', 'counted_minutes', 'interval_minutes'),
     Event.FIRED: ('nudge_id', 'interval_minutes', 'counted_minutes', 'suggestion', 'sessions', 'focused_window'),
     Event.ANSWERED: ('nudge_id', 'answer', 'seconds_since_fired', 'saved', 'queued', 'late'),
-    Event.DISMISSED: ('nudge_id',),
     Event.EXPIRED: ('nudge_id',),
     Event.PICKED: ('nudge_id', 'pick', 'sessions', 'focused_window'),
     Event.GAP: ('gap_seconds',),
@@ -961,7 +912,7 @@ SUGGESTION_SCHEMA = {
             'required': ['error', 'message', 'detail'],
             'properties': {
                 'error': {'enum': [kind.value for kind in SuggestionError], 'description': 'Why /next drew nothing.'},
-                'message': {'type': 'string', 'description': 'What the notification says instead.'},
+                'message': {'type': 'string', 'description': 'What the panel says instead.'},
                 'detail': {'type': 'string', 'description': "The service's or the client's own sentence."},
             },
         },

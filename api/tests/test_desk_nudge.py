@@ -1,7 +1,7 @@
 """The desk nudge against the real service, in process.
 
 The watch runs on an injected clock, with `claude-sessions`, `hyprctl`,
-`notify-send` and `gdbus` stand-ins on PATH that answer from recorded output.
+`canberra-gtk-play` and `notify-send` stand-ins on PATH that answer from recorded output.
 """
 
 import datetime as dt
@@ -43,11 +43,10 @@ BOOKS = [{'title': 'A Neutral Book', 'id': 7}, {'title': 'Another Book', 'id': 9
 READ = 'pursuits:\n  read:\n    description: Read what is on the shelf\n    weight: 30\n    cadence: 3d\n'
 RESOLVED_READ = READ + '    resolve: {app: life, path: /books}\n    label: title\n    id: id\n'
 ONLY_PAUSED = READ + '    paused: true\n'
-NOTIFIED = 4711
 
 # Each stand-in logs its call, then answers as the real program does, from the recorded output.
 STAND_IN = """#!PYTHON
-import json, os, sys, time
+import json, os, sys
 from pathlib import Path
 
 here = Path(os.environ['DESK_NUDGE_STAND_INS'])
@@ -65,33 +64,12 @@ elif name == 'hyprctl':
         print((fixtures / 'hyprctl-activewindow.json').read_text())
     else:
         sys.exit('HYPRLAND_INSTANCE_SIGNATURE not set! (is hyprland running?)')
-elif name == 'gdbus':
-    if 'org.freedesktop.DBus.GetNameOwner' in args:
-        print((fixtures / 'gdbus-get-name-owner.txt').read_text().strip())
-    else:
-        (here / f'closed-{args[-1]}').touch()
-        print('()')
 elif name == 'loginctl':
     print('no')
 elif name == 'life':
     failing = here / 'life-exit'
     if failing.exists():
         sys.exit('the habit store is down')
-elif name == 'notify-send' and '-A' in args:
-    shown = args[args.index('-r') + 1] if '-r' in args else 'NOTIFIED'
-    print(shown, flush=True)
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        if (here / 'action').exists():
-            chosen = (here / 'action').read_text()
-            (here / 'action').unlink()
-            if chosen:
-                print(chosen, flush=True)
-            sys.exit(0)
-        if (here / f'closed-{shown}').exists():
-            (here / f'closed-{shown}').unlink()
-            sys.exit(0)
-        time.sleep(0.02)
 """
 
 
@@ -140,12 +118,6 @@ class Desk:
         logged = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
         return [call['argv'] for call in logged if call['program'] == program]
 
-    def click(self, action: str) -> None:
-        """The person's click on the open notification: an answer's name, or '' for a left click that closes it."""
-        pending = self.root / 'action.pending'
-        pending.write_text(action)
-        pending.rename(self.root / 'action')
-
     def status(self) -> dict:
         shown = CliRunner().invoke(cli_app, ['desk-nudge', 'status', '--json'])
         assert shown.exit_code == 0, shown.output
@@ -184,9 +156,9 @@ def desk(tmp_path, monkeypatch):
     root = tmp_path / 'desk'
     programs = root / 'bin'
     programs.mkdir(parents=True)
-    for program in ('claude-sessions', 'hyprctl', 'gdbus', 'notify-send', 'loginctl', 'life'):
+    for program in ('claude-sessions', 'hyprctl', 'canberra-gtk-play', 'notify-send', 'loginctl', 'life'):
         script = programs / program
-        script.write_text(STAND_IN.replace('PYTHON', sys.executable).replace('NOTIFIED', str(NOTIFIED)))
+        script.write_text(STAND_IN.replace('PYTHON', sys.executable))
         script.chmod(0o755)
     (root / 'run' / 'hypr' / INSTANCE).mkdir(parents=True)
     (root / 'run' / 'hypr' / INSTANCE / '.socket.sock').touch()
@@ -214,12 +186,12 @@ def registered(store, monkeypatch, tmp_path, register: str, around=None):
 
 
 def fired(desk: Desk) -> commands.Watch:
-    """A watch run for 30 minutes, until its nudge is ready and showing."""
+    """A watch run for 30 minutes, until its nudge is ready and has chimed."""
     watch = desk.watch()
     desk.run(watch, 30 * 60 - 15)
     assert desk.state()['phase'] == Phase.COUNTING
     desk.run(watch, 15)
-    until(lambda: (desk.state()['nudge'] or {}).get('notification_id'))
+    until(lambda: desk.calls('canberra-gtk-play'))
     return watch
 
 
@@ -257,14 +229,12 @@ def test_the_interval_fires_the_nudge_with_the_draws_first_item(store, monkeypat
     assert record['sessions'] == json.loads((FIXTURES / 'claude-sessions.json').read_text())
     assert record['focused_window'] == {'class': 'com.mitchellh.ghostty', 'title': 'Terminal — project-1'}
     assert desk.calls('hyprctl') == [['instances', '-j'], ['-i', INSTANCE, 'activewindow', '-j']]
-    [argv] = desk.calls('notify-send')
-    assert argv[:3] == ['-p', '-t', '0']
-    assert [argv[place + 1].split('=')[0] for place, part in enumerate(argv) if part == '-A'] == [answer.value for answer in Answer]
+    assert desk.calls('canberra-gtk-play') == [['--id', commands.CHIME_SOUND, '--description', 'desk nudge']]
+    assert desk.calls('notify-send') == [], 'a firing shows no notification'
     status = desk.status()
     assert (status['phase'], status['pill']['text'], status['nudge_id']) == ('ready', 'ready · read', record['nudge_id'])
 
-    desk.click('too_soon')
-    until(lambda: desk.records(Event.ANSWERED))
+    assert CliRunner().invoke(cli_app, ['desk-nudge', 'answer', 'too_soon']).exit_code == 0
 
     [answered] = desk.records(Event.ANSWERED)
     assert (answered['answer'], answered['saved'], answered['late'], answered['nudge_id']) == ('too_soon', True, False, record['nudge_id'])
@@ -276,19 +246,12 @@ def test_an_unanswered_nudge_expires_after_ten_minutes(store, monkeypatch, tmp_p
     registered(store, monkeypatch, tmp_path, RESOLVED_READ)
     watch = fired(desk)
 
-    desk.run(watch, 5 * 60)
-    assert watch.shown is not None and watch.shown.process.poll() is None, 'the ticks ran while the notification stayed open'
-    desk.click('')
-    until(lambda: desk.records(Event.DISMISSED))
+    desk.run(watch, 10 * 60 - 15)
     assert desk.status()['pill']['text'] == 'ready · read'
-
-    desk.run(watch, 5 * 60 - 15)
-    assert desk.state()['phase'] == Phase.READY
     desk.run(watch, 15)
 
     [expired] = desk.records(Event.EXPIRED)
     assert expired['nudge_id'] == desk.records(Event.FIRED)[0]['nudge_id']
-    assert desk.calls('gdbus')[-1][-2:] == ['org.freedesktop.Notifications.CloseNotification', str(NOTIFIED)]
     assert (desk.state()['phase'], desk.state()['counted_seconds']) == (Phase.COUNTING, 0)
 
 
@@ -314,12 +277,10 @@ def test_a_failed_next_still_fires_and_records_the_error(store, monkeypatch, tmp
 
     [record] = desk.records(Event.FIRED)
     assert record['suggestion']['error'] == kind.value
-    [argv] = desk.calls('notify-send')
-    assert argv[-1].startswith(desk_nudge.SUGGESTION_MESSAGES[kind])
     assert desk.status()['pill']['text'] == 'ready · break'
 
 
-def test_a_restarted_watch_resumes_a_ready_nudge(store, monkeypatch, tmp_path, desk):
+def test_a_restarted_watch_finishes_a_firing_and_chimes_once(store, monkeypatch, tmp_path, desk):
     registered(store, monkeypatch, tmp_path, RESOLVED_READ)
     stopped_while_firing = desk_nudge.fresh_state()
     stopped_while_firing.update(counted_seconds=30 * 60.0, last_tick=desk_nudge.stamp(DESK_START))
@@ -327,16 +288,13 @@ def test_a_restarted_watch_resumes_a_ready_nudge(store, monkeypatch, tmp_path, d
     commands.write_state(stopped_while_firing)
 
     first = desk.watch()
-    until(lambda: (desk.state()['nudge'] or {}).get('notification_id'))
+    until(lambda: desk.calls('canberra-gtk-play'))
     first.close()
     desk.clock.moment += dt.timedelta(seconds=30)
-    desk.watch()
-    until(lambda: len(desk.calls('notify-send')) == 2)
+    desk.watch().close()
 
-    shown, shown_again = desk.calls('notify-send')
     assert [record['nudge_id'] for record in desk.records(Event.FIRED)] == [nudge['nudge_id']]
-    assert '-r' not in shown
-    assert shown_again[shown_again.index('-r') + 1] == str(NOTIFIED)
+    assert len(desk.calls('canberra-gtk-play')) == 1
     assert desk.state()['phase'] == Phase.READY
 
 

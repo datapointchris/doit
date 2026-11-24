@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:doit:desk-nudge-record:v2",
+  "$id": "urn:doit:desk-nudge-record:v3",
   "title": "doit.desk_nudge",
   "description": "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, appended and never rotated, for a log shipper to read. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
   "type": "object",
@@ -21,7 +21,6 @@
         "started",
         "fired",
         "answered",
-        "dismissed",
         "expired",
         "picked",
         "gap",
@@ -31,7 +30,7 @@
       "description": "What happened."
     },
     "fleet.schema_version": {
-      "const": 2,
+      "const": 3,
       "description": "This line's shape."
     },
     "doit_version": {
@@ -117,7 +116,7 @@
             },
             "message": {
               "type": "string",
-              "description": "What the notification says instead."
+              "description": "What the panel says instead."
             },
             "detail": {
               "type": "string",
@@ -327,20 +326,6 @@
           "saved",
           "queued",
           "late"
-        ]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "event": {
-            "const": "dismissed"
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "nudge_id"
         ]
       }
     },

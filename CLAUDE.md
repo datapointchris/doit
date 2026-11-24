@@ -64,17 +64,17 @@ apps draw three lanes.
 - **`hyprctl`**, in `service_commands.desk_nudge.focused_window`, at the same moments: `instances
   -j`, then `-i <instance> activewindow -j`. A unit started at login never has
   `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
-- **`notify-send`**, in `Watch.show`, as a child that the desk nudge's tick loop never waits on,
-  open until clicked, and in `notify` for a passing notice.
-- **`gdbus`**, in `close_notification` and `notification_bus_owner`.
+- **`canberra-gtk-play --id <CHIME_SOUND>`**, in `service_commands.desk_nudge.chime`, once as a
+  nudge turns ready. A firing opens nothing else.
+- **`notify-send`**, in `notify`, for a passing notice after an answer or a panel pick.
 - **`loginctl show-session auto -p IdleHint --value`**, in `service_commands.desk_nudge.session_idle`,
   before each timed read of the desk nudge panel's rows. It never moves the clock.
 - **`life habits complete <id>`**, in `service_commands.desk_nudge.completed_habit`, at a panel
   pick on a habit, stopped after `HABIT_SECONDS`. Its argv is `dashboard.habit_completion_argv`,
   built from the habit's id in doit's code, never read from the panel's cache.
 
-The desk nudge programs are named in `service_commands.desk_nudge`, and each one but the open
-notification and `life habits complete` is stopped after `PROGRAM_SECONDS`. Every one runs outside
+The desk nudge programs are named in `service_commands.desk_nudge`, and each one but `life habits
+complete` is stopped after `PROGRAM_SECONDS`. Every one runs outside
 the state file's lock. A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit learns from another program arrives over HTTP through the wrappers
 below.
 
