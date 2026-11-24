@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +16,8 @@ import (
 // runAsDoit makes this test binary run main, so a test runs doit as a process
 // with the os.Args, PATH and stdin that it chooses.
 const runAsDoit = "DOIT_TEST_RUN_AS_DOIT"
+
+const handedTreeFile = "testdata/tree-handed-to-doit-python.json"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(runAsDoit) == "1" {
@@ -24,14 +28,15 @@ func TestMain(m *testing.M) {
 }
 
 // fakePython writes a doit-python that records its argv one NUL-ended word at
-// a time, echoes stdin, and exits 7. Only shell builtins run, so PATH needs
-// nothing beyond the fake.
+// a time and the Go tree it was handed, echoes stdin, and exits 7. Only shell
+// builtins run, so PATH needs nothing beyond the fake.
 func fakePython(t *testing.T) (dir, argvFile string) {
 	t.Helper()
 	dir = t.TempDir()
 	argvFile = filepath.Join(t.TempDir(), "argv")
 	script := "#!/bin/sh\n" +
 		": >\"$FAKE_ARGV\"\n" +
+		"printf '%s' \"$DOIT_GO_COMMANDS\" >\"$FAKE_ARGV.commands\"\n" +
 		"for word in \"$@\"; do printf '%s\\0' \"$word\" >>\"$FAKE_ARGV\"; done\n" +
 		"while IFS= read -r line; do printf 'python read %s\\n' \"$line\"; done\n" +
 		"exit 7\n"
@@ -102,7 +107,20 @@ func TestAnUnportedVerbExecsDoitPythonWithTheSameArgvAndExitCodeAndAMissingOneIs
 		}
 	}
 
-	for _, args := range [][]string{{"--version"}, {"-V"}, {"auth", "--help"}} {
+	// doit-python's own tests list the Go commands from this file, so it holds
+	// what the Go doit hands on.
+	var handed, committed []treeCommand
+	if data, err := os.ReadFile(argvFile + ".commands"); err != nil || json.Unmarshal(data, &handed) != nil {
+		t.Fatalf("doit-python was handed no readable Go tree: %v %q", err, data)
+	}
+	if data, err := os.ReadFile(handedTreeFile); err != nil || json.Unmarshal(data, &committed) != nil {
+		t.Fatalf("reading %s: %v", handedTreeFile, err)
+	}
+	if !reflect.DeepEqual(handed, committed) {
+		t.Errorf("doit-python was handed %+v, and %s holds %+v; write the first there", handed, handedTreeFile, committed)
+	}
+
+	for _, args := range [][]string{{"--version"}, {"-V"}, {"--no-input", "--version"}, {"auth", "--help"}} {
 		_ = os.Remove(argvFile)
 		run := runDoit(t, fake, argvFile, args...)
 		if _, reached := passedArgv(t, argvFile); reached || run.exit != 0 {
@@ -110,9 +128,22 @@ func TestAnUnportedVerbExecsDoitPythonWithTheSameArgvAndExitCodeAndAMissingOneIs
 		}
 	}
 
-	run := runDoit(t, t.TempDir(), argvFile, "pursuits", "list")
-	want := "doit: doit-python is not installed, and pursuits is not yet in the Go doit\n"
-	if run.exit != 1 || run.stderr != want {
-		t.Errorf("with no doit-python on PATH: exit %d, stderr %q; want exit 1 and %q", run.exit, run.stderr, want)
+	// Without doit-python, the Go doit answers its own help and usage
+	// mistakes, and names a verb only doit-python runs.
+	for _, missing := range []struct {
+		args []string
+		exit int
+		verb string
+	}{
+		{[]string{"pursuits", "list"}, 1, "pursuits"},
+		{[]string{"--no-input", "pursuits", "list"}, 1, "pursuits"},
+		{[]string{"--help"}, 0, ""},
+		{[]string{"auth", "bogus"}, 2, ""},
+	} {
+		run := runDoit(t, t.TempDir(), argvFile, missing.args...)
+		if run.exit != missing.exit || !strings.Contains(run.stderr, missing.verb) {
+			t.Errorf("doit %q with no doit-python on PATH: exit %d, stderr %q; want exit %d naming %q",
+				missing.args, run.exit, run.stderr, missing.exit, missing.verb)
+		}
 	}
 }

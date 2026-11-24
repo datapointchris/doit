@@ -23,6 +23,15 @@ console script, with the same argv for everything else: an unported verb, a flag
 bare `doit` and `doit --help`. A port adds its verb to cobra's tree and deletes the Python command
 in the same change, so no verb has two implementations.
 
+- **The cobra tree is the one list of what Go runs.** The exec hands it to `doit-python` in
+  `DOIT_GO_COMMANDS`, and `list_go_commands` in `cli.py` adds an entry that runs nothing for each
+  command the Python tree lacks, so the help Python prints names every verb. Nothing in Python lists
+  a Go verb by hand. `cli/cmd/doit/testdata/tree-handed-to-doit-python.json` is that list as Go
+  hands it, which the Go scenario test checks and the Python tests read.
+- **A namespace that Go runs whole carries the `portedWhole` annotation.** Its bare and `--help`
+  lines stay in Go. A partly ported namespace carries none, so those lines reach Python, whose
+  group lists the Go commands beside its own.
+
 - **`cli/internal/login` holds pyclilogin's identifiers for the product `doit`**: the config file,
   the keychain service `doit-cli`, and `$XDG_STATE_HOME/doit` for the fallback token file and the
   refresh lock. Changing any one logs every desk out of one side.

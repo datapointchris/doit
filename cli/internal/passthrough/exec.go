@@ -17,35 +17,26 @@ import (
 // Program is the Python doit's console script, which Go finds on PATH.
 const Program = "doit-python"
 
-// NotInstalled is the refusal where Program is not on PATH, naming what was asked for.
-type NotInstalled struct {
-	Verb string
-}
+// CommandsVariable carries the Go tree's commands to Program, which lists each
+// one its own tree lacks in the help it prints.
+const CommandsVariable = "DOIT_GO_COMMANDS"
 
-func (n NotInstalled) Error() string {
-	return fmt.Sprintf("%s is not installed, and %s is not yet in the Go doit", Program, n.Verb)
-}
+// ErrNotInstalled is Program missing from PATH.
+var ErrNotInstalled = errors.New(Program + " is not on PATH")
 
-// Exec replaces this process with Program run on args, and returns only when
-// that cannot happen.
-func Exec(args []string) error {
+// Exec replaces this process with Program run on args, with commands in
+// CommandsVariable, and returns only when that cannot happen.
+func Exec(args []string, commands string) error {
 	path, err := exec.LookPath(Program)
 	if errors.Is(err, exec.ErrNotFound) {
-		return NotInstalled{Verb: verbOf(args)}
+		return ErrNotInstalled
 	}
 	if err != nil {
 		return fmt.Errorf("find %s: %w", Program, err)
 	}
-	if err := syscall.Exec(path, append([]string{Program}, args...), os.Environ()); err != nil {
+	environment := append(os.Environ(), CommandsVariable+"="+commands)
+	if err := syscall.Exec(path, append([]string{Program}, args...), environment); err != nil {
 		return fmt.Errorf("run %s: %w", path, err)
 	}
 	return nil
-}
-
-// verbOf is what the refusal names: the first word typed after doit.
-func verbOf(args []string) string {
-	if len(args) == 0 {
-		return "bare doit"
-	}
-	return args[0]
 }

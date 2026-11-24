@@ -4,8 +4,10 @@ Every node prints help when given no arguments and a usage error exits 2, both
 from typer. Each subcommand module owns its own `app`, and this file assembles them.
 """
 
+import json
 import os
 import shlex
+from collections.abc import Mapping
 from typing import Annotated
 
 import typer
@@ -13,6 +15,7 @@ from pyclilogin import LoginError
 from typer._click.core import Context
 from typer._click.exceptions import NoSuchOption
 from typer.core import TyperGroup
+from typer.main import get_command_name
 
 from doit import __version__
 from doit import config_commands
@@ -69,8 +72,8 @@ WHAT_YOU_DECLARED = 'What you declared'
 THIS_MACHINE = 'This machine'
 
 # Typer lists a group's commands ahead of its sub-apps and draws each panel where
-# its first command falls. Left alone, `auth` would put This machine above What
-# you declared.
+# its first command falls. Left alone, a command the Go doit runs would put This
+# machine above What you declared. A name missing here sorts last.
 ROOT_ORDER = (
     'next',
     'today',
@@ -81,11 +84,9 @@ ROOT_ORDER = (
     'pursuits',
     'review',
     'sources',
-    'auth',
     'config',
     'shell',
     'desk-nudge',
-    'update',
 )
 
 
@@ -168,36 +169,23 @@ app.add_typer(config_commands.app, name='config', rich_help_panel=THIS_MACHINE)
 app.add_typer(shell.app, name='shell', rich_help_panel=THIS_MACHINE)
 app.add_typer(desk_nudge.app, name='desk-nudge', rich_help_panel=THIS_MACHINE)
 
-# The verbs the Go doit runs, each with its summary and examples. The Go binary
-# hands `doit --help` to this tree, so each is listed here for the help to name
-# every verb. A command line reaching one came from a person running doit-python
-# directly, or from the Go doit passing on a flag it does not take.
-RUN_BY_GO = {
-    'auth': (
-        "Log this machine in to doit's service, and out.",
-        examples(
-            ('doit auth status', 'whether this machine is logged in, and to what'),
-            ('doit auth login https://doit.example.com', 'log a new machine in to that service'),
-        ),
-    ),
-    'update': (
-        'Update doit to the latest release.',
-        examples(
-            ('doit update --check', 'whether a newer release exists, installing nothing'),
-            ('doit update', 'install the newest release over this one'),
-        ),
-    ),
-}
+# The Go doit hands its command tree here when it passes a line on, as a JSON list
+# of {path, summary, group}. Each command this tree lacks gets an entry that runs
+# nothing, under the group holding its parent, so the help lists every verb.
+GO_COMMANDS_VARIABLE = 'DOIT_GO_COMMANDS'
 
 
-def run_by_go(name: str):
-    """The command for a verb the Go doit runs, which refuses as a usage error and names the Go help."""
+def run_by_go(path: list[str]):
+    """The command for one the Go doit runs, which refuses as a usage error and names the Go help.
+
+    A line reaches it from the Go doit passing on a flag it does not take.
+    """
 
     def refuse(ctx: typer.Context) -> None:
-        typed = shlex.join(['doit', name, *ctx.args])
+        named = shlex.join(['doit', *path])
+        typed = shlex.join(['doit', *path, *ctx.args])
         error_console.print(
-            f'doit: the Go doit runs `doit {name}`, and doit-python does not, so `{typed}` ran nothing. '
-            f'`doit {name} --help` lists what it takes.',
+            f'doit: the Go doit runs `{named}`, and doit-python does not, so `{typed}` ran nothing. `{named} --help` lists what it takes.',
             soft_wrap=True,
             markup=False,
         )
@@ -206,14 +194,36 @@ def run_by_go(name: str):
     return refuse
 
 
-for verb, (summary, verb_examples) in RUN_BY_GO.items():
-    app.command(
-        verb,
-        help=summary,
-        epilog=verb_examples,
-        rich_help_panel=THIS_MACHINE,
-        context_settings={'ignore_unknown_options': True, 'allow_extra_args': True},
-    )(run_by_go(verb))
+def group_at(path: list[str]) -> typer.Typer | None:
+    """The group of this tree at path below the root, or None where there is none."""
+    group = app
+    for name in path:
+        found = next((info.typer_instance for info in group.registered_groups if info.name == name), None)
+        if found is None:
+            return None
+        group = found
+    return group
+
+
+def names_in(group: typer.Typer) -> set[str]:
+    """Every command and group name group lists."""
+    commands = {info.name or get_command_name(info.callback.__name__) for info in group.registered_commands if info.callback}
+    return commands | {info.name for info in group.registered_groups if isinstance(info.name, str)}
+
+
+def list_go_commands(environ: Mapping[str, str]) -> None:
+    """Add an entry for each command the Go doit names in environ that this tree lacks."""
+    for command in json.loads(environ.get(GO_COMMANDS_VARIABLE) or '[]'):
+        *parents, name = command['path']
+        group = group_at(parents)
+        if group is None or name in names_in(group):
+            continue
+        group.command(
+            name,
+            help=command['summary'],
+            rich_help_panel=command.get('group'),
+            context_settings={'ignore_unknown_options': True, 'allow_extra_args': True},
+        )(run_by_go(command['path']))
 
 
 def version_callback(asked: bool) -> None:
@@ -256,6 +266,7 @@ def main() -> None:
     if refusal := retired_variable_set():
         error_console.print(f'doit: {refusal}', soft_wrap=True, markup=False)
         raise SystemExit(2)
+    list_go_commands(os.environ)
     # The console script is doit-python, and a person typed doit, so every
     # usage line and refusal names doit.
     try:

@@ -23,9 +23,12 @@ from typer.testing import CliRunner
 
 import doit
 from doit import __version__
+from doit.cli import GO_COMMANDS_VARIABLE
 from doit.cli import ROOT_ORDER
 from doit.cli import accepted_placements
 from doit.cli import app
+from doit.cli import list_go_commands
+from doit.service_commands import desk_nudge as desk_nudge_commands
 from doit.service_commands import pursuits as pursuit_commands
 
 runner = CliRunner()
@@ -114,6 +117,7 @@ WORDS = r'((?: [a-z][\w-]*(?![\w/.-]))+)'
 PRINTED_IN_SOURCE = re.compile(rf"(?:\]|`|')doit{WORDS}")
 SHELL_FENCE = re.compile(r'^```(?:bash|sh)\n(.*?)^```', re.MULTILINE | re.DOTALL)
 PRINTED_IN_FENCE = re.compile(rf'^doit{WORDS}', re.MULTILINE)
+HANDED_GO_TREE = REPO / 'cli' / 'cmd' / 'doit' / 'testdata' / 'tree-handed-to-doit-python.json'
 # Text that a screen shows and nobody runs: the zsh completion's heading over the
 # verb list, and the desk nudge panel's banner over rows that could not be read again.
 NOT_A_COMMAND = {('shell.py', ' command'), ('desk_nudge.py', ' unreachable')}
@@ -132,11 +136,14 @@ def printed_commands():
         yield 'README.md', match.group(1).split()
 
 
-def test_every_command_it_prints_is_in_the_command_tree():
+def test_every_command_it_prints_is_in_the_command_tree(monkeypatch):
     """A hint naming a command that was renamed sends its reader to an error.
 
     The walk stops at a leaf, so the words after it are that command's arguments.
+    The Go doit's commands are listed as it hands them to doit-python.
     """
+    monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
+    list_go_commands({GO_COMMANDS_VARIABLE: HANDED_GO_TREE.read_text()})
     tree = get_command(app)
     missing = []
     walked = 0
@@ -201,10 +208,23 @@ def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
     assert accepted_placements(refused.value) == ['doit --no-input next']
 
 
-def test_a_line_the_go_doit_passed_on_names_its_help_and_runs_nothing():
-    """The Go doit hands on a flag it does not take, and Python has no copy of the verb to run it."""
-    result = runner.invoke(app, ['update', '--chek'])
+def test_a_command_the_go_doit_hands_on_is_listed_under_its_parent_and_runs_nothing(monkeypatch):
+    """The Go doit hands its tree on with each line it passes, and Python has no copy of those verbs to run."""
+    monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
+    monkeypatch.setattr(desk_nudge_commands.app, 'registered_commands', list(desk_nudge_commands.app.registered_commands))
+    handed = [
+        {'path': ['update'], 'summary': 'Update doit', 'group': 'This machine'},
+        {'path': ['desk-nudge', 'window'], 'summary': 'Open the panel window'},
+    ]
+    list_go_commands({GO_COMMANDS_VARIABLE: json.dumps(handed)})
 
+    tree = get_command(app)
+    assert isinstance(tree, TyperGroup)
+    nudge = tree.commands['desk-nudge']
+    assert isinstance(nudge, TyperGroup)
+    assert 'update' in tree.commands
+    assert 'window' in nudge.commands
+    result = runner.invoke(app, ['update', '--chek'])
     assert result.exit_code == 2
     assert 'doit update --help' in result.output
 

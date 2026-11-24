@@ -36,7 +36,9 @@ func newAuthCommand() *cobra.Command {
 			"  doit auth login https://doit.example.com  log a new machine in to that service\n" +
 			"  doit auth login                           log in again to the service the config file names\n" +
 			"  doit auth logout                          forget this machine's token",
+		GroupID: thisMachine,
 	})
+	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(newAuthStatusCommand(), newAuthLoginCommand(), newAuthLogoutCommand(), newAuthTokenCommand())
 	return cmd
 }

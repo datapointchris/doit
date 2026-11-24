@@ -34,7 +34,9 @@ func updateConfig() goselfupdate.Config {
 }
 
 func newUpdateCommand() *cobra.Command {
-	return goclikit.UpdateCommand(updateConfig())
+	cmd := goclikit.UpdateCommand(updateConfig())
+	cmd.GroupID = thisMachine
+	return cmd
 }
 
 // githubToken lifts GitHub's 60 unauthenticated reads an hour: the
