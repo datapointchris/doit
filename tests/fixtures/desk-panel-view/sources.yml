@@ -1,0 +1,7 @@
+sources:
+  life:
+    adapter: life
+
+completions:
+  life-habits:
+    adapter: life-habits

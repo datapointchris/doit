@@ -317,6 +317,23 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     def desk_nudge_answer(body: DeskNudgeAnswerBody, caller: Person) -> dict:
         return views.answer_desk_nudge(body.model_dump(), caller.who)
 
+    @api.get('/desk-panel-view')
+    def desk_panel_view(
+        caller: Person,
+        machine: Annotated[
+            str | None,
+            Query(description='The desk asking, whose offered counts a new draw adds to. The service names itself when omitted.'),
+        ] = None,
+        draw: Annotated[
+            bool,
+            Query(
+                description='Draw as /next does, replacing a draw that aged out. Without it the standing draw is read and nothing is saved.'
+            ),
+        ] = False,
+    ) -> dict:
+        """The desk nudge panel's parts, each computed by doit's rules, as `schemas/desk-panel-view.schema.json` describes."""
+        return views.desk_panel_view(machine, draw)
+
     @api.get('/dashboard')
     def dashboard(caller: Person, lane: Annotated[list[str] | None, Query(description='Only these lanes.')] = None) -> dict:
         return views.dashboard(lane)

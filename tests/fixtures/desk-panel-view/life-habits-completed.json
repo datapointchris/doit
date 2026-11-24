@@ -1,0 +1,26 @@
+[
+  {
+    "id": 902,
+    "habit_id": 2,
+    "name": "Floss",
+    "category_id": 1,
+    "category": {
+      "id": 1,
+      "name": "Health",
+      "is_current": true
+    },
+    "complete_date": "2026-11-02"
+  },
+  {
+    "id": 905,
+    "habit_id": 5,
+    "name": "Make the bed",
+    "category_id": 2,
+    "category": {
+      "id": 2,
+      "name": "Home",
+      "is_current": true
+    },
+    "complete_date": "2026-11-02"
+  }
+]

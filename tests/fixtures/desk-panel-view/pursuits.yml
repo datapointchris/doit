@@ -1,0 +1,17 @@
+# A register with one of each shape the desk panel view lists: a counted pursuit
+# whose log completes a task in life, and a timed one logged in minutes.
+pursuits:
+  tasks:
+    description: The top of the task list
+    weight: 40
+    cadence: 1d
+    resolve: {app: life, path: /tasks}
+    label: name
+    id: id
+    context: category
+    on_log: life tasks complete {id}
+
+  read:
+    description: A book already on the shelf
+    weight: 30
+    weekly_minutes: 180

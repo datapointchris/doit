@@ -21,6 +21,7 @@ import typer
 
 from doit import dashboard
 from doit import desk_nudge
+from doit import desk_panel
 from doit import evidence
 from doit import forecast
 from doit import happened
@@ -54,6 +55,9 @@ FUTURE_SKEW = dt.timedelta(minutes=1)
 # The zone furthest ahead of UTC. A client's day reads as the future only past its
 # date there, because a desk in any zone may already be on it.
 FURTHEST_AHEAD_ZONE = dt.timezone(dt.timedelta(hours=14))
+
+NO_PURSUITS = 'no pursuits yet: `doit pursuits edit` writes them'
+NOTHING_TO_DRAW = 'nothing to draw: every pursuit is paused, past its term, or tracked'
 
 
 def instant(text: str | None, name: str) -> dt.datetime | None:
@@ -131,7 +135,7 @@ class Views:
     def registered(self) -> documents.Config:
         found = self.config()
         if not found.pursuits:
-            raise NotFound('no pursuits yet: `doit pursuits edit` writes them')
+            raise NotFound(NO_PURSUITS)
         return found
 
     def pursuit_list(self) -> dict:
@@ -165,7 +169,19 @@ class Views:
         config, now = self.registered(), self.now()
         state = self.state(config, now)
         if not state['active']:
-            raise Conflict('nothing to draw: every pursuit is paused, past its term, or tracked')
+            raise Conflict(NOTHING_TO_DRAW)
+        selection = self.drawn(config, state, now, machine, reroll)
+        context, context_error = self.context(now)
+        return {
+            **selection,
+            'state': pursuits.explain_payload(state),
+            'context': context,
+            'context_error': context_error,
+            'pursuits': config.pursuits,
+        }
+
+    def drawn(self, config: documents.Config, state: dict, now: dt.datetime, machine: str | None, reroll: bool) -> dict:
+        """The standing draw less what is logged, or a new one, saved and counted as offered to `machine`."""
         standing = None if reroll else self.standing_draw(now)
         if standing is not None:
             resolved = standing.get('resolved') or {}
@@ -182,16 +198,8 @@ class Views:
             selection['resolved'] = self.readers.resolve_all(selection['offered'], config.pursuits)
             self.store.save_draw(selection)
             self.store.bump_offers(paths.canonical_machine(machine or MACHINE), selection['offered'], now.date())
-        else:
-            selection = standing
-        context, context_error = self.context(now)
-        return {
-            **selection,
-            'state': pursuits.explain_payload(state),
-            'context': context,
-            'context_error': context_error,
-            'pursuits': config.pursuits,
-        }
+            return selection
+        return standing
 
     def register(self) -> dict:
         """The pursuits as declared, which of them are in the draw, and what the standing draw offers, with no app asked."""
@@ -484,15 +492,20 @@ class Views:
             return {'text': f'pursuits unavailable — {error}', 'unavailable': True}
         return {'text': line, 'unavailable': False} if line else None
 
-    def today(self) -> dict:
-        """`doit today --json`: what today still wants, and what it has had."""
-        config, now = self.config(), self.now()
+    def day(self, config: documents.Config, now: dt.datetime, *, whole_habits: bool = False) -> tuple[today.Day, dict, happened.Kept]:
+        """Today's two lists and figures, from one round of the day's sources, with that round's answers and what doit keeps."""
         bounds = window.day_of(now)
         registry = today.day_registry(config.registry)
         everything = [*registry.sources.values(), *registry.completions.values()]
-        results = self.readers.results(everything, bounds, now)
+        results = self.readers.results(everything, bounds, now, whole_habits=whole_habits)
         built = dashboard.arranged([*dashboard.source_lanes(registry, results), self.maintenance_lane(config, now)], None)
-        day = today.assemble(registry, results, built, self.kept(config, now), bounds, now)
+        kept = self.kept(config, now)
+        return today.assemble(registry, results, built, kept, bounds, now), results, kept
+
+    def today(self) -> dict:
+        """`doit today --json`: what today still wants, and what it has had."""
+        config, now = self.config(), self.now()
+        day, _, _ = self.day(config, now)
         return {
             'schema_version': lanes.SCHEMA_VERSION,
             'generated_at': lanes.timestamp(now),
@@ -501,6 +514,56 @@ class Views:
             'quota': None if day.figures is None else quota.to_dict(day.figures),
             'problems': config.registry.problems,
         }
+
+    def desk_panel_view(self, machine: str | None, draw: bool) -> dict:
+        """The desk panel view, which `schemas/desk-panel-view.schema.json` describes.
+
+        With `draw` it draws as `/next` does, so a draw that aged out is replaced,
+        saved and counted as offered to `machine`. Without it, it reads the
+        standing draw, and saves no draw and counts no offer.
+        """
+        config, now = self.config(), self.now()
+        day, results, kept = self.day(config, now, whole_habits=True)
+        selection, reason = self.panel_draw(config, kept.state, now, machine, draw)
+        items = self.choices(desk_panel.item_pursuits(day, config.pursuits), config, selection)
+        life_source = next((source.id for source in config.registry.sources.values() if source.adapter == 'life'), None)
+        return desk_panel.view(
+            now=now,
+            register=config.pursuits,
+            usual=pursuits.usual_minutes(config.pursuits, kept.state['records']) if kept.state else {},
+            day=day,
+            selection=selection,
+            suggestion_reason=reason,
+            items=items,
+            life=results.get(life_source) if life_source else None,
+            problems=config.registry.problems,
+        )
+
+    def panel_draw(
+        self, config: documents.Config, state: dict | None, now: dt.datetime, machine: str | None, draw: bool
+    ) -> tuple[dict | None, str | None]:
+        """The suggestion's draw, or None and why there is none. Only `draw` saves a draw or counts an offer."""
+        if not config.pursuits or state is None:
+            return None, NO_PURSUITS
+        if draw:
+            if not state['active']:
+                return None, NOTHING_TO_DRAW
+            return self.drawn(config, state, now, machine, reroll=False), None
+        standing = self.standing_draw(now)
+        if standing is None:
+            minutes = round(self.draw_lifetime.total_seconds() / 60)
+            return None, f'no draw from the last {minutes} minutes stands, and this read did not ask for one'
+        return pursuits.without_logged(standing), None
+
+    def choices(self, names: list[str], config: documents.Config, selection: dict | None) -> dict[str, dict]:
+        """Each named pursuit's resolve: the draw's entry where it answered, else a fresh read. Nothing is saved."""
+        held = (selection or {}).get('resolved') or {}
+        answered = {
+            name: held[name]
+            for name in names
+            if isinstance(held.get(name), dict) and not held[name].get('error') and held[name].get('candidates')
+        }
+        return {**answered, **self.readers.resolve_all([name for name in names if name not in answered], config.pursuits)}
 
     def happened(self, since: str | None, until: str | None) -> dict:
         """`doit happened --json`: what every record says happened over a window."""

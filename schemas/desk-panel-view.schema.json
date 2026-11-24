@@ -1,0 +1,297 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "urn:doit:desk-panel-view:v1",
+  "title": "doit desk panel view",
+  "description": "GET /api/v1/desk-panel-view on doit's service: every part of the desk nudge's panel, each computed by doit's own rules, so the desk's watch and the page that draws it hold no rule. The query takes `machine`, the desk asking, and `draw`. With draw=true the service draws as /next does: a draw that aged out is replaced, saved and counted as offered to the machine. Without it the service reads the standing draw, and saves no draw and counts no offer. Every entry that a pick completes carries its `key` and what it completes, so no reader parses a key. No field holds minutes away from the desk: a timed pursuit's Log starts from `usual_minutes`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "suggestion", "suggestion_reason", "answers", "totals", "pursuits", "habits", "lanes", "problems"],
+  "definitions": {
+    "nullable_number": {"type": ["number", "null"]},
+    "key": {
+      "type": ["string", "null"],
+      "description": "What a pick names, such as `pursuit:tasks:532`, `habit:7` or `review:prune-images`. Null on an entry that completes nothing."
+    },
+    "completes": {
+      "description": "What picking the entry completes, the parts of its key. Null on an entry that completes nothing.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "ref", "item_id"],
+          "properties": {
+            "kind": {"enum": ["pursuit", "habit", "review", "practice"], "description": "Which owner completes it."},
+            "ref": {"type": "string", "description": "A pursuit's name, a habit's id, or a review register entry's id."},
+            "item_id": {"type": ["string", "null"], "description": "The choice that a write-through pursuit's log completes. Null on every other entry."}
+          }
+        }
+      ]
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "by", "key", "completes"],
+      "description": "One choice that a pursuit's resolve answered, such as a book or a task.",
+      "properties": {
+        "id": {"type": ["string", "null"], "description": "Its id in the app that owns it. Null where the resolve declares no id."},
+        "title": {"type": "string", "description": "What it is: the resolve's label field."},
+        "by": {"type": "string", "description": "Its author or place: the resolve's context fields. Empty where none is declared."},
+        "key": {"$ref": "#/definitions/key"},
+        "completes": {"$ref": "#/definitions/completes"}
+      }
+    },
+    "part_status": {"enum": ["ok", "unavailable"], "description": "unavailable where the part could not be read, and `reason` says why."},
+    "unit_totals": {
+      "description": "The pursuits counted in one unit, summed. Null where no pursuits were read.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pace", "need", "done", "behind", "asked_of"],
+          "properties": {
+            "pace": {"type": "number", "description": "What the pace asks a day."},
+            "need": {"type": "number", "description": "What today asks, less any lead."},
+            "done": {"type": "number", "description": "What today paid toward that."},
+            "behind": {"type": "number", "description": "What the pace asked before today and nothing paid."},
+            "asked_of": {"type": "integer", "minimum": 0, "description": "How many pursuits ask something today."}
+          }
+        }
+      ]
+    },
+    "lane_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "text", "note", "urgency", "handle", "key", "completes"],
+      "properties": {
+        "label": {"type": "string"},
+        "text": {"type": "string"},
+        "note": {"type": "string"},
+        "urgency": {"enum": ["none", "due", "overdue"]},
+        "handle": {"type": "string", "description": "What a person would type to act on it. Never run by the desk."},
+        "key": {"$ref": "#/definitions/key"},
+        "completes": {"$ref": "#/definitions/completes"}
+      }
+    },
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One due lane under doit's lane contract, with each row's key.",
+      "required": ["name", "title", "meta", "status", "alert", "omit_when_empty", "reason", "rows", "grid", "total", "in_flight", "hints"],
+      "properties": {
+        "name": {"type": "string", "description": "review, practice or upcoming."},
+        "title": {"type": "string"},
+        "meta": {"type": "string"},
+        "status": {"$ref": "#/definitions/part_status"},
+        "alert": {"type": "boolean"},
+        "omit_when_empty": {"type": "boolean"},
+        "reason": {"type": ["string", "null"], "description": "Why the lane could not be read, or what part of it could not."},
+        "rows": {"type": "array", "items": {"$ref": "#/definitions/lane_row"}, "description": "The rows that `doit today` lists: three of a backlog."},
+        "grid": {"type": "array", "items": {"type": "object"}},
+        "total": {"type": "integer", "minimum": 0, "description": "How many rows the lane holds before the cut."},
+        "in_flight": {"type": "integer", "minimum": 0},
+        "hints": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"const": 1},
+    "generated_at": {"type": "string", "format": "date-time", "description": "When the service computed it, with the service's offset."},
+    "suggestion": {
+      "description": "The draw's first pursuit, as `doit next` offers it. Null where nothing was drawn, and `suggestion_reason` says why.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "draw_id", "pursuit", "item_id", "label", "description", "unit", "writes_through", "usual_minutes",
+            "need", "done", "behind", "key", "completes", "choices", "choices_error"
+          ],
+          "properties": {
+            "draw_id": {"type": "string", "description": "The draw it comes from."},
+            "pursuit": {"type": "string"},
+            "item_id": {
+              "type": ["string", "null"],
+              "description": "The choice that the pursuit stands for with nobody asked: the only one offered. Null where it offers several or none."
+            },
+            "label": {"type": "string", "description": "What `doit next` shows for it: each choice on its own line, else the pursuit's description."},
+            "description": {"type": "string"},
+            "unit": {"enum": ["minutes", "checkoffs"], "description": "The unit it is counted in."},
+            "writes_through": {"type": "boolean", "description": "Whether a log of it completes one of its choices in another app."},
+            "usual_minutes": {
+              "$ref": "#/definitions/nullable_number",
+              "description": "A timed pursuit's most often logged minutes, which a Log starts from. Null where no entry kept minutes, or on a counted pursuit."
+            },
+            "need": {"$ref": "#/definitions/nullable_number", "description": "What today asks of it, in its unit. Null where today's figures do not count it."},
+            "done": {"$ref": "#/definitions/nullable_number", "description": "What today paid toward that."},
+            "behind": {"$ref": "#/definitions/nullable_number", "description": "What its pace asked before today and nothing paid."},
+            "key": {"$ref": "#/definitions/key", "description": "What its Log picks. Null on a pursuit that writes through, whose log is a choice's."},
+            "completes": {"$ref": "#/definitions/completes"},
+            "choices": {"type": "array", "items": {"$ref": "#/definitions/choice"}},
+            "choices_error": {"type": ["string", "null"], "description": "Why its choices could not be read."}
+          }
+        }
+      ]
+    },
+    "suggestion_reason": {"type": ["string", "null"], "description": "Why there is no suggestion. Null where there is one."},
+    "answers": {
+      "type": "array",
+      "description": "Each answer a nudge takes, in the order a panel offers them.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["answer", "label"],
+        "properties": {
+          "answer": {"enum": ["good_timing", "too_soon", "too_late", "bothered"]},
+          "label": {"type": "string", "description": "The words on its button."}
+        }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What today asks to hold every pace, as the `quota` of `doit today --json`. Minutes and checkoffs are counted apart and never summed.",
+      "required": ["minutes", "checkoffs", "pursuits", "catch_up", "checklists", "unavailable"],
+      "properties": {
+        "minutes": {"$ref": "#/definitions/unit_totals"},
+        "checkoffs": {"$ref": "#/definitions/unit_totals"},
+        "pursuits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "unit", "pace", "need", "done", "behind"],
+            "properties": {
+              "name": {"type": "string"},
+              "unit": {"enum": ["minutes", "checkoffs"]},
+              "pace": {"type": "number"},
+              "need": {"type": "number"},
+              "done": {"type": "number"},
+              "behind": {"type": "number"}
+            }
+          }
+        },
+        "catch_up": {
+          "type": "array",
+          "description": "What is behind spread over each timescale, with whether it is worth showing.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["days", "label", "minutes_per_day", "checkoffs_per_day", "shown"],
+            "properties": {
+              "days": {"type": "integer"},
+              "label": {"type": "string"},
+              "minutes_per_day": {"type": "number"},
+              "checkoffs_per_day": {"type": "integer"},
+              "shown": {"type": "boolean"}
+            }
+          }
+        },
+        "checklists": {
+          "type": "array",
+          "description": "habits, review and practice, each as what it finished today out of what it finished and still has due.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "done", "total", "unavailable"],
+            "properties": {
+              "name": {"enum": ["habits", "review", "practice"]},
+              "done": {"type": ["integer", "null"]},
+              "total": {"type": ["integer", "null"]},
+              "unavailable": {"type": "string", "description": "Why it could not be read. Empty where it was."}
+            }
+          }
+        },
+        "unavailable": {"type": "string", "description": "Why the pursuits could not be read. Empty where they were."}
+      }
+    },
+    "pursuits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "rows"],
+      "properties": {
+        "status": {"$ref": "#/definitions/part_status"},
+        "reason": {"type": ["string", "null"]},
+        "rows": {
+          "type": "array",
+          "description": "Each pursuit on today's due list, furthest behind first, then each other one that today's figures count.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name", "description", "unit", "owed", "note", "need", "done", "behind", "writes_through", "usual_minutes",
+              "key", "completes", "items", "items_error"
+            ],
+            "properties": {
+              "name": {"type": "string"},
+              "description": {"type": "string"},
+              "unit": {"enum": ["minutes", "checkoffs"]},
+              "owed": {"type": "boolean", "description": "Whether today's due list holds it: it owes a whole checkoff and was not done today."},
+              "note": {"type": ["string", "null"], "description": "How late it is, such as `3w overdue`. Null where it is not owed."},
+              "need": {"$ref": "#/definitions/nullable_number", "description": "What today asks of it, in its unit."},
+              "done": {"$ref": "#/definitions/nullable_number", "description": "What today paid toward that."},
+              "behind": {"$ref": "#/definitions/nullable_number", "description": "What its pace asked before today and nothing paid."},
+              "writes_through": {"type": "boolean"},
+              "usual_minutes": {"$ref": "#/definitions/nullable_number"},
+              "key": {"$ref": "#/definitions/key", "description": "What its log picks. Null on a pursuit that writes through, whose log is an item's."},
+              "completes": {"$ref": "#/definitions/completes"},
+              "items": {"type": "array", "items": {"$ref": "#/definitions/choice"}, "description": "A write-through pursuit's choices, such as its tasks. Empty on every other pursuit."},
+              "items_error": {"type": ["string", "null"], "description": "Why its items could not be read."}
+            }
+          }
+        }
+      }
+    },
+    "habits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "rows"],
+      "description": "Every current habit, read whole from the life read whose rows the habits meter counts. Empty where no source reads life.",
+      "properties": {
+        "status": {"$ref": "#/definitions/part_status"},
+        "reason": {"type": ["string", "null"]},
+        "rows": {
+          "type": "array",
+          "description": "In habit-id order, so finishing one moves none.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "category", "done", "key", "completes", "items"],
+            "properties": {
+              "id": {"type": ["integer", "null"], "description": "Life's habit id. Null on a completion whose habit was deleted."},
+              "name": {"type": "string"},
+              "category": {"type": "string"},
+              "done": {"type": "boolean", "description": "Whether it was completed today. A done habit carries no key."},
+              "key": {"$ref": "#/definitions/key"},
+              "completes": {"$ref": "#/definitions/completes"},
+              "items": {
+                "type": "array",
+                "description": "Its checklist items. Empty on a habit with none.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "name", "target", "ticks", "done"],
+                  "properties": {
+                    "id": {"type": "integer", "description": "Life's checklist item id, which a tick names."},
+                    "name": {"type": "string"},
+                    "target": {"type": "integer", "minimum": 1, "description": "Ticks a day that complete it."},
+                    "ticks": {"type": "integer", "minimum": 0, "description": "Ticks today."},
+                    "done": {"type": "boolean", "description": "Whether today's ticks reach its target, as life counts it."}
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "description": "Each of review, practice and upcoming that the service reads, in the order `doit today` lists them.",
+      "items": {"$ref": "#/definitions/lane"}
+    },
+    "problems": {"type": "array", "items": {"type": "string"}, "description": "What is wrong in the sources document."}
+  }
+}

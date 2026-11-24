@@ -1,0 +1,19 @@
+# Four maintenance items and one Lab, none ever done, so each is due.
+items:
+  prune-images:
+    description: Prune the container images
+    cadence: 1w
+  rotate-keys:
+    description: Rotate the backup keys
+    cadence: 4w
+  check-disks:
+    description: Check the disks' health
+    cadence: 2w
+  update-firmware:
+    description: Update the router firmware
+    cadence: 12w
+
+practice:
+  lab-regex:
+    description: Work through the regex Lab
+    cadence: 1w

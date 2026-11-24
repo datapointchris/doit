@@ -1,0 +1,269 @@
+"""The desk panel view: each part of the desk nudge's panel, computed from what the service read.
+
+The service reads the store and the apps and hands this module what it read.
+The root package's own functions decide every rule of the panel here, so the
+desk's watch, the page and the terminal board copy none of them.
+`schemas/desk-panel-view.schema.json` describes the document.
+
+Every entry that a pick completes carries its `key` and what it completes, as
+`{kind, ref, item_id}`. An entry that completes nothing carries null in both.
+So no reader parses a key or lists a kind to learn what a pick does.
+
+No part holds minutes away from the desk. A timed pursuit's Log starts from its
+`usual_minutes`, because an amount inferred from time away was weighed and
+rejected.
+"""
+
+import dataclasses as dc
+import datetime as dt
+
+from doit import dashboard
+from doit import happened
+from doit import lanes
+from doit import quota
+from doit import sources
+from doit import today
+from doit.desk_nudge import ANSWER_LABELS
+from doit.desk_nudge import Answer
+from doit.desk_nudge import completion_key
+from doit.desk_nudge import suggestion_from
+from doit.lanes import CompletionKind
+from doit.lanes import Lane
+from doit.lanes import Row
+from doit.pursuits import is_timed
+from doit.pursuits import writes_through
+from doit.today import due_row_cap
+
+SCHEMA_VERSION = 1
+
+# The due lanes carried under the lane contract. Pursuits and habits are parts of their own.
+LANES = (*(register.name for register in happened.registers()), *today.DAY_SHAPED_ROW_LANES)
+
+NOTHING_OFFERED = 'the draw offers nothing that is not already logged'
+
+NO_COMPLETION: dict = {'key': None, 'completes': None}
+
+
+def completion(kind: CompletionKind, ref: str, item_id: str | None = None) -> dict:
+    """What picking an entry completes: its key, and the kind, ref and item id that make it."""
+    return {'key': completion_key(kind, ref, item_id), 'completes': {'kind': str(kind), 'ref': ref, 'item_id': item_id}}
+
+
+def unit_of(config: dict) -> str:
+    """A pursuit's unit, minutes or checkoffs, as `doit today --json` names it."""
+    return 'minutes' if is_timed(config) else 'checkoffs'
+
+
+def pursuit_completion(name: str, config: dict) -> dict:
+    """A pursuit that writes through is completed by one of its choices, so its own entry completes nothing."""
+    return NO_COMPLETION if writes_through(config) else completion(CompletionKind.PURSUIT, name)
+
+
+def choice(name: str, config: dict, found: dict) -> dict:
+    """One resolved choice: its title, its author or place, and what picking it completes.
+
+    Only a pursuit that writes through completes a choice, and only a choice
+    carrying an id, because its log completes that id in the app that owns it.
+    """
+    item_id = found.get('id')
+    completes = completion(CompletionKind.PURSUIT, name, item_id) if writes_through(config) and item_id else NO_COMPLETION
+    return {'id': item_id, 'title': found.get('label') or '', 'by': found.get('context') or '', **completes}
+
+
+def choices_of(name: str, config: dict, entry: dict | None) -> tuple[list[dict], str | None]:
+    """A pursuit's choices from its resolve, or why they could not be read."""
+    if not entry:
+        return [], None
+    if entry.get('error'):
+        return [], str(entry['error'])
+    return [choice(name, config, found) for found in entry.get('choices') or [] if isinstance(found, dict)], None
+
+
+def figures(pursuit: dict | None) -> dict:
+    """What today asks of a pursuit, what it paid and what is behind, from today's figures. Null where the figures do not count it."""
+    found = pursuit or {}
+    return {'need': found.get('need'), 'done': found.get('done'), 'behind': found.get('behind')}
+
+
+def suggestion(selection: dict, register: dict, usual: dict, days: dict[str, dict]) -> dict:
+    """The draw's first pursuit, as `doit next` offers it, with its choices and what a Log starts from."""
+    offered = suggestion_from({**selection, 'pursuits': register})
+    name = offered['pursuit']
+    config = register.get(name) or {}
+    choices, choices_error = choices_of(name, config, (selection.get('resolved') or {}).get(name))
+    return {
+        'draw_id': selection.get('draw_id'),
+        **offered,
+        'description': config.get('description') or '',
+        'unit': unit_of(config),
+        'writes_through': writes_through(config),
+        'usual_minutes': usual.get(name),
+        **figures(days.get(name)),
+        **pursuit_completion(name, config),
+        'choices': choices,
+        'choices_error': choices_error,
+    }
+
+
+def answers() -> list[dict]:
+    """Each answer to a nudge, with the words on its button."""
+    return [{'answer': answer.value, 'label': ANSWER_LABELS[answer]} for answer in Answer]
+
+
+def due_lane(day: today.Day, name: str) -> Lane | None:
+    return next((lane for lane in day.due if lane.name == name), None)
+
+
+def listed_pursuits(day: today.Day) -> list[str]:
+    """Each pursuit on today's due list, furthest behind first, then each other one that today's figures count."""
+    lane = due_lane(day, lanes.PURSUITS)
+    owed = [row.completes.ref for row in lane.rows if row.completes] if lane is not None and lane.available else []
+    counted = [entry.name for entry in day.figures.pursuits] if day.figures is not None else []
+    return list(dict.fromkeys([*owed, *counted]))
+
+
+def item_pursuits(day: today.Day, register: dict) -> list[str]:
+    """The listed pursuits whose choices are read, because a log of one completes the choice it names."""
+    return [name for name in listed_pursuits(day) if writes_through(register.get(name) or {})]
+
+
+def pursuits_part(day: today.Day, register: dict, usual: dict, days: dict[str, dict], items: dict[str, dict]) -> dict:
+    """Each pursuit in its own unit, owed ones first: what today asks of it, what is behind, and the choices that its log completes."""
+    lane = due_lane(day, lanes.PURSUITS)
+    if lane is not None and not lane.available:
+        return {'status': 'unavailable', 'reason': lane.reason or None, 'rows': []}
+    notes = {row.completes.ref: row.note for row in lane.rows if row.completes} if lane is not None else {}
+    rows = []
+    for name in listed_pursuits(day):
+        config = register.get(name) or {}
+        through = writes_through(config)
+        choices, choices_error = choices_of(name, config, items.get(name)) if through else ([], None)
+        rows.append(
+            {
+                'name': name,
+                'description': config.get('description') or '',
+                'unit': unit_of(config),
+                'owed': name in notes,
+                'note': notes.get(name),
+                **figures(days.get(name)),
+                'writes_through': through,
+                'usual_minutes': usual.get(name),
+                **pursuit_completion(name, config),
+                'items': choices,
+                'items_error': choices_error,
+            }
+        )
+    return {'status': 'ok', 'reason': None, 'rows': rows}
+
+
+def checklist_items(checklist: dict | None) -> list[dict]:
+    """A habit's checklist items as life counts them today."""
+    return [
+        {
+            'id': item.get('id'),
+            'name': item.get('name') or '',
+            'target': item.get('daily_target'),
+            'ticks': len(item.get('ticks') or []),
+            'done': bool(item.get('done')),
+        }
+        for item in (checklist or {}).get('items') or []
+        if isinstance(item, dict)
+    ]
+
+
+def habits_part(result: sources.Result | None) -> dict:
+    """Every habit, done or not, in habit-id order, with its category and its checklist items.
+
+    Read from life's overview with every habit listed, the read whose rows the
+    habits meter counts, so the rows and the meter agree. Where no source reads
+    life it is silent, and where the read failed it says why. A habit done
+    today completes nothing, and life accepts a second completion of one, so it
+    is listed once and carries no key.
+    """
+    if result is None:
+        return {'status': 'ok', 'reason': None, 'rows': []}
+    payload, reason = dashboard.life_context({'life': result}, ('habits',))
+    if payload is None or reason:
+        return {'status': 'unavailable', 'reason': reason or None, 'rows': []}
+    section = payload.get('habits') or {}
+    checklists = {checklist.get('habit_id'): checklist for checklist in section.get('checklists') or [] if isinstance(checklist, dict)}
+    entries = [(habit, False) for habit in section.get('due_today') or []] + [
+        (habit, True) for habit in section.get('completed_today') or []
+    ]
+    entries.sort(key=lambda entry: dashboard.habit_sort_key(entry[0], entry[1]))
+    rows: list[dict] = []
+    listed: set[int] = set()
+    for habit, done in entries:
+        habit_id = habit.get('habit_id') if done else habit.get('id')
+        if isinstance(habit_id, int):
+            if habit_id in listed:
+                continue
+            listed.add(habit_id)
+        else:
+            habit_id = None
+        target = completion(CompletionKind.HABIT, str(habit_id)) if habit_id is not None and not done else NO_COMPLETION
+        rows.append(
+            {
+                'id': habit_id,
+                'name': habit.get('name') or '',
+                'category': (habit.get('category') or {}).get('name') or '',
+                'done': done,
+                **target,
+                'items': checklist_items(checklists.get(habit_id)),
+            }
+        )
+    return {'status': 'ok', 'reason': None, 'rows': rows}
+
+
+def lane_row(row: Row) -> dict:
+    """A due row under the lane contract, with its key and what it completes."""
+    target = row.completes
+    return {**lanes.row_to_dict(row), **(completion(target.kind, target.ref) if target else NO_COMPLETION)}
+
+
+def lanes_part(day: today.Day) -> list[dict]:
+    """Review, practice and upcoming under the lane contract, each cut to the rows that `doit today` lists. `total` counts them all."""
+    found = []
+    for lane in day.due:
+        if lane.name not in LANES:
+            continue
+        shown = dc.replace(lane, rows=lane.rows[: due_row_cap(lane.name, whole_routine=True)])
+        found.append({**lanes.lane_to_dict(shown), 'rows': [lane_row(row) for row in shown.rows]})
+    return found
+
+
+def view(
+    *,
+    now: dt.datetime,
+    register: dict,
+    usual: dict,
+    day: today.Day,
+    selection: dict | None,
+    suggestion_reason: str | None,
+    items: dict[str, dict],
+    life: sources.Result | None,
+    problems: list[str],
+) -> dict:
+    """The desk panel view, from the service's reads.
+
+    `selection` is the draw the suggestion comes from, or None with
+    `suggestion_reason` saying why there is none. `items` holds each
+    write-through pursuit's resolve. `life` is the life source's answer, read
+    with every habit, or None where no source reads life.
+    """
+    totals = quota.to_dict(day.figures or quota.Quota())
+    days = {entry['name']: entry for entry in totals['pursuits']}
+    if selection is not None and not selection.get('offered'):
+        selection, suggestion_reason = None, NOTHING_OFFERED
+    return {
+        'schema_version': SCHEMA_VERSION,
+        'generated_at': lanes.timestamp(now),
+        'suggestion': suggestion(selection, register, usual, days) if selection is not None else None,
+        'suggestion_reason': None if selection is not None else suggestion_reason,
+        'answers': answers(),
+        'totals': totals,
+        'pursuits': pursuits_part(day, register, usual, days, items),
+        'habits': habits_part(life),
+        'lanes': lanes_part(day),
+        'problems': problems,
+    }
