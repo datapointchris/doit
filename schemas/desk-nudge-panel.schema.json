@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:doit:desk-nudge-panel:v2",
   "title": "doit desk-nudge panel",
-  "description": "One step of the desk nudge's panel, read from the rows that the watch keeps in $XDG_CACHE_HOME/doit/desk-nudge-panel.json. A menu draws each row and hands the picked key to `doit desk-nudge panel pick`, which prints the next step. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
+  "description": "One step of the desk nudge's panel, read from the rows that the watch keeps in $XDG_CACHE_HOME/doit/desk-nudge-panel.json. `doit tui` draws each row and hands the picked key to `doit desk-nudge panel pick`, which prints the next step. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -33,6 +33,8 @@
           "key",
           "kind",
           "text",
+          "group",
+          "minutes",
           "suggested"
         ],
         "properties": {
@@ -60,9 +62,23 @@
             "type": "string",
             "description": "The line to draw."
           },
+          "group": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The due lane a completion row came from, which it is drawn under. Null on every other row."
+          },
+          "minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The minutes a minutes row logs or reopens at. Null on every other row."
+          },
           "suggested": {
             "type": "boolean",
-            "description": "The row completes the suggestion, which `doit next` put first."
+            "description": "A completion row completes the suggestion, which `doit next` put first. On a log_minutes row, the amount that the step offers first, and that its ±5 rows count from."
           }
         }
       }

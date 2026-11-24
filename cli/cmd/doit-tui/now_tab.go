@@ -5,14 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
-	"slices"
-	"strings"
+	"strconv"
+	"syscall"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datapointchris/gotermboard"
 )
+
+// panelSchemaVersion is the version of doit's panel step that this board reads. Any other is
+// refused, because doit and doit-tui are released and upgraded apart.
+const panelSchemaVersion = 2
 
 // panelStep is one step of `doit desk-nudge panel`, as doit's schemas/desk-nudge-panel.schema.json
 // gives it.
@@ -27,6 +32,8 @@ type panelRow struct {
 	Key       *string `json:"key"`
 	Kind      string  `json:"kind"`
 	Text      string  `json:"text"`
+	Group     *string `json:"group"`
+	Minutes   *int    `json:"minutes"`
 	Suggested bool    `json:"suggested"`
 }
 
@@ -37,10 +44,14 @@ const (
 	kindAnswer     = "answer"
 	kindLog        = "log_minutes"
 	kindAdjust     = "adjust_minutes"
-	keySeparator   = ":"
 	panelReadEvery = 15 * time.Second
-	// pickWithin bounds one pick, which may complete a habit through life or log through doit's service.
-	pickWithin = time.Minute
+	// readWithin bounds one read of the rows, which doit takes from this desk's cache.
+	readWithin = 30 * time.Second
+	// pickWithin bounds one pick. doit bounds each of its requests itself, and this sits well past
+	// those bounds, so doit reports its own failures. Only a completion that never ends reaches it.
+	pickWithin = 10 * time.Minute
+	// stopWithin is how long a stopped doit, and everything it started, has to exit.
+	stopWithin = 5 * time.Second
 )
 
 // panel is how the now tab reaches doit, which holds every rule about what a row is and what a
@@ -53,7 +64,11 @@ type panel interface {
 // doitPanel runs `doit desk-nudge panel show --json` and `doit desk-nudge panel pick <key> --json`.
 type doitPanel struct{}
 
-func (doitPanel) show(ctx context.Context) (panelStep, error) { return runPanel(ctx, "show", "--json") }
+func (doitPanel) show(ctx context.Context) (panelStep, error) {
+	ctx, cancel := context.WithTimeout(ctx, readWithin)
+	defer cancel()
+	return runPanel(ctx, "show", "--json")
+}
 
 func (doitPanel) pick(ctx context.Context, key string) (panelStep, error) {
 	return runPanel(ctx, "pick", key, "--json")
@@ -61,9 +76,17 @@ func (doitPanel) pick(ctx context.Context, key string) (panelStep, error) {
 
 func runPanel(ctx context.Context, args ...string) (panelStep, error) {
 	cmd := exec.CommandContext(ctx, "doit", append([]string{"desk-nudge", "panel"}, args...)...)
+	// A session of its own keeps a completion that opens /dev/tty off the board's keys, and lets a
+	// stop reach everything doit started.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
+	cmd.WaitDelay = stopWithin
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return panelStep{}, fmt.Errorf("doit desk-nudge panel %s was stopped: %w", args[0], ctxErr)
+	}
 	if err != nil {
 		return panelStep{}, errors.New(gotermboard.LastLine(stderr.Bytes(), err))
 	}
@@ -71,92 +94,45 @@ func runPanel(ctx context.Context, args ...string) (panelStep, error) {
 	if err := json.Unmarshal(out, &step); err != nil {
 		return panelStep{}, errors.New("doit desk-nudge panel printed no step: " + err.Error())
 	}
+	if step.SchemaVersion != panelSchemaVersion {
+		older := "doit"
+		if step.SchemaVersion > panelSchemaVersion {
+			older = "doit-tui"
+		}
+		return panelStep{}, fmt.Errorf("doit desk-nudge panel printed schema_version %d and this doit-tui reads %d, so upgrade %s",
+			step.SchemaVersion, panelSchemaVersion, older)
+	}
 	return step, nil
 }
 
-// The groups the now tab draws completion rows in, in order, by the kind doit gives each row.
-var kindGroups = []struct{ kind, title string }{
-	{"pursuit", "pursuits"},
-	{"habit", "habits"},
-	{"practice", "practices"},
-	{"review", "review"},
-}
-
-// The answers to a ready nudge, each on a key and a footer hint, by the value its row key carries.
-var answers = []struct{ key, value, label string }{
-	{"1", "good_timing", "good timing"},
-	{"2", "too_soon", "too soon"},
-	{"3", "too_late", "too late"},
-	{"4", "bothered", "bothered me"},
-}
-
-// minutesOffer is a timed pursuit's minutes step, held under its row until a log or another row's
-// pick ends it.
+// minutesOffer is a timed pursuit's minutes step: the amount enter logs, and the rows that reopen
+// the step above and below it.
 type minutesOffer struct {
 	log      panelRow
 	up, down *panelRow
 }
 
-// offerFrom reads a minutes step. Where it offers several amounts, the one at the center of its
-// ±5 rows is the one enter logs.
 func offerFrom(step panelStep) (minutesOffer, bool) {
 	var offer minutesOffer
-	var logs, adjusts []panelRow
+	found := false
 	for _, row := range step.Rows {
-		switch {
-		case row.Key == nil:
-		case row.Kind == kindLog:
-			logs = append(logs, row)
-		case row.Kind == kindAdjust:
-			adjusts = append(adjusts, row)
+		if row.Key != nil && row.Kind == kindLog && (row.Suggested || !found) {
+			offer.log, found = row, true
 		}
 	}
-	if len(logs) == 0 {
-		return minutesOffer{}, false
+	if !found || offer.log.Minutes == nil {
+		return minutesOffer{}, found
 	}
-	// doit leaves out a −5 that would reach zero, so a lone adjust row is the +5.
-	slices.SortFunc(adjusts, func(a, b panelRow) int { return amountOf(*a.Key) - amountOf(*b.Key) })
-	switch len(adjusts) {
-	case 1:
-		offer.up = &adjusts[0]
-	case 2:
-		offer.down, offer.up = &adjusts[0], &adjusts[1]
-	}
-	offer.log = logs[0]
-	if center, ok := centerOf(offer); ok {
-		for _, row := range logs {
-			if amountOf(*row.Key) == center {
-				offer.log = row
-			}
+	for _, row := range step.Rows {
+		switch {
+		case row.Key == nil || row.Kind != kindAdjust || row.Minutes == nil:
+		case *row.Minutes > *offer.log.Minutes:
+			offer.up = &row
+		case *row.Minutes < *offer.log.Minutes:
+			offer.down = &row
 		}
 	}
 	return offer, true
-}
-
-// amountOf is the minutes a minutes row's key names: `log_minutes:45:pursuit:read` names 45.
-func amountOf(key string) int {
-	parts := strings.SplitN(key, keySeparator, 3)
-	if len(parts) < 2 {
-		return 0
-	}
-	amount := 0
-	for _, digit := range parts[1] {
-		if digit < '0' || digit > '9' {
-			return 0
-		}
-		amount = amount*10 + int(digit-'0')
-	}
-	return amount
-}
-
-func centerOf(offer minutesOffer) (int, bool) {
-	switch {
-	case offer.up != nil && offer.down != nil:
-		return (amountOf(*offer.up.Key) + amountOf(*offer.down.Key)) / 2, true
-	case offer.up != nil:
-		return amountOf(*offer.up.Key) - 5, true
-	}
-	return 0, false
 }
 
 // pickedMsg is what a pick came to, for the row it acted for.
@@ -169,14 +145,17 @@ type pickedMsg struct {
 // nowBoard is the now tab: the suggestion, the answers while a nudge is ready, and every row of
 // today that something completes, each completed by a click or a key.
 type nowBoard struct {
-	panel    panel
-	today    *gotermboard.Source[panelStep]
-	offers   map[string]minutesOffer
+	panel panel
+	today *gotermboard.Source[panelStep]
+	// offered is the row whose minutes are open under it, and offer is those minutes. Empty while
+	// no row's are.
+	offered  string
+	offer    minutesOffer
 	underWay string
 }
 
 func newNowBoard(p panel) *nowBoard {
-	b := &nowBoard{panel: p, offers: map[string]minutesOffer{}}
+	b := &nowBoard{panel: p}
 	b.today = gotermboard.NewSource("doit desk-nudge panel", panelReadEvery, func(ctx context.Context) (panelStep, string, error) {
 		step, err := p.show(ctx)
 		return step, "", err
@@ -188,10 +167,13 @@ func (b *nowBoard) Sources() []gotermboard.Refresher { return []gotermboard.Refr
 func (b *nowBoard) Groupings() []string              { return nil }
 func (b *nowBoard) UnderWay() string                 { return b.underWay }
 
+// Frame draws the suggestion first, then each completion row under the group doit names for it,
+// in the order doit lists them.
 func (b *nowBoard) Frame(now time.Time, _ string) gotermboard.Frame {
 	strip := []gotermboard.Line{gotermboard.ReadStatus([]gotermboard.Status{b.today.Status()}, now)}
-	suggested := gotermboard.Group{Key: "suggested", Title: gotermboard.Line{gotermboard.C("up next", gotermboard.Bold)}}
-	byKind := map[string][]gotermboard.Row{}
+	suggested := gotermboard.Group{Key: "suggested", Title: title("up next")}
+	var groups []gotermboard.Group
+	at := map[string]int{}
 	for _, row := range b.today.Value().Rows {
 		switch {
 		case row.Key == nil:
@@ -200,29 +182,34 @@ func (b *nowBoard) Frame(now time.Time, _ string) gotermboard.Frame {
 		case row.Suggested:
 			suggested.Rows = append(suggested.Rows, b.row(row))
 		default:
-			byKind[row.Kind] = append(byKind[row.Kind], b.row(row))
+			name := row.Kind
+			if row.Group != nil {
+				name = *row.Group
+			}
+			i, seen := at[name]
+			if !seen {
+				i, at[name] = len(groups), len(groups)
+				groups = append(groups, gotermboard.Group{Key: name, Title: title(name)})
+			}
+			groups[i].Rows = append(groups[i].Rows, b.row(row))
 		}
 	}
-	var groups []gotermboard.Group
 	if len(suggested.Rows) > 0 {
-		groups = append(groups, suggested)
-	}
-	for _, g := range kindGroups {
-		if rows := byKind[g.kind]; len(rows) > 0 {
-			groups = append(groups, gotermboard.Group{Key: g.kind, Title: gotermboard.Line{gotermboard.C(g.title, gotermboard.Bold)}, Rows: rows})
-		}
+		groups = append([]gotermboard.Group{suggested}, groups...)
 	}
 	return gotermboard.Frame{Strip: strip, Columns: []gotermboard.Column{{Title: ""}}, Groups: groups}
 }
 
+func title(text string) gotermboard.Line {
+	return gotermboard.Line{gotermboard.C(text, gotermboard.Bold)}
+}
+
 // row draws a completion row, with the minutes it offers under it while a pick has opened them.
 func (b *nowBoard) row(row panelRow) gotermboard.Row {
-	// A habit's text opens on `habit · `, which its group's title already says.
-	text := strings.TrimPrefix(row.Text, row.Kind+" · ")
-	drawn := gotermboard.Row{Key: *row.Key, Cells: []gotermboard.Cell{gotermboard.C(text, "")}}
-	if offer, open := b.offers[*row.Key]; open {
-		said := offer.log.Text
-		if offer.up != nil || offer.down != nil {
+	drawn := gotermboard.Row{Key: *row.Key, Cells: []gotermboard.Cell{gotermboard.C(row.Text, "")}}
+	if b.offered != "" && b.offered == *row.Key {
+		said := b.offer.log.Text
+		if b.offer.up != nil || b.offer.down != nil {
 			said += "   +/- changes it, enter logs it"
 		}
 		drawn.Second = gotermboard.Line{gotermboard.C(said, gotermboard.Cyan)}
@@ -230,50 +217,42 @@ func (b *nowBoard) row(row panelRow) gotermboard.Row {
 	return drawn
 }
 
+// Actions puts each of a ready nudge's answers on a number, in the order doit lists them.
 func (b *nowBoard) Actions() []gotermboard.Action {
-	actions := make([]gotermboard.Action, 0, len(answers)+3)
-	for _, answer := range answers {
+	var actions []gotermboard.Action
+	for i, answer := range b.answers() {
+		number := strconv.Itoa(i + 1)
 		actions = append(actions, gotermboard.Action{
-			Keys: []string{answer.key}, Label: "answer the nudge: " + answer.label, Footer: answer.key + " " + answer.label,
-			Run: func(m *gotermboard.Model) tea.Cmd {
-				key, _ := b.answerKey(answer.value)
-				return b.pick(m.Cursor(), key, "answering "+answer.label)
-			},
-			Applies: func(*gotermboard.Model) bool {
-				_, ready := b.answerKey(answer.value)
-				return ready
-			},
+			Keys: []string{number}, Label: "answer the nudge: " + answer.Text, Footer: number + " " + answer.Text,
+			Run: func(m *gotermboard.Model) tea.Cmd { return b.pick(m.Cursor(), *answer.Key, "answering "+answer.Text) },
 		})
 	}
 	onRow := func(m *gotermboard.Model) bool { _, ok := b.rowAt(m.Cursor()); return ok }
-	offering := func(m *gotermboard.Model) bool { _, ok := b.offers[m.Cursor()]; return ok }
+	offering := func(m *gotermboard.Model) bool { return b.offered != "" && m.Cursor() == b.offered }
 	return append(actions,
 		gotermboard.Action{
 			Keys: []string{"enter"}, Label: "complete the row, or log the minutes it offers", Footer: "enter done",
 			Run: b.complete, Applies: onRow,
 		},
 		gotermboard.Action{
-			Keys: []string{"+", "="}, Label: "offer five more minutes", Footer: "+/- minutes",
-			Run: func(m *gotermboard.Model) tea.Cmd { return b.adjust(m, func(o minutesOffer) *panelRow { return o.up }) }, Applies: offering,
+			Keys: []string{"+", "="}, Label: "offer more minutes", Footer: "+/- minutes",
+			Run: func(*gotermboard.Model) tea.Cmd { return b.adjust(b.offer.up) }, Applies: offering,
 		},
 		gotermboard.Action{
-			Keys: []string{"-"}, Label: "offer five fewer minutes",
-			Run: func(m *gotermboard.Model) tea.Cmd {
-				return b.adjust(m, func(o minutesOffer) *panelRow { return o.down })
-			}, Applies: offering,
+			Keys: []string{"-"}, Label: "offer fewer minutes",
+			Run: func(*gotermboard.Model) tea.Cmd { return b.adjust(b.offer.down) }, Applies: offering,
 		},
 	)
 }
 
-// answerKey is the key of the answer row with this value, while a nudge is ready to take it.
-func (b *nowBoard) answerKey(value string) (string, bool) {
-	prefix := kindAnswer + keySeparator + value + keySeparator
+func (b *nowBoard) answers() []panelRow {
+	var found []panelRow
 	for _, row := range b.today.Value().Rows {
-		if row.Key != nil && row.Kind == kindAnswer && strings.HasPrefix(*row.Key, prefix) {
-			return *row.Key, true
+		if row.Key != nil && row.Kind == kindAnswer {
+			found = append(found, row)
 		}
 	}
-	return "", false
+	return found
 }
 
 func (b *nowBoard) rowAt(key string) (panelRow, bool) {
@@ -285,22 +264,30 @@ func (b *nowBoard) rowAt(key string) (panelRow, bool) {
 	return panelRow{}, false
 }
 
-// complete picks the cursor's row, or logs the minutes a pick on it opened.
+// complete picks the cursor's row, or logs the minutes a pick on it opened. While another row's
+// minutes are open, the line under that row says enter logs them, so enter closes them and
+// completes nothing.
 func (b *nowBoard) complete(m *gotermboard.Model) tea.Cmd {
 	key := m.Cursor()
-	row, _ := b.rowAt(key)
-	if offer, open := b.offers[key]; open {
-		return b.pick(key, *offer.log.Key, "logging "+offer.log.Text)
+	switch b.offered {
+	case "":
+	case key:
+		return b.pick(key, *b.offer.log.Key, "logging "+b.offer.log.Text)
+	default:
+		b.offered = ""
+		m.Say("closed the minutes open under another row, so enter again completes this one")
+		m.Rebuild()
+		return nil
 	}
+	row, _ := b.rowAt(key)
 	return b.pick(key, key, "completing "+row.Text)
 }
 
-func (b *nowBoard) adjust(m *gotermboard.Model, side func(minutesOffer) *panelRow) tea.Cmd {
-	key := m.Cursor()
-	if to := side(b.offers[key]); to != nil {
-		return b.pick(key, *to.Key, "")
+func (b *nowBoard) adjust(to *panelRow) tea.Cmd {
+	if to == nil {
+		return nil
 	}
-	return nil
+	return b.pick(b.offered, *to.Key, "")
 }
 
 // pick hands key to `doit desk-nudge panel pick` in the background, for the row it acts for.
@@ -313,6 +300,9 @@ func (b *nowBoard) pick(row, key, doing string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), pickWithin)
 		defer cancel()
 		step, err := b.panel.pick(ctx, key)
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("the pick ran past %v and was stopped. It may have landed, so the rows are read again", pickWithin)
+		}
 		return pickedMsg{row: row, step: step, err: err}
 	}
 }
@@ -325,15 +315,15 @@ func (b *nowBoard) Receive(m *gotermboard.Model, msg tea.Msg) tea.Cmd {
 	b.underWay = ""
 	switch {
 	case picked.err != nil:
-		delete(b.offers, picked.row)
+		b.offered = ""
 		m.Say(picked.err.Error())
 		b.today.Force()
 	case picked.step.Step == stepMinutes:
 		if offer, ok := offerFrom(picked.step); ok {
-			b.offers = map[string]minutesOffer{picked.row: offer}
+			b.offered, b.offer = picked.row, offer
 		}
 	case picked.step.Step == stepDone:
-		delete(b.offers, picked.row)
+		b.offered = ""
 		if picked.step.Message != nil {
 			m.Say(*picked.step.Message)
 		}

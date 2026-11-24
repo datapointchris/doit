@@ -439,22 +439,24 @@ It exits 1 where the completion did not go through, and 4 where the service gave
 
 ```bash
 doit tui                                  # open doit's screens
-doit tui --tab now                        # open on the panel, as a status bar button would
+doit tui --tab now                        # open on the panel by name
 COLUMNS=120 LINES=30 doit tui --once      # print the screen it opens on, then exit
 ```
 
 `doit tui` hands the terminal to `doit-tui`, a Go program on Bubble Tea built from this
 repository's `cli/` module. Install it with
 `go install github.com/datapointchris/doit/cli/cmd/doit-tui@latest`, which takes the newest
-`cli/vX.Y.Z` tag. Its `now` tab draws the suggestion under `up next`, then each row grouped by
-what completes it: pursuits, habits, practices and review. A click puts the cursor on a row, and a
-second click or enter completes it. A timed pursuit opens its minutes under its row, where `+` and
-`-` move them by five and enter logs them. While a nudge is ready, `1` to `4` answer it, and each
-answer is a footer hint that a click also runs. A note, such as why the rows are old, draws above
-the table.
+`cli/vX.Y.Z` tag. Its `now` tab draws the suggestion under `up next`, then each row under the `doit
+today` lane it came from. A click puts the cursor on a row, and a second click or enter completes
+it. A timed pursuit opens its minutes under its row, where `+` and `-` take the step that doit
+offers above or below, and enter logs them. Enter on another row closes those minutes first and
+completes nothing. While a nudge is ready, each answer sits on a number key and a footer hint that a
+click also runs. A note, such as why the rows are old, draws above the table.
 
-It runs `doit desk-nudge panel show --json` every 15 seconds and `panel pick <key> --json` for each
-pick, so doit keeps every rule about what a row is and what a pick does.
+It reruns `doit desk-nudge panel show --json` on a timer and runs `panel pick <key> --json` for each
+pick. Each row carries its group, its minutes and whether it is suggested, so the board parses no
+key and doit keeps every rule about what a row is and what a pick does. The board refuses a step
+whose `schema_version` it does not read, and names whether doit or `doit-tui` needs upgrading.
 
 ## The service — one store, and every view computed behind it
 
