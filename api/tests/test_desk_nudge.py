@@ -71,6 +71,8 @@ elif name == 'gdbus':
     else:
         (here / f'closed-{args[-1]}').touch()
         print('()')
+elif name == 'loginctl':
+    print('no')
 elif name == 'life':
     failing = here / 'life-exit'
     if failing.exists():
@@ -182,14 +184,12 @@ def desk(tmp_path, monkeypatch):
     root = tmp_path / 'desk'
     programs = root / 'bin'
     programs.mkdir(parents=True)
-    for program in ('claude-sessions', 'hyprctl', 'gdbus', 'notify-send', 'life'):
+    for program in ('claude-sessions', 'hyprctl', 'gdbus', 'notify-send', 'loginctl', 'life'):
         script = programs / program
         script.write_text(STAND_IN.replace('PYTHON', sys.executable).replace('NOTIFIED', str(NOTIFIED)))
         script.chmod(0o755)
     (root / 'run' / 'hypr' / INSTANCE).mkdir(parents=True)
     (root / 'run' / 'hypr' / INSTANCE / '.socket.sock').touch()
-    (root / 'proc' / '4242').mkdir(parents=True)
-    (root / 'proc' / '4242' / 'comm').write_text('hypridle\n')
     monkeypatch.setenv('PATH', f'{programs}{os.pathsep}{os.environ["PATH"]}')
     monkeypatch.setenv('DESK_NUDGE_STAND_INS', str(root))
     monkeypatch.setenv('DESK_NUDGE_FIXTURES', str(FIXTURES))
@@ -198,7 +198,6 @@ def desk(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_RUNTIME_DIR', str(root / 'run'))
     monkeypatch.delenv('HYPRLAND_INSTANCE_SIGNATURE', raising=False)
     monkeypatch.delenv('WAYLAND_DISPLAY', raising=False)
-    monkeypatch.setattr(commands, 'PROC', root / 'proc')
     monkeypatch.setattr('doit.cli.notify', lambda config: None)
     clock = Clock(DESK_START)
     monkeypatch.setattr(commands, 'now', clock)
@@ -215,9 +214,9 @@ def registered(store, monkeypatch, tmp_path, register: str, around=None):
 
 
 def fired(desk: Desk) -> commands.Watch:
-    """A watch run for 60 present minutes, until its nudge is ready and showing."""
+    """A watch run for 30 minutes, until its nudge is ready and showing."""
     watch = desk.watch()
-    desk.run(watch, 60 * 60 - 15)
+    desk.run(watch, 30 * 60 - 15)
     assert desk.state()['phase'] == Phase.COUNTING
     desk.run(watch, 15)
     until(lambda: (desk.state()['nudge'] or {}).get('notification_id'))
@@ -234,27 +233,27 @@ def answer(api, nudge_id: uuid.UUID, given: str) -> dict:
 
 def test_an_answer_moves_the_interval_and_too_soon_then_too_late_cancel(api):
     first, second = uuid.uuid4(), uuid.uuid4()
-    assert api.get('/api/v1/desk-nudge').json()['interval_minutes'] == 60
+    assert api.get('/api/v1/desk-nudge').json()['interval_minutes'] == 30
 
     soon = answer(api, first, 'too_soon')
     resent = answer(api, first, 'too_soon')
     late = answer(api, second, 'too_late')
 
-    assert soon['interval_minutes'] == 66
+    assert soon['interval_minutes'] == 33
     assert (soon['added'], resent['added']) == (True, False)
     assert resent['stored'] == soon['stored'], 'a resend answers the row first stored'
-    assert resent['interval_minutes'] == 66, 'a resend is stored once'
-    assert late['interval_minutes'] == 60
+    assert resent['interval_minutes'] == 33, 'a resend is stored once'
+    assert late['interval_minutes'] == 30
     assert api.get('/api/v1/desk-nudge').json()['answer_counts'] == {'good_timing': 0, 'too_soon': 1, 'too_late': 1, 'bothered': 0}
 
 
-def test_a_present_interval_fires_the_nudge_with_the_draws_first_item(store, monkeypatch, tmp_path, desk):
+def test_the_interval_fires_the_nudge_with_the_draws_first_item(store, monkeypatch, tmp_path, desk):
     registered(store, monkeypatch, tmp_path, RESOLVED_READ)
     fired(desk)
 
     [record] = desk.records(Event.FIRED)
     assert record['suggestion'] == {'pursuit': 'read', 'item_id': None, 'label': 'A Neutral Book\nAnother Book'}
-    assert (record['present_minutes'], record['interval_minutes']) == (60, 60)
+    assert (record['counted_minutes'], record['interval_minutes']) == (30, 30)
     assert record['sessions'] == json.loads((FIXTURES / 'claude-sessions.json').read_text())
     assert record['focused_window'] == {'class': 'com.mitchellh.ghostty', 'title': 'Terminal — project-1'}
     assert desk.calls('hyprctl') == [['instances', '-j'], ['-i', INSTANCE, 'activewindow', '-j']]
@@ -270,7 +269,7 @@ def test_a_present_interval_fires_the_nudge_with_the_draws_first_item(store, mon
     [answered] = desk.records(Event.ANSWERED)
     assert (answered['answer'], answered['saved'], answered['late'], answered['nudge_id']) == ('too_soon', True, False, record['nudge_id'])
     status = desk.status()
-    assert (status['phase'], status['present_minutes'], status['interval_minutes'], status['minutes_left']) == ('counting', 0, 66, 66)
+    assert (status['phase'], status['counted_minutes'], status['interval_minutes'], status['minutes_left']) == ('counting', 0, 33, 33)
 
 
 def test_an_unanswered_nudge_expires_after_ten_minutes(store, monkeypatch, tmp_path, desk):
@@ -290,7 +289,7 @@ def test_an_unanswered_nudge_expires_after_ten_minutes(store, monkeypatch, tmp_p
     [expired] = desk.records(Event.EXPIRED)
     assert expired['nudge_id'] == desk.records(Event.FIRED)[0]['nudge_id']
     assert desk.calls('gdbus')[-1][-2:] == ['org.freedesktop.Notifications.CloseNotification', str(NOTIFIED)]
-    assert (desk.state()['phase'], desk.state()['present_seconds']) == (Phase.COUNTING, 0)
+    assert (desk.state()['phase'], desk.state()['counted_seconds']) == (Phase.COUNTING, 0)
 
 
 def refused_next(answer: Callable[[], httpx2.Response]):
@@ -323,7 +322,7 @@ def test_a_failed_next_still_fires_and_records_the_error(store, monkeypatch, tmp
 def test_a_restarted_watch_resumes_a_ready_nudge(store, monkeypatch, tmp_path, desk):
     registered(store, monkeypatch, tmp_path, RESOLVED_READ)
     stopped_while_firing = desk_nudge.fresh_state()
-    stopped_while_firing.update(present_seconds=60 * 60.0, last_tick=desk_nudge.stamp(DESK_START))
+    stopped_while_firing.update(counted_seconds=30 * 60.0, last_tick=desk_nudge.stamp(DESK_START))
     nudge = desk_nudge.begin_firing(stopped_while_firing, DESK_START, '019aad00-0000-7000-8000-00000000000a')
     commands.write_state(stopped_while_firing)
 
@@ -356,7 +355,7 @@ def test_an_answer_that_fails_to_save_is_sent_again_until_stored(store, monkeypa
     assert taken.exit_code == service.NO_ANSWER_EXIT, taken.output
     assert [(line['saved'], line['answer']) for line in desk.records(Event.ANSWERED)] == [(False, 'too_soon')]
     status = desk.status()
-    assert (status['phase'], status['queued_answer_count'], status['interval_minutes']) == ('counting', 1, 60)
+    assert (status['phase'], status['queued_answer_count'], status['interval_minutes']) == ('counting', 1, 30)
 
     down[0] = False
     desk.run(watch, 15)
@@ -364,7 +363,7 @@ def test_an_answer_that_fails_to_save_is_sent_again_until_stored(store, monkeypa
 
     assert [line['saved'] for line in desk.records(Event.ANSWERED)] == [False, True]
     status = desk.status()
-    assert (status['queued_answer_count'], status['interval_minutes'], status['minutes_left']) == (0, 66, 66)
+    assert (status['queued_answer_count'], status['interval_minutes'], status['minutes_left']) == (0, 33, 33)
 
 
 TASKS = [{'id': 532, 'name': 'Bathe Dingo'}, {'id': 533, 'name': 'Trim Dingo Nails'}, {'id': 534, 'name': 'Unprogram Alexas'}]
@@ -421,7 +420,7 @@ def test_the_panel_logs_a_task_by_item_and_a_timed_pursuit_by_its_usual_minutes(
     assert desk.calls('life') == [['tasks', 'complete', '532']]
     [picked] = desk.records(Event.PICKED)
     assert (picked['nudge_id'], picked['pick']['item_id'], picked['pick']['ok']) == (nudge['nudge_id'], '532', True)
-    assert (desk.state()['phase'], desk.state()['present_seconds']) == (Phase.COUNTING, 0)
+    assert (desk.state()['phase'], desk.state()['counted_seconds']) == (Phase.COUNTING, 0)
     desk.panel('pick', 'pursuit:tasks:532', exit_code=2)
     assert desk.calls('life') == [['tasks', 'complete', '532']], 'a pick is taken once'
 

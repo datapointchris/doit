@@ -1,4 +1,4 @@
-"""`doit desk-nudge`: the watch that counts present time and fires the nudge, the commands that answer, pause and report it, and its panel.
+"""`doit desk-nudge`: the watch that counts and fires the nudge, the commands that answer, pause and report it, and its panel.
 
 Every rule is `doit.desk_nudge`'s. This module holds the effects around them: the
 state file and its lock, the record file, the service's reads and writes, and the
@@ -23,7 +23,6 @@ from collections.abc import Callable
 from collections.abc import Iterator
 from dataclasses import dataclass
 from dataclasses import field
-from enum import StrEnum
 from pathlib import Path
 from typing import IO
 from typing import Annotated
@@ -61,7 +60,7 @@ from doit.service_commands.review import mark_done
 
 log = logging.getLogger('doit.desk_nudge')
 
-# How long `claude-sessions`, `hyprctl`, `gdbus` and a passing `notify-send` may each take.
+# How long `claude-sessions`, `hyprctl`, `gdbus`, `loginctl` and a passing `notify-send` may each take.
 PROGRAM_SECONDS = 5.0
 # Outlasts the service's read of each app plus its read of the day's context, as `/next` makes them.
 NEXT_BUDGET_SECONDS = 30.0
@@ -73,10 +72,9 @@ ANSWER_BUDGET_SECONDS = 10.0
 HABIT_SECONDS = 30.0
 # Another desk's answers move the interval too, so the watch reads it again this often.
 INTERVAL_REFRESH_SECONDS = 300.0
-# While the desk is in use, rows completed elsewhere leave the panel this often, beside each firing and each pick.
+# While logind holds the session active, rows completed elsewhere leave the panel this often, beside each firing and each pick.
 PANEL_REFRESH_SECONDS = 300.0
 PICK_REFUSED_EXIT = 2
-PROC = Path('/proc')
 # `fcntl.lockf` excludes other processes and never this one's threads, so the watch's threads take this first.
 STATE_THREAD_LOCK = threading.Lock()
 
@@ -87,9 +85,9 @@ app = typer.Typer(
     name='desk-nudge',
     no_args_is_help=True,
     help=(
-        'A nudge when a long stretch at the desk runs past the interval, suggesting what `doit next` offers first.\n\n'
-        'The watch counts the time you are present and fires a notification at the interval. Your answers to it tune the '
-        'interval, and every firing, answer and absence is recorded for the warehouse.'
+        'A nudge every interval at the desk, suggesting what `doit next` offers first.\n\n'
+        'The watch counts the time since the last nudge ended and fires a notification at the interval. Your answers to it '
+        'tune the interval, and every firing, answer and pick is recorded for the warehouse.'
     ),
     epilog=examples(
         ('doit desk-nudge status', 'where the clock stands, and what the nudge suggests'),
@@ -159,7 +157,7 @@ def write_state(state: dict) -> None:
 def changed_state() -> Iterator[dict]:
     """The state, read under `STATE_THREAD_LOCK` and `fcntl.lockf` and written back atomically with the pill redrawn.
 
-    The watch, `record-presence`, `answer`, `pause`, `resume` and `panel pick` each
+    The watch, `answer`, `pause`, `resume` and `panel pick` each
     change the file this way. Hold it around the read, the change and the write alone. A
     block that raises writes nothing. A file that cannot be read is set aside, and
     the change starts from a fresh clock.
@@ -289,22 +287,13 @@ def hyprland_socket_exists() -> bool:
     return runtime is not None and any((Path(runtime) / 'hypr').glob('*/.socket.sock'))
 
 
-def process_name(pid: str) -> str:
+def session_idle() -> bool:
+    """Whether logind marks the display session idle, which an idle listener such as hypridle's sets. A failed read reads as active."""
     try:
-        return (PROC / pid / 'comm').read_text(encoding='utf-8').strip()
-    except OSError:
-        return ''
-
-
-def find_hypridle(remembered: str | None = None) -> str | None:
-    """hypridle's pid, checking the pid found last before reading every process's name."""
-    if remembered and process_name(remembered) == 'hypridle':
-        return remembered
-    try:
-        pids = [entry.name for entry in PROC.iterdir() if entry.name.isdigit()]
-    except OSError:
-        return None
-    return next((pid for pid in pids if process_name(pid) == 'hypridle'), None)
+        return run_program(['loginctl', 'show-session', 'auto', '-p', 'IdleHint', '--value']).strip() == 'yes'
+    except ProgramFailed as error:
+        log.warning(f"could not read logind's idle hint, so the panel's rows are read as for a desk in use: {error}")
+        return False
 
 
 # --- the service ----------------------------------------------------------------
@@ -531,7 +520,6 @@ class Watch:
         self.interval_read_at: float | None = None
         self.panel_read_at: float | None = None
         self.shown: Shown | None = None
-        self.hypridle_pid: str | None = None
         self.showing = threading.Lock()
         # One rebuild of the panel's rows at a time, so a slower read never writes over a newer one.
         self.panel_lock = threading.Lock()
@@ -554,7 +542,7 @@ class Watch:
                 moment,
                 doit_version=self.version,
                 phase=phase.value,
-                present_minutes=round(state['present_seconds'] / 60, 2),
+                counted_minutes=round(state['counted_seconds'] / 60, 2),
                 interval_minutes=state['interval_minutes'],
             )
         append_records([started])
@@ -563,19 +551,18 @@ class Watch:
         elif nudge and phase is Phase.READY:
             self.show(nudge, replaces=nudge['notification_id'])
         self.refresh_interval_when_due()
-        self.rebuild_panel_when_due(picked=False, in_use=True)
+        self.rebuild_panel_when_due(picked=False)
 
     def tick(self) -> None:
         """Count, expire, and start whatever the tick calls for off the loop."""
         moment = now()
-        live = self.live_desk()
+        live = hyprland_socket_exists()
         with changed_state() as state:
-            change = desk_nudge.tick(state, moment, live, self.hypridle_pid)
+            change = desk_nudge.tick(state, moment, live)
             firing = desk_nudge.begin_firing(state, moment, new_id(moment)) if change.fire else None
             ready = dict(state['nudge']) if state['phase'] == Phase.READY else None
             queued = bool(state['queued_answers'])
             picked = not alive(self.rebuilding) and desk_nudge.take_panel_rebuild(state)
-            in_use = Phase(state['phase']).desk_in_use
         carry_out(change)
         if firing:
             self.firing = self.background(self.fire, firing)
@@ -587,7 +574,7 @@ class Watch:
         if queued and not alive(self.resending):
             self.resending = self.background(resend_queued)
         self.refresh_interval_when_due()
-        self.rebuild_panel_when_due(picked, in_use)
+        self.rebuild_panel_when_due(picked)
 
     def refresh_interval_when_due(self) -> None:
         due = self.interval_read_at is None or time.monotonic() - self.interval_read_at >= INTERVAL_REFRESH_SECONDS
@@ -595,20 +582,23 @@ class Watch:
             self.interval_read_at = time.monotonic()
             self.refreshing = self.background(refresh_interval)
 
-    def rebuild_panel_when_due(self, picked: bool, in_use: bool) -> None:
-        """Read the panel's rows again after a pick, with `/next`, which leaves out what was logged, and every `PANEL_REFRESH_SECONDS`.
-
-        The timed read waits while nobody is at the desk, because `/today` asks
-        every app. A desk coming back has rows older than the interval, so the
-        next tick reads them.
-        """
-        due = in_use and (self.panel_read_at is None or time.monotonic() - self.panel_read_at >= PANEL_REFRESH_SECONDS)
+    def rebuild_panel_when_due(self, picked: bool) -> None:
+        """Read the panel's rows again after a pick, with `/next`, which leaves out what was logged, and every `PANEL_REFRESH_SECONDS`."""
+        due = self.panel_read_at is None or time.monotonic() - self.panel_read_at >= PANEL_REFRESH_SECONDS
         if (picked or due) and not alive(self.rebuilding):
             self.panel_read_at = time.monotonic()
-            self.rebuilding = self.background(self.rebuild_panel, None, picked)
+            self.rebuilding = self.background(self.rebuild_panel, None, picked, not picked)
 
-    def rebuild_panel(self, suggestion: dict | None, read_next: bool) -> None:
-        """A failure that the read does not name keeps the last rows, because a stopped thread would leave them old with no word."""
+    def rebuild_panel(self, suggestion: dict | None, read_next: bool, unless_idle: bool = False) -> None:
+        """A failure that the read does not name keeps the last rows, because a stopped thread would leave them old with no word.
+
+        A timed read waits while logind marks the session idle, because `/today`
+        asks every app. It is due again at the next tick, so the first tick back
+        at the desk reads the rows.
+        """
+        if unless_idle and session_idle():
+            self.panel_read_at = None
+            return
         with self.panel_lock:
             try:
                 rebuild_panel_cache(suggestion, read_next=read_next)
@@ -632,7 +622,7 @@ class Watch:
             desk_nudge.instant(nudge['fired_at']),
             nudge_id=nudge['nudge_id'],
             interval_minutes=nudge['interval_minutes'],
-            present_minutes=nudge['present_minutes'],
+            counted_minutes=nudge['counted_minutes'],
             suggestion=suggestion,
             **seen,
         )
@@ -689,15 +679,6 @@ class Watch:
         with changed_state() as state:
             records = desk_nudge.dismissal(state, now(), shown.nudge_id)
         append_records(records)
-
-    def live_desk(self) -> bool:
-        """A Hyprland socket and a running hypridle, both read with no program."""
-        return hyprland_socket_exists() and self.hypridle_running()
-
-    def hypridle_running(self) -> bool:
-        """Whether hypridle runs, keeping its pid for the tick to judge an away by."""
-        self.hypridle_pid = find_hypridle(self.hypridle_pid)
-        return self.hypridle_pid is not None
 
     def run(self) -> int:
         """Tick until the installed doit is another release, then exit so that the unit starts it."""
@@ -769,7 +750,7 @@ def log_to_stderr() -> None:
     epilog=examples(('doit desk-nudge watch', 'run the clock in this terminal, where the desk has no user service running it')),
 )
 def watch_command() -> None:
-    """Count present time and fire the nudge at the interval, until stopped.
+    """Count the time since the last nudge ended and fire the nudge at the interval, until stopped.
 
     The desk's user service runs this. It exits 1 where another watch already
     runs on this desk, and 0 once another doit release is installed, so that the
@@ -782,36 +763,6 @@ def watch_command() -> None:
         raise typer.Exit(1)
     with held:
         raise typer.Exit(Watch().run())
-
-
-class Presence(StrEnum):
-    AWAY = 'away'
-    BACK = 'back'
-
-
-@app.command(
-    'record-presence',
-    epilog=examples(
-        ('doit desk-nudge record-presence away 120', 'what the 120-second hypridle listener runs on timeout'),
-        ('doit desk-nudge record-presence back 120', 'what it runs on the next input'),
-    ),
-)
-def record_presence_command(
-    change: Annotated[Presence, typer.Argument(help='away after the idle timeout, back on the next input.')],
-    seconds: Annotated[
-        int, typer.Argument(min=1, help="The listener's timeout, which an away counts back from.")
-    ] = desk_nudge.IDLE_AFTER_SECONDS,
-) -> None:
-    """Record that the desk went idle or came back, which pauses, restarts or ends the nudge."""
-    moment = now()
-    reporter = find_hypridle() if change is Presence.AWAY else None
-    with changed_state() as state:
-        if change is Presence.AWAY:
-            made = desk_nudge.went_away(state, moment, seconds, reporter)
-        else:
-            made = desk_nudge.came_back(state, moment, seconds)
-    carry_out(made)
-    raise typer.Exit(0)
 
 
 @app.command(
@@ -889,7 +840,7 @@ def status_command(
 def render_status(document: dict) -> None:
     rows: list[tuple[str, str]] = [('clock', document['pill']['text'])]
     if document['minutes_left'] is not None:
-        rows.append(('present', f'{document["present_minutes"]:g} of {document["interval_minutes"]:g} minutes'))
+        rows.append(('counted', f'{document["counted_minutes"]:g} of {document["interval_minutes"]:g} minutes'))
     if document['ready_until']:
         rows.append(('ready until', f'{desk_nudge.instant(document["ready_until"]):%H:%M}'))
     suggestion = document['suggestion']

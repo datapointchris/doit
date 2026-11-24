@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:doit:desk-nudge-status:v1",
+  "$id": "urn:doit:desk-nudge-status:v2",
   "title": "doit desk-nudge status",
   "description": "Where the desk nudge's clock stands, read from this desk's state file with no request. Its pill is the state file's own pill object, which a status bar reads from the file. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
   "type": "object",
@@ -9,7 +9,7 @@
     "schema_version",
     "phase",
     "watch_running",
-    "present_minutes",
+    "counted_minutes",
     "interval_minutes",
     "minutes_left",
     "nudge_id",
@@ -22,14 +22,13 @@
   ],
   "properties": {
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "phase": {
       "enum": [
         "counting",
         "firing",
         "ready",
-        "away",
         "paused",
         "no_desk"
       ],
@@ -39,13 +38,13 @@
       "type": "boolean",
       "description": "Whether the watch ticked within the pill's stale horizon."
     },
-    "present_minutes": {
+    "counted_minutes": {
       "type": "number",
-      "description": "The present time counted toward the interval."
+      "description": "The minutes counted toward the interval: time with a desk session since the last nudge ended."
     },
     "interval_minutes": {
       "type": "number",
-      "description": "The interval last read from the service, or 60 where none was."
+      "description": "The interval last read from the service, or 30 where none was."
     },
     "minutes_left": {
       "type": [
@@ -53,7 +52,7 @@
         "null"
       ],
       "minimum": 0,
-      "description": "Present minutes still to count before a firing. Null while a nudge is firing or ready."
+      "description": "Minutes still to count before a firing. Null while a nudge is firing or ready."
     },
     "nudge_id": {
       "oneOf": [
@@ -197,7 +196,6 @@
             "counting",
             "firing",
             "ready",
-            "away",
             "paused",
             "no_desk"
           ],

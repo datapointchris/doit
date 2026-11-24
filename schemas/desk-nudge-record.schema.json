@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:doit:desk-nudge-record:v1",
+  "$id": "urn:doit:desk-nudge-record:v2",
   "title": "doit.desk_nudge",
   "description": "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, appended and never rotated, for a log shipper to read. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
   "type": "object",
@@ -24,8 +24,6 @@
         "dismissed",
         "expired",
         "picked",
-        "away",
-        "back",
         "gap",
         "paused",
         "resumed"
@@ -33,7 +31,7 @@
       "description": "What happened."
     },
     "fleet.schema_version": {
-      "const": 1,
+      "const": 2,
       "description": "This line's shape."
     },
     "doit_version": {
@@ -45,7 +43,6 @@
         "counting",
         "firing",
         "ready",
-        "away",
         "paused",
         "no_desk"
       ],
@@ -67,9 +64,9 @@
       "type": "number",
       "description": "The interval in force."
     },
-    "present_minutes": {
+    "counted_minutes": {
       "type": "number",
-      "description": "The present time counted."
+      "description": "The minutes counted toward the interval: time with a desk session since the last nudge ended."
     },
     "suggestion": {
       "description": "What the nudge suggested: /next's first offered pursuit and what it stands for, or why none was drawn.",
@@ -272,21 +269,9 @@
         }
       }
     },
-    "idle_after_seconds": {
-      "type": "integer",
-      "description": "The listener's timeout, which an away counts back from."
-    },
-    "away_seconds": {
-      "type": "number",
-      "description": "How long the absence had run, from the last input."
-    },
-    "fired_while_idle": {
-      "type": "boolean",
-      "description": "Whether a nudge fired inside the idle window."
-    },
     "gap_seconds": {
       "type": "number",
-      "description": "The time between two ticks, counted as absence past two tick periods."
+      "description": "The time between two ticks, past two tick periods, which the clock does not count."
     }
   },
   "allOf": [
@@ -302,7 +287,7 @@
         "required": [
           "doit_version",
           "phase",
-          "present_minutes",
+          "counted_minutes",
           "interval_minutes"
         ]
       }
@@ -319,7 +304,7 @@
         "required": [
           "nudge_id",
           "interval_minutes",
-          "present_minutes",
+          "counted_minutes",
           "suggestion",
           "sessions",
           "focused_window"
@@ -387,39 +372,6 @@
           "pick",
           "sessions",
           "focused_window"
-        ]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "event": {
-            "const": "away"
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "idle_after_seconds",
-          "away_seconds",
-          "fired_while_idle",
-          "nudge_id"
-        ]
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "event": {
-            "const": "back"
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "idle_after_seconds",
-          "away_seconds",
-          "fired_while_idle"
         ]
       }
     },

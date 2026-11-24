@@ -1,4 +1,4 @@
-"""The desk nudge's rules: the clock that counts present time, the answers that tune its interval, and the records it writes.
+"""The desk nudge's rules: the clock that counts toward the interval, the answers that tune it, and the records it writes.
 
 The service keeps every answer and computes the interval from all of them on each
 read, so a changed rule reprices the same answers. The desk keeps the clock in a
@@ -27,19 +27,15 @@ from doit.pursuits import writes_through
 from doit.today import CHECKLIST_GROUPS
 from doit.today import due_row_cap
 
-STARTING_INTERVAL_MINUTES = 60
+STARTING_INTERVAL_MINUTES = 30
 
 # Each too soon multiplies the interval by this, and each too late divides it.
 ANSWER_STEP = 1.1
 
 TICK_SECONDS = 15
-# The most present time one tick adds. A longer gap between ticks, such as a
-# suspend or a stopped watch, counts as absence, because no listener reports it.
+# The most time one tick counts. A longer gap between ticks, such as a suspend or
+# a stopped watch, goes uncounted.
 TICK_CAP_SECONDS = 2 * TICK_SECONDS
-# How long after the last input hypridle's listener reports the desk away.
-IDLE_AFTER_SECONDS = 120
-# An absence this long is a break, and restarts the clock at zero. A shorter one pauses it.
-BREAK_SECONDS = 5 * 60
 READY_SECONDS = 10 * 60
 # The pill reads `nudge stopped` once this passes with no tick, so a watch that
 # died is told apart from a clock that holds.
@@ -47,9 +43,9 @@ STALE_AFTER_SECONDS = 4 * TICK_SECONDS
 # How many ended nudges the state remembers, so a late answer can name its firing.
 REMEMBERED_NUDGES = 20
 
-STATE_VERSION = 1
-RECORD_SCHEMA_VERSION = 1
-STATUS_SCHEMA_VERSION = 1
+STATE_VERSION = 2
+RECORD_SCHEMA_VERSION = 2
+STATUS_SCHEMA_VERSION = 2
 PANEL_SCHEMA_VERSION = 1
 PANEL_CACHE_VERSION = 1
 RECORD_SCHEMA_FILE = 'desk-nudge-record.schema.json'
@@ -87,20 +83,17 @@ class Event(StrEnum):
     DISMISSED = 'dismissed'
     EXPIRED = 'expired'
     PICKED = 'picked'
-    AWAY = 'away'
-    BACK = 'back'
     GAP = 'gap'
     PAUSED = 'paused'
     RESUMED = 'resumed'
 
 
 class Phase(StrEnum):
-    """Where the clock stands. Only `counting` adds present time."""
+    """Where the clock stands. Only `counting` adds time."""
 
     COUNTING = 'counting'
     FIRING = 'firing'
     READY = 'ready'
-    AWAY = 'away'
     PAUSED = 'paused'
     NO_DESK = 'no_desk'
 
@@ -108,11 +101,6 @@ class Phase(StrEnum):
     def holds_nudge(self) -> bool:
         """Whether a nudge is in hand, which `begin_firing` starts and `end_ready` ends."""
         return self in (Phase.FIRING, Phase.READY)
-
-    @property
-    def desk_in_use(self) -> bool:
-        """Whether someone may be at the desk. A pause holds the clock through a day block, and the desk is still used."""
-        return self not in (Phase.AWAY, Phase.NO_DESK)
 
 
 class SuggestionError(StrEnum):
@@ -131,7 +119,7 @@ SUGGESTION_MESSAGES = {
     SuggestionError.UNREADABLE: "The service's draw could not be read, so take a break.",
 }
 
-PILL_TEXT = {Phase.AWAY: 'away', Phase.PAUSED: 'paused', Phase.NO_DESK: 'no desk'}
+PILL_TEXT = {Phase.PAUSED: 'paused', Phase.NO_DESK: 'no desk'}
 
 
 class NothingToAnswer(Exception):
@@ -183,13 +171,11 @@ def fresh_state() -> dict[str, Any]:
     state: dict[str, Any] = {
         'version': STATE_VERSION,
         'phase': Phase.COUNTING.value,
-        'present_seconds': 0.0,
+        'counted_seconds': 0.0,
         'last_tick': None,
         'interval_minutes': float(STARTING_INTERVAL_MINUTES),
         'answer_counts': answer_counts([]),
         'nudge': None,
-        'away': None,
-        'no_desk_since': None,
         'queued_answers': [],
         'recent_nudges': [],
         # Each panel key picked, with when its completion ended, and whether a pick asks the watch to read the rows again.
@@ -231,26 +217,19 @@ def end_ready(state: dict) -> dict:
     """End the nudge in hand, restart the clock at zero, and return the nudge."""
     nudge = state['nudge']
     state['nudge'] = None
-    state['present_seconds'] = 0.0
+    state['counted_seconds'] = 0.0
     state['phase'] = Phase.COUNTING.value
     remembered = {'nudge_id': nudge['nudge_id'], 'fired_at': nudge['fired_at']}
     state['recent_nudges'] = [*state['recent_nudges'], remembered][-REMEMBERED_NUDGES:]
     return nudge
 
 
-def away_outlived(state: dict, hypridle_pid: str | None) -> bool:
-    """Whether the hypridle that reported the away has gone, so that no `back` will come for it."""
-    away = state['away']
-    return bool(away and away.get('hypridle_pid') and hypridle_pid and hypridle_pid != away['hypridle_pid'])
+def tick(state: dict, now: dt.datetime, live_desk: bool) -> Change:
+    """One tick of the watch: time counted, a ready nudge expired, the desk checked, and a firing called.
 
-
-def tick(state: dict, now: dt.datetime, live_desk: bool, hypridle_pid: str | None = None) -> Change:
-    """One tick of the watch: present time added, a ready nudge expired, the desk checked, and a firing called.
-
-    A tick adds the seconds since the last one, capped at `TICK_CAP_SECONDS`. A
-    longer gap writes `gap`, and one of `BREAK_SECONDS` or more restarts the clock.
-    A desk that has been gone that long restarts it too when it returns. An away
-    whose hypridle has gone, as after a logout or a reboot, ends as a `back` would.
+    A tick adds the seconds since the last one, capped at `TICK_CAP_SECONDS`, and a
+    longer gap writes `gap`. The clock holds while no desk session exists. Nothing
+    but a nudge ending restarts it, so leaving the desk neither pauses nor resets it.
     """
     change = Change()
     last = maybe_instant(state['last_tick'])
@@ -268,31 +247,14 @@ def tick(state: dict, now: dt.datetime, live_desk: bool, hypridle_pid: str | Non
     if phase is Phase.PAUSED or phase.holds_nudge:
         return change
     if not live_desk:
-        if phase is not Phase.NO_DESK:
-            state['no_desk_since'] = stamp(last or now)
-            state['phase'] = Phase.NO_DESK.value
+        state['phase'] = Phase.NO_DESK.value
         return change
-    returned = phase is Phase.NO_DESK
-    if returned:
-        began = min(
-            (moment for moment in (maybe_instant(state['no_desk_since']), maybe_instant((state['away'] or {}).get('since'))) if moment),
-            default=now,
-        )
-        state['no_desk_since'] = None
-        if (now - began).total_seconds() >= BREAK_SECONDS:
-            state['present_seconds'] = 0.0
-        state['phase'] = (Phase.AWAY if state['away'] else Phase.COUNTING).value
-        phase = Phase(state['phase'])
-    if phase is Phase.AWAY and away_outlived(state, hypridle_pid):
-        change.records += came_back(state, now, state['away']['idle_after_seconds']).records
+    if phase is Phase.NO_DESK:
+        state['phase'] = Phase.COUNTING.value
         return change
-    if returned or phase is Phase.AWAY:
-        return change
-    if gap >= BREAK_SECONDS:
-        state['present_seconds'] = 0.0
-    elif not change.closes:
-        state['present_seconds'] += min(gap, TICK_CAP_SECONDS)
-    change.fire = state['present_seconds'] >= state['interval_minutes'] * 60
+    if not change.closes:
+        state['counted_seconds'] += min(gap, TICK_CAP_SECONDS)
+    change.fire = state['counted_seconds'] >= state['interval_minutes'] * 60
     return change
 
 
@@ -302,7 +264,7 @@ def begin_firing(state: dict, now: dt.datetime, nudge_id: str) -> dict:
     state['nudge'] = {
         'nudge_id': nudge_id,
         'fired_at': stamp(now),
-        'present_minutes': round(state['present_seconds'] / 60, 2),
+        'counted_minutes': round(state['counted_seconds'] / 60, 2),
         'interval_minutes': state['interval_minutes'],
         'suggestion': None,
         'ready_until': None,
@@ -329,69 +291,6 @@ def held_nudge(state: dict, nudge_id: str) -> dict | None:
     return nudge if nudge and nudge['nudge_id'] == nudge_id else None
 
 
-def went_away(state: dict, now: dt.datetime, idle_after_seconds: int, hypridle_pid: str | None = None) -> Change:
-    """hypridle's listener saw no input for `idle_after_seconds`, so the desk has been away since the last input.
-
-    Counting gives those seconds back. A nudge in hand ends, and the record says
-    whether it fired inside the idle window. A paused clock or a gone desk only
-    remembers when the absence began. The away keeps the pid of the hypridle that
-    reported it, so a tick can end it once that hypridle is gone.
-    """
-    since = now - dt.timedelta(seconds=idle_after_seconds)
-    fired_while_idle = False
-    nudge_id = None
-    change = Change()
-    phase = Phase(state['phase'])
-    if phase.holds_nudge:
-        change.closes = end_ready(state)
-        nudge_id = change.closes['nudge_id']
-        fired_while_idle = instant(change.closes['fired_at']) >= since
-        state['phase'] = Phase.AWAY.value
-    elif phase is Phase.COUNTING:
-        state['present_seconds'] = max(state['present_seconds'] - idle_after_seconds, 0.0)
-        state['phase'] = Phase.AWAY.value
-    earlier = state['away']
-    state['away'] = {
-        'since': earlier['since'] if earlier else stamp(since),
-        'idle_after_seconds': idle_after_seconds,
-        'fired_while_idle': fired_while_idle or bool(earlier and earlier['fired_while_idle']),
-        'hypridle_pid': hypridle_pid or (earlier or {}).get('hypridle_pid'),
-    }
-    change.records.append(
-        record(
-            Event.AWAY,
-            now,
-            idle_after_seconds=idle_after_seconds,
-            away_seconds=float(idle_after_seconds),
-            fired_while_idle=fired_while_idle,
-            nudge_id=nudge_id,
-        )
-    )
-    return change
-
-
-def came_back(state: dict, now: dt.datetime, idle_after_seconds: int) -> Change:
-    """Input again. Under `BREAK_SECONDS` away resumes the count, and a break restarts it at zero."""
-    away = state['away'] or {'since': stamp(now - dt.timedelta(seconds=idle_after_seconds)), 'fired_while_idle': False}
-    away_seconds = max((now - instant(away['since'])).total_seconds(), 0.0)
-    state['away'] = None
-    if state['phase'] == Phase.AWAY:
-        if away_seconds >= BREAK_SECONDS:
-            state['present_seconds'] = 0.0
-        state['phase'] = Phase.COUNTING.value
-    return Change(
-        records=[
-            record(
-                Event.BACK,
-                now,
-                idle_after_seconds=idle_after_seconds,
-                away_seconds=round(away_seconds, 3),
-                fired_while_idle=away['fired_while_idle'],
-            )
-        ]
-    )
-
-
 def pause(state: dict, now: dt.datetime) -> Change:
     """Hold the clock where it stands, ending a nudge in hand. A clock already paused is left alone."""
     if state['phase'] == Phase.PAUSED:
@@ -408,7 +307,7 @@ def resume(state: dict, now: dt.datetime) -> Change:
     """Carry on the count from where `pause` held it."""
     if state['phase'] != Phase.PAUSED:
         return Change()
-    state['phase'] = (Phase.AWAY if state['away'] else Phase.COUNTING).value
+    state['phase'] = Phase.COUNTING.value
     return Change(records=[record(Event.RESUMED, now)])
 
 
@@ -544,11 +443,9 @@ def topic(suggestion: dict | None) -> str:
 def notification_text(nudge: dict) -> tuple[str, str]:
     """The notification's summary and body."""
     suggestion = nudge['suggestion'] or {}
-    foot = f'{round(nudge["present_minutes"])} min at the desk'
     if 'pursuit' not in suggestion:
-        return 'Time for a break', f'{suggestion.get("message") or SUGGESTION_MESSAGES[SuggestionError.NOTHING_TO_DRAW]}\n{foot}'
-    label = suggestion.get('label')
-    return f'Up for {suggestion["pursuit"]}', f'{label}\n{foot}' if label else foot
+        return 'Time for a break', suggestion.get('message') or SUGGESTION_MESSAGES[SuggestionError.NOTHING_TO_DRAW]
+    return f'Up for {suggestion["pursuit"]}', suggestion.get('label') or ''
 
 
 def notification_argv(nudge: dict, replaces: int | None = None) -> list[str]:
@@ -584,7 +481,7 @@ def bus_owner_from(reply: str) -> str | None:
 
 
 def minutes_left(state: dict) -> int:
-    return max(math.ceil((state['interval_minutes'] * 60 - state['present_seconds']) / 60), 0)
+    return max(math.ceil((state['interval_minutes'] * 60 - state['counted_seconds']) / 60), 0)
 
 
 def pill_face(state: dict) -> dict[str, str]:
@@ -607,7 +504,7 @@ def status_document(state: dict, now: dt.datetime) -> dict:
         'schema_version': STATUS_SCHEMA_VERSION,
         'phase': state['phase'],
         'watch_running': stale_after is not None and now < stale_after,
-        'present_minutes': round(state['present_seconds'] / 60, 2),
+        'counted_minutes': round(state['counted_seconds'] / 60, 2),
         'interval_minutes': state['interval_minutes'],
         'minutes_left': None if nudge else minutes_left(state),
         'nudge_id': nudge.get('nudge_id'),
@@ -1019,14 +916,12 @@ def record(event: Event, now: dt.datetime, **fields: Any) -> dict:
 
 # The fields that each event's line carries beyond `ts`, `event` and the schema version.
 RECORD_FIELDS: dict[Event, tuple[str, ...]] = {
-    Event.STARTED: ('doit_version', 'phase', 'present_minutes', 'interval_minutes'),
-    Event.FIRED: ('nudge_id', 'interval_minutes', 'present_minutes', 'suggestion', 'sessions', 'focused_window'),
+    Event.STARTED: ('doit_version', 'phase', 'counted_minutes', 'interval_minutes'),
+    Event.FIRED: ('nudge_id', 'interval_minutes', 'counted_minutes', 'suggestion', 'sessions', 'focused_window'),
     Event.ANSWERED: ('nudge_id', 'answer', 'seconds_since_fired', 'saved', 'queued', 'late'),
     Event.DISMISSED: ('nudge_id',),
     Event.EXPIRED: ('nudge_id',),
     Event.PICKED: ('nudge_id', 'pick', 'sessions', 'focused_window'),
-    Event.AWAY: ('idle_after_seconds', 'away_seconds', 'fired_while_idle', 'nudge_id'),
-    Event.BACK: ('idle_after_seconds', 'away_seconds', 'fired_while_idle'),
     Event.GAP: ('gap_seconds',),
     Event.PAUSED: ('nudge_id',),
     Event.RESUMED: (),
@@ -1086,7 +981,10 @@ RECORD_PROPERTIES: dict[str, dict] = {
         'description': "The firing's UUIDv7, which joins its answers and the service's row. Null where no nudge was in hand.",
     },
     'interval_minutes': {'type': 'number', 'description': 'The interval in force.'},
-    'present_minutes': {'type': 'number', 'description': 'The present time counted.'},
+    'counted_minutes': {
+        'type': 'number',
+        'description': 'The minutes counted toward the interval: time with a desk session since the last nudge ended.',
+    },
     'suggestion': SUGGESTION_SCHEMA,
     'sessions': {
         'description': 'Every row of `claude-sessions --json`, whole, or why it could not be read.',
@@ -1129,10 +1027,7 @@ RECORD_PROPERTIES: dict[str, dict] = {
             'error': {'type': ['string', 'null'], 'description': "Why it did not: the owner's refusal, or the command and how it failed."},
         },
     },
-    'idle_after_seconds': {'type': 'integer', 'description': "The listener's timeout, which an away counts back from."},
-    'away_seconds': {'type': 'number', 'description': 'How long the absence had run, from the last input.'},
-    'fired_while_idle': {'type': 'boolean', 'description': 'Whether a nudge fired inside the idle window.'},
-    'gap_seconds': {'type': 'number', 'description': 'The time between two ticks, counted as absence past two tick periods.'},
+    'gap_seconds': {'type': 'number', 'description': 'The time between two ticks, past two tick periods, which the clock does not count.'},
 }
 
 
@@ -1176,7 +1071,7 @@ def status_schema() -> dict:
             'schema_version',
             'phase',
             'watch_running',
-            'present_minutes',
+            'counted_minutes',
             'interval_minutes',
             'minutes_left',
             'nudge_id',
@@ -1191,7 +1086,10 @@ def status_schema() -> dict:
             'schema_version': {'const': STATUS_SCHEMA_VERSION},
             'phase': {'enum': [phase.value for phase in Phase], 'description': 'Where the clock stands.'},
             'watch_running': {'type': 'boolean', 'description': "Whether the watch ticked within the pill's stale horizon."},
-            'present_minutes': {'type': 'number', 'description': 'The present time counted toward the interval.'},
+            'counted_minutes': {
+                'type': 'number',
+                'description': 'The minutes counted toward the interval: time with a desk session since the last nudge ended.',
+            },
             'interval_minutes': {
                 'type': 'number',
                 'description': f'The interval last read from the service, or {STARTING_INTERVAL_MINUTES} where none was.',
@@ -1199,7 +1097,7 @@ def status_schema() -> dict:
             'minutes_left': {
                 'type': ['integer', 'null'],
                 'minimum': 0,
-                'description': 'Present minutes still to count before a firing. Null while a nudge is firing or ready.',
+                'description': 'Minutes still to count before a firing. Null while a nudge is firing or ready.',
             },
             'nudge_id': {'oneOf': [NUDGE_ID, {'type': 'null'}], 'description': 'The nudge in hand.'},
             'fired_at': {**nullable_stamp, 'description': 'When the nudge in hand fired.'},

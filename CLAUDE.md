@@ -33,6 +33,10 @@ date either carries evidence or does not, whichever app was asked. Standing coun
 pursuit's zero point, so a date dropped is a payment the balance no longer sees, and the pursuit
 reads as owing it forever.
 
+**Keep the desk nudge's clock blind to input.** A short absence comes every few minutes at a desk,
+so a clock that pauses or resets on one rarely reaches its interval, and the nudge never fires.
+Only a nudge ending restarts it. An idle hint may gate a background read, never the count.
+
 **Do not reconcile `doit today` and the due list on a timed pursuit.** `doit today` counts every
 minute the pace asked before today and nothing paid. The due list calls a pursuit owed only once it
 is a whole checkoff behind, and a timed pursuit's checkoff is a week. So work can read hours behind
@@ -63,6 +67,8 @@ apps draw three lanes.
 - **`notify-send`**, in `Watch.show`, as a child that the desk nudge's tick loop never waits on,
   open until clicked, and in `notify` for a passing notice.
 - **`gdbus`**, in `close_notification` and `notification_bus_owner`.
+- **`loginctl show-session auto -p IdleHint --value`**, in `service_commands.desk_nudge.session_idle`,
+  before each timed read of the desk nudge panel's rows. It never moves the clock.
 - **`life habits complete <id>`**, in `service_commands.desk_nudge.completed_habit`, at a panel
   pick on a habit, stopped after `HABIT_SECONDS`. Its argv is `dashboard.habit_completion_argv`,
   built from the habit's id in doit's code, never read from the panel's cache.
@@ -90,7 +96,7 @@ install a release it runs `git clone` and `uv`, each under the library's own tim
   each file rewritten by the command that fetches it, and the desk nudge panel's rows, which the
   watch rewrites and `panel show` reads. `doit config show` prints each of these with
   where it came from, and a value doit newly resolves gets a row there.
-- **The desk nudge's clock** — present time is a fact of one desk, so `$XDG_STATE_HOME/doit/`
+- **The desk nudge's clock** — the time a desk counts is a fact of that desk, so `$XDG_STATE_HOME/doit/`
   holds the nudge's state file and its record file, which a log shipper reads. Only its answers
   go to the service, so the interval follows the login to any desk.
 

@@ -341,40 +341,35 @@ practice:
     command: howto labs show rg-search-code
 ```
 
-## `desk-nudge` — a nudge when a long stretch at the desk runs past the interval
+## `desk-nudge` — a nudge toward the next thing every interval at the desk
 
 ```bash
 doit desk-nudge watch                      # the loop that a desk's user service runs
 doit desk-nudge status                     # where the clock stands, and what the nudge suggests
 doit desk-nudge answer too_soon            # answer the nudge that is showing
-doit desk-nudge record-presence away 120   # what an idle listener runs after 120 s with no input
 doit desk-nudge pause                      # hold the clock until resume
 doit desk-nudge panel show --json          # the panel's rows, read with no request
 doit desk-nudge panel pick habit:17 --json # complete one row, and print the next step
 ```
 
-The watch ticks every 15 seconds and counts the time you are present. When that reaches the
-interval, it reads `doit next` and shows a notification naming the first pursuit offered, with four
-answers: good timing, too soon, too late and bothered me. The nudge stays ready for 10 minutes. An
-answer, those 10 minutes, leaving the desk or `pause` ends it, and the clock restarts at zero. The
-answers are the notification's actions, which the notification server offers its own way. A
-notification closed with no answer leaves the nudge ready.
+The watch ticks every 15 seconds and counts the time since the last nudge ended. When that reaches
+the interval, it reads `doit next` and shows a notification naming the first pursuit offered, with
+four answers: good timing, too soon, too late and bothered me. The nudge stays ready for 10 minutes.
+An answer, a completing panel pick, those 10 minutes or `pause` ends it, and the clock restarts at
+zero. The answers are the notification's actions, which the notification server offers its own way.
+A notification closed with no answer leaves the nudge ready.
 
-The interval starts at 60 minutes. Each too soon multiplies it by 1.1, and each too late divides it
+The interval starts at 30 minutes. Each too soon multiplies it by 1.1, and each too late divides it
 by 1.1. The service stores every answer and computes the interval from all of them, so it follows
 the login to any desk. An answer that the service could store later is kept on the desk, and the
 watch sends it again each tick. One that the service refuses is recorded and dropped.
 
-Present time counts only what the desk shows:
+The clock does not watch for input, so stepping away neither pauses nor resets it:
 
-- A tick adds at most 30 seconds, so a suspend or a stopped watch counts as absence.
-- An idle listener runs `record-presence away 120` after 120 seconds with no input, ignoring
-  inhibitors, and `back` on the next input. The away takes those 120 seconds back.
-- An absence of 5 minutes or more is a break, and restarts the clock. A shorter one pauses it.
-- The clock counts only while a Hyprland socket exists under `$XDG_RUNTIME_DIR/hypr/` and
-  `hypridle` runs. Otherwise the phase is `no_desk`.
-- An away ends once the `hypridle` that reported it is gone, as after a logout or a reboot, because
-  no `back` will come for it.
+- A tick adds at most 30 seconds, so a suspend or a stopped watch goes uncounted.
+- The clock counts only while a Hyprland socket exists under `$XDG_RUNTIME_DIR/hypr/`. Otherwise
+  the phase is `no_desk`, and the count holds until the desk returns.
+- Nothing but a nudge ending restarts it.
 
 `$XDG_STATE_HOME/doit/desk-nudge.json` holds the clock. A status bar reads only its `pill` object:
 it prints the `text` and the `class`, and reads `nudge stopped` once the time is past `stale_after`.
@@ -383,7 +378,7 @@ The rest of the file is the watch's own. `status --json` carries the same `pill`
 cannot be read is moved aside, with `.unreadable-` and the time added to its name, and the clock
 starts fresh.
 
-Each firing, answer, pick, dismissal, expiry, absence, gap, pause and resume appends one JSON line to
+Each firing, answer, pick, dismissal, expiry, gap, pause and resume appends one JSON line to
 `$XDG_STATE_HOME/doit/desk-nudge-events.jsonl`, which `schemas/desk-nudge-record.schema.json`
 describes. A firing's line carries every row that `claude-sessions --json` prints and the focused
 window that `hyprctl` names, so a later rule can learn when a nudge lands well. `task schemas`
@@ -417,8 +412,9 @@ today` that something completes, in each lane's own order:
 
 The watch reads the rows from `/today` and `/pursuits` into
 `$XDG_CACHE_HOME/doit/desk-nudge-panel.json`, so the panel opens with no request. It reads them at
-each firing, after each pick, and every `PANEL_REFRESH_SECONDS` while the desk is in use. Away from
-the desk the timed read waits, and the first tick back reads them. The cache holds what each row
+each firing, after each pick, and every `PANEL_REFRESH_SECONDS`. The timed read waits while
+logind marks the session idle, as hypridle's 10-minute listener sets it, and the first tick back
+reads them. The cache holds what each row
 completes, never a command. After a pick, the watch also reads `/next`, which leaves out what was
 just logged, so the suggestion moves on. A suggestion carried into a later read stays only while
 today's lane still lists its pursuit. A read that fails keeps the last rows, and the first row says
