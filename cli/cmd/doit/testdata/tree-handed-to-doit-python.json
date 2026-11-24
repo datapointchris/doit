@@ -1,0 +1,44 @@
+[
+  {
+    "path": [
+      "auth"
+    ],
+    "summary": "Log this machine in to doit's service, and out",
+    "group": "This machine"
+  },
+  {
+    "path": [
+      "auth",
+      "status"
+    ],
+    "summary": "Show where doit is pointed and whether this machine is logged in"
+  },
+  {
+    "path": [
+      "auth",
+      "login"
+    ],
+    "summary": "Log in by approving a code in any browser"
+  },
+  {
+    "path": [
+      "auth",
+      "logout"
+    ],
+    "summary": "Forget this machine's token"
+  },
+  {
+    "path": [
+      "auth",
+      "token"
+    ],
+    "summary": "Print a valid access token, for calling the service directly"
+  },
+  {
+    "path": [
+      "update"
+    ],
+    "summary": "Update doit to the latest release",
+    "group": "This machine"
+  }
+]

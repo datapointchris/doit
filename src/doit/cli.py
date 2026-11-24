@@ -4,18 +4,18 @@ Every node prints help when given no arguments and a usage error exits 2, both
 from typer. Each subcommand module owns its own `app`, and this file assembles them.
 """
 
+import json
 import os
+import shlex
+from collections.abc import Mapping
 from typing import Annotated
 
 import typer
 from pyclilogin import LoginError
-from pyclilogin.typercmd import add_auth_commands
-from pyselfupdate import Config
-from pyselfupdate import notify
-from pyselfupdate.typercmd import add_update_command
 from typer._click.core import Context
 from typer._click.exceptions import NoSuchOption
 from typer.core import TyperGroup
+from typer.main import get_command_name
 
 from doit import __version__
 from doit import config_commands
@@ -72,8 +72,8 @@ WHAT_YOU_DECLARED = 'What you declared'
 THIS_MACHINE = 'This machine'
 
 # Typer lists a group's commands ahead of its sub-apps and draws each panel where
-# its first command falls. Left alone, `update` would put This machine above What
-# you declared.
+# its first command falls. Left alone, a command the Go doit runs would put This
+# machine above What you declared. A name missing here sorts last.
 ROOT_ORDER = (
     'next',
     'today',
@@ -84,11 +84,9 @@ ROOT_ORDER = (
     'pursuits',
     'review',
     'sources',
-    'auth',
     'config',
     'shell',
     'desk-nudge',
-    'update',
 )
 
 
@@ -156,29 +154,6 @@ app = typer.Typer(
 )
 
 
-# Notify-only by house rule: one check per 24h, one line to stderr, and
-# `doit update` is the only thing that writes anything. The notice and the
-# command share this one config so they cannot advertise a release the command
-# then refuses.
-#
-# No credential is configured because pyselfupdate authenticates itself, running
-# `gh auth token` when a request is about to be made. `$GITHUB_TOKEN_COMMAND`
-# redirects that or empties it, and it is the user's lever rather than ours.
-UPDATE_CONFIG = Config(tool='doit', owner='datapointchris')
-
-AUTH_EXAMPLES = {
-    'login': examples(
-        ('doit auth login https://doit.example.com', 'log a new machine in to that service'),
-        ('doit auth login', 'log in again to the service the config file names'),
-    ),
-    'logout': examples(('doit auth logout', "forget this machine's token")),
-    'token': examples(('doit auth token', 'an access token, for calling the service directly')),
-    'status': examples(
-        ('doit auth status', 'whether this machine is logged in, and to what'),
-        ('doit auth status --json', 'the same as data'),
-    ),
-}
-
 # The draw sits at the root because it is typed most. Logging and skipping live
 # under `pursuits`, beside the file they write to.
 app.command('next', rich_help_panel=WHAT_TO_DO_NOW, epilog=pursuits.NEXT_EXAMPLES)(pursuits.next_command)
@@ -194,22 +169,61 @@ app.add_typer(config_commands.app, name='config', rich_help_panel=THIS_MACHINE)
 app.add_typer(shell.app, name='shell', rich_help_panel=THIS_MACHINE)
 app.add_typer(desk_nudge.app, name='desk-nudge', rich_help_panel=THIS_MACHINE)
 
-auth = add_auth_commands(app, service.LOGIN, rich_help_panel=THIS_MACHINE)
-auth.info.epilog = examples(
-    ('doit auth status', 'whether this machine is logged in, and to what'),
-    ('doit auth login https://doit.example.com', 'log a new machine in to that service'),
-)
-for auth_command in auth.registered_commands:
-    auth_command.epilog = AUTH_EXAMPLES[auth_command.name or '']
+# The Go doit hands its command tree here when it passes a line on, as a JSON list
+# of {path, summary, group}. Each command this tree lacks gets an entry that runs
+# nothing, under the group holding its parent, so the help lists every verb.
+GO_COMMANDS_VARIABLE = 'DOIT_GO_COMMANDS'
 
-# pyselfupdate takes no panel or epilog, so its command is given them once registered.
-add_update_command(app, UPDATE_CONFIG)
-update_command = app.registered_commands[-1]
-update_command.rich_help_panel = THIS_MACHINE
-update_command.epilog = examples(
-    ('doit update --check', 'whether a newer release exists, installing nothing'),
-    ('doit update', 'install the newest release over this one'),
-)
+
+def run_by_go(path: list[str]):
+    """The command for one the Go doit runs, which refuses as a usage error and names the Go help.
+
+    A line reaches it from the Go doit passing on a flag it does not take.
+    """
+
+    def refuse(ctx: typer.Context) -> None:
+        named = shlex.join(['doit', *path])
+        typed = shlex.join(['doit', *path, *ctx.args])
+        error_console.print(
+            f'doit: the Go doit runs `{named}`, and doit-python does not, so `{typed}` ran nothing. `{named} --help` lists what it takes.',
+            soft_wrap=True,
+            markup=False,
+        )
+        raise SystemExit(2)
+
+    return refuse
+
+
+def group_at(path: list[str]) -> typer.Typer | None:
+    """The group of this tree at path below the root, or None where there is none."""
+    group = app
+    for name in path:
+        found = next((info.typer_instance for info in group.registered_groups if info.name == name), None)
+        if found is None:
+            return None
+        group = found
+    return group
+
+
+def names_in(group: typer.Typer) -> set[str]:
+    """Every command and group name group lists."""
+    commands = {info.name or get_command_name(info.callback.__name__) for info in group.registered_commands if info.callback}
+    return commands | {info.name for info in group.registered_groups if isinstance(info.name, str)}
+
+
+def list_go_commands(environ: Mapping[str, str]) -> None:
+    """Add an entry for each command the Go doit names in environ that this tree lacks."""
+    for command in json.loads(environ.get(GO_COMMANDS_VARIABLE) or '[]'):
+        *parents, name = command['path']
+        group = group_at(parents)
+        if group is None or name in names_in(group):
+            continue
+        group.command(
+            name,
+            help=command['summary'],
+            rich_help_panel=command.get('group'),
+            context_settings={'ignore_unknown_options': True, 'allow_extra_args': True},
+        )(run_by_go(command['path']))
 
 
 def version_callback(asked: bool) -> None:
@@ -222,7 +236,6 @@ def version_callback(asked: bool) -> None:
 
 @app.callback()
 def root(
-    ctx: typer.Context,
     version: Annotated[
         bool | None,
         typer.Option('--version', '-V', callback=version_callback, is_eager=True, help='Show the installed version and exit.'),
@@ -234,12 +247,6 @@ def root(
 ) -> None:
     """Root callback, hosting the app-level options."""
     set_no_input(no_input)
-
-    # `update` runs its own check, so notifying too would ask the releases API
-    # twice for one command and let the notice contradict what `--check` just
-    # printed. Every other path is gated locally before it reaches the network.
-    if ctx.invoked_subcommand != 'update':
-        notify(UPDATE_CONFIG)
 
 
 # Each chose the files doit read and wrote. The service holds that data, so one
@@ -259,8 +266,11 @@ def main() -> None:
     if refusal := retired_variable_set():
         error_console.print(f'doit: {refusal}', soft_wrap=True, markup=False)
         raise SystemExit(2)
+    list_go_commands(os.environ)
+    # The console script is doit-python, and a person typed doit, so every
+    # usage line and refusal names doit.
     try:
-        app()
+        app(prog_name='doit')
     except (service.ServiceFailed, LoginError) as failure:
         error_console.print(f'doit: {failure}', soft_wrap=True, markup=False)
         raise SystemExit(service.exit_code(failure)) from None

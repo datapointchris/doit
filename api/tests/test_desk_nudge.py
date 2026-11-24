@@ -172,7 +172,6 @@ def desk(tmp_path, monkeypatch):
     monkeypatch.setenv('XDG_RUNTIME_DIR', str(root / 'run'))
     monkeypatch.delenv('HYPRLAND_INSTANCE_SIGNATURE', raising=False)
     monkeypatch.delenv('WAYLAND_DISPLAY', raising=False)
-    monkeypatch.setattr('doit.cli.notify', lambda config: None)
     clock = Clock(DESK_START)
     monkeypatch.setattr(commands, 'now', clock)
     found = Desk(root, clock)

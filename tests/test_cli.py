@@ -22,27 +22,17 @@ from typer.models import CommandInfo
 from typer.testing import CliRunner
 
 import doit
-import doit.cli
 from doit import __version__
+from doit.cli import GO_COMMANDS_VARIABLE
 from doit.cli import ROOT_ORDER
 from doit.cli import accepted_placements
 from doit.cli import app
+from doit.cli import list_go_commands
+from doit.service_commands import desk_nudge as desk_nudge_commands
 from doit.service_commands import pursuits as pursuit_commands
 
 runner = CliRunner()
 SCHEMAS = Path(__file__).resolve().parents[1] / 'schemas'
-
-
-@pytest.fixture(autouse=True)
-def never_check_for_updates(monkeypatch):
-    """Keep the releases API out of the suite.
-
-    pyselfupdate's own gates already decline here — a captured stream is not a
-    TTY and a checkout is not an installed tool — but a test that reaches the
-    network only when two of someone else's gates both hold is a test that fails
-    on a machine, not in CI.
-    """
-    monkeypatch.setattr('doit.cli.notify', lambda config: None)
 
 
 def command_name(command: CommandInfo) -> str:
@@ -127,6 +117,7 @@ WORDS = r'((?: [a-z][\w-]*(?![\w/.-]))+)'
 PRINTED_IN_SOURCE = re.compile(rf"(?:\]|`|')doit{WORDS}")
 SHELL_FENCE = re.compile(r'^```(?:bash|sh)\n(.*?)^```', re.MULTILINE | re.DOTALL)
 PRINTED_IN_FENCE = re.compile(rf'^doit{WORDS}', re.MULTILINE)
+HANDED_GO_TREE = REPO / 'cli' / 'cmd' / 'doit' / 'testdata' / 'tree-handed-to-doit-python.json'
 # Text that a screen shows and nobody runs: the zsh completion's heading over the
 # verb list, and the desk nudge panel's banner over rows that could not be read again.
 NOT_A_COMMAND = {('shell.py', ' command'), ('desk_nudge.py', ' unreachable')}
@@ -145,11 +136,14 @@ def printed_commands():
         yield 'README.md', match.group(1).split()
 
 
-def test_every_command_it_prints_is_in_the_command_tree():
+def test_every_command_it_prints_is_in_the_command_tree(monkeypatch):
     """A hint naming a command that was renamed sends its reader to an error.
 
     The walk stops at a leaf, so the words after it are that command's arguments.
+    The Go doit's commands are listed as it hands them to doit-python.
     """
+    monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
+    list_go_commands({GO_COMMANDS_VARIABLE: HANDED_GO_TREE.read_text()})
     tree = get_command(app)
     missing = []
     walked = 0
@@ -214,36 +208,25 @@ def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
     assert accepted_placements(refused.value) == ['doit --no-input next']
 
 
-def test_update_path_does_not_also_notify(monkeypatch):
-    """`update` runs its own check, so notifying would ask the API twice."""
-    calls: list[object] = []
-    monkeypatch.setattr('doit.cli.notify', calls.append)
-    monkeypatch.setattr('pyselfupdate.typercmd.run_update', lambda *args, **kwargs: None)
+def test_a_command_the_go_doit_hands_on_is_listed_under_its_parent_and_runs_nothing(monkeypatch):
+    """The Go doit hands its tree on with each line it passes, and Python has no copy of those verbs to run."""
+    monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
+    monkeypatch.setattr(desk_nudge_commands.app, 'registered_commands', list(desk_nudge_commands.app.registered_commands))
+    handed = [
+        {'path': ['update'], 'summary': 'Update doit', 'group': 'This machine'},
+        {'path': ['desk-nudge', 'window'], 'summary': 'Open the panel window'},
+    ]
+    list_go_commands({GO_COMMANDS_VARIABLE: json.dumps(handed)})
 
-    runner.invoke(app, ['update', '--check'])
-
-    assert calls == []
-
-
-def test_every_other_path_notifies(monkeypatch):
-    """The notice is gated inside pyselfupdate, so it must be reached to gate."""
-    calls: list[object] = []
-    monkeypatch.setattr('doit.cli.notify', calls.append)
-
-    runner.invoke(app, ['sources', 'list'])
-
-    assert calls == [doit.cli.UPDATE_CONFIG]
-
-
-def test_the_credential_is_left_to_pyselfupdate():
-    """pyselfupdate runs `gh auth token` itself, and `$GITHUB_TOKEN_COMMAND` is
-    what redirects or empties it — a lever that belongs to whoever runs doit.
-
-    A helper here would be a second implementation of that, and the reason the
-    library grew one is that eleven tools never pasted it.
-    """
-    assert doit.cli.UPDATE_CONFIG.token == ''
-    assert doit.cli.UPDATE_CONFIG.token_func is None
+    tree = get_command(app)
+    assert isinstance(tree, TyperGroup)
+    nudge = tree.commands['desk-nudge']
+    assert isinstance(nudge, TyperGroup)
+    assert 'update' in tree.commands
+    assert 'window' in nudge.commands
+    result = runner.invoke(app, ['update', '--chek'])
+    assert result.exit_code == 2
+    assert 'doit update --help' in result.output
 
 
 def test_version_is_unknown_without_installed_metadata(monkeypatch):

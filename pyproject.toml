@@ -27,22 +27,20 @@ requires-python = ">=3.13"
 # Not pytermstyle: a standalone CLI standardizes on rich's display semantics, and
 # pytermstyle is for the in-repo dotfiles apps sharing a palette with colors.sh.
 #
-# The [typer] extra is the ready-made `doit update`; safekeep declines it only
-# because it is argparse. Resolved from PyPI, where the name was free.
-#
 # typer's floor is the first release carrying click at `typer._click`, whose
 # types cli.py imports. pyyaml's is the first with wheels for this Python.
 dependencies = [
     "typer>=0.26.0",
     "rich>=13.0.0",
     "pyyaml>=6.0.2",
-    "pyselfupdate[typer]>=0.5.4",
     "pyclilogin>=0.2.0",
     "httpx2>=2.9.1",
 ]
 
+# The Go binary built from cli/ is `doit`. It runs each verb it has ported and
+# hands every other command line to this one unchanged.
 [project.scripts]
-doit = "doit.cli:main"
+doit-python = "doit.cli:main"
 
 [tool.ruff]
 line-length = 140

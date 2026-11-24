@@ -5,11 +5,13 @@ parse is the classic way this breaks, and it breaks at shell startup on every
 machine at once rather than where it was written.
 """
 
+import json
 import os
 import re
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -85,11 +87,15 @@ def test_tab_after_pursuits_log_offers_the_cached_names_without_starting_doit(tm
     assert not started.exists()
 
 
+HANDED_GO_TREE = Path(__file__).resolve().parents[1] / 'cli' / 'cmd' / 'doit' / 'testdata' / 'tree-handed-to-doit-python.json'
+
+
 def test_the_completion_offers_the_verbs_the_cli_has():
-    """Nothing else joins this hand-written list to the command tree."""
+    """Nothing else joins this hand-written list to the command tree, the Go doit's verbs among it."""
     offered = set(re.findall(r"^\s+'([a-z-]+):", shell.zsh_completion(), re.M))
     registered = {command.name for command in cli_app.registered_commands}
     registered |= {group.name for group in cli_app.registered_groups}
+    registered |= {command['path'][0] for command in json.loads(HANDED_GO_TREE.read_text())}
 
     assert offered == registered
 

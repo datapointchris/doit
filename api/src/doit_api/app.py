@@ -4,9 +4,9 @@ Every route parses its request, calls a view or a write, and returns what that
 returned. Nothing here computes a view, reads an app or opens the store itself.
 
 `/health`, `/ready` and the RFC 9728 metadata answer anyone. Everything under
-`/api/v1` answers a person's login, because every route reads or writes one
-person's register and journal. A write records the caller as `recorded_by`,
-beside the machine and actor the client names.
+`/api/v1` answers a person's login. Its routes read or write one person's
+register and journal, and its OpenAPI document describes them. A write records
+the caller as `recorded_by`, beside the machine and actor the client names.
 
 `create_app` takes every collaborator as an argument. Production passes the ones
 `main` builds from the environment. A test passes a temporary store, stand-in
@@ -137,6 +137,11 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
         summary="doit's register, review register, sources and journal with their history, and every view computed from them.",
         version=version('doit-api'),
         lifespan=lifespan,
+        # The document is served under /api/v1, behind a person's login, by the
+        # route below.
+        openapi_url=None,
+        docs_url=None,
+        redoc_url=None,
     )
     install_error_handlers(app)
 
@@ -167,6 +172,11 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
 
     api = APIRouter(prefix='/api/v1')
     Person = Annotated[Caller, Depends(person_dependency(verifier))]
+
+    @api.get('/openapi.json', include_in_schema=False)
+    def openapi_document(caller: Person) -> dict:
+        """The OpenAPI document. A client names its info.version when an answer lacks a field it needs."""
+        return app.openapi()
 
     @api.get('/documents')
     def document_list(caller: Person) -> list[dict]:
