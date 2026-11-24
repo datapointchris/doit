@@ -25,16 +25,18 @@ from doit import sources
 from doit import today
 from doit.desk_nudge import ANSWER_LABELS
 from doit.desk_nudge import Answer
-from doit.desk_nudge import completion_key
-from doit.desk_nudge import suggestion_from
 from doit.lanes import CompletionKind
 from doit.lanes import Lane
 from doit.lanes import Row
+from doit.pursuits import choice_lines
 from doit.pursuits import is_timed
+from doit.pursuits import settled_choice
 from doit.pursuits import writes_through
 from doit.today import due_row_cap
 
 SCHEMA_VERSION = 1
+
+KEY_SEPARATOR = ':'
 
 # The due lanes carried under the lane contract. Pursuits and habits are parts of their own.
 LANES = (*(register.name for register in happened.registers()), *today.DAY_SHAPED_ROW_LANES)
@@ -42,6 +44,11 @@ LANES = (*(register.name for register in happened.registers()), *today.DAY_SHAPE
 NOTHING_OFFERED = 'the draw offers nothing that is not already logged'
 
 NO_COMPLETION: dict = {'key': None, 'completes': None}
+
+
+def completion_key(kind: str, ref: str, item_id: str | None = None) -> str:
+    """What an entry completes, as its key: `pursuit:tasks:532`, `habit:17`, `review:prune-docker`."""
+    return KEY_SEPARATOR.join([kind, ref, *([item_id] if item_id else [])])
 
 
 def completion(kind: CompletionKind, ref: str, item_id: str | None = None) -> dict:
@@ -89,16 +96,22 @@ def suggestion(selection: dict, register: dict, usual: dict, days: dict[str, dic
     """The draw's first pursuit, as `doit next` offers it, with its choices and what a Log starts from.
 
     A resolve in `items` stands in for the draw's own, so a choice read since
-    the draw failed is the one shown, as the pursuits part shows it.
+    the draw failed is the one shown, as the pursuits part shows it. The label
+    is what `doit next` shows for it: each resolved choice on its own line, else
+    the pursuit's description.
     """
     resolved = {**(selection.get('resolved') or {}), **items}
-    offered = suggestion_from({**selection, 'resolved': resolved, 'pursuits': register})
-    name = offered['pursuit']
+    name = selection['offered'][0]
     config = register.get(name) or {}
+    entry = resolved.get(name) or {}
+    drawn = [] if entry.get('error') else entry.get('choices') or []
+    settled = settled_choice(drawn)
     choices, choices_error = choices_of(name, config, resolved.get(name))
     return {
         'draw_id': selection.get('draw_id'),
-        **offered,
+        'pursuit': name,
+        'item_id': settled.get('id') if settled else None,
+        'label': '\n'.join(choice_lines(drawn)) or config.get('description') or '',
         'description': config.get('description') or '',
         'unit': unit_of(config),
         'writes_through': writes_through(config),

@@ -79,49 +79,57 @@ its reason. A merge of every same-named lane was rejected, because it changes wh
 for every other source. Feedback stays the opposite way: one lane per app, never combined, so three
 apps draw three lanes.
 
-**Keep `doit-tui` reading the desk nudge panel through `doit desk-nudge panel`.** The panel's rows
-live in this desk's cache, its picks take the desk nudge's state lock, and a pick runs `life habits
-complete` and a pursuit's `on_log`, none of which the service runs. A Go copy of any of it would be a
-second owner of the state file and of every completion rule. When doit's CLI moves to Go, the tab
-moves with it and calls the same code in process. Only the panel has this reason, so a tab over the
-service's data reads the service's API. The board parses no key and lists no kind. Where it needs
-another fact about a row, the row carries it, as `group`, `minutes` and `suggested` do.
+**Run every desk nudge pick inside the watch.** The panel's parts live in this desk's cache, a pick
+takes the desk nudge's state lock, and a pick runs `life habits complete` and a pursuit's `on_log`,
+none of which the service runs. `doit desk-nudge panel pick` hands the key to the watch over its
+socket rather than running the pick itself. A second runner of picks would be a second owner of the
+state file and of every completion rule.
+
+**Keep `doit-tui` reading the desk nudge panel through `doit desk-nudge panel`.** It lists each
+step's rows with `desknudge.Panel.Rows`, the code that `panel show` prints them with. The board
+parses no key and lists no kind. Where it needs another fact about a row, the row carries it, as
+`group`, `minutes` and `suggested` do. Only the panel has this reason, so a tab over the service's
+data reads the service's API.
 
 ## The service runs no command, and the CLI's own code starts the processes below
 
 - **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`, with no timeout.
 - **`doit-tui`**, in `tui.tui_command`, which replaces the process with it. `doit-tui` is the Go
   program in `cli/`. It starts `doit desk-nudge panel show --json` on a timer and `panel pick <key>
-  --json` for each pick, each in a session of its own, so every rule about a row stays in this
-  package.
-- **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking, with no timeout. A desk nudge
-  panel pick runs it unasked, because the pick is the asking.
+  --json` for each pick, each in a session of its own, so every rule about a row stays in
+  `cli/internal/desknudge`.
+- **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking, with no timeout.
 - **A review item's `show`**, in `review.run_show`, inside the nudge, stopped after 10
   seconds.
-- **`claude-sessions --json`**, in `service_commands.desk_nudge.claude_sessions`, at each desk
-  nudge firing, answer and panel pick.
-- **`hyprctl`**, in `service_commands.desk_nudge.hyprctl`: `instances -j`, then `-i <instance>
-  activewindow -j` at the same moments, and `-i <instance> monitors -j` as a nudge turns ready. A
-  unit started at login never has `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
-- **`canberra-gtk-play --id <CHIME_SOUND>`**, in `service_commands.desk_nudge.chime`, once as a
-  nudge turns ready, unless every display is off. A firing opens nothing else.
-- **`notify-send`**, in `notify`, for a passing notice after an answer or a panel pick.
-- **`loginctl show-session auto -p IdleHint --value`**, in `service_commands.desk_nudge.session_idle`,
-  before each timed read of the desk nudge panel's rows. It never moves the clock.
-- **`life habits complete <id>`**, in `service_commands.desk_nudge.completed_habit`, at a panel
-  pick on a habit, stopped after `HABIT_SECONDS`. Its argv is `dashboard.habit_completion_argv`,
-  built from the habit's id in doit's code, never read from the panel's cache.
 
-The desk nudge programs are named in `service_commands.desk_nudge`, and each one but `life habits
-complete` is stopped after `PROGRAM_SECONDS`. Every one runs outside
-the state file's lock. A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit learns from another program arrives over HTTP through the wrappers
-below.
+A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit
+learns from another program arrives over HTTP through the wrappers below.
 
 The Go binary starts these:
 
 - **`doit-python`**, in `passthrough.Exec`, which replaces the process with it for every command line
   that `owns` turns down.
 - **The browser**, through pkg/browser's `xdg-open` or `open`, at `doit auth login`.
+- **The desk nudge's programs**, each an argv built by a function in
+  `cli/internal/desknudge/programs.go`:
+  - `claude-sessions --json`, by `claudeSessionsProgram`, at each firing, answer and pick.
+  - `hyprctl instances -j`, then `hyprctl -i <instance> activewindow -j`, at the same moments. A
+    unit started at login never has `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
+  - `hyprctl -i <instance> monitors -j`, as a nudge turns ready.
+  - `canberra-gtk-play --id message-new-instant`, by `chimeProgram`, once as a nudge turns ready,
+    unless every display is off. A firing opens nothing else.
+  - `notify-send -a doit`, by `notifyProgram`, for a passing notice after an answer or a pick.
+  - `loginctl show-session auto -p IdleHint --value`, by `idleHintProgram`, before each timed read
+    of the desk panel view. It never moves the clock.
+  - `life habits complete <id>`, by `habitProgram`, at a pick on a habit. The argv is built from
+    the habit's id in code, never read from the panel's cache.
+  - A pursuit's `on_log`, by `onLogProgram`, at a pick on that pursuit, unasked, because the pick
+    is the asking. The template is split into words before the item's fields fill it, so no field
+    can add an argument.
+
+  `life habits complete` and `on_log` are stopped after 30 seconds, and every other one after 5.
+  Each runs outside the state file's lock. `TestEachProgramTheWatchStartsHasItsArgvAndBound` is the
+  table of every argv and bound.
 
 The libraries start processes of their own. pyclilogin and goclilogin each run a login's configured
 `token_command`. goselfupdate runs `$GITHUB_TOKEN_COMMAND`, which defaults to `gh auth token`, for
@@ -142,7 +150,12 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
   where it came from, and a value doit newly resolves gets a row there.
 - **The desk nudge's clock** — the time a desk counts is a fact of that desk, so `$XDG_STATE_HOME/doit/`
   holds the nudge's state file and its record file, which a log shipper reads. Only its answers
-  go to the service, so the interval follows the login to any desk.
+  go to the service, so the interval follows the login to any desk. The watch serves its picks on
+  `$XDG_RUNTIME_DIR/doit/watch.sock`, in a 0700 directory.
+- **The desk nudge's schemas** — `schemas/desk-nudge-status.schema.json`,
+  `desk-nudge-record.schema.json` and `desk-nudge-panel.schema.json` are the source of each shape,
+  edited by hand. `TestEachDocumentTheWatchWritesMatchesItsSchemaFile` validates what the Go watch
+  writes against them.
 
 ## Which sources are asked is configuration, and how each is read is code
 

@@ -1,19 +1,33 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:doit:desk-nudge-panel:v2",
+  "$id": "urn:doit:desk-nudge-panel:v3",
   "title": "doit desk-nudge panel",
-  "description": "One step of the desk nudge's panel, read from the rows that the watch keeps in $XDG_CACHE_HOME/doit/desk-nudge-panel.json. `doit tui` draws each row and hands the picked key to `doit desk-nudge panel pick`, which prints the next step. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
+  "description": "One step of the desk nudge's panel. The watch keeps the today step in $XDG_CACHE_HOME/doit/desk-nudge-panel.json, `doit desk-nudge panel show --json` prints it, and `doit desk-nudge panel pick --json` prints the step a pick leads to. Each part is the service's desk panel view as the watch last read it, passed through whole, and null before the first read. The other fields are what only this desk knows. This file is the source of the shape, and a Go test validates each document the watch writes against it.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "step",
-    "rows",
-    "message"
+    "message",
+    "read_at",
+    "generated_at",
+    "stale_since",
+    "stale_reason",
+    "nudge",
+    "picked",
+    "minutes",
+    "suggestion",
+    "suggestion_reason",
+    "answers",
+    "totals",
+    "pursuits",
+    "habits",
+    "lanes",
+    "problems"
   ],
   "properties": {
     "schema_version": {
-      "const": 2
+      "const": 3
     },
     "step": {
       "enum": [
@@ -21,67 +35,7 @@
         "minutes",
         "done"
       ],
-      "description": "today's rows, a timed pursuit's minutes, or done once a pick has acted."
-    },
-    "rows": {
-      "type": "array",
-      "description": "What to draw, in order. Empty on a done step.",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "key",
-          "kind",
-          "text",
-          "group",
-          "minutes",
-          "suggested"
-        ],
-        "properties": {
-          "key": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What `panel pick` takes. Null on a note, which completes nothing."
-          },
-          "kind": {
-            "enum": [
-              "note",
-              "answer",
-              "pursuit",
-              "habit",
-              "review",
-              "practice",
-              "log_minutes",
-              "adjust_minutes"
-            ],
-            "description": "A note, an answer, what a completion completes, or a step through the minutes."
-          },
-          "text": {
-            "type": "string",
-            "description": "The line to draw."
-          },
-          "group": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The due lane a completion row came from, which it is drawn under. Null on every other row."
-          },
-          "minutes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "description": "The minutes a minutes row logs or reopens at. Null on every other row."
-          },
-          "suggested": {
-            "type": "boolean",
-            "description": "A completion row completes the suggestion, which `doit next` put first. On a log_minutes row, the amount that the step offers first, and that its ±5 rows count from."
-          }
-        }
-      }
+      "description": "today's parts, a timed pursuit's minutes, or done once a pick has acted."
     },
     "message": {
       "type": [
@@ -89,6 +43,278 @@
         "null"
       ],
       "description": "What a done step did. Null on every other step."
+    },
+    "read_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When the watch began the read that the parts come from, on this desk's clock. Null before the first read."
+    },
+    "generated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When the service computed the parts. Null before the first read."
+    },
+    "stale_since": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "When the first of the reads that have failed since the last good one ended. Null while the latest read went through."
+    },
+    "stale_reason": {
+      "description": "Why the latest read failed: unreachable, login, or unreadable, with the error's detail. Null while the latest read went through.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error",
+            "detail"
+          ],
+          "properties": {
+            "error": {
+              "enum": [
+                "unreachable",
+                "login",
+                "unreadable"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "nudge": {
+      "description": "The nudge that is ready to answer, with the key that picks each answer. Null where no nudge is ready.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "nudge_id",
+            "fired_at",
+            "ready_until",
+            "answers"
+          ],
+          "properties": {
+            "nudge_id": {
+              "type": "string"
+            },
+            "fired_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "ready_until": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "answers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "answer",
+                  "label",
+                  "key"
+                ],
+                "properties": {
+                  "answer": {
+                    "enum": [
+                      "good_timing",
+                      "too_soon",
+                      "too_late",
+                      "bothered"
+                    ]
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "key": {
+                    "type": "string",
+                    "description": "What `panel pick` takes to answer the nudge."
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "picked": {
+      "type": "array",
+      "description": "The keys picked on this desk since the parts were read, each held out of the rows until a read drops what it completed.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "at"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "minutes": {
+      "description": "A timed pursuit's minutes step: log an amount, or reopen the step 5 above or below it. Null on every other step.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "text",
+            "rows"
+          ],
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "The key of the pursuit or item the minutes log."
+            },
+            "text": {
+              "type": "string"
+            },
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "kind",
+                  "text",
+                  "minutes",
+                  "suggested"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "description": "What `panel pick` takes."
+                  },
+                  "kind": {
+                    "enum": [
+                      "log_minutes",
+                      "adjust_minutes"
+                    ],
+                    "description": "Log the amount, or reopen the step at it."
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "minutes": {
+                    "type": "integer"
+                  },
+                  "suggested": {
+                    "type": "boolean",
+                    "description": "The amount that the step offers first, and that its ±5 rows count from."
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "suggestion": {
+      "anyOf": [
+        {
+          "$ref": "urn:doit:desk-panel-view:v1#/properties/suggestion"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "suggestion_reason": {
+      "$ref": "urn:doit:desk-panel-view:v1#/properties/suggestion_reason"
+    },
+    "answers": {
+      "anyOf": [
+        {
+          "$ref": "urn:doit:desk-panel-view:v1#/properties/answers"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "totals": {
+      "anyOf": [
+        {
+          "$ref": "urn:doit:desk-panel-view:v1#/properties/totals"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pursuits": {
+      "anyOf": [
+        {
+          "$ref": "urn:doit:desk-panel-view:v1#/properties/pursuits"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "habits": {
+      "anyOf": [
+        {
+          "$ref": "urn:doit:desk-panel-view:v1#/properties/habits"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "lanes": {
+      "anyOf": [
+        {
+          "$ref": "urn:doit:desk-panel-view:v1#/properties/lanes"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "problems": {
+      "anyOf": [
+        {
+          "$ref": "urn:doit:desk-panel-view:v1#/properties/problems"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   }
 }

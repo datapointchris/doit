@@ -44,11 +44,6 @@ tasks:
       - uv run ruff format .
       - uv run ruff check --fix .
 
-  schemas:
-    desc: Write the desk nudge's record and status schemas from doit.desk_nudge
-    cmds:
-      - uv run python -c 'from pathlib import Path; from doit.desk_nudge import write_schemas; write_schemas(Path("schemas"))'
-
   build:
     desc: Build the wheel and sdist
     cmds:

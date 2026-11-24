@@ -26,7 +26,6 @@ from doit.render import error_console
 from doit.render import examples
 from doit.render import set_no_input
 from doit.service_commands import dashboard
-from doit.service_commands import desk_nudge
 from doit.service_commands import forecast
 from doit.service_commands import happened
 from doit.service_commands import pursuits
@@ -86,7 +85,6 @@ ROOT_ORDER = (
     'sources',
     'config',
     'shell',
-    'desk-nudge',
 )
 
 
@@ -167,7 +165,6 @@ app.add_typer(review.app, name='review', rich_help_panel=WHAT_YOU_DECLARED)
 app.add_typer(sources.app, name='sources', rich_help_panel=WHAT_YOU_DECLARED)
 app.add_typer(config_commands.app, name='config', rich_help_panel=THIS_MACHINE)
 app.add_typer(shell.app, name='shell', rich_help_panel=THIS_MACHINE)
-app.add_typer(desk_nudge.app, name='desk-nudge', rich_help_panel=THIS_MACHINE)
 
 # The Go doit hands its command tree here when it passes a line on, as a JSON list
 # of {path, summary, group}. Each command this tree lacks gets an entry that runs

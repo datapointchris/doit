@@ -40,5 +40,70 @@
     ],
     "summary": "Update doit to the latest release",
     "group": "This machine"
+  },
+  {
+    "path": [
+      "desk-nudge"
+    ],
+    "summary": "The nudge when a long stretch at the desk runs past the interval",
+    "group": "This machine"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "watch"
+    ],
+    "summary": "Count the time since the last nudge ended and fire the nudge at the interval, until stopped"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "status"
+    ],
+    "summary": "The phase, the time left, the suggestion, the interval and the answer counts"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "answer"
+    ],
+    "summary": "Answer a nudge, which ends it and restarts the clock"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "pause"
+    ],
+    "summary": "Hold the clock where it stands, ending a nudge that is showing, until resume"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "resume"
+    ],
+    "summary": "Carry on the count from where pause held it"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "panel"
+    ],
+    "summary": "The desk nudge's panel, which completes any of today's rows in one pick"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "panel",
+      "show"
+    ],
+    "summary": "The suggestion, the answers while a nudge is ready, and every row that something can complete"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "panel",
+      "pick"
+    ],
+    "summary": "Act on one row: answer the nudge, open a timed pursuit's minutes, or complete the row"
   }
 ]
