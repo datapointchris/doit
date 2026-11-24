@@ -1006,8 +1006,8 @@ panel_app = typer.Typer(
     no_args_is_help=True,
     help=(
         "The desk nudge's panel, which completes any of today's rows in one pick.\n\n"
-        'A menu such as rofi draws the rows that `panel show --json` prints, and hands the key picked to `panel pick`, '
-        'which prints the next step. doit builds every completion from the row it names, so the menu holds no rule.'
+        '`doit tui` draws the rows that `panel show --json` prints, and hands the key picked to `panel pick`, '
+        'which prints the next step. doit builds every completion from the row it names, so the screen holds no rule.'
     ),
     epilog=examples(
         ('doit desk-nudge panel show', "today's rows with the key that picks each"),

@@ -46,7 +46,7 @@ REMEMBERED_NUDGES = 20
 STATE_VERSION = 2
 RECORD_SCHEMA_VERSION = 3
 STATUS_SCHEMA_VERSION = 2
-PANEL_SCHEMA_VERSION = 1
+PANEL_SCHEMA_VERSION = 2
 PANEL_CACHE_VERSION = 1
 RECORD_SCHEMA_FILE = 'desk-nudge-record.schema.json'
 STATUS_SCHEMA_FILE = 'desk-nudge-status.schema.json'
@@ -471,7 +471,7 @@ def status_document(state: dict, now: dt.datetime) -> dict:
 
 # --- the panel ---------------------------------------------------------------------
 #
-# The panel is rows that doit computes and rofi draws. Its cache holds each row's
+# The panel is rows that doit computes and `doit tui` draws. Its cache holds each row's
 # identity, a kind and a ref, and never a command, so a file that anything else
 # can write never chooses what a pick runs. A key names what a row completes, so
 # one completion keeps one key wherever it is listed.
@@ -700,7 +700,7 @@ def panel_today(cache: dict | None, state: dict) -> list[dict]:
     ready = state['nudge'] if state['phase'] == Phase.READY else None
     suggestion = ready['suggestion'] if ready and not read_since(cache, ready['fired_at']) else (cache or {}).get('suggestion')
     if cache is not None and suggestion and 'pursuit' in suggestion:
-        rows += suggestion_rows(suggestion, cache)
+        rows += [{**row, 'suggested': True} for row in suggestion_rows(suggestion, cache)]
     if ready:
         rows += [
             panel_row(answer_row_key(answer, ready['nudge_id']), PanelRowKind.ANSWER, ANSWER_LABELS[answer], answer.value)
@@ -847,7 +847,7 @@ def panel_step(step: PanelStep, rows: list[dict], message: str | None = None) ->
     return {
         'schema_version': PANEL_SCHEMA_VERSION,
         'step': step.value,
-        'rows': [{'key': row['key'], 'kind': row['kind'], 'text': row['text']} for row in rows],
+        'rows': [{'key': row['key'], 'kind': row['kind'], 'text': row['text'], 'suggested': bool(row.get('suggested'))} for row in rows],
         'message': message,
     }
 
@@ -1106,7 +1106,7 @@ def panel_schema() -> dict:
                 'items': {
                     'type': 'object',
                     'additionalProperties': False,
-                    'required': ['key', 'kind', 'text'],
+                    'required': ['key', 'kind', 'text', 'suggested'],
                     'properties': {
                         'key': {
                             'type': ['string', 'null'],
@@ -1117,6 +1117,7 @@ def panel_schema() -> dict:
                             'description': 'A note, an answer, what a completion completes, or a step through the minutes.',
                         },
                         'text': {'type': 'string', 'description': 'The line to draw.'},
+                        'suggested': {'type': 'boolean', 'description': 'The row completes the suggestion, which `doit next` put first.'},
                     },
                 },
             },

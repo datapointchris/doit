@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Names the version one tag stream releases at this commit, from the conventional commits under its paths.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: resolve-version --prefix <prefix> [--push] --path <path>...
+
+Prints tag=, version= and previous= for one tag stream, such as cli/v or v,
+as lines GITHUB_OUTPUT takes. tag is empty where this commit releases nothing.
+
+- A tag of the stream already on this commit was cut by an earlier attempt.
+  Without a published GitHub release it is named again, so this run finishes
+  that release. With one, there is nothing left to release.
+- The stream's newest tag on an earlier commit must have a published release.
+  A tag without one is a release a failed run left unfinished, and no version
+  is cut past it until that run is re-run.
+- A commit that is no longer the tip of GITHUB_REF releases nothing, because
+  the run for the tip releases these commits too.
+- The first version is <prefix>0.1.0. After it, svu bumps from the
+  conventional commits touching a --path, and keeps a breaking change on 0.x
+  a minor bump.
+
+--push pushes a new tag to origin before printing it. Reads GITHUB_SHA and
+GITHUB_REF, and GH_TOKEN and GH_REPO for the release lookup.
+EOF
+}
+
+die() {
+  printf 'resolve-version: %s\n' "$*" >&2
+  exit 1
+}
+
+usage_error() {
+  printf 'resolve-version: %s\n\n' "$1" >&2
+  usage >&2
+  exit 2
+}
+
+note() {
+  printf '%s\n' "$*" >&2
+}
+
+if [ $# -eq 0 ]; then
+  usage
+  exit 0
+fi
+
+prefix='' push=false
+paths=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --prefix | --path)
+      [ $# -ge 2 ] || usage_error "$1 needs a value"
+      if [ "$1" = --path ]; then
+        paths+=("$2")
+      else
+        prefix=$2
+      fi
+      shift 2
+      ;;
+    --push)
+      push=true
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *) usage_error "unknown argument $1" ;;
+  esac
+done
+[ -n "$prefix" ] || usage_error "--prefix is required"
+[ ${#paths[@]} -gt 0 ] || usage_error "--path is required at least once"
+for name in GITHUB_SHA GITHUB_REF; do
+  [ -n "${!name:-}" ] || die "$name is unset"
+done
+
+emit() {
+  local tag=$1
+  printf 'tag=%s\nversion=%s\nprevious=%s\n' "$tag" "${tag#"$prefix"}" "$previous"
+}
+
+# Whether a tag has a published release. "release not found" and a draft both
+# answer no. Any other failure stops the run rather than reading as an answer.
+released() {
+  local answer
+  if answer=$(gh release view "$1" --json isDraft --jq .isDraft 2>&1); then
+    [ "$answer" = false ]
+  elif [[ $answer == *"release not found"* ]]; then
+    return 1
+  else
+    die "reading the release for $1: $answer"
+  fi
+}
+
+# sed rather than head, which would close the pipe on git and fail it under pipefail.
+pattern="${prefix}[0-9]*"
+previous=$(git tag --list "$pattern" --no-contains HEAD --sort=-version:refname | sed -n 1p)
+current=$(git tag --list "$pattern" --points-at HEAD --sort=-version:refname | sed -n 1p)
+
+if [ -n "$current" ]; then
+  if released "$current"; then
+    note "$current is already released"
+    emit ''
+  else
+    note "$current already tags $GITHUB_SHA, so this run finishes its release"
+    emit "$current"
+  fi
+  exit 0
+fi
+
+if [ -n "$previous" ] && ! released "$previous"; then
+  die "$previous has no published release. Re-run the release run for $(git rev-list -n 1 "$previous") to finish it, then this one."
+fi
+
+tip=$(git ls-remote --exit-code origin "$GITHUB_REF" | cut -f1)
+[ -n "$tip" ] || die "origin names no commit for $GITHUB_REF"
+if [ "$tip" != "$GITHUB_SHA" ]; then
+  note "$GITHUB_REF is at $tip, past $GITHUB_SHA; the run for $tip releases these commits"
+  emit ''
+  exit 0
+fi
+
+# svu exits 1 where no tag matches, so the first version is decided here, keyed
+# on the absent tag: treating any svu failure as a first release would turn a
+# broken run into a published one.
+if [ -z "$previous" ]; then
+  next=${prefix}0.1.0
+else
+  directories=()
+  for path in "${paths[@]}"; do
+    directories+=(--log.directory "$path")
+  done
+  next=$(svu next --tag.pattern "$pattern" --tag.prefix "$prefix" "${directories[@]}" --v0)
+  if [ "$next" = "$previous" ]; then
+    note "no releasable commits under ${paths[*]} since $previous"
+    emit ''
+    exit 0
+  fi
+fi
+
+if [ "$push" = true ]; then
+  git tag "$next" "$GITHUB_SHA"
+  git push --quiet origin "refs/tags/$next"
+fi
+note "releasing $next (previous: ${previous:-none})"
+emit "$next"

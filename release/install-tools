@@ -8,7 +8,7 @@ Usage: install-tools <directory> <tool>...
 
 Downloads each tool's linux/amd64 release into <directory>, checks it against
 the SHA-256 pinned here, and leaves an executable named for the tool. The
-tools are kustomize, flux and cosign.
+tools are svu, kustomize, flux and cosign.
 
 A bump edits a tool's version and its SHA-256 together.
 EOF
@@ -30,6 +30,12 @@ shift
 # empty where the asset is the binary itself.
 pin() {
   case $1 in
+    svu)
+      version=3.4.1
+      sha256=7ee8c91998c15109130638dc661a912d5f426e2f8642f6f6c04e6502be920770
+      url=https://github.com/caarlos0/svu/releases/download/v$version/svu_${version}_linux_amd64.tar.gz
+      member=svu
+      ;;
     kustomize)
       version=5.8.3
       sha256=cb9e31198d3f63b44848bd0afc4c8efc56e6cfef9c93a4a39a211940e6decd61

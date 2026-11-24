@@ -45,6 +45,46 @@ jobs:
       username: ${{ secrets.PYPI_ICB_USERNAME }}
       password: ${{ secrets.PYPI_ICB_PASSWORD }}
 
+  # The TUI's own stream, tagged cli/vX.Y.Z from the conventional commits under
+  # cli/. `go install github.com/datapointchris/doit/cli/cmd/doit-tui@latest`
+  # resolves the newest of these tags through the module proxy, so the release
+  # is the tag and a GitHub release naming it, and nothing is built here. The
+  # release is not marked latest, so the package's own stays the one GitHub
+  # shows.
+  cli-release:
+    needs: validate
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        shell: bash
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install svu
+        run: |
+          release/install-tools "$RUNNER_TEMP/bin" svu
+          echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+
+      - name: Resolve and tag the TUI's version
+        id: cli
+        run: release/resolve-version --prefix cli/v --push --path cli >>"$GITHUB_OUTPUT"
+
+      - name: Publish the TUI's release
+        if: steps.cli.outputs.tag != ''
+        env:
+          TAG: ${{ steps.cli.outputs.tag }}
+          PREVIOUS: ${{ steps.cli.outputs.previous }}
+        run: |
+          git log --no-merges --pretty='- %s (%h)' "${PREVIOUS:+${PREVIOUS}..}${TAG}" -- cli >"$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --latest=false --verify-tag
+
   # The service's image, built from the repository root because it runs the
   # root package's view code. It is tagged by the last commit touching anything
   # it holds, so a release that changed none of it builds nothing.
