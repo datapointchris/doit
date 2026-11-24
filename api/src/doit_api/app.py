@@ -135,7 +135,8 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     app = FastAPI(
         title='doit-api',
         summary="doit's register, review register, sources and journal with their history, and every view computed from them.",
-        version=version('doit-api'),
+        # The release stamps its version on the root package alone, and doit-api's stays 0.1.0.
+        version=version('doit'),
         lifespan=lifespan,
         # The document is served under /api/v1, behind a person's login, by the
         # route below.
