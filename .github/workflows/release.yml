@@ -49,8 +49,7 @@ jobs:
   # cli/. Its release carries doit_<version>_<os>_<arch>.tar.gz for each desk,
   # with the binary at the archive's root, and checksums.txt. `doit update` and
   # a machine's package manager install from those. `go install
-  # .../cli/cmd/doit-tui@latest` still resolves the same tags through the
-  # module proxy. The release is not marked latest, so the Python package's own
+  # .../cli/cmd/doit-tui@latest` resolves these tags through the module proxy. The release is not marked latest, so the Python package's own
   # stays the one GitHub shows.
   #
   # The tag is not pushed here. It lands with the release, so a failed build
@@ -131,11 +130,15 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # After the Python release, whose doit-python a desk installs before this
-  # binary takes the name doit.
+  # After the Python release reaches the index, whose doit-python a desk
+  # installs before this binary takes the name doit. A push that cut no Python
+  # release skips publish, and a failed or cancelled upload holds this back.
   cli-publish:
     name: Publish the Go doit's release
-    needs: [release, cli-version, cli-build]
+    needs: [release, publish, cli-version, cli-build]
+    if: >-
+      always() && needs.release.result == 'success' && needs.cli-build.result == 'success'
+      && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
     runs-on: ubuntu-26.04
     defaults:
       run:
