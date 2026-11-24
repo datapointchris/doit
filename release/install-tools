@@ -8,7 +8,7 @@ Usage: install-tools <directory> <tool>...
 
 Downloads each tool's linux/amd64 release into <directory>, checks it against
 the SHA-256 pinned here, and leaves an executable named for the tool. The
-tools are svu, kustomize, flux and cosign.
+tools are the names that pin below takes.
 
 A bump edits a tool's version and its SHA-256 together.
 EOF
