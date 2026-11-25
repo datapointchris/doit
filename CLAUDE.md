@@ -243,9 +243,13 @@ Every external effect the service has goes through one wrapper:
 - **The store** is `doit_api.store.Store`, the only module that writes SQL.
 - **An app** is read through `doit_api.readers.apps.App.get`, GitHub through
   `readers.github.GitHub.call`, ClickHouse through `readers.clickhouse.checks`.
+- **An app's write** goes through `App.post`, and ingestion's placement or drop of an item is the
+  only one. The service names the person's login in its body, and ingestion records the decision as
+  theirs, so the record stays in ingestion.
 - **A failed read** raises `ReadFailed`, and `readers.declared_reads` logs it at error as
   `source_failed` with the source's name. An alert is filed on that line, so keep its name and its
-  `source` field.
+  `source` field. **A failed write** raises `WriteFailed`, which the route answers as a 404, a 422
+  or a 409 by ingestion's status.
 
 Shapes that look wrong and are not:
 

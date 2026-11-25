@@ -6,6 +6,9 @@ That sentence becomes the reason on the lane the read was for, and the service
 logs it at error as `source_failed` with the source's name, so an alert can be
 filed on the line.
 
+A write goes through `App.post`, and its refusal is the same sentence, said to
+the person whose request the service passed on.
+
 An app whose URL or secret the deployment has not set is not an error at
 startup. Its reads refuse with the variable to set, so the service runs while a
 credential is on its way and the lane says what it is waiting for.
@@ -30,15 +33,25 @@ API_PREFIX = '/api/v1'
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
 
-class ReadFailed(RuntimeError):
-    """An app could not answer a read, for a reason worth one sentence on the lane."""
+class AppFailed(RuntimeError):
+    """An app could not answer a request, for a reason worth one sentence."""
 
-    def __init__(self, reason: str, *, timed_out: bool = False, refused: bool = False) -> None:
+    def __init__(self, reason: str, *, timed_out: bool = False, refused: bool = False, status: int | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
         self.timed_out = timed_out
         # The app turned the service's credential away: a 401, a 403, or a token it would not mint.
         self.refused = refused
+        # The app's HTTP status, where it answered at all.
+        self.status = status
+
+
+class ReadFailed(AppFailed):
+    """An app could not answer a read, for a reason worth one sentence on the lane."""
+
+
+class WriteFailed(AppFailed):
+    """An app refused a write or never answered it, for a reason worth one sentence to the person who asked for it."""
 
 
 def local_zone() -> str:
@@ -76,35 +89,48 @@ class App:
 
     def get(self, path: str, query: dict[str, object] | None = None, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> object:
         """The JSON body of `GET <app>/api/v1<path>`, or a `ReadFailed` saying why there is none."""
-        asked = f'GET {path}'
+        params = {key: value_text(value) for key, value in (query or {}).items() if value is not None}
+        return self.exchange('GET', path, f'GET {path}', ReadFailed, timeout, params=params)
+
+    def post(self, path: str, body: dict[str, object], asked: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> object:
+        """The JSON body of `POST <app>/api/v1<path>` sending `body`, or a `WriteFailed` saying why there is none.
+
+        `asked` names the request in that sentence as a person would type it,
+        because `path` carries the escapes of each segment it fills.
+        """
+        return self.exchange('POST', path, asked, WriteFailed, timeout, json=body)
+
+    def exchange(self, method: str, path: str, asked: str, failed: type[AppFailed], timeout: float, **request: Any) -> object:
+        """One request with the service's token, its JSON answer, or `failed` saying why there is none."""
         if self.settings.missing:
-            raise ReadFailed(f'{self.name} is not configured on the service: {self.settings.missing} unset')
+            raise failed(f'{self.name} is not configured on the service: {self.settings.missing} unset')
         try:
             token = self.tokens.token()
         except LoginError as error:
-            raise ReadFailed(f'{self.name}: {error}', refused=True) from error
-        params = {key: value_text(value) for key, value in (query or {}).items() if value is not None}
+            raise failed(f'{self.name}: {error}', refused=True) from error
         try:
-            response = self.client.get(
+            response = self.client.request(
+                method,
                 f'{self.settings.url}{API_PREFIX}{path}',
-                params=params,
                 headers={'Authorization': f'Bearer {token.access_token}', 'Accept': 'application/json'},
                 timeout=timeout,
+                **request,
             )
         except httpx2.TimeoutException as error:
-            raise ReadFailed(f'{self.name} did not answer {asked} within {timeout:g}s', timed_out=True) from error
+            raise failed(f'{self.name} did not answer {asked} within {timeout:g}s', timed_out=True) from error
         except httpx2.HTTPError as error:
-            raise ReadFailed(f'{self.name} could not be reached for {asked}: {error}') from error
+            raise failed(f'{self.name} could not be reached for {asked}: {error}') from error
         if response.status_code >= 400:
             said = answer_message(response)
-            raise ReadFailed(
+            raise failed(
                 f'{self.name} answered {response.status_code} to {asked}' + (f': {said}' if said else ''),
                 refused=response.status_code in (401, 403),
+                status=response.status_code,
             )
         try:
             return response.json()
         except ValueError as error:
-            raise ReadFailed(f'{self.name} answered {asked} with something other than JSON') from error
+            raise failed(f'{self.name} answered {asked} with something other than JSON') from error
 
 
 def value_text(value: object) -> str:

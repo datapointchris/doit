@@ -132,6 +132,20 @@ class DeskNudgeAnswerBody(Strict):
     machine: str | None = Field(None, description='The desk that showed the nudge. The service names itself when omitted.')
 
 
+class IngestionDecisionBody(Strict):
+    """A person's decision on an item in ingestion, which the service passes on as theirs."""
+
+    key: str = Field(min_length=1, description="The item's key, as the ingestion-review lane prints it, or its URL.")
+    cause: str | None = Field(
+        None, description='The aspect that decided it, such as subreddit, channel, theme or title. Kept as unstated when omitted.'
+    )
+    note: str | None = Field(None, description='The questions and why the item was saved, for a model read to answer.')
+
+
+class IngestionPlacementBody(IngestionDecisionBody):
+    destination: str = Field(min_length=1, description='A destination that the set in force in ingestion declares.')
+
+
 class ForecastBody(Strict):
     budget_minutes: int | None = Field(None, gt=0, description="Minutes a day to spend. The register's budget when omitted.")
 
@@ -396,6 +410,20 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     def source_contract(caller: Person) -> dict:
         """An annotated example of the lane document that each source becomes, for a source being written."""
         return sources.contract_example()
+
+    @api.post('/ingestion/items/place')
+    def ingestion_place(body: IngestionPlacementBody, caller: Person) -> Any:
+        """Place an item on a destination in ingestion, as the caller's decision.
+
+        The key travels in the body, because a key holds `/`. ingestion's answer
+        is passed on whole, and the same body sent again records nothing more.
+        """
+        return views.decide_ingestion_item('place', body.key, body.model_dump(exclude={'key'}), caller.who)
+
+    @api.post('/ingestion/items/drop')
+    def ingestion_drop(body: IngestionDecisionBody, caller: Person) -> Any:
+        """Drop an item in ingestion, which keeps its row, as the caller's decision."""
+        return views.decide_ingestion_item('drop', body.key, body.model_dump(exclude={'key'}), caller.who)
 
     @api.get('/forecasts')
     def forecast_list(caller: Person) -> list[dict]:

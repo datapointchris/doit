@@ -144,7 +144,8 @@ def app_settings(name: str, client_id: str, scopes: tuple[str, ...]) -> AppSetti
 
 
 # Each app's client and the scopes it is asked for: every read the service
-# makes of that app, and nothing it writes.
+# makes of that app, and the one write it passes on, ingestion's placement of
+# an item a person reviewed.
 LIFE_SCOPES = (
     'life.overview.read',
     'life.habits.read',
@@ -157,6 +158,7 @@ MESO_SCOPES = ('meso.cycles.read', 'meso.review.read', 'meso.feedback.read')
 NOMAD_SCOPES = ('nomad.overview.read',)
 PROJECTS_SCOPES = ('projects.items.read',)
 SLATE_SCOPES = ('slate.records.read',)
+INGESTION_SCOPES = ('ingestion.review.read', 'ingestion.review.place')
 
 
 @dataclass(frozen=True)
@@ -196,6 +198,7 @@ class Settings:
                 'nomad': app_settings('nomad', 'nomad-svc-doit', NOMAD_SCOPES),
                 'projects': app_settings('projects', 'projects-svc-doit', PROJECTS_SCOPES),
                 'slate': app_settings('slate', 'slate-svc-doit', SLATE_SCOPES),
+                'ingestion': app_settings('ingestion', 'ingestion-svc-doit', INGESTION_SCOPES),
             },
             github=GitHubSettings(
                 client_id=optional_env('DOIT_API_GITHUB_CLIENT_ID'),

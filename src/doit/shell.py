@@ -104,6 +104,7 @@ _doit() {{
   verbs=(
     'next:What to do now, drawn from your weighted pursuits'
     'dashboard:Everything outstanding across your apps, in lanes'
+    'ingestion:Decide the items that wait in ingestion on you'
     'tui:The screens where a click or a key completes a row'
     'today:What today still wants, and what it has had'
     'happened:What every record says happened over a window'

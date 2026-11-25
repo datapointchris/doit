@@ -65,7 +65,7 @@ func newRootCommand() *cobra.Command {
 	// Declared before cobra's own, which then stands aside.
 	root.Flags().BoolP("version", "V", false, "Show the installed version and exit")
 	root.AddCommand(
-		newNextCommand(), newTodayCommand(), newDashboardCommand(), newHappenedCommand(), newForecastCommand(),
+		newNextCommand(), newTodayCommand(), newDashboardCommand(), newIngestionCommand(), newHappenedCommand(), newForecastCommand(),
 		newPursuitsCommand(), newReviewCommand(), newSourcesCommand(),
 		newAuthCommand(), newUpdateCommand(), newDeskNudgeCommand(),
 	)

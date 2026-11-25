@@ -22,6 +22,36 @@
   },
   {
     "path": [
+      "ingestion"
+    ],
+    "summary": "Decide the items that wait in ingestion on you",
+    "group": "What to do now"
+  },
+  {
+    "path": [
+      "ingestion",
+      "items"
+    ],
+    "summary": "Place or drop an item that ingestion holds"
+  },
+  {
+    "path": [
+      "ingestion",
+      "items",
+      "place"
+    ],
+    "summary": "Place an item on a destination, as your decision"
+  },
+  {
+    "path": [
+      "ingestion",
+      "items",
+      "drop"
+    ],
+    "summary": "Drop an item, which keeps its row in ingestion, as your decision"
+  },
+  {
+    "path": [
       "happened"
     ],
     "summary": "What happened over a span of time, from every app and log, and who did it",
