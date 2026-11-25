@@ -94,6 +94,14 @@
     "path": [
       "desk-nudge",
       "panel",
+      "open"
+    ],
+    "summary": "Show today's rows as a page in a window, where a click completes a row"
+  },
+  {
+    "path": [
+      "desk-nudge",
+      "panel",
       "show"
     ],
     "summary": "The suggestion, the answers while a nudge is ready, and every row that something can complete"

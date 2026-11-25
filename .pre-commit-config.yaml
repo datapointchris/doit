@@ -332,6 +332,35 @@ repos:
         # repo with DB integration tests has to keep a hook of its own.
         args: [-short]
 
+# generated:vue - Vue/Frontend
+  # Every hook runs from the component directory, so filenames are never passed:
+  # pre-commit hands them out repo-root-relative, which resolves to the wrong
+  # place the moment the command has cd'd. files: still gates whether it runs.
+  - repo: local
+    hooks:
+      - id: vue-eslint
+        name: eslint (vue)
+        entry: bash -c 'cd cli/web && npm run lint:fix'
+        language: system
+        pass_filenames: false
+        files: '^cli/web/.*\.(vue|js|ts|jsx|tsx)$'
+
+      - id: vue-prettier
+        name: prettier (vue)
+        entry: bash -c 'cd cli/web && npx prettier --write .'
+        language: system
+        pass_filenames: false
+        files: '^cli/web/.*\.(vue|js|ts|jsx|tsx|css|scss|json)$'
+
+      - id: vue-typecheck
+        name: typecheck (vue)
+        # --if-present: a plain-JS Vue app has nothing to typecheck, and that is
+        # a true answer rather than a gap. Every other hook here stays strict.
+        entry: bash -c 'cd cli/web && npm run --if-present typecheck'
+        language: system
+        pass_filenames: false
+        files: '^cli/web/.*\.(vue|ts|tsx)$'
+
 # generated:github-actions - GitHub Actions
   - repo: https://github.com/jdx/jactionlint
     rev: v1.8.2

@@ -133,6 +133,65 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           govulncheck ./...
 
+  vue-cli-web:
+    name: "Vue build and tests in cli/web"
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: cli/web
+    steps:
+
+      - name: Check out the commit
+        uses: actions/checkout@v7
+
+      # generated:vue-cli-web
+      # Shared by the vue job and the hooks job, whose vue-eslint, vue-prettier
+      # and vue-typecheck hooks run npm scripts in the component.
+      - name: Install the Node .nvmrc names
+        uses: actions/setup-node@v7
+        with:
+          # The repo's own file, at the workspace root, because the Node major
+          # also lives in each Dockerfile's FROM line and a pin here would be a
+          # third copy. The ci die refuses to write this job without the file,
+          # since setup-node fails before installing anything.
+          node-version-file: .nvmrc
+          cache: npm
+          # A glob rather than cli/web/package-lock.json, because the two
+          # layouts in use keep the lock in different places: one lock per
+          # component beside its package.json, or an npm workspace with a
+          # single lock at the repo root. setup-node fails outright when a
+          # named path does not resolve, so a workspace component with no lock
+          # of its own kills the job before npm ci.
+          #
+          # Action inputs resolve from the workspace root, not the job's
+          # working-directory, so this is not relative to the component.
+          cache-dependency-path: "**/package-lock.json"
+
+      # An npm workspace has to install from the root: the lock covers every
+      # workspace, and npm ci inside one refuses to run without a lock beside
+      # it. Falling back keeps the per-component layout installing in place.
+      #
+      # The directory is named on the step because the hooks job has no
+      # working-directory of its own, and installs for every component.
+      - name: npm ci in cli/web
+        working-directory: "cli/web"
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            cd "$GITHUB_WORKSPACE" && npm ci
+          fi
+
+      - run: npm run build
+
+      # test:unit where the component has one, because test is where a
+      # frontend hangs its browser run or a second build; otherwise test. A
+      # component with neither has no suite, which is not a failure.
+      - name: Test
+        run: |
+          script=$(node -p "const s = require('./package.json').scripts ?? {}; s['test:unit'] ? 'test:unit' : s.test ? 'test' : ''")
+          if [ -n "$script" ]; then npm run "$script"; fi
+
   hooks:
     name: "Pre-commit hooks"
     runs-on: ubuntu-26.04
@@ -152,6 +211,43 @@ jobs:
           go-version-file: "cli/go.mod"
           cache: true
           cache-dependency-path: "cli/go.sum"
+
+      # Shared by the vue job and the hooks job, whose vue-eslint, vue-prettier
+      # and vue-typecheck hooks run npm scripts in the component.
+      - name: Install the Node .nvmrc names
+        uses: actions/setup-node@v7
+        with:
+          # The repo's own file, at the workspace root, because the Node major
+          # also lives in each Dockerfile's FROM line and a pin here would be a
+          # third copy. The ci die refuses to write this job without the file,
+          # since setup-node fails before installing anything.
+          node-version-file: .nvmrc
+          cache: npm
+          # A glob rather than cli/web/package-lock.json, because the two
+          # layouts in use keep the lock in different places: one lock per
+          # component beside its package.json, or an npm workspace with a
+          # single lock at the repo root. setup-node fails outright when a
+          # named path does not resolve, so a workspace component with no lock
+          # of its own kills the job before npm ci.
+          #
+          # Action inputs resolve from the workspace root, not the job's
+          # working-directory, so this is not relative to the component.
+          cache-dependency-path: "**/package-lock.json"
+
+      # An npm workspace has to install from the root: the lock covers every
+      # workspace, and npm ci inside one refuses to run without a lock beside
+      # it. Falling back keeps the per-component layout installing in place.
+      #
+      # The directory is named on the step because the hooks job has no
+      # working-directory of its own, and installs for every component.
+      - name: npm ci in cli/web
+        working-directory: "cli/web"
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            cd "$GITHUB_WORKSPACE" && npm ci
+          fi
 
       # Every hook in the repo's committed pre-commit config. A push from a
       # checkout that never ran `pre-commit

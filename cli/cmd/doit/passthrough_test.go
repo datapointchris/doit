@@ -53,15 +53,19 @@ type doitRun struct {
 
 func runDoit(t *testing.T, path, argvFile string, args ...string) doitRun {
 	t.Helper()
+	return runDoitWith(t, []string{"PATH=" + path, "FAKE_ARGV=" + argvFile}, args...)
+}
+
+// runDoitWith runs doit with env added to a temporary home.
+func runDoitWith(t *testing.T, env []string, args ...string) doitRun {
+	t.Helper()
 	cmd := exec.CommandContext(t.Context(), os.Args[0], args...)
-	cmd.Env = []string{
+	cmd.Env = append([]string{
 		runAsDoit + "=1",
-		"PATH=" + path,
-		"FAKE_ARGV=" + argvFile,
 		"HOME=" + t.TempDir(),
 		"XDG_STATE_HOME=" + t.TempDir(),
 		"XDG_CONFIG_HOME=" + t.TempDir(),
-	}
+	}, env...)
 	cmd.Stdin = strings.NewReader("one line\n")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
