@@ -33,9 +33,17 @@ jobs:
   # failed partway uploads the rest.
   #
   # A commit that bumps nothing leaves `released` false, and this is skipped.
+  #
+  # After the Go doit's release, because `doit-python` relies on the `doit`
+  # cut beside it, and a desk updates the two on separate schedules. Where this
+  # push cuts no Go release, cli-version names no tag and this runs alone. A Go
+  # build or release that fails holds the package back.
   publish:
-    needs: release
-    if: needs.release.outputs.released == 'true'
+    needs: [release, cli-version, cli-publish]
+    if: >-
+      always() && needs.release.outputs.released == 'true' && needs.cli-version.result == 'success'
+      && (needs.cli-publish.result == 'success'
+        || (needs.cli-publish.result == 'skipped' && needs.cli-version.outputs.tag == ''))
     uses: datapointchris/reusable-workflows/.github/workflows/python-publish.yml@v1
     with:
       tag: ${{ needs.release.outputs.tag }}
@@ -149,15 +157,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # After the Python release reaches the index, whose doit-python a desk
-  # installs before this binary takes the name doit. A push that cut no Python
-  # release skips publish, and a failed or cancelled upload holds this back.
+  # Before the Python package reaches the index, which waits on this. This
+  # binary runs every verb but `tui`, so it works beside any earlier
+  # doit-python on a desk.
   cli-publish:
     name: Publish the Go doit's release
-    needs: [release, publish, cli-version, cli-build]
-    if: >-
-      always() && needs.release.result == 'success' && needs.cli-build.result == 'success'
-      && (needs.publish.result == 'success' || needs.publish.result == 'skipped')
+    needs: [release, cli-version, cli-build]
+    if: always() && needs.release.result == 'success' && needs.cli-build.result == 'success'
     runs-on: ubuntu-26.04
     defaults:
       run:
