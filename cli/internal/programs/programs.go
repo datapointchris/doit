@@ -93,8 +93,9 @@ func ShellJoin(argv []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// SplitWords splits text as a POSIX shell splits words, honoring single
-// quotes, double quotes and backslashes, as Python's shlex.split does.
+// SplitWords splits text into words as Python's shlex.split does. Single
+// quotes keep every character. Inside double quotes a backslash escapes only a
+// double quote or a backslash, and stays before any other character.
 func SplitWords(text string) ([]string, error) {
 	var words []string
 	var word strings.Builder
@@ -104,6 +105,9 @@ func SplitWords(text string) ([]string, error) {
 	for _, char := range text {
 		switch {
 		case escaped:
+			if quote == '"' && char != '"' && char != '\\' {
+				word.WriteRune('\\')
+			}
 			word.WriteRune(char)
 			escaped = false
 		case quote == '\'':
