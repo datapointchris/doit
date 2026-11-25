@@ -12,11 +12,10 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.10
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/datapointchris/goclikit v0.7.0
-	github.com/datapointchris/goclilogin v0.9.2
+	github.com/datapointchris/goclilogin v0.10.0
 	github.com/datapointchris/goselfupdate v0.11.0
 	github.com/datapointchris/gotermboard v0.61.1
 	github.com/datapointchris/gotermstyle v0.7.0
-	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.38.0
@@ -40,6 +39,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.31 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
+	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect

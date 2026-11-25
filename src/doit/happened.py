@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import NamedTuple
 
+from doit import actor
 from doit import journal
 from doit import lanes
 from doit import review
@@ -489,3 +490,13 @@ def fold(registry: sources.Registry, results: dict[str, sources.Result], kept: K
             ]
         groups.extend(built)
     return groups
+
+
+def groups_with_an_actor(groups: list[Lane]) -> list[str]:
+    """Each group whose record wrote an actor on any entry, in the fold's order."""
+    return [lane.name for lane in groups if any(cell.actor for cell in lane.grid)]
+
+
+def unknown_actors(groups: list[Lane]) -> int:
+    """How many entries name an actor whose spelling `doit.actor` does not recognize."""
+    return sum(actor.kind(cell.actor) == actor.UNKNOWN for lane in groups for cell in lane.grid)

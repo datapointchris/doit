@@ -16,6 +16,7 @@ from doit import actor
 from doit import evidence
 from doit import happened
 from doit import journal
+from doit import lanes
 from doit import sources
 from doit import window
 from doit.lanes import GridCell
@@ -285,3 +286,16 @@ def test_the_actor_identity_written_is_one_its_kind_reads_back(monkeypatch):
 def test_a_runner_prefix_doit_has_never_seen_reads_unknown_rather_than_by_hand():
     """A new kind of runner is counted apart, never shown as the reader's own work."""
     assert actor.kind('runner/nightly/abc') == actor.UNKNOWN
+
+
+def test_the_verdict_names_each_group_that_recorded_an_actor_and_counts_the_unknown_kinds():
+    groups = [
+        happened.done_lane(
+            'issues', 'ISSUES', [GridCell('x', True, actor='ada@laptop'), GridCell('y', True, actor='runner/nightly/abc')], ''
+        ),
+        happened.done_lane('tasks', 'TASKS', [GridCell('z', True)], ''),
+        lanes.unavailable('learning', 'LEARNING', 'not logged in'),
+    ]
+
+    assert happened.groups_with_an_actor(groups) == ['issues']
+    assert happened.unknown_actors(groups) == 1
