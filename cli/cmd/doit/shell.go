@@ -12,10 +12,6 @@ import (
 	"github.com/datapointchris/doit/cli/internal/deskfiles"
 )
 
-// defaultNudgeMinutes is the gate's interval before any nudge has written the
-// interval file. The service's own default is review.DEFAULT_NUDGE_MINUTES.
-const defaultNudgeMinutes = 240
-
 // shells are the shells doit prints a gate and a completion for.
 var shells = []string{"zsh"}
 
@@ -107,7 +103,7 @@ func zshStartupGate() string {
 		`    cat "` + showing + `"`,
 		`    rm -f "` + showing + `"`,
 		"  fi",
-		`  _doit_mins="$(cat "` + deskfiles.NudgeIntervalPath() + `" 2>/dev/null || echo ` + strconv.Itoa(defaultNudgeMinutes) + `)"`,
+		`  _doit_mins="$(cat "` + deskfiles.NudgeIntervalPath() + `" 2>/dev/null || echo ` + strconv.Itoa(deskfiles.DefaultNudgeMinutes) + `)"`,
 		`  if [[ ! -f "` + marker + `" || -n "$(find "` + marker + `" -mmin +"$_doit_mins" 2>/dev/null)" ]]; then`,
 		`    mkdir -p "` + deskfiles.CacheDir() + `"`,
 		`    : >| "` + marker + `"`,

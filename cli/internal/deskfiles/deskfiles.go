@@ -33,6 +33,11 @@ func CompletionNamesPath() string { return filepath.Join(CacheDir(), "next-names
 // the gate that `doit shell init` prints reads before it starts any process.
 func NudgeIntervalPath() string { return filepath.Join(CacheDir(), "nudge-interval-minutes") }
 
+// DefaultNudgeMinutes is the gate's interval until a nudge writes the interval
+// file. It equals the service's own default, and the contract test fails where
+// the two differ.
+const DefaultNudgeMinutes = 240
+
 // NudgeMarkerPath is the file whose mtime is when the gate last asked for a nudge on this desk.
 func NudgeMarkerPath() string { return filepath.Join(CacheDir(), "nudge") }
 
