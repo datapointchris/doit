@@ -225,7 +225,11 @@ func newPanelOpenCommand() *cobra.Command {
 				said = err.Error()
 			}
 			if err != nil {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "doit desk-nudge panel open: %s\n  (%v)\n", said, err)
+				printed := "doit desk-nudge panel open: " + said
+				if said != err.Error() {
+					printed += "\n  (" + err.Error() + ")"
+				}
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), printed)
 				desknudge.Notify(cmd.Context(), "doit: the panel did not open", said)
 				return exitCode(service.NoAnswerExit)
 			}

@@ -247,7 +247,8 @@ const pageCodeWithin = 5 * time.Second
 
 // AskPageCode asks the watch for the panel page's URL with a fresh one-use
 // code. Where nothing answers, it is ErrNoWatch or ErrWatchServesNoPicks, as
-// AskPick's is. Where the watch answers and mints no code, it is ErrWatchServesNoPage.
+// AskPick's is. Where the watch has no such route, or answers in a shape that
+// this doit cannot read, it is ErrWatchServesNoPage. A watch that refuses says why.
 func (p Paths) AskPageCode(ctx context.Context) (PageCode, error) {
 	ctx, cancel := context.WithTimeout(ctx, pageCodeWithin)
 	defer cancel()
@@ -267,9 +268,9 @@ func (p Paths) AskPageCode(ctx context.Context) (PageCode, error) {
 	case response.StatusCode != http.StatusCreated:
 		var failure PickError
 		if json.NewDecoder(response.Body).Decode(&failure) != nil || failure.Message == "" {
-			failure.Message = fmt.Sprintf("it answered HTTP %d", response.StatusCode)
+			failure.Message = fmt.Sprintf("it answered HTTP %d to POST /page-codes", response.StatusCode)
 		}
-		return PageCode{}, fmt.Errorf("%w: %s", ErrWatchServesNoPage, failure.Message)
+		return PageCode{}, errors.New("the desk nudge watch minted no code for the panel page: " + failure.Message)
 	case json.NewDecoder(response.Body).Decode(&minted) != nil || minted.URL == "":
 		return PageCode{}, fmt.Errorf("%w: it answered a code this doit does not read", ErrWatchServesNoPage)
 	}
