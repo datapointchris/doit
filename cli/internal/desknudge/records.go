@@ -8,7 +8,7 @@ import (
 
 // RecordSchemaVersion is the shape of a line in desk-nudge-events.jsonl, which
 // schemas/desk-nudge-record.schema.json describes.
-const RecordSchemaVersion = 4
+const RecordSchemaVersion = 5
 
 // Each moment the nudge records, one line each.
 const (
@@ -110,17 +110,16 @@ func answeredRecord(now time.Time, row AnswerRow, late, saved, queued bool, seen
 }
 
 // pickedFields are what a picked line says of its pick: what it acted on, what
-// it did, whether it went through, and the pending pick it was, if any.
+// it did, and whether it went through.
 type pickedFields struct {
-	Kind          string  `json:"kind"`
-	Ref           string  `json:"ref"`
-	ItemID        *string `json:"item_id"`
-	Minutes       *int    `json:"minutes"`
-	Action        string  `json:"action"`
-	Outcome       *string `json:"outcome"`
-	PendingPickID *string `json:"pending_pick_id"`
-	OK            bool    `json:"ok"`
-	Error         *string `json:"error"`
+	Kind    string  `json:"kind"`
+	Ref     string  `json:"ref"`
+	ItemID  *string `json:"item_id"`
+	Minutes *int    `json:"minutes"`
+	Action  string  `json:"action"`
+	Outcome string  `json:"outcome"`
+	OK      bool    `json:"ok"`
+	Error   *string `json:"error"`
 }
 
 // pickedRecord is the picked line: what the pick acted on, how it came out, and the nudge it ended.

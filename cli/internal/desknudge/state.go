@@ -63,8 +63,8 @@ type State struct {
 	RecentNudges    []RecentNudge  `json:"recent_nudges"`
 	Panel           PanelState     `json:"panel"`
 	Pill            Pill           `json:"pill"`
-	// PendingPicks are the page's clicks that have not ended, in click order.
-	PendingPicks []PendingPick `json:"pending_picks"`
+	// RunningPicks are the picks whose commit began and has not ended, in the order they began.
+	RunningPicks []RunningPick `json:"running_picks"`
 }
 
 // Nudge is the nudge in hand, from its firing until an answer, a pick or its expiry ends it.
@@ -175,7 +175,7 @@ type RecentNudge struct {
 
 // PanelState holds each panel key picked, with when its completion ended. A
 // read of the panel that begins after that lets it go. Ended holds how each
-// pending pick ended, which the panel shows on its row.
+// pick ended, which the panel shows on its row.
 type PanelState struct {
 	Picked []HeldPick  `json:"picked"`
 	Ended  []EndedPick `json:"ended"`
@@ -204,7 +204,7 @@ func freshState() *State {
 		QueuedAnswers:   []QueuedAnswer{},
 		RecentNudges:    []RecentNudge{},
 		Panel:           PanelState{Picked: []HeldPick{}, Ended: []EndedPick{}},
-		PendingPicks:    []PendingPick{},
+		RunningPicks:    []RunningPick{},
 	}
 	for _, answer := range answerValues {
 		state.AnswerCounts[answer] = 0
@@ -243,8 +243,8 @@ func parseState(text []byte) (*State, error) {
 	if state.Panel.Ended == nil {
 		state.Panel.Ended = []EndedPick{}
 	}
-	if state.PendingPicks == nil {
-		state.PendingPicks = []PendingPick{}
+	if state.RunningPicks == nil {
+		state.RunningPicks = []RunningPick{}
 	}
 	return state, nil
 }

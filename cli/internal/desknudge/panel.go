@@ -111,7 +111,7 @@ type Panel struct {
 	Nudge   *ReadyNudge  `json:"nudge"`
 	Picked  []HeldPick   `json:"picked"`
 	Minutes *MinutesStep `json:"minutes"`
-	// Picks are the pending picks, and how each one that ended came out, while the panel shows it.
+	// Picks are the running picks, and how each one that ended came out, while the panel shows it.
 	Picks []ShownPick `json:"picks"`
 }
 
@@ -242,12 +242,11 @@ type entry struct {
 func (e entry) note() bool  { return e.key == "" }
 func (e entry) timed() bool { return e.unit == "minutes" }
 
-// What a pick does, as its picked line names it. A cancel is a pending pick taken back.
+// What a pick does, as its picked line names it.
 const (
 	ActionComplete = "complete"
 	ActionTick     = "tick"
 	ActionUntick   = "untick"
-	ActionCancel   = "cancel"
 )
 
 // holdsKey is whether a pick of action holds its key from a second pick until
@@ -519,14 +518,15 @@ type Row struct {
 	Target *int `json:"target"`
 	// UntickKey takes a checklist item's latest set back.
 	UntickKey *string `json:"untick_key"`
-	// Picks are the pending picks of the row's keys, and how each one that ended came out.
+	// Picks are the running picks of the row's keys, and how each one that ended came out.
 	Picks []ShownPick `json:"picks"`
 }
 
 // todayRows are what today's step draws, in order: the notes, the suggestion,
 // the answers while a nudge is ready, then each row that a pick completes. A
-// row picked from a terminal leaves until the view is read again, and a row
-// with a pending pick stays, showing how the pick stands.
+// row whose key a pick holds leaves until the view is read again, unless its
+// pick still commits, so a reader of rows never draws a row just completed as
+// one to pick.
 func (p *Panel) todayRows() []Row {
 	entries := p.entries()
 	rows := []Row{}
@@ -549,9 +549,10 @@ func (p *Panel) todayRows() []Row {
 			rows = append(rows, rowOf(found, p))
 		}
 	}
+	committing := func(pick ShownPick) bool { return pick.State == PickCommitting }
 	kept := rows[:0]
 	for _, row := range rows {
-		if row.Key == nil || row.Kind == KindAnswer || !p.held(*row.Key) || len(row.Picks) > 0 {
+		if row.Key == nil || row.Kind == KindAnswer || !p.held(*row.Key) || slices.ContainsFunc(row.Picks, committing) {
 			kept = append(kept, row)
 		}
 	}
@@ -606,7 +607,7 @@ func readyNudge(state *State, answersRaw json.RawMessage) *ReadyNudge {
 
 // panelFor is today's step or a done step, built over the cached view with what
 // the state says now: the ready nudge, the keys picked since the view was read,
-// and the pending picks. A done step draws no row.
+// and the picks. A done step draws no row.
 func panelFor(cached *Panel, state *State, step string) Panel {
 	built := Panel{}
 	if cached != nil {

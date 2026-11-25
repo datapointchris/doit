@@ -66,15 +66,15 @@ func TestAForeignHostAMissingCookieAReusedCodeAndAnExpiredCodeAreEachRefused(t *
 	}{
 		{"a foreign Host", http.MethodGet, root + "/api/panel", "doit.example:" + page.Port(), cookie, ""},
 		{"a missing cookie", http.MethodGet, root + "/api/panel", "", nil, ""},
-		{"a missing cookie on a click", http.MethodPost, root + "/api/pending-picks", "", nil, `{"key": "review:prune-images"}`},
+		{"a missing cookie on a click", http.MethodPost, root + "/api/picks", "", nil, `{"key": "review:prune-images"}`},
 		{"a reused code", http.MethodGet, opened, "", nil, ""},
 	} {
 		if got := pageRequest(t, refused.method, refused.target, refused.host, refused.cookie, refused.body); got.StatusCode != http.StatusForbidden {
 			t.Errorf("%s answered %d, want 403", refused.why, got.StatusCode)
 		}
 	}
-	if pending := f.state().PendingPicks; len(pending) != 0 {
-		t.Errorf("a click with no cookie left %+v pending, want nothing picked", pending)
+	if len(f.reviews) != 0 {
+		t.Errorf("a click with no cookie marked %v done, want nothing picked", f.reviews)
 	}
 
 	expired := mint()
@@ -82,7 +82,11 @@ func TestAForeignHostAMissingCookieAReusedCodeAndAnExpiredCodeAreEachRefused(t *
 	if got := pageRequest(t, http.MethodGet, expired, "", nil, ""); got.StatusCode != http.StatusForbidden || len(got.Cookies()) != 0 {
 		t.Errorf("an expired code answered %d with cookies %v, want 403 and no cookie", got.StatusCode, got.Cookies())
 	}
-	if got := pageRequest(t, http.MethodPost, root+"/api/pending-picks", "", cookie, `{"key": "review:prune-images"}`); got.StatusCode != http.StatusCreated {
-		t.Errorf("a click with the cookie answered %d, want the pending pick", got.StatusCode)
+	if got := pageRequest(t, http.MethodPost, root+"/api/picks", "", cookie, `{"key": "review:prune-images"}`); got.StatusCode != http.StatusOK {
+		t.Errorf("a click with the cookie answered %d, want the pick done", got.StatusCode)
+	}
+	// The page's row shows a pick that went through, so no notice repeats it.
+	if notices := f.ran("notify-send"); len(notices) != 0 {
+		t.Errorf("notify-send ran %q for a click that went through, want nothing", notices)
 	}
 }

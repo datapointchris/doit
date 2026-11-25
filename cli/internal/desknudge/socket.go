@@ -20,28 +20,21 @@ import (
 // The socket speaks HTTP/1.1 with JSON bodies, as tailscaled's LocalAPI does
 // for its CLI. Its directory is 0700, so only this user reaches it.
 //
-//	GET    /panel                today's step, as panel show --json prints it
-//	POST   /picks                {"key": "...", "minutes": 30 | null}, which commits at once
-//	                             200 the step the pick leads to: done, or a timed pursuit's minutes
-//	                             409 refused, 502 the completion failed, 504 no answer came
-//	POST   /pending-picks        {"key": "...", "minutes": 30 | null}, a click that commits pendingFor later
-//	                             201 the pending pick, state pending
-//	                             200 the pick that key had waiting, taken back instead, state canceled
-//	                             409 refused, 502 the state file could not be written
-//	                             not safe to repeat: a second one is a second click, so a client never resends it
-//	GET    /pending-picks/{id}   200 the pick: pending, committing, or how it ended, for endedAnsweredFor
-//	                             after the panel stops listing it
-//	                             404 this desk holds no pick by that id now
-//	DELETE /pending-picks/{id}   200 the pick taken back, state canceled, again on a resend
-//	                             404 this desk holds no pick by that id now, 409 it is committing or ended otherwise
-//	POST   /page-codes           201 {"url", "expires_at"}: the panel page's URL with a one-use code
-//	                             409 the watch serves no panel page until the service restarts
+//	GET    /panel        today's step, as panel show --json prints it
+//	POST   /picks        {"key": "...", "minutes": 30 | null}, which commits at once and answers how it ended
+//	                     200 the step the pick leads to: done, or a timed pursuit's minutes
+//	                     409 refused or skipped, 502 the completion failed, 504 no answer came
+//	                     not safe to repeat: one sent while its key still runs is refused, and one
+//	                     sent after is a second pick
+//	POST   /page-codes   201 {"url", "expires_at"}: the panel page's URL with a one-use code
+//	                     409 the watch serves no panel page until the service restarts
 //
-// A failure answers {"exit_code": 2 | 1 | 4, "message": "..."}. A pending pick
-// answers as the panel's picks show one. The panel page reaches every route but
-// POST /page-codes under /api/, on 127.0.0.1 behind its Host check and cookie.
+// A failure answers {"exit_code": 2 | 1 | 4, "message": "..."}. The panel page
+// reaches every route but POST /page-codes under /api/, on 127.0.0.1 behind its
+// Host check and cookie. A pick from the page that goes through is not
+// notified, because the page's row shows it.
 
-// pickRequest is what POST /picks and POST /pending-picks take.
+// pickRequest is what POST /picks takes.
 type pickRequest struct {
 	Key     string `json:"key"`
 	Minutes *int   `json:"minutes"`
@@ -84,15 +77,14 @@ func (w *Watch) serve(ctx context.Context) (*server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", path, err)
 	}
-	pageRoutes := w.pageRoutes()
-	page := panelpage.New(pageRoutes, w.desk.Now)
+	page := panelpage.New(w.pageRoutes(false), w.desk.Now)
 	unserved := ""
 	if err := page.Listen(ctx); err != nil {
 		logger.Error("the panel page is not served: " + err.Error())
 		page, unserved = nil, err.Error()
 	}
 	routes := http.NewServeMux()
-	routes.Handle("/", pageRoutes)
+	routes.Handle("/", w.pageRoutes(true))
 	routes.HandleFunc("POST /page-codes", func(response http.ResponseWriter, _ *http.Request) {
 		if page == nil {
 			answer(response, http.StatusConflict, PickError{
@@ -113,8 +105,9 @@ func (w *Watch) serve(ctx context.Context) (*server, error) {
 	return served, nil
 }
 
-// pageRoutes are what both the socket and the panel page answer: the panel and its picks.
-func (w *Watch) pageRoutes() *http.ServeMux {
+// pageRoutes are what both the socket and the panel page answer: the panel and
+// its picks. notifyDone is whether a pick that went through is notified.
+func (w *Watch) pageRoutes(notifyDone bool) *http.ServeMux {
 	routes := http.NewServeMux()
 	routes.HandleFunc("GET /panel", func(response http.ResponseWriter, _ *http.Request) {
 		answer(response, http.StatusOK, panelFor(w.desk.Paths.readPanel(), w.desk.Paths.readState(), StepToday))
@@ -126,50 +119,13 @@ func (w *Watch) pageRoutes() *http.ServeMux {
 			return
 		}
 		// A pick that started runs to its end, though the asker leaves.
-		step, err := w.Pick(context.WithoutCancel(request.Context()), asked.Key, asked.Minutes)
+		step, err := w.Pick(context.WithoutCancel(request.Context()), asked.Key, asked.Minutes, notifyDone)
 		if err != nil {
 			failure := pickFailure(err)
 			answer(response, statusFor(failure.ExitCode), failure)
 			return
 		}
 		answer(response, http.StatusOK, step)
-	})
-	routes.HandleFunc("POST /pending-picks", func(response http.ResponseWriter, request *http.Request) {
-		var asked pickRequest
-		if err := json.NewDecoder(io.LimitReader(request.Body, 1<<16)).Decode(&asked); err != nil || asked.Key == "" {
-			answer(response, http.StatusBadRequest, PickError{ExitCode: PickRefused, Message: "a pending pick names its key, as {\"key\": \"...\"}"})
-			return
-		}
-		pick, err := w.CreatePending(asked.Key, asked.Minutes)
-		switch {
-		case err != nil:
-			failure := pickFailure(err)
-			answer(response, statusFor(failure.ExitCode), failure)
-		case pick.State == OutcomeCanceled:
-			answer(response, http.StatusOK, pick)
-		default:
-			answer(response, http.StatusCreated, pick)
-		}
-	})
-	routes.HandleFunc("GET /pending-picks/{id}", func(response http.ResponseWriter, request *http.Request) {
-		pick, err := w.PickByID(request.PathValue("id"))
-		if err != nil {
-			answer(response, http.StatusNotFound, PickError{ExitCode: PickRefused, Message: err.Error()})
-			return
-		}
-		answer(response, http.StatusOK, pick)
-	})
-	routes.HandleFunc("DELETE /pending-picks/{id}", func(response http.ResponseWriter, request *http.Request) {
-		pick, err := w.CancelPending(request.PathValue("id"))
-		switch {
-		case errors.Is(err, ErrNoPendingPick):
-			answer(response, http.StatusNotFound, PickError{ExitCode: PickRefused, Message: err.Error()})
-		case err != nil:
-			failure := pickFailure(err)
-			answer(response, statusFor(failure.ExitCode), failure)
-		default:
-			answer(response, http.StatusOK, pick)
-		}
 	})
 	return routes
 }
