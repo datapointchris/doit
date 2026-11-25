@@ -80,13 +80,14 @@ class DoneBody(Keyed):
         None, gt=0, description='Required for a pursuit measured in minutes, refused for one counted in completions.'
     )
     occurred_at: str | None = Field(None, description='When it happened, ISO 8601 with an offset. Now when omitted.')
+    ago: str | None = Field(None, description='When it happened, as a span back from now such as 90m or 2d. Refused beside occurred_at.')
     item: dict[str, Any] | None = Field(None, description='The resolved choice the entry is about, where the entry names one.')
     downstream: dict[str, Any] | None = Field(None, description="What the pursuit's on_log command did on the desk.")
     check: bool = Field(
         False,
         description=(
-            'Write nothing: match the pursuit, refuse minutes that do not fit it, and answer the choice the log is about '
-            'and its on_log, which a desk runs before it sends the log.'
+            'Write nothing: match the pursuit, refuse minutes that do not fit it, and answer the instant the log '
+            'records, the choice it is about and its on_log, which a desk runs before it sends the log.'
         ),
     )
     item_id: str | None = Field(
