@@ -11,7 +11,6 @@ import (
 
 	"github.com/datapointchris/goclikit"
 	"github.com/datapointchris/goclilogin"
-	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 
@@ -79,14 +78,9 @@ func newAuthLoginCommand() *cobra.Command {
 			config := login.Config(deployment)
 			store := goclilogin.NewTokenStore(config)
 
-			// The browser's own start-up noise would land between the code and
-			// the URL. A launcher that fails is still reported by OpenURL's error.
-			browser.Stdout = io.Discard
-			browser.Stderr = io.Discard
-
 			token, err := goclilogin.Login(ctx, config, func(prompt goclilogin.DevicePrompt) {
 				goclilogin.WriteInstructions(stderr, config.ClientID, prompt)
-				if openErr := browser.OpenURL(prompt.BrowserURL()); openErr != nil {
+				if openErr := goclilogin.OpenBrowser(prompt.BrowserURL()); openErr != nil {
 					_, _ = fmt.Fprintf(stderr, "(could not open a browser here: %v)\n", openErr)
 				}
 			})

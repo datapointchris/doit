@@ -130,7 +130,8 @@ The Go binary starts these:
 
 - **`doit-python`**, in `passthrough.Exec`, which replaces the process with it for every command line
   that `owns` turns down.
-- **The browser**, through pkg/browser's `xdg-open` or `open`, at `doit auth login`.
+- **The browser**, through goclilogin's `OpenBrowser`, which runs pkg/browser's `xdg-open` or `open`,
+  at `doit auth login`.
 - **`webviewrs -n doit-panel -t "doit panel" --dark --close-on-blur <url>`**, by `panelWindowArgv` in
   `cli/cmd/doit/desk_nudge.go`, at `doit desk-nudge panel open`, which replaces the process with it.
 - **The desk nudge's programs**, each an argv built by a function in
