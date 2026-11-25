@@ -5,29 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/datapointchris/gotermboard"
 	"github.com/datapointchris/gotermstyle"
 	"github.com/spf13/cobra"
 
 	"github.com/datapointchris/doit/cli/internal/deskfiles"
-	"github.com/datapointchris/doit/cli/internal/programs"
 	"github.com/datapointchris/doit/cli/internal/service"
 )
 
-// defaultEditor is opened where $EDITOR is unset or blank.
-const defaultEditor = "nvim"
-
-// document is one of the service's documents, as GET /documents/{name} and its template answer it.
-type document struct {
-	Text string `json:"text"`
-}
-
-// editDocument edits one of the service's documents in $EDITOR, starting from
+// editDocument edits one of the service's documents in the editor, starting from
 // its template where none is written yet. The service validates the whole
 // text and writes nothing it refuses. A refusal names the first fault and
 // reopens the edit with the text as it was left. A save that fails any other
@@ -35,15 +26,14 @@ type document struct {
 // reports whether a document now stands.
 func editDocument(cmd *cobra.Command, client *service.Client, name string) (bool, error) {
 	ctx, out, errOut := cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr()
-	path := "/documents/" + url.PathEscape(name)
-	var held document
+	held, err := client.Document(ctx, name)
 	stored := true
-	if _, err := client.Get(ctx, path, nil, &held); err != nil {
+	if err != nil {
 		var refused *service.Refused
 		if !errors.As(err, &refused) || refused.Status != http.StatusNotFound {
 			return false, err
 		}
-		if _, err := client.Get(ctx, path+"/template", nil, &held); err != nil {
+		if held, err = client.DocumentTemplate(ctx, name); err != nil {
 			return false, err
 		}
 		stored = false
@@ -77,7 +67,7 @@ func editDocument(cmd *cobra.Command, client *service.Client, name string) (bool
 			_, _ = fmt.Fprintf(out, "%s: no change.\n", name)
 			return true, nil
 		}
-		err = client.Put(ctx, path, map[string]string{"text": text}, nil)
+		err = client.SaveDocument(ctx, name, text)
 		var refused *service.Refused
 		switch {
 		case err == nil:
@@ -101,24 +91,15 @@ func editDocument(cmd *cobra.Command, client *service.Client, name string) (bool
 	}
 }
 
-// openInEditor opens path in $EDITOR, which is a command line rather than a
-// program name, as git reads it, so `code -w` is split into its words before
-// the path is added. It waits as long as the person edits.
+// openInEditor opens path in the person's editor, as gotermboard names it:
+// $VISUAL, then $EDITOR, then vi. It waits as long as the person edits.
 func openInEditor(ctx context.Context, path string) error {
-	command := strings.TrimSpace(os.Getenv("EDITOR"))
-	if command == "" {
-		command = defaultEditor
-	}
-	words, err := programs.SplitWords(command)
-	if err != nil || len(words) == 0 {
-		return fmt.Errorf("$EDITOR %q cannot be split into a command: %v", command, err)
-	}
-	editor := exec.CommandContext(ctx, words[0], append(words[1:], path)...)
+	editor := gotermboard.EditorCommand(ctx, path)
 	editor.Stdin, editor.Stdout, editor.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := editor.Run(); err != nil {
 		var exited *exec.ExitError
 		if !errors.As(err, &exited) {
-			return fmt.Errorf("could not open the editor: %w", err)
+			return fmt.Errorf("could not open the editor %s: %w", editor.Path, err)
 		}
 	}
 	return nil

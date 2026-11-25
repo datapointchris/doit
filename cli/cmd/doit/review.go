@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"time"
 
@@ -17,7 +16,6 @@ import (
 
 	"github.com/datapointchris/doit/cli/internal/deskfiles"
 	"github.com/datapointchris/doit/cli/internal/programs"
-	"github.com/datapointchris/doit/cli/internal/review"
 	"github.com/datapointchris/doit/cli/internal/screens"
 	"github.com/datapointchris/doit/cli/internal/service"
 )
@@ -119,9 +117,9 @@ func newReviewDoneCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			done, err := review.MarkDone(cmd.Context(), client, args[0], day)
+			done, err := client.CompleteReview(cmd.Context(), args[0], day)
 			if err != nil {
-				return err
+				return refusedAsTyped(err)
 			}
 			after := ""
 			switch {
@@ -157,7 +155,7 @@ func pastDay(on string, now time.Time) (string, error) {
 }
 
 // readsNow is how an entry reads after a correction, which need not sit one cadence from today.
-func readsNow(status *review.Status) string {
+func readsNow(status *service.ReviewStatus) string {
 	if status == nil {
 		return ""
 	}
@@ -187,21 +185,17 @@ func newReviewUndoCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			path := "/review/" + url.PathEscape(args[0]) + "/completions"
-			var held []struct {
-				DoneOn string `json:"done_on"`
-			}
-			if _, err := client.Get(ctx, path, nil, &held); err != nil {
-				return err
+			held, err := client.ReviewCompletions(ctx, args[0])
+			if err != nil {
+				return refusedAsTyped(err)
 			}
 			if len(held) == 0 {
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "%s has no completion to take back.\n", terminalcontrol.Strip(args[0]))
 				return exitCode(1)
 			}
-			// Named by its day, so a send repeated after a lost answer cannot take back the one before it.
-			var undone review.Done
-			if err := client.Delete(ctx, path+"/"+url.PathEscape(held[len(held)-1].DoneOn), &undone); err != nil {
-				return err
+			undone, err := client.UndoReviewCompletion(ctx, args[0], held[len(held)-1].DoneOn)
+			if err != nil {
+				return refusedAsTyped(err)
 			}
 			printReviewed(cmd.OutOrStdout(), "Took back", args[0], " ("+undone.DoneOn+")."+readsNow(undone.Status))
 			return nil
@@ -212,7 +206,7 @@ func newReviewUndoCommand() *cobra.Command {
 func newReviewEditCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "edit",
-		Short:   "Edit the register in $EDITOR, the document listing every review item",
+		Short:   "Edit the register in your editor, the document listing every review item",
 		Example: "  doit review edit  add an item or change its cadence",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

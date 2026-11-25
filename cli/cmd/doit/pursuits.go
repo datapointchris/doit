@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -114,7 +114,7 @@ func newPursuitsLogCommand() *cobra.Command {
 			"  doit pursuits log chore --no-write                 record it without running the pursuit's on_log command",
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			wanted := logWanted{assumeYes: assumeYes, noWrite: noWrite, occurred: time.Now()}
+			wanted := logWanted{assumeYes: assumeYes, noWrite: noWrite, ago: ago}
 			if cmd.Flags().Changed("minutes") {
 				if minutes < 1 {
 					return goclikit.UsageError(errors.New("--minutes takes a whole number of minutes above 0"))
@@ -123,13 +123,6 @@ func newPursuitsLogCommand() *cobra.Command {
 			}
 			if cmd.Flags().Changed("item") {
 				wanted.itemID = &item
-			}
-			if ago != "" {
-				back, ok := span(ago)
-				if !ok {
-					return goclikit.UsageError(fmt.Errorf("--ago takes a span such as 30s, 90m, 3h, 2d or 1w, not %q", ago))
-				}
-				wanted.occurred = wanted.occurred.Add(-back)
 			}
 			if len(args) > 0 {
 				wanted.name, wanted.words = args[0], args[1:]
@@ -146,40 +139,29 @@ func newPursuitsLogCommand() *cobra.Command {
 	return cmd
 }
 
-// spanPattern is a span such as 30m or 2w, as every flag that takes one reads it.
-var spanPattern = regexp.MustCompile(`^(\d+)([smhdw])$`)
-
-// span is text as a duration, where it is a span.
-func span(text string) (time.Duration, bool) {
-	found := spanPattern.FindStringSubmatch(text)
-	if found == nil {
-		return 0, false
-	}
-	count, err := strconv.Atoi(found[1])
-	if err != nil {
-		return 0, false
-	}
-	unit := map[string]time.Duration{"s": time.Second, "m": time.Minute, "h": time.Hour, "d": 24 * time.Hour, "w": 7 * 24 * time.Hour}[found[2]]
-	return time.Duration(count) * unit, true
-}
-
 // logWanted is what `doit pursuits log` was given.
 type logWanted struct {
 	name      string
 	words     []string
 	minutes   *int
 	itemID    *string
-	occurred  time.Time
+	ago       string
 	assumeYes bool
 	noWrite   bool
 }
 
 // logPursuit logs one pursuit, asking for whatever was not passed where
-// someone can answer. The service's check matches the name and refuses bad
-// minutes or items first, so nothing runs or is written before it passes.
+// someone can answer. Every log held on this desk is sent first. The
+// service's check matches the name and refuses bad minutes or items, so
+// nothing runs or is written before it passes.
 func logPursuit(cmd *cobra.Command, wanted logWanted) error {
 	ctx, out, errOut := cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr()
 	client, err := service.Open(ctx)
+	if err != nil {
+		return err
+	}
+	held := pursuits.DeskHeldLogs()
+	sent, err := sentHeld(cmd, client, held)
 	if err != nil {
 		return err
 	}
@@ -190,6 +172,11 @@ func logPursuit(cmd *cobra.Command, wanted logWanted) error {
 	}
 	if err != nil {
 		return err
+	}
+	if slices.Contains(sent, check.Pursuit) {
+		name := terminalcontrol.Strip(check.Pursuit)
+		_, _ = fmt.Fprintf(errOut, "  That held log was %s's, so nothing more is logged. Run it again to log %s once more.\n", name, name)
+		return nil
 	}
 	note := strings.Join(wanted.words, " ")
 	if len(wanted.words) == 0 && canAsk() {
@@ -211,24 +198,32 @@ func logPursuit(cmd *cobra.Command, wanted logWanted) error {
 	if check.Ask && canAsk() {
 		chosen = askedChoice(out, check.Choices)
 	}
-	var downstream map[string]any
-	if !wanted.noWrite {
-		if downstream, err = ranOnLog(cmd, check, chosen, note, wanted); err != nil {
-			return err
-		}
+	if wanted.noWrite {
+		check.OnLog = nil
 	}
-	entry := pursuits.Entry{
-		ID: service.NewWriteID(time.Now()), Pursuit: check.Pursuit, Occurred: wanted.occurred, Note: note,
-		Minutes: wanted.minutes, Machine: actor.MachineName(), Actor: actor.Identity(),
+	body, logged, err := pursuits.Log(ctx, client, pursuits.Run{
+		Check: check, Chosen: chosen, Held: held,
+		Entry: pursuits.Entry{
+			ID: service.NewWriteID(time.Now()), Note: note, Minutes: wanted.minutes, Machine: actor.MachineName(), Actor: actor.Identity(),
+		},
+		Approve: func(onLog *pursuits.OnLog) (bool, map[string]any) { return approvedOnLog(cmd, onLog, wanted.assumeYes) },
+	})
+	downstream, _ := body["downstream"].(map[string]any)
+	if failure := pursuits.Failure(downstream); failure != "" {
+		_, _ = fmt.Fprintln(errOut, yellow(errOut, "  "+terminalcontrol.Strip(fmt.Sprint(downstream["command"]))+" "+failure))
 	}
-	body := entry.Body(check.NamesChosen, chosen, downstream)
-	logged, err := pursuits.Posted(ctx, client, body)
-	if err != nil {
-		if pursuits.Acted(downstream) {
-			ran, repair := pursuits.RepairLines(body)[0], pursuits.RepairLines(body)[1]
-			_, _ = fmt.Fprintln(errOut, yellow(errOut, "  "+terminalcontrol.Strip(ran)))
-			_, _ = fmt.Fprintln(errOut, "  "+terminalcontrol.Strip(repair))
-		}
+	var stillHeld *pursuits.HeldError
+	switch {
+	case errors.As(err, &stillHeld):
+		_, _ = fmt.Fprintln(errOut, yellow(errOut, "  The log is held at "+stillHeld.Path+
+			", and the next doit pursuits log sends it again. The service stores it once, however this send ended."))
+		return err
+	case err != nil && pursuits.Acted(downstream):
+		repair := pursuits.RepairLines(body)
+		_, _ = fmt.Fprintln(errOut, yellow(errOut, "  "+terminalcontrol.Strip(repair[0])))
+		_, _ = fmt.Fprintln(errOut, "  "+terminalcontrol.Strip(repair[1]))
+		return err
+	case err != nil:
 		return err
 	}
 	palette := gotermstyle.PaletteFor(os.Stdout)
@@ -239,34 +234,59 @@ func logPursuit(cmd *cobra.Command, wanted logWanted) error {
 	return nil
 }
 
+// sentHeld sends every log held on this desk again, and says how each ended.
+// It answers the pursuits whose held log is now stored.
+func sentHeld(cmd *cobra.Command, client *service.Client, held pursuits.HeldLogs) ([]string, error) {
+	out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
+	sent, err := held.SendHeld(cmd.Context(), client)
+	palette := gotermstyle.PaletteFor(os.Stdout)
+	var stored []string
+	for _, each := range sent {
+		name := terminalcontrol.Strip(fmt.Sprint(each.Body["pursuit"]))
+		if each.Refused != nil {
+			_, _ = fmt.Fprintln(errOut, yellow(errOut, "  The held log of "+name+" was refused: "+terminalcontrol.Strip(each.Refused.Error())))
+			if downstream, _ := each.Body["downstream"].(map[string]any); pursuits.Acted(downstream) {
+				_, _ = fmt.Fprintln(errOut, "  "+terminalcontrol.Strip(pursuits.RepairLines(each.Body)[1]))
+			}
+			continue
+		}
+		stored = append(stored, fmt.Sprint(each.Body["pursuit"]))
+		_, _ = fmt.Fprintln(out, palette.Paint(gotermstyle.CodeGreen, "Sent")+" the held log of "+terminalcontrol.Strip(pursuits.Line(each.Body, each.Logged)))
+	}
+	if err != nil {
+		_, _ = fmt.Fprintln(errOut, yellow(errOut, "  Logs held at "+held.Dir+" wait for the service, so nothing more is logged."))
+	}
+	return stored, err
+}
+
 // checkedPursuit is the service's check of the pursuit wanted, asking which
 // pursuit where none was named. A name typed at the question that matches no
 // one pursuit is said and asked again. verb names the command, for the line
 // that says how to name the pursuit with no terminal.
-func checkedPursuit(cmd *cobra.Command, client *service.Client, wanted logWanted, verb string) (pursuits.Check, error) {
+func checkedPursuit(cmd *cobra.Command, client *service.Client, wanted logWanted, verb string) (service.LogCheck, error) {
 	ctx, out, errOut := cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr()
 	name, prompted := wanted.name, false
 	for {
 		if name == "" {
 			if !canAsk() {
 				_, _ = fmt.Fprintf(errOut, "Which pursuit? Pass it as the argument:  doit pursuits %s <pursuit>\n", verb)
-				return pursuits.Check{}, exitCode(1)
+				return service.LogCheck{}, exitCode(1)
 			}
 			if !prompted {
 				register, err := client.Register(ctx)
 				if err != nil {
-					return pursuits.Check{}, err
+					return service.LogCheck{}, err
 				}
 				listForPrompt(out, register.PromptRows, register.Offered)
 				prompted = true
 			}
 			answer, err := asked(out, "\n  pursuit: ")
 			if err != nil || answer == "" {
-				return pursuits.Check{}, errAbandoned
+				return service.LogCheck{}, errAbandoned
 			}
 			name = answer
 		}
-		check, err := pursuits.Checked(ctx, client, name, wanted.minutes, wanted.itemID)
+		check, err := client.CheckLog(ctx, service.LogAsked{Pursuit: name, Minutes: wanted.minutes, ItemID: wanted.itemID, Ago: wanted.ago})
 		var refused *service.Refused
 		switch {
 		case errors.As(err, &refused) && refused.Status == http.StatusNotFound && prompted:
@@ -324,7 +344,7 @@ func askedMinutes(out, errOut io.Writer) (*int, error) {
 
 // askedChoice asks which of several choices was done. Enter means none of
 // them, because the first would complete whatever happened to sort first.
-func askedChoice(out io.Writer, choices []pursuits.Choice) map[string]any {
+func askedChoice(out io.Writer, choices []service.LogChoice) map[string]any {
 	palette := gotermstyle.PaletteFor(os.Stdout)
 	_, _ = fmt.Fprintln(out)
 	for number, choice := range choices {
@@ -337,30 +357,22 @@ func askedChoice(out io.Writer, choices []pursuits.Choice) map[string]any {
 	return nil
 }
 
-// ranOnLog runs the pursuit's on_log against chosen after asking, and answers
-// what it did. With --yes it runs unasked. With nobody to ask it runs nothing,
-// because the choice may be a quarter of an hour old, and a wrong completion
-// is a silent lie in another app's data.
-func ranOnLog(cmd *cobra.Command, check pursuits.Check, chosen map[string]any, note string, wanted logWanted) (map[string]any, error) {
-	onLog, err := pursuits.OnLogFor(check.OnLog, chosen, note, wanted.minutes)
-	if err != nil || onLog == nil {
-		return nil, err
+// approvedOnLog is whether the pursuit's on_log runs, asking first, and what
+// the log records where it does not. With --yes it runs unasked. With nobody
+// to ask it runs nothing, because the choice may be a quarter of an hour
+// old, and a wrong completion is a silent lie in another app's data.
+func approvedOnLog(cmd *cobra.Command, onLog *pursuits.OnLog, assumeYes bool) (bool, map[string]any) {
+	if assumeYes {
+		return true, nil
 	}
-	if !wanted.assumeYes {
-		if !canAsk() {
-			return nil, nil
-		}
-		palette := gotermstyle.PaletteFor(os.Stdout)
-		if !confirmed(cmd.OutOrStdout(), "  "+palette.Paint(gotermstyle.CodeCyan, terminalcontrol.Strip(onLog.Command))+"  run it? [y/N] ") {
-			return onLog.Declined(), nil
-		}
+	if !canAsk() {
+		return false, nil
 	}
-	downstream, err := onLog.Ran(cmd.Context())
-	if failure := pursuits.Failure(downstream); err == nil && failure != "" {
-		errOut := cmd.ErrOrStderr()
-		_, _ = fmt.Fprintln(errOut, yellow(errOut, "  "+terminalcontrol.Strip(onLog.Command)+" "+failure))
+	palette := gotermstyle.PaletteFor(os.Stdout)
+	if !confirmed(cmd.OutOrStdout(), "  "+palette.Paint(gotermstyle.CodeCyan, terminalcontrol.Strip(onLog.Command))+"  run it? [y/N] ") {
+		return false, onLog.Declined()
 	}
-	return downstream, err
+	return true, nil
 }
 
 func newPursuitsSkipCommand() *cobra.Command {
@@ -377,51 +389,43 @@ func newPursuitsSkipCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var name string
-			if len(args) > 0 {
-				name = args[0]
-			} else {
-				if !canAsk() {
-					_, _ = fmt.Fprintln(errOut, "Which pursuit? Pass it as the argument:  doit pursuits skip <pursuit>")
-					return exitCode(1)
-				}
-				register, err := client.Register(ctx)
-				if err != nil {
-					return err
-				}
-				var drawn []service.PromptRow
-				for _, row := range register.PromptRows {
-					for _, active := range register.Active {
-						if row.Name == active {
-							drawn = append(drawn, row)
-						}
-					}
-				}
-				if len(drawn) == 0 {
-					_, _ = fmt.Fprintln(errOut, "Nothing is in the draw to pass.")
-					return exitCode(1)
-				}
-				listForPrompt(out, drawn, register.Offered)
-				if name, err = asked(out, "\n  pursuit: "); err != nil || name == "" {
-					_, _ = fmt.Fprintln(errOut, "  Nothing skipped.")
-					return exitCode(1)
-				}
-			}
-			body := map[string]any{
-				"id": service.NewWriteID(time.Now()), "pursuit": name, "machine": actor.MachineName(), "actor": actor.Identity(),
-			}
+			body := map[string]any{"id": service.NewWriteID(time.Now()), "machine": actor.MachineName(), "actor": actor.Identity()}
 			if duration != "" {
 				body["for"] = duration
 			}
-			var passed struct {
-				Days  int    `json:"days"`
-				Until string `json:"until"`
-				Entry struct {
-					Pursuit string `json:"pursuit"`
-				} `json:"entry"`
+			var name string
+			if len(args) > 0 {
+				name = args[0]
+			} else if !canAsk() {
+				_, _ = fmt.Fprintln(errOut, "Which pursuit? Pass it as the argument:  doit pursuits skip <pursuit>")
+				return exitCode(1)
 			}
-			if err := client.Post(ctx, "/journal/skip", body, true, &passed); err != nil {
-				return refusedAsTyped(err)
+			var passed service.Skipped
+			for prompted := false; ; {
+				if name == "" {
+					if !prompted {
+						if err := listDrawn(cmd, client); err != nil {
+							return err
+						}
+						prompted = true
+					}
+					if name, err = asked(out, "\n  pursuit: "); err != nil || name == "" {
+						_, _ = fmt.Fprintln(errOut, "  Nothing skipped.")
+						return exitCode(1)
+					}
+				}
+				body["pursuit"] = name
+				passed, err = client.Skip(ctx, body)
+				var refused *service.Refused
+				if prompted && errors.As(err, &refused) && refused.Status == http.StatusNotFound {
+					_, _ = fmt.Fprintln(errOut, "  "+terminalcontrol.Strip(refused.Message))
+					name = ""
+					continue
+				}
+				if err != nil {
+					return refusedAsTyped(err)
+				}
+				break
 			}
 			until := passed.Until
 			if at, err := time.Parse(time.RFC3339Nano, passed.Until); err == nil {
@@ -439,15 +443,24 @@ func newPursuitsSkipCommand() *cobra.Command {
 	return cmd
 }
 
-// refusedAsTyped turns the service's refusal of what was typed into a usage
-// error, which exits 2. The service answers 404 for a name that means no one
-// pursuit, and 422 for a value it cannot read.
-func refusedAsTyped(err error) error {
-	var refused *service.Refused
-	if errors.As(err, &refused) && (refused.Status == http.StatusNotFound || refused.Status == http.StatusUnprocessableEntity) {
-		return goclikit.UsageError(err)
+// listDrawn lists the pursuits in the draw, which are the ones a skip can pass.
+func listDrawn(cmd *cobra.Command, client *service.Client) error {
+	register, err := client.Register(cmd.Context())
+	if err != nil {
+		return err
 	}
-	return err
+	var drawn []service.PromptRow
+	for _, row := range register.PromptRows {
+		if slices.Contains(register.Active, row.Name) {
+			drawn = append(drawn, row)
+		}
+	}
+	if len(drawn) == 0 {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Nothing is in the draw to pass.")
+		return exitCode(1)
+	}
+	listForPrompt(cmd.OutOrStdout(), drawn, register.Offered)
+	return nil
 }
 
 func newPursuitsResumeCommand() *cobra.Command {
@@ -466,10 +479,8 @@ func newPursuitsResumeCommand() *cobra.Command {
 			if len(args) > 0 {
 				body["pursuit"] = args[0]
 			}
-			var resumed struct {
-				Resumed []string `json:"resumed"`
-			}
-			if err := client.Post(cmd.Context(), "/journal/resume", body, false, &resumed); err != nil {
+			resumed, err := client.Resume(cmd.Context(), body)
+			if err != nil {
 				return refusedAsTyped(err)
 			}
 			out := cmd.OutOrStdout()
@@ -528,10 +539,8 @@ func newPursuitsResetCommand() *cobra.Command {
 					return exitCode(1)
 				}
 			}
-			var reset struct {
-				Reset []string `json:"reset"`
-			}
-			if err := client.Post(ctx, "/journal/reset", body, false, &reset); err != nil {
+			reset, err := client.ResetBalances(ctx, body)
+			if err != nil {
 				return refusedAsTyped(err)
 			}
 			balances := "the balance"
@@ -647,7 +656,7 @@ func newPursuitsEvidenceCommand() *cobra.Command {
 func newPursuitsEditCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "edit",
-		Short:   "Edit the pursuits in $EDITOR, starting from an annotated template where none are written",
+		Short:   "Edit the pursuits in your editor, starting from an annotated template where none are written",
 		Example: "  doit pursuits edit  change a pace or a weight, or add a pursuit",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

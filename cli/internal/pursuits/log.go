@@ -14,42 +14,64 @@ import (
 	"github.com/datapointchris/doit/cli/internal/service"
 )
 
-// Check is the log route's answer to a check, which writes nothing.
-type Check struct {
-	// Pursuit is the one pursuit that the typed name matched.
-	Pursuit string `json:"pursuit"`
-	// OnLog is the template that completes the choice in its app, or nil.
-	OnLog *string `json:"on_log"`
-	// MinutesRefusal is why the log still needs minutes, where it does.
-	MinutesRefusal *string `json:"minutes_refusal"`
-	// Choices are the pursuit's current choices, each with its line and the item a log records.
-	Choices []Choice `json:"choices"`
-	// Chosen is the choice that the log is about, flattened as a log records it, or nil.
-	Chosen map[string]any `json:"chosen"`
-	// Ask is several choices, none named, where only the person logging can say which.
-	Ask bool `json:"ask"`
-	// NamesChosen is whether the log names its choice whatever on_log does.
-	NamesChosen bool `json:"names_chosen"`
+// Run is one log of a pursuit once the service's check has passed. A caller
+// asks the person what the check leaves open, and fills in the rest.
+type Run struct {
+	Check service.LogCheck
+	// Chosen is what the log is about: the check's choice, or the person's pick.
+	Chosen map[string]any
+	// Entry is the log's fields. Its instant is the one the check fixed.
+	Entry Entry
+	// Approve says whether on_log runs and, where it does not, what the log
+	// records instead. A nil Approve runs it unasked.
+	Approve func(*OnLog) (run bool, instead map[string]any)
+	// Started keeps the entry as on_log begins, saying it may not have run.
+	// An error stops the log before on_log runs.
+	Started func(body map[string]any) error
+	// Ended keeps the entry once on_log has ended.
+	Ended func(body map[string]any)
+	// Held keeps the entry on this desk until the service answers it.
+	Held HeldLogs
 }
 
-// Choice is one of a pursuit's current choices.
-type Choice struct {
-	Line string         `json:"line"`
-	Item map[string]any `json:"item"`
-}
-
-// Checked asks the log route whether a log of name would be taken, writing
-// nothing. A name that means no one pursuit is refused with 404, minutes or
-// an item that do not fit with 422, and an item of an app that could not be
-// read with 409.
-func Checked(ctx context.Context, client *service.Client, name string, minutes *int, itemID *string) (Check, error) {
-	body := map[string]any{"pursuit": name, "check": true, "duration_minutes": minutes}
-	if itemID != nil {
-		body["item_id"] = *itemID
+// Log runs the pursuit's on_log where Approve agrees, then posts the entry
+// that records what it did. It answers the body it posted. Where no answer
+// says the entry was stored, it stays held, and the error is a *HeldError.
+func Log(ctx context.Context, client *service.Client, run Run) (map[string]any, service.Logged, error) {
+	occurred, err := time.Parse(time.RFC3339Nano, run.Check.OccurredAt)
+	if err != nil {
+		return nil, service.Logged{}, fmt.Errorf("the service's check answered occurred_at %q, which is not an instant", run.Check.OccurredAt)
 	}
-	var check Check
-	err := client.Post(ctx, "/journal/done", body, true, &check)
-	return check, err
+	run.Entry.Pursuit, run.Entry.Occurred = run.Check.Pursuit, occurred
+	onLog, err := OnLogFor(run.Check.OnLog, run.Chosen, run.Entry.Note, run.Entry.Minutes)
+	if err != nil {
+		return nil, service.Logged{}, err
+	}
+	var downstream map[string]any
+	if onLog != nil {
+		approved, instead := true, map[string]any(nil)
+		if run.Approve != nil {
+			approved, instead = run.Approve(onLog)
+		}
+		downstream = instead
+		if approved {
+			if run.Started != nil {
+				started := map[string]any{"command": onLog.Command, "ran": nil, "exit_code": nil, "error": "stopped while on_log ran"}
+				if err := run.Started(run.Entry.Body(run.Check.NamesChosen, run.Chosen, started)); err != nil {
+					return nil, service.Logged{}, err
+				}
+			}
+			if downstream, err = onLog.Ran(ctx); err != nil {
+				return nil, service.Logged{}, err
+			}
+		}
+	}
+	body := run.Entry.Body(run.Check.NamesChosen, run.Chosen, downstream)
+	if run.Ended != nil && downstream != nil {
+		run.Ended(body)
+	}
+	logged, err := run.Held.Post(ctx, client, body)
+	return body, logged, err
 }
 
 // Entry is one log of a pursuit, as this desk writes it.
@@ -88,22 +110,8 @@ const instantLayout = "2006-01-02T15:04:05.000-07:00"
 // Acted is whether on_log ran, as the log's downstream records it.
 func Acted(downstream map[string]any) bool { return downstream != nil && downstream["ran"] == true }
 
-// Logged is the log route's answer once it stores an entry.
-type Logged struct {
-	DueInDays *float64 `json:"due_in_days"`
-	// Due is when the pursuit next comes due, as a person reads it, or nil without a schedule.
-	Due *string `json:"due"`
-}
-
-// Posted sends body to the log route. The service keeps an entry by its id, so a resend is stored once.
-func Posted(ctx context.Context, client *service.Client, body map[string]any) (Logged, error) {
-	var logged Logged
-	err := client.Post(ctx, "/journal/done", body, true, &logged)
-	return logged, err
-}
-
 // Line is what a log says once it lands: the pursuit, the choice it names, and when it next comes due.
-func Line(body map[string]any, logged Logged) string {
+func Line(body map[string]any, logged service.Logged) string {
 	line := fmt.Sprint(body["pursuit"])
 	named, _ := body["item"].(map[string]any)
 	if label, _ := named["label"].(string); label != "" {

@@ -92,7 +92,7 @@ def resolved_settings(login: Deployment) -> dict[str, Resolved]:
         'config_file': from_variable(login.path, 'XDG_CONFIG_HOME'),
         'cache_dir': from_variable(pursuits.CACHE_DIR, 'XDG_CACHE_HOME'),
         'state_dir': from_variable(paths.state_dir(), 'XDG_STATE_HOME'),
-        'editor': from_variable(editor.editor_command(), 'EDITOR'),
+        'editor': from_variable(editor.editor_command(), editor.editor_variable() or 'EDITOR'),
         'machine': Resolved(paths.machine_name(), 'hostname'),
         'actor': Resolved(actor.identity(), 'environment', actor.identity_source()),
     }

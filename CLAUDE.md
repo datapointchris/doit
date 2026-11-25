@@ -37,11 +37,12 @@ in the same change, so no verb has two implementations.
   refresh lock. Changing any one logs every desk out of one side.
 - **`cli/internal/deskfiles` writes two files in `$XDG_CACHE_HOME/doit/`, and the shell reads each
   with no process started.**
-  - `next-names.txt` holds one `name<TAB>description` line per pursuit, sorted by name. `doit next`,
-    `doit pursuits` and `doit pursuits edit` rewrite it. The zsh completion that
+  - `next-names.txt` holds one `name<TAB>description` line per pursuit, sorted by name. Each command
+    that fetches the pursuits rewrites it, through `saveCompletionNames`. The zsh completion that
     `doit shell completion zsh` prints reads it.
-  - `nudge-interval-minutes` holds the shell nudge's interval in whole minutes. `doit review nudge`
-    and `nudge-every` rewrite it. The gate that `doit shell init zsh` prints reads it.
+  - `nudge-interval-minutes` holds the shell nudge's interval in whole minutes. Each command that
+    reads the interval rewrites it, through `keepNudgeInterval`. The gate that
+    `doit shell init zsh` prints reads it.
 
   The contract test fails where either reader looks at another path.
 - **`cli/internal/service` is the Go client of the service.** A route's call is a method that names
@@ -119,7 +120,7 @@ The release builds the page and fails where the build wrote no script under `dis
 
 ## The service runs no command, and the CLI's own code starts the processes below
 
-doit-python starts one:
+doit-python starts these:
 
 - **`doit-tui`**, in `tui.tui_command`, which replaces the process with it. `doit-tui` is the Go
   program in `cli/`. It starts `doit desk-nudge panel show --json` on a timer and `panel pick <key>
@@ -133,10 +134,10 @@ The Go binary starts these:
 
 - **`doit-python`**, in `passthrough.Exec`, which replaces the process with it for every command line
   that `owns` turns down.
-- **`$EDITOR`**, by `openInEditor` in `cli/cmd/doit/document_edit.go`, for every `edit` verb, with
-  no bound, because it waits as long as the person edits. `$EDITOR` is split into words as git
-  reads it, and `nvim` opens where it is unset.
-- **A pursuit's `on_log`**, by `pursuits.OnLogProgram` in `cli/internal/pursuits/on_log.go`, at
+- **The editor**, by `openInEditor` in `cli/cmd/doit/document_edit.go`, for every `edit` verb, with
+  no bound, because it waits as long as the person edits. gotermboard's `EditorCommand` names it:
+  `$VISUAL`, then `$EDITOR`, then `vi`, split on whitespace.
+- **A pursuit's `on_log`**, by `pursuits.Log` in `cli/internal/pursuits/log.go`, at
   `doit pursuits log`, stopped after 30 seconds by `OnLogBound`. It runs after the log's check has
   named the item and before the log is posted, so the journal records how it ended. It asks first
   unless `--yes` is passed, and runs nothing where nobody can answer.
@@ -181,7 +182,7 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
 
 - **Documents** — the pursuits, the review register and the sources. The service stores each as its
   text, so comments and layout survive, and `editDocument` in `cli/cmd/doit/document_edit.go`
-  round-trips it through `$EDITOR`. Never in the repo: it is personal, and the repo is public.
+  round-trips it through the editor. Never in the repo: it is personal, and the repo is public.
 - **Records** — the journal, review completions, offered counts, forecast readings and the nudge's
   last showing, in the service's store. A Go verb reaches them only through `cli/internal/service`.
 - **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer and the
@@ -189,6 +190,10 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
   each file rewritten by the command that fetches it, and the desk nudge panel's rows, which the
   watch rewrites and `panel show` reads. `doit config show` prints each of these with
   where it came from, and a value doit newly resolves gets a row there.
+- **Held logs** — `$XDG_STATE_HOME/doit/held-logs/` keeps each pursuit log from just before its
+  post until the service answers it, one file per entry, named by its id. Where the answer is lost,
+  the next `doit pursuits log` or pursuit pick sends it again under its id. The service then stores
+  it once, and on_log never runs twice. `HeldLogs` in `cli/internal/pursuits/held.go` is the store.
 - **The desk nudge's clock** — the time a desk counts is a fact of that desk, so `$XDG_STATE_HOME/doit/`
   holds the nudge's state file and its record file, which a log shipper reads. Only its answers
   go to the service, so the interval follows the login to any desk. The watch serves its picks on

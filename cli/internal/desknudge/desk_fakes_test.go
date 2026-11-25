@@ -247,7 +247,7 @@ func (f *fakeDesk) routes() http.Handler {
 	checked := func(body map[string]any) map[string]any {
 		if body["pursuit"] != "tasks" {
 			return map[string]any{
-				"pursuit": body["pursuit"], "on_log": nil, "minutes_refusal": nil,
+				"pursuit": body["pursuit"], "occurred_at": deskClockStart.Format(time.RFC3339), "on_log": nil, "minutes_refusal": nil,
 				"choices": []any{}, "chosen": nil, "ask": false, "names_chosen": true,
 			}
 		}
@@ -262,7 +262,7 @@ func (f *fakeDesk) routes() http.Handler {
 			}
 		}
 		return map[string]any{
-			"pursuit": "tasks", "on_log": "tick-task {id} {label}", "minutes_refusal": nil,
+			"pursuit": "tasks", "occurred_at": deskClockStart.Format(time.RFC3339), "on_log": "tick-task {id} {label}", "minutes_refusal": nil,
 			"choices": choices, "chosen": chosen, "ask": body["item_id"] == nil, "names_chosen": body["item_id"] != nil,
 		}
 	}

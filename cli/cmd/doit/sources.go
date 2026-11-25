@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -73,8 +72,8 @@ func newSourcesExampleCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var template document
-			if _, err := client.Get(cmd.Context(), "/documents/sources/template", nil, &template); err != nil {
+			template, err := client.DocumentTemplate(cmd.Context(), "sources")
+			if err != nil {
 				return err
 			}
 			_, err = fmt.Fprintln(cmd.OutOrStdout(), template.Text)
@@ -86,7 +85,7 @@ func newSourcesExampleCommand() *cobra.Command {
 func newSourcesEditCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:     "edit",
-		Short:   "Edit the sources in $EDITOR, starting from the example where none are written",
+		Short:   "Edit the sources in your editor, starting from the example where none are written",
 		Example: "  doit sources edit  turn a source on or off",
 		Args:    cobra.NoArgs,
 		RunE:    func(cmd *cobra.Command, _ []string) error { return editedOrExit(cmd, "sources") },
@@ -106,8 +105,8 @@ func newSourcesContractCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var contract json.RawMessage
-			if _, err := client.Get(cmd.Context(), "/sources/contract", nil, &contract); err != nil {
+			contract, err := client.SourcesContract(cmd.Context())
+			if err != nil {
 				return err
 			}
 			return printJSON(cmd.OutOrStdout(), contract)

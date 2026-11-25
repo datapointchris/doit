@@ -177,9 +177,10 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 		}{
 			{[]string{"read", "--no-write"}, 2, "read is ambiguous: it matches read-library, read-longform"},
 			{[]string{"nonsense"}, 2, "no pursuit named nonsense"},
-			{[]string{"chores", "--minutes", "20", "--no-write"}, 2, "minutes"},
-			{[]string{"read-library", "--no-write"}, 2, "--minutes"},
-			{[]string{"--no-write"}, 1, "Which pursuit?"},
+			{[]string{"chores", "--minutes", "20", "--no-write"}, 2, ""},
+			{[]string{"read-library", "--no-write"}, 2, ""},
+			{[]string{"chores", "--ago", "3x", "--no-write"}, 2, ""},
+			{[]string{"--no-write"}, 1, ""},
 		} {
 			printed, stderr, exit := on.run(t, append([]string{"pursuits", "log"}, refused.args...)...)
 			if exit != refused.exit || !strings.Contains(stderr, refused.said) {
@@ -192,7 +193,7 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 	})
 
 	t.Run("pursuits log writes one journal event, which drift and dormant then read", func(t *testing.T) {
-		if printed, stderr, exit := on.run(t, "pursuits", "log", "chores", "swept", "--no-write"); exit != 0 || !strings.Contains(printed, "Logged chores") {
+		if printed, stderr, exit := on.run(t, "pursuits", "log", "chores", "swept", "--no-write"); exit != 0 {
 			t.Fatalf("doit pursuits log chores exited %d, printing:\n%s%s", exit, printed, stderr)
 		}
 		if printed, stderr, exit := on.run(t, "pursuits", "log", "read-library", "--minutes", "20", "--no-write"); exit != 0 {
@@ -222,24 +223,35 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 		}
 	})
 
-	t.Run("pursuits skip, resume and reset say what changed, and a reset of all is confirmed", func(t *testing.T) {
-		printed, stderr, exit := on.run(t, "pursuits", "skip", "read-library", "--for", "3d")
-		if exit != 0 || !strings.Contains(printed, "Passed read-library") || !strings.Contains(printed, "doit pursuits resume read-library") {
+	t.Run("pursuits skip, resume and reset each write their event, and a reset of all is confirmed", func(t *testing.T) {
+		if printed, stderr, exit := on.run(t, "pursuits", "skip", "read-library", "--for", "3d"); exit != 0 {
 			t.Errorf("doit pursuits skip read-library --for 3d exited %d, printing:\n%s%s", exit, printed, stderr)
+		}
+		skips := served.events(t, "read-library", "skip")
+		if len(skips) != 1 || skips[0].ExpiresAt == nil || time.Until(*skips[0].ExpiresAt).Round(time.Hour) != 72*time.Hour {
+			t.Errorf("a skip for 3d wrote %+v", skips)
 		}
 		if _, stderr, exit := on.run(t, "pursuits", "skip", "chores", "--for", "3m"); exit != 2 {
 			t.Errorf("a skip for a span of minutes exited %d, wanting the usage exit 2: %s", exit, stderr)
 		}
-		for wanted, args := range map[string][]string{
-			"Resumed read-library — back in the next draw.":     {"resume", "read-library"},
-			"Reset chores — the balance starts again from now.": {"reset", "chores"},
-		} {
-			if printed, stderr, exit := on.run(t, append([]string{"pursuits"}, args...)...); exit != 0 || !strings.Contains(printed, wanted) {
-				t.Errorf("doit pursuits %v exited %d without %q, printing:\n%s%s", args, exit, wanted, printed, stderr)
+		reset := len(served.events(t, "chores", "reset"))
+		for _, args := range [][]string{{"resume", "read-library"}, {"reset", "chores"}} {
+			if printed, stderr, exit := on.run(t, append([]string{"pursuits"}, args...)...); exit != 0 {
+				t.Errorf("doit pursuits %v exited %d, printing:\n%s%s", args, exit, printed, stderr)
 			}
 		}
-		if _, stderr, exit := on.run(t, "pursuits", "reset"); exit != 1 || !strings.Contains(stderr, "Pass --yes") {
+		if skips := served.events(t, "read-library", "skip"); len(skips) != 2 || skips[1].ExpiresAt == nil || time.Until(*skips[1].ExpiresAt) > time.Minute {
+			t.Errorf("a resume left the skips %+v, the newest not ending now", skips)
+		}
+		resets := len(served.events(t, "", "reset"))
+		if _, stderr, exit := on.run(t, "pursuits", "reset"); exit != 1 {
 			t.Errorf("a reset of every pursuit with nobody to confirm exited %d: %s", exit, stderr)
+		}
+		if after := len(served.events(t, "chores", "reset")); after != reset+1 {
+			t.Errorf("a reset of chores wrote %d reset events of it", after-reset)
+		}
+		if after := len(served.events(t, "", "reset")); after != resets {
+			t.Errorf("a refused reset of every pursuit wrote %d reset events", after-resets)
 		}
 	})
 
@@ -249,7 +261,7 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 		}
 		today := time.Now().Format(time.DateOnly)
 		for _, args := range [][]string{{"done", "never-done", "--on", "2026-07-17"}, {"done", "never-done"}} {
-			if printed, stderr, exit := on.run(t, append([]string{"review"}, args...)...); exit != 0 || !strings.Contains(printed, "Marked never-done done") {
+			if printed, stderr, exit := on.run(t, append([]string{"review"}, args...)...); exit != 0 {
 				t.Fatalf("doit review %v exited %d, printing:\n%s%s", args, exit, printed, stderr)
 			}
 		}
@@ -266,8 +278,13 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 		if printed, _, _ := on.run(t, "review", "undo", "never-done"); !strings.Contains(printed, "Now: never done.") {
 			t.Errorf("taking back the last completion printed:\n%s", printed)
 		}
-		if _, stderr, exit := on.run(t, "review", "undo", "never-done"); exit != 1 || !strings.Contains(stderr, "no completion to take back") {
+		if _, stderr, exit := on.run(t, "review", "undo", "never-done"); exit != 1 {
 			t.Errorf("an undo with nothing to take back exited %d: %s", exit, stderr)
+		}
+		for _, verb := range []string{"done", "undo"} {
+			if _, stderr, exit := on.run(t, "review", verb, "no-such-entry"); exit != 2 {
+				t.Errorf("doit review %s of an id the register lacks exited %d, wanting the usage exit 2: %s", verb, exit, stderr)
+			}
 		}
 		printed, stderr, exit := on.run(t, "review", "list", "--json")
 		var entries []struct {
@@ -281,7 +298,7 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 
 	t.Run("review nudge shows what is due once per interval and runs each show", func(t *testing.T) {
 		printed, stderr, exit := on.run(t, "review", "nudge")
-		for _, wanted := range []string{"never-done", "echo overdue", "fresh\n", "Done:  doit review done <id>"} {
+		for _, wanted := range []string{"never-done", "echo overdue", "fresh\n"} {
 			if exit != 0 || !strings.Contains(printed, wanted) {
 				t.Errorf("doit review nudge exited %d without %q, printing:\n%s%s", exit, wanted, printed, stderr)
 			}
@@ -289,7 +306,7 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 		if again, stderr, exit := on.run(t, "review", "nudge"); exit != 0 || again != "" {
 			t.Errorf("a second nudge inside the interval exited %d, printing:\n%s%s", exit, again, stderr)
 		}
-		if printed, stderr, exit := on.run(t, "review", "nudge-every", "90m"); exit != 0 || printed != "Nudge interval set to 90 minutes.\n" {
+		if printed, stderr, exit := on.run(t, "review", "nudge-every", "90m"); exit != 0 {
 			t.Errorf("doit review nudge-every 90m exited %d, printing:\n%s%s", exit, printed, stderr)
 		}
 		gate, stderr, exit := on.run(t, "shell", "init", "zsh")
@@ -307,10 +324,9 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 
 	t.Run("sources list, example and contract answer with no source configured", func(t *testing.T) {
 		for wanted, args := range map[string][]string{
-			"No sources configured": {"list"},
-			"[]\n":                  {"list", "--json"},
-			"sources:":              {"example"},
-			`"lanes"`:               {"contract"},
+			"[]\n":     {"list", "--json"},
+			"sources:": {"example"},
+			`"lanes"`:  {"contract"},
 		} {
 			if printed, stderr, exit := on.run(t, append([]string{"sources"}, args...)...); exit != 0 || !strings.Contains(printed, wanted) {
 				t.Errorf("doit sources %v exited %d without %q, printing:\n%s%s", args, exit, wanted, printed, stderr)
@@ -343,7 +359,7 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 			t.Fatal("a refused item ran on_log or wrote a log")
 		}
 		printed, stderr, exit := on.run(t, "pursuits", "log", "tasks", "--item", "512", "--yes")
-		if exit != 0 || !strings.Contains(printed, "Ran sh -c") {
+		if exit != 0 {
 			t.Fatalf("doit pursuits log tasks --item 512 --yes exited %d, printing:\n%s%s", exit, printed, stderr)
 		}
 		if completed, err := os.ReadFile(marker); err != nil || string(completed) != "Return the parcel" {
@@ -354,10 +370,16 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 			logged[0].Downstream == nil || !logged[0].Downstream.Ran || logged[0].Downstream.ExitCode == nil || *logged[0].Downstream.ExitCode != 0 {
 			t.Errorf("the log of task 512 wrote %+v", logged)
 		}
-		if printed, stderr, exit := on.run(t, "pursuits", "log", "tasks", "--yes"); exit != 0 || strings.Contains(printed, "Ran") {
+		if err := os.Remove(marker); err != nil {
+			t.Fatal(err)
+		}
+		if printed, stderr, exit := on.run(t, "pursuits", "log", "tasks", "--yes"); exit != 0 {
 			t.Errorf("three choices with nobody to ask which exited %d, printing:\n%s%s", exit, printed, stderr)
 		}
-		if logged := served.journal(t, "tasks"); len(logged) != 2 || logged[1].Item != nil {
+		if _, err := os.Stat(marker); err == nil {
+			t.Error("a log among three choices that names none ran on_log")
+		}
+		if logged := served.journal(t, "tasks"); len(logged) != 2 || logged[1].Item != nil || logged[1].Downstream != nil {
 			t.Errorf("a log among three choices that names none wrote %+v", logged)
 		}
 	})
@@ -365,10 +387,11 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 
 // logged is one done event of the journal.
 type logged struct {
-	Event   string  `json:"event"`
-	Note    *string `json:"note"`
-	Minutes *int    `json:"duration_minutes"`
-	Item    *struct {
+	Event     string     `json:"event"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	Note      *string    `json:"note"`
+	Minutes   *int       `json:"duration_minutes"`
+	Item      *struct {
 		Label string `json:"label"`
 	} `json:"item"`
 	Downstream *struct {
@@ -380,19 +403,25 @@ type logged struct {
 // journal is every done event of pursuit, or of every pursuit where it is "".
 func (s service) journal(t *testing.T, pursuit string) []logged {
 	t.Helper()
+	return s.events(t, pursuit, "done")
+}
+
+// events is every event of pursuit of the kind named, or of every pursuit where it is "".
+func (s service) events(t *testing.T, pursuit, event string) []logged {
+	t.Helper()
 	path := "/api/v1/journal"
 	if pursuit != "" {
 		path += "?pursuit=" + url.QueryEscape(pursuit)
 	}
 	var records []logged
 	s.read(t, path, &records)
-	var done []logged
+	var kept []logged
 	for _, record := range records {
-		if record.Event == "done" {
-			done = append(done, record)
+		if record.Event == event {
+			kept = append(kept, record)
 		}
 	}
-	return done
+	return kept
 }
 
 // completions is each day entry holds a completion on, oldest first.

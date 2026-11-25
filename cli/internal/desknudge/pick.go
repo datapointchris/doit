@@ -12,7 +12,6 @@ import (
 
 	"github.com/datapointchris/doit/cli/internal/programs"
 	"github.com/datapointchris/doit/cli/internal/pursuits"
-	"github.com/datapointchris/doit/cli/internal/review"
 	"github.com/datapointchris/doit/cli/internal/service"
 )
 
@@ -364,9 +363,9 @@ func (d *Desk) markedReviewDone(ctx context.Context, ref, day string) completion
 	ctx, cancel := context.WithTimeout(ctx, writeBound)
 	defer cancel()
 	client, err := d.Open(ctx)
-	var done review.Done
+	var done service.ReviewDone
 	if err == nil {
-		done, err = review.MarkDone(ctx, client, ref, day)
+		done, err = client.CompleteReview(ctx, ref, day)
 	}
 	if err != nil {
 		return completion{summary: "doit: " + ref + " not marked done", body: err.Error(), exitCode: service.ExitCode(err), recordedNothing: true}
@@ -400,68 +399,87 @@ func pursuitNotLogged(name string, err error) completion {
 // loggedPursuit logs a pursuit, naming the row's choice, after its on_log runs
 // unasked, because the pick is the asking.
 //
-// It logs as `doit pursuits log` does, through the service's check: the
-// choice is the one the row names, or with none named the only one the
-// resolve offers. on_log runs against that choice, then the log posts what
-// on_log did.
+// It logs as `doit pursuits log` does. Every log held on this desk is sent
+// first, and where one of them was this pursuit's, the pick is that log.
+// Otherwise the service's check names the choice: the one the row names, or
+// with none named the only one the resolve offers. on_log runs against that
+// choice, then the log posts what on_log did.
 func (d *Desk) loggedPursuit(ctx context.Context, target Completes, minutes *int, journal logWrite) completion {
 	name := target.Ref
-	checkCtx, cancel := context.WithTimeout(ctx, writeBound)
-	defer cancel()
-	client, err := d.Open(checkCtx)
-	var check pursuits.Check
-	if err == nil {
-		check, err = pursuits.Checked(checkCtx, client, name, minutes, target.ItemID)
-	}
-	if err != nil {
-		return pursuitNotLogged(name, err)
-	}
-	onLog, err := pursuits.OnLogFor(check.OnLog, check.Chosen, "", minutes)
-	if err != nil {
-		return pursuitNotLogged(name, err)
-	}
-	entry := pursuits.Entry{ID: journal.id, Pursuit: check.Pursuit, Occurred: d.Now(), Minutes: minutes, Machine: d.Machine, Actor: d.Actor}
-	var downstream map[string]any
-	if onLog != nil {
-		if journal.save != nil {
-			started := map[string]any{"command": onLog.Command, "ran": nil, "exit_code": nil, "error": "the watch stopped while on_log ran"}
-			if err := journal.save(entry.Body(check.NamesChosen, check.Chosen, started)); err != nil {
-				return pursuitNotLogged(name, err)
-			}
-		}
-		if downstream, err = onLog.Ran(ctx); err != nil {
-			return pursuitNotLogged(name, err)
-		}
-	}
-	body := entry.Body(check.NamesChosen, check.Chosen, downstream)
-	if journal.save != nil && downstream != nil {
-		if err := journal.save(body); err != nil {
-			logger.Warn("could not save " + name + "'s entry before posting it, so a restart sends the one saved as on_log began: " + err.Error())
-		}
-	}
-	return d.postedLog(ctx, body)
-}
-
-// postedLog posts a pursuit's journal entry, and says what it logged. A resend
-// of one entry is stored once, because the service keeps an entry by its id.
-func (d *Desk) postedLog(ctx context.Context, body map[string]any) completion {
-	name := fmt.Sprint(body["pursuit"])
-	downstream, _ := body["downstream"].(map[string]any)
-	ctx, cancel := context.WithTimeout(ctx, writeBound)
+	ctx, cancel := context.WithTimeout(ctx, pursuits.OnLogBound+2*writeBound)
 	defer cancel()
 	client, err := d.Open(ctx)
-	var logged pursuits.Logged
-	if err == nil {
-		logged, err = pursuits.Posted(ctx, client, body)
-	}
 	if err != nil {
-		if !pursuits.Acted(downstream) {
-			return pursuitNotLogged(name, err)
+		return pursuitNotLogged(name, err)
+	}
+	held := pursuits.HeldLogs{Dir: d.Paths.HeldLogs}
+	sent, err := held.SendHeld(ctx, client)
+	if err != nil {
+		return pursuitNotLogged(name, err)
+	}
+	check, err := client.CheckLog(ctx, service.LogAsked{Pursuit: name, Minutes: minutes, ItemID: target.ItemID})
+	if err != nil {
+		return pursuitNotLogged(name, err)
+	}
+	for _, each := range sent {
+		if each.Refused != nil {
+			logger.Warn("the held log of " + fmt.Sprint(each.Body["pursuit"]) + " was refused: " + each.Refused.Error())
+		} else if each.Body["pursuit"] == check.Pursuit {
+			return completion{ok: true, summary: "doit: logged", body: "Sent the held log of " + pursuits.Line(each.Body, each.Logged)}
 		}
+	}
+	run := pursuits.Run{
+		Check: check, Chosen: check.Chosen, Held: held,
+		Entry: pursuits.Entry{ID: journal.id, Minutes: minutes, Machine: d.Machine, Actor: d.Actor},
+	}
+	if journal.save != nil {
+		run.Started = journal.save
+		run.Ended = func(body map[string]any) {
+			if err := journal.save(body); err != nil {
+				logger.Warn("could not save " + name + "'s entry before posting it, so a restart sends the one saved as on_log began: " + err.Error())
+			}
+		}
+	}
+	body, logged, err := pursuits.Log(ctx, client, run)
+	return loggedOutcome(name, body, logged, err)
+}
+
+// postedLog posts a pursuit's journal entry that a restart found saved, and
+// says what it logged. The service keeps an entry by its id, so a resend is
+// stored once. An entry it cannot post is held on this desk.
+func (d *Desk) postedLog(ctx context.Context, body map[string]any) completion {
+	name := fmt.Sprint(body["pursuit"])
+	ctx, cancel := context.WithTimeout(ctx, writeBound)
+	defer cancel()
+	held := pursuits.HeldLogs{Dir: d.Paths.HeldLogs}
+	client, err := d.Open(ctx)
+	if err != nil {
+		if path, holdErr := held.Hold(body); holdErr == nil && service.LaterSendCanStore(err) {
+			err = &pursuits.HeldError{Err: err, Path: path}
+		}
+		return loggedOutcome(name, body, service.Logged{}, err)
+	}
+	logged, err := held.Post(ctx, client, body)
+	return loggedOutcome(name, body, logged, err)
+}
+
+// loggedOutcome says how a pursuit's log ended.
+func loggedOutcome(name string, body map[string]any, logged service.Logged, err error) completion {
+	downstream, _ := body["downstream"].(map[string]any)
+	var held *pursuits.HeldError
+	switch {
+	case errors.As(err, &held):
+		return completion{
+			summary: "doit: " + name + " held, not yet recorded", exitCode: service.ExitCode(err),
+			body: err.Error() + "\nThe log is held at " + held.Path + ", and the next log of a pursuit sends it again.",
+		}
+	case err != nil && pursuits.Acted(downstream):
 		return completion{
 			summary: "doit: " + name + " not recorded", exitCode: service.ExitCode(err),
 			body: strings.Join(append([]string{err.Error()}, pursuits.RepairLines(body)...), "\n"),
 		}
+	case err != nil:
+		return pursuitNotLogged(name, err)
 	}
 	line := "Logged " + pursuits.Line(body, logged)
 	if !pursuits.Acted(downstream) {

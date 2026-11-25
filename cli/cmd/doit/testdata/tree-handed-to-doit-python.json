@@ -130,7 +130,7 @@
       "pursuits",
       "edit"
     ],
-    "summary": "Edit the pursuits in $EDITOR, starting from an annotated template where none are written"
+    "summary": "Edit the pursuits in your editor, starting from an annotated template where none are written"
   },
   {
     "path": [
@@ -172,7 +172,7 @@
       "review",
       "edit"
     ],
-    "summary": "Edit the register in $EDITOR, the document listing every review item"
+    "summary": "Edit the register in your editor, the document listing every review item"
   },
   {
     "path": [
@@ -207,7 +207,7 @@
       "sources",
       "edit"
     ],
-    "summary": "Edit the sources in $EDITOR, starting from the example where none are written"
+    "summary": "Edit the sources in your editor, starting from the example where none are written"
   },
   {
     "path": [
