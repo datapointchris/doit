@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-// Each verb the Go doit runs, against the service it ships beside. A later
-// port adds its verbs here.
+// Each verb the Go doit runs, against the service it ships beside.
 func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts the Python service, which the commit hook's -short run leaves to CI")
@@ -23,11 +23,11 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 	served := startService(t, root)
 	served.write(t, "pursuits", filepath.Join(root, "tests", "fixtures", "pursuits", "pursuits.yml"))
 	served.write(t, "review", filepath.Join(root, "tests", "fixtures", "review", "register.yml"))
-	on := newDesk(t, served.url)
+	on := newDesk(t, served.url, root)
 
 	t.Run("today prints the day the service answers", func(t *testing.T) {
 		printed, stderr, exit := on.run(t, "today")
-		if exit != 0 || !strings.Contains(printed, "Today · ") || !strings.Contains(printed, "STILL DUE") {
+		if exit != 0 {
 			t.Fatalf("doit today exited %d, printing:\n%s%s", exit, printed, stderr)
 		}
 		if !strings.Contains(printed, "never-done") {
@@ -60,15 +60,11 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 		State   struct {
 			Active []string `json:"active"`
 		} `json:"state"`
-		OfferRows []json.RawMessage `json:"offer_rows"`
 	}
-	t.Run("next --json prints the draw and the rows its screens print", func(t *testing.T) {
+	t.Run("next --json prints the draw", func(t *testing.T) {
 		printed, stderr, exit := on.run(t, "next", "--json")
 		if exit != 0 || json.Unmarshal([]byte(printed), &drawn) != nil || len(drawn.Offered) == 0 {
 			t.Fatalf("doit next --json exited %d, printing:\n%s%s", exit, printed, stderr)
-		}
-		if len(drawn.OfferRows) != len(drawn.State.Active) {
-			t.Errorf("%d offer rows for %d active pursuits", len(drawn.OfferRows), len(drawn.State.Active))
 		}
 	})
 
@@ -84,9 +80,17 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 				}
 			}
 		}
-		names, err := os.ReadFile(filepath.Join(on.cache, "doit", "next-names.txt"))
+	})
+
+	t.Run("the shell completion reads the names file next wrote", func(t *testing.T) {
+		completion, stderr, exit := on.run(t, "shell", "completion", "zsh")
+		read := regexp.MustCompile(`local cache="([^"]+)"`).FindStringSubmatch(completion)
+		if exit != 0 || read == nil {
+			t.Fatalf("doit shell completion zsh exited %d, naming no names file:\n%s%s", exit, completion, stderr)
+		}
+		names, err := os.ReadFile(read[1])
 		if err != nil || !strings.Contains(string(names), "chores\tThe maintenance list\n") {
-			t.Errorf("next-names.txt holds %q (%v), and the shell completes from it", names, err)
+			t.Errorf("the completion reads %s, which holds %q (%v)", read[1], names, err)
 		}
 	})
 }

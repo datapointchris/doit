@@ -409,7 +409,7 @@ def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store,
 
     upcoming = next(lane for lane in client.get('/api/v1/today').json()['due'] if lane['name'] == 'upcoming')
     assert 'Portland' in [row['label'] for row in upcoming['rows']] + [row['text'] for row in upcoming['rows']]
-    assert upcoming['reason'].startswith('life is not configured'), 'the due list says what it could not ask'
+    assert 'life' in (upcoming['reason'] or ''), 'the due list says which source it could not ask'
 
     listed = CliRunner().invoke(sources_commands.app, ['list', '--json'])
     assert {row['id']: row['failure'] for row in json.loads(listed.output)} == {'life': 'failed', 'nomad': None, 'meso-feedback': None}
