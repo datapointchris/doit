@@ -26,17 +26,30 @@ type offerColumn struct {
 	heading string
 	cell    func(service.OfferRow) string
 	right   bool
+	// code is the cell's color on an offered row.
+	code string
+	// marksLate colors the cell yellow on a row that is late.
+	marksLate bool
 	// dropOrder is when the column gives way in a narrow pane, from 1, or 0 for never.
 	dropOrder int
 }
 
 // The name and the date are what the screen is read for, so they never give way.
 var offerColumns = []offerColumn{
-	{heading: "pursuit", cell: func(r service.OfferRow) string { return r.Name }},
+	{heading: "pursuit", cell: func(r service.OfferRow) string { return r.Name }, code: gotermstyle.CodeWhite},
 	{heading: "wt", cell: func(r service.OfferRow) string { return r.Weight }, right: true, dropOrder: 1},
 	{heading: "goal", cell: func(r service.OfferRow) string { return r.Goal }, dropOrder: 2},
 	{heading: "done", cell: func(r service.OfferRow) string { return r.Tally }, dropOrder: 3},
-	{heading: "due", cell: func(r service.OfferRow) string { return r.Due }},
+	{heading: "due", cell: func(r service.OfferRow) string { return r.Due }, marksLate: true},
+}
+
+// lastDrop is the highest dropOrder in offerColumns.
+func lastDrop() int {
+	last := 0
+	for _, column := range offerColumns {
+		last = max(last, column.dropOrder)
+	}
+	return last
 }
 
 // Next prints what to do now: today's events, then every pursuit, the offered
@@ -79,7 +92,10 @@ func offers(pr *printer, rows []service.OfferRow) {
 			widths[index] = max(widths[index], runes(column.cell(row)))
 		}
 	}
-	shown := []int{0, 1, 2, 3, 4}
+	shown := make([]int, len(offerColumns))
+	for index := range offerColumns {
+		shown[index] = index
+	}
 	room := func() int {
 		used := len(gutter)
 		for _, index := range shown {
@@ -87,7 +103,7 @@ func offers(pr *printer, rows []service.OfferRow) {
 		}
 		return pr.widths.Layout - used
 	}
-	for drop := 1; drop <= 3 && room() < readableChoiceWidth; drop++ {
+	for drop := 1; drop <= lastDrop() && room() < readableChoiceWidth; drop++ {
 		kept := shown[:0:0]
 		for _, index := range shown {
 			if offerColumns[index].dropOrder != drop {
@@ -132,7 +148,11 @@ func offers(pr *printer, rows []service.OfferRow) {
 				if choiceIndex == 0 {
 					text = cell(offerColumns[index].cell(row), index)
 				}
-				printed = printed.add(text, offerCode(index, row)).add(gutter, "")
+				code := offerColumns[index].code
+				if offerColumns[index].marksLate && row.Late {
+					code = gotermstyle.CodeYellow
+				}
+				printed = printed.add(text, code).add(gutter, "")
 			}
 			code := gotermstyle.CodeGreen
 			if row.Failed {
@@ -152,25 +172,13 @@ func offers(pr *printer, rows []service.OfferRow) {
 				printed = printed.add(gutter, codeDim)
 			}
 			code := codeDim
-			if offerColumns[index].heading == "due" && row.Late {
+			if offerColumns[index].marksLate && row.Late {
 				code = codeDimYellow
 			}
 			printed = printed.add(cell(offerColumns[index].cell(row), index), code)
 		}
 		pr.cut(printed)
 	}
-}
-
-func offerCode(index int, row service.OfferRow) string {
-	switch offerColumns[index].heading {
-	case "due":
-		if row.Late {
-			return gotermstyle.CodeYellow
-		}
-	case "pursuit":
-		return gotermstyle.CodeWhite
-	}
-	return ""
 }
 
 // Explain prints the draw with every number behind it: each pursuit owed
