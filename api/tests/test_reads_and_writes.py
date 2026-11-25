@@ -243,6 +243,20 @@ def test_a_log_check_resolves_again_past_a_draw_whose_read_failed(store):
     assert [record for record in store.journal() if record['event'] == 'done'] == [], 'a check logs nothing'
 
 
+def test_a_review_completion_taken_back_stays_in_history(store):
+    client = client_for(store)
+    client.put(
+        '/api/v1/documents/review', json={'text': 'items:\n  stretch:\n    description: Stretch\n    cadence: 1w\n'}
+    ).raise_for_status()
+    for day in ('2026-10-20', '2026-10-30'):
+        client.post('/api/v1/review/stretch/completions', json={'day': day}).raise_for_status()
+        client.delete(f'/api/v1/review/stretch/completions/{day}').raise_for_status()
+
+    history = client.get('/api/v1/history/review_completions', params={'key': 'stretch'}).json()
+    assert sorted(row['done_on'] for row in history) == ['2026-10-20', '2026-10-30']
+    assert all(row['valid_to'] for row in history)
+
+
 def test_a_reason_reaches_every_read_of_a_pursuit_and_a_tracked_one_has_no_weight_or_due_date(api):
     reason = 'It keeps the [house] standing, per chores.md'
     register = f'pursuits:\n  build:\n    description: Engineering\n  chores:\n    weight: 25\n    cadence: 3d\n    reason: {reason}\n'
