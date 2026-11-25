@@ -17,10 +17,10 @@ those agents read, and no pursuit or daily list carries it.
 
 ## Install
 
-doit's CLI is moving from Python to Go one verb at a time, so it installs as two programs. `doit` is
-a Go binary. It runs the verbs it has ported, and hands every other command line to `doit-python`
-unchanged, so stdin, stdout and the exit code are the Python CLI's. Bare `doit` and `doit --help`
-go to `doit-python` too, whose help lists every verb.
+doit installs as two programs. `doit` is a Go binary, and runs every command line. `doit tui` alone
+needs `doit-python`, the Python CLI: it execs `doit-python tui` with the arguments typed after it,
+so stdin, stdout and the exit code are the Python CLI's. Update `doit` before `doit-python`, because
+a `doit-python` release relies on the Go binary released beside it.
 
 ```bash
 # doit, the Go binary, from the newest cli/vX.Y.Z release, into a directory on PATH
@@ -39,17 +39,16 @@ doit update --check   # whether a newer Go release exists
 ```
 
 Each `cli/` release carries one `doit_<version>_<os>_<arch>.tar.gz` for each platform it builds,
-with `doit` at the archive's root, and `checksums.txt`. Without `doit-python` on `PATH`, `doit` still
-answers its own verbs and its help. A verb that only `doit-python` runs exits 1 and names itself.
+with `doit` at the archive's root, and `checksums.txt`. Without `doit-python` on `PATH`, every verb
+but `doit tui` works, and `doit tui` exits 1 naming `doit-python`.
 
 Every Python release is published to that package index. Name it on the install: without it uv asks
 PyPI, where `doit` is a different project. `uv tool upgrade doit` updates `doit-python`, and uv
 fetches the Python it needs.
 
 `doit update` replaces the Go binary with its newest release, checked against the release's
-checksums. It refuses a local build, which carries no release version to compare. On a verb it runs
-itself, the Go binary checks for a newer release at most once a day, and names one it finds in a
-line on stderr.
+checksums. It refuses a local build, which carries no release version to compare. The Go binary
+checks for a newer release at most once a day, and names one it finds in a line on stderr.
 
 ## Starting from scratch
 
