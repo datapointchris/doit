@@ -178,6 +178,16 @@ def warn_empty() -> None:
 BLOCK_TITLES = {'items': 'Review', 'practice': 'Practice'}
 
 
+def with_status(row: dict) -> dict:
+    """An entry as the service answers it: its derived fields, and `status`, the label every screen prints for it."""
+    return {**row, 'status': status_label(row['overdue'])}
+
+
+def block_titles() -> list[dict]:
+    """Each block with its heading, maintenance first, as the browse views print them."""
+    return [{'name': block, 'title': BLOCK_TITLES[block]} for block in BLOCKS]
+
+
 def render_stranded(stranded: list[str]) -> None:
     """Name any recorded done dates whose item the register no longer holds.
 

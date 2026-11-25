@@ -33,6 +33,7 @@ from pydantic import ConfigDict
 from pydantic import Field
 
 from doit import journal
+from doit import sources
 from doit.desk_nudge import Answer
 
 from . import documents
@@ -81,6 +82,16 @@ class DoneBody(Keyed):
     occurred_at: str | None = Field(None, description='When it happened, ISO 8601 with an offset. Now when omitted.')
     item: dict[str, Any] | None = Field(None, description='The resolved choice the entry is about, where the entry names one.')
     downstream: dict[str, Any] | None = Field(None, description="What the pursuit's on_log command did on the desk.")
+    check: bool = Field(
+        False,
+        description=(
+            'Write nothing: match the pursuit, refuse minutes that do not fit it, and answer the choice the log is about '
+            'and its on_log, which a desk runs before it sends the log.'
+        ),
+    )
+    item_id: str | None = Field(
+        None, description='With check, the id of the choice the log names. Refused where no current choice carries it.'
+    )
 
 
 class SkipBody(Keyed):
@@ -104,6 +115,9 @@ class CompletionBody(Strict):
 
 class NudgeBody(Strict):
     interval_minutes: int | None = Field(None, gt=0)
+    every: str | None = Field(
+        None, description='The interval as typed: 4h, 90m, or a bare number of hours. Read in place of interval_minutes.'
+    )
     last_nudged_at: str | None = Field(None, description='When the nudge last showed, ISO 8601 with an offset. Only moves later.')
 
 
@@ -196,6 +210,13 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     def document_write(name: str, body: DocumentBody, caller: Person) -> dict:
         """Replace a document. It is validated whole first, and a refusal names the first fault and writes nothing."""
         return documents.save(store, name, body.text, caller.who, views.now())
+
+    @api.get('/documents/{name}/template')
+    def document_template(name: str, caller: Person) -> dict:
+        """The annotated starting text that an edit opens where the document has not been written yet."""
+        if name not in documents.NAMES:
+            raise NotFound(f'no document named {name}')
+        return {'name': name, 'text': documents.TEMPLATES[name]}
 
     @api.get('/documents/{name}/versions')
     def document_versions(name: str, caller: Person) -> list[dict]:
@@ -318,7 +339,7 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
 
     @api.put('/review/nudge')
     def review_nudge_set(body: NudgeBody, caller: Person) -> dict:
-        return views.set_nudge(body.interval_minutes, body.last_nudged_at)
+        return views.set_nudge(body.interval_minutes, body.last_nudged_at, body.every)
 
     @api.get('/desk-nudge')
     def desk_nudge_interval(caller: Person) -> dict:
@@ -369,6 +390,11 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
     @api.get('/sources')
     def source_list(caller: Person) -> dict:
         return views.sources()
+
+    @api.get('/sources/contract')
+    def source_contract(caller: Person) -> dict:
+        """An annotated example of the lane document that each source becomes, for a source being written."""
+        return sources.contract_example()
 
     @api.get('/forecasts')
     def forecast_list(caller: Person) -> list[dict]:

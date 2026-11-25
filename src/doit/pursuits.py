@@ -1231,10 +1231,76 @@ def dormant_rows(state: dict) -> list[dict]:
                     'days_since': elapsed,
                     'interval_days': round(interval, 2),
                     'goal': goal_text(config),
+                    'last': format_elapsed(elapsed),
                     'reason': config.get('reason'),
                 }
             )
     return sorted(rows, key=lambda row: -(math.inf if row['days_since'] is None else row['days_since']))
+
+
+def by_weight(register: dict) -> list[tuple[str, dict]]:
+    """The register's pursuits, heaviest first."""
+    return sorted(register.items(), key=lambda row: -row[1].get('weight', 0))
+
+
+def list_rows(state: dict, register: dict) -> list[dict]:
+    """Every row `doit pursuits list` prints, heaviest first, each cell as it prints.
+
+    ``state`` is what :func:`standing_from` rebuilt from the answered payload, so
+    a row's due date agrees with the state beside it. A tracked pursuit has no
+    weight and no due date. `standing` is why a pursuit sits out of the draw.
+    """
+    rows = []
+    for name, config in by_weight(register):
+        days = due_in_days(state, name) if paced(config) else None
+        standing = ''
+        if config.get('paused'):
+            standing = 'paused'
+        elif name in state['term_ended']:
+            standing = f'term ended {config["until"]}'
+        elif name in state['suppressed']:
+            standing = 'skipped'
+        rows.append(
+            {
+                'name': name,
+                'paced': paced(config),
+                'weight': str(int(config.get('weight', 0))) if paced(config) else '',
+                'goal': goal_text(config),
+                'last': format_elapsed(state['days_since'].get(name)),
+                'due': format_due(days) if paced(config) else '',
+                'late': late(days),
+                'standing': standing,
+                'reason': config.get('reason') or '',
+            }
+        )
+    return rows
+
+
+def prompt_rows(register: dict) -> list[dict]:
+    """Each pursuit as a log lists it when asking which, heaviest first, with its description's first sentence."""
+    return [{'name': name, 'summary': first_sentence(config.get('description', ''))} for name, config in by_weight(register)]
+
+
+def evidence_rows(
+    watching: list[str], observed: dict[str, dt.datetime], errors: dict, undeclared: set[str], now: dt.datetime
+) -> list[dict]:
+    """Each watched pursuit's row of `doit pursuits evidence`, in the order given, with the cell it prints.
+
+    `kind` is why the row reads as it does: `undeclared`, `failed`, `observed` or
+    `unseen`. An observed row's `at` is when the app last saw it, which its cell counts from.
+    """
+    rows = []
+    for name in watching:
+        if name in undeclared:
+            rows.append({'pursuit': name, 'kind': 'undeclared', 'text': 'no backend — logged by hand', 'at': None})
+        elif name in errors:
+            rows.append({'pursuit': name, 'kind': 'failed', 'text': str(errors[name]), 'at': None})
+        elif name in observed:
+            elapsed = (now - observed[name]).total_seconds() / 86400.0
+            rows.append({'pursuit': name, 'kind': 'observed', 'text': format_elapsed(elapsed), 'at': observed[name].isoformat()})
+        else:
+            rows.append({'pursuit': name, 'kind': 'unseen', 'text': 'asked, nothing recorded yet', 'at': None})
+    return rows
 
 
 def context_lines(overview: object, today: dt.date) -> list[str]:
@@ -1770,6 +1836,20 @@ def render_reasons(named: Iterable[tuple[str, str | None]]) -> None:
         console.print(table)
 
 
+def pursuit_matches(needle: str, pursuits: dict) -> list[str]:
+    """Each pursuit that ``needle`` could name: itself where it is one, else every name it begins, sorted."""
+    if needle in pursuits:
+        return [needle]
+    return sorted(name for name in pursuits if name.startswith(needle))
+
+
+def unmatched(needle: str, matches: list[str]) -> str:
+    """Why a typed name means no one pursuit, naming each it could mean."""
+    if matches:
+        return f'{needle} is ambiguous: it matches {", ".join(matches)}'
+    return f'no pursuit named {needle}'
+
+
 def match_pursuit(needle: str, pursuits: dict) -> str | None:
     """Exact name, else an unambiguous prefix. Typing three letters is the point."""
     if needle in pursuits:
@@ -1866,6 +1946,42 @@ def item_refusal(name: str, item: dict, item_id: str) -> str:
     if held:
         return f'{name} holds no item {item_id}. Its items now: {", ".join(held)}'
     return f'{name} holds no item with an id, so --item {item_id} names nothing'
+
+
+class ItemUnreadable(ValueError):
+    """A log names an item of a pursuit whose app could not be read, so the item cannot be checked."""
+
+
+def log_choices(name: str, config: dict, item: dict, item_id: str | None) -> dict:
+    """The choice that a log of the pursuit is about, among its current ones, as the log route's check answers it.
+
+    `chosen` is the choice flattened as the log records it, or None where the log
+    is about none yet. `ask` is several choices with none named, of a pursuit
+    whose log completes one, which only the person logging can settle. Each of
+    `choices` carries its line and the item it records. `names_chosen` says the
+    log names its choice whatever on_log does: one was named, or the resolve
+    counted one candidate.
+
+    Raises ItemUnreadable where ``item_id`` is named and the app could not be
+    read, and ValueError where it names none of the current choices.
+    """
+    choices = item.get('choices') or []
+    ask = False
+    if item_id is None:
+        index = 0 if settled_choice(choices) is not None else -1
+        ask = index < 0 and bool(choices) and writes_through(config)
+    else:
+        if item.get('error'):
+            raise ItemUnreadable(f'{name} could not be read, so --item {item_id} cannot be checked: {item["error"]}')
+        index = choice_carrying(choices, item_id)
+        if index < 0:
+            raise ValueError(item_refusal(name, item, item_id))
+    return {
+        'choices': [{'line': line, 'item': chosen_item(item, at)} for at, line in enumerate(choice_lines(choices))],
+        'chosen': chosen_item(item, index) or None,
+        'ask': ask,
+        'names_chosen': item_id is not None or int(item.get('candidates') or 1) == 1,
+    }
 
 
 def prompt_for_choice(choices: list[dict]) -> int:
@@ -2175,6 +2291,28 @@ def logged_minutes(records: list[dict], start: dt.datetime) -> float:
             continue
         total += journal.recorded_minutes(record) or 0.0
     return total
+
+
+def printed_drift_rows(rows: list[dict]) -> list[dict]:
+    """Each of :func:`drift_rows` as `doit pursuits drift` prints it, each cell its text.
+
+    Asked and done read in the pursuit's own unit, and a tracked pursuit's done
+    carries the minutes its logs recorded.
+    """
+    return [
+        {
+            'pursuit': row['pursuit'],
+            'goal': row['goal'],
+            'since': f'{dt.datetime.fromisoformat(row["since"]):%d %b}',
+            'asked': '—' if row['asked'] is None else quantity_text(row['asked'], row['unit']),
+            'done': quantity_text(row['done'], row['unit']) + (f' · {minutes_text(row["minutes"])}' if row.get('minutes') else ''),
+            'due': format_due(row['due_days']),
+            'offered': str(row['offered']),
+            'passed': str(row['skips']),
+            'reason': row.get('reason') or '',
+        }
+        for row in rows
+    ]
 
 
 def quantity_text(amount: float, unit: str) -> str:

@@ -31,6 +31,9 @@ from .store import stamp
 
 NAMES = ('pursuits', 'review', 'sources')
 
+# Each document's annotated starting text, which an edit opens where none is written yet.
+TEMPLATES = {'pursuits': pursuits.TEMPLATE, 'review': review.TEMPLATE, 'sources': sources.TEMPLATE}
+
 
 @dataclass
 class Config:

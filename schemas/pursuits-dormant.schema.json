@@ -1,25 +1,61 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:doit:pursuits-dormant:v1",
+  "$id": "urn:doit:pursuits-dormant:v2",
   "title": "doit pursuits dormant",
   "description": "The pursuits gone quiet for more than three of their own intervals, coldest first.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "dormant"],
+  "required": [
+    "schema_version",
+    "dormant"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {
+      "const": 2
+    },
     "dormant": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["pursuit", "days_since", "interval_days", "goal", "reason"],
+        "required": [
+          "pursuit",
+          "days_since",
+          "interval_days",
+          "goal",
+          "last",
+          "reason"
+        ],
         "properties": {
-          "pursuit": {"type": "string"},
-          "days_since": {"type": ["number", "null"], "description": "Days since it was last done, null for a pursuit never done."},
-          "interval_days": {"type": "number", "description": "How many days its pace allows between checkoffs."},
-          "goal": {"type": "string", "description": "Its pace as the screen says it, like `every 7d` or `8h a week`."},
-          "reason": {"type": ["string", "null"], "description": "Why it weighs what it does, null where the register does not say."}
+          "pursuit": {
+            "type": "string"
+          },
+          "days_since": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Days since it was last done, null for a pursuit never done."
+          },
+          "interval_days": {
+            "type": "number",
+            "description": "How many days its pace allows between checkoffs."
+          },
+          "goal": {
+            "type": "string",
+            "description": "Its pace as the screen says it, like `every 7d` or `8h a week`."
+          },
+          "last": {
+            "type": "string",
+            "description": "How long since it was last done, as the screen says it, like `3w ago` or `never`."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it weighs what it does, null where the register does not say."
+          }
         }
       }
     }

@@ -1,18 +1,17 @@
 """The `doit sources` commands, each asking the service or printing what an adapter declares."""
 
-import datetime as dt
 import json
 from typing import Annotated
 
 import typer
 from rich.text import Text
 
-from doit import lanes
 from doit import service
 from doit.render import console
 from doit.render import error_console
 from doit.render import examples
 from doit.sources import TEMPLATE
+from doit.sources import contract_example
 from doit.sources import report_block
 
 app = typer.Typer(
@@ -77,18 +76,5 @@ def contract_command() -> None:
     This is the interface between a source and every view: each adapter's read
     is shaped into it.
     """
-    example = lanes.to_document(
-        [
-            lanes.Lane(
-                name='trips',
-                title='TRIPS',
-                meta='2 planned',
-                rows=[lanes.Row(label='next', text='Lisbon', note='in 12d', urgency=lanes.Urgency.DUE)],
-                total=2,
-                hints=['nomad trips list'],
-            )
-        ],
-        dt.datetime(2026, 8, 6, 12, 0, 0),
-    )
-    print(json.dumps(example, indent=2))
+    print(json.dumps(contract_example(), indent=2))
     raise typer.Exit(0)

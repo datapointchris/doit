@@ -142,17 +142,19 @@ class Views:
         """`doit pursuits list --json`: every pursuit and the state behind it."""
         config, now = self.registered(), self.now()
         state = self.state(config, now)
+        payload = pursuits.explain_payload(state)
         return {
             'pursuits': config.pursuits,
-            'state': pursuits.explain_payload(state),
+            'state': payload,
             'usual_minutes': pursuits.usual_minutes(config.pursuits, state['records']),
+            'rows': pursuits.list_rows(pursuits.standing_from(payload, config.pursuits, now), config.pursuits),
         }
 
     def matched(self, needle: str, register: dict) -> str:
-        found = pursuits.match_pursuit(needle, register)
-        if not found:
-            raise NotFound(f'no pursuit named {needle}')
-        return found
+        matches = pursuits.pursuit_matches(needle, register)
+        if len(matches) != 1:
+            raise NotFound(pursuits.unmatched(needle, matches))
+        return matches[0]
 
     def standing_draw(self, now: dt.datetime) -> dict | None:
         """The draw from the last few minutes, or None once it has aged out or nothing is left of it."""
@@ -217,6 +219,7 @@ class Views:
             'active': sorted(name for name, declared in config.pursuits.items() if pursuits.is_active(declared, now.date())),
             'offered': standing.get('offered', []),
             'draw_id': standing.get('draw_id'),
+            'prompt_rows': pursuits.prompt_rows(config.pursuits),
         }
 
     def context(self, now: dt.datetime) -> tuple[list[str], str | None]:
@@ -245,7 +248,12 @@ class Views:
         config, now = self.registered(), self.now()
         name = self.matched(str(body['pursuit']), config.pursuits)
         minutes = body.get('duration_minutes')
-        if refusal := pursuits.minutes_refusal(name, config.pursuits[name], minutes):
+        refusal = pursuits.minutes_refusal(name, config.pursuits[name], minutes)
+        if body.get('check'):
+            if refusal and minutes is not None:
+                raise BadRequest(refusal)
+            return self.log_check(name, config.pursuits[name], refusal, body.get('item_id'))
+        if refusal:
             raise BadRequest(refusal)
         occurred = instant(body.get('occurred_at'), 'occurred_at') or now
         if occurred > now + FUTURE_SKEW:
@@ -269,7 +277,22 @@ class Views:
         if standing is not None:
             standing['logged'] = sorted({*standing.get('logged', []), name})
             self.store.save_draw(standing)
-        return {'entry': entry, 'due_in_days': pursuits.due_with(state, name, entry)}
+        days = pursuits.due_with(state, name, entry)
+        return {'entry': entry, 'due_in_days': days, 'due': None if days is None else pursuits.format_due(days)}
+
+    def log_check(self, name: str, declared: dict, minutes_refusal: str | None, item_id: str | None) -> dict:
+        """What a log of `name` would record, checked and written nowhere: the choice it is about, and its on_log.
+
+        `minutes_refusal` is why the log still needs minutes, where it does.
+        """
+        item = self.item(name)['resolved'] if declared.get('resolve') else {}
+        try:
+            choices = pursuits.log_choices(name, declared, item, item_id)
+        except pursuits.ItemUnreadable as error:
+            raise Conflict(str(error)) from error
+        except ValueError as error:
+            raise BadRequest(str(error)) from error
+        return {'pursuit': name, 'on_log': declared.get('on_log') or None, 'minutes_refusal': minutes_refusal, **choices}
 
     def skip(self, body: dict, recorded_by: str) -> dict:
         """Pass on a pursuit for a span, as `doit pursuits skip` does."""
@@ -338,23 +361,33 @@ class Views:
             raise BadRequest(str(error)) from error
         state = self.state(config, now)
         rows = pursuits.drift_rows(config.pursuits, state, start, end, self.store.offers_by_day())
-        return {'since': start and start.isoformat(), 'until': (end or now).isoformat(), 'rows': rows}
+        return {
+            'since': start and start.isoformat(),
+            'until': (end or now).isoformat(),
+            'rows': rows,
+            'printed_rows': pursuits.printed_drift_rows(rows),
+        }
 
     def dormant(self) -> dict:
         """`doit pursuits dormant --json`, which `schemas/pursuits-dormant.schema.json` describes."""
         config, now = self.registered(), self.now()
-        return {'schema_version': 1, 'dormant': pursuits.dormant_rows(self.state(config, now))}
+        return {'schema_version': 2, 'dormant': pursuits.dormant_rows(self.state(config, now))}
 
     def evidence(self) -> dict:
         """`doit pursuits evidence --json`: what each app says was last done, asking every one now."""
         config, now = self.registered(), self.now()
         watching = pursuits.watched(config.pursuits, now.date())
         observations = self.observations(config.pursuits, now, force=True)
+        watched = sorted(watching, key=lambda name: -watching[name].get('weight', 0))
+        observed = evidence.observed(observations)
+        errors = evidence.problems(observations)
+        undeclared = set(watching) - set(evidence.declared(watching))
         return {
-            'watched': sorted(watching, key=lambda name: -watching[name].get('weight', 0)),
-            'observed': {name: when.isoformat() for name, when in evidence.observed(observations).items()},
-            'errors': evidence.problems(observations),
-            'undeclared': sorted(set(watching) - set(evidence.declared(watching))),
+            'watched': watched,
+            'observed': {name: when.isoformat() for name, when in observed.items()},
+            'errors': errors,
+            'undeclared': sorted(undeclared),
+            'rows': pursuits.evidence_rows(watched, observed, errors, undeclared, now),
         }
 
     def offer_counts(self) -> dict:
@@ -364,7 +397,7 @@ class Views:
         stranded: set[str] = set()
         for by_machine in recent.values():
             stranded |= {name for name in by_machine if name not in config.pursuits}
-        return {'counts': self.store.offer_counts(), 'recent': recent, 'stranded': sorted(stranded)}
+        return {'counts': self.store.offer_counts(), 'recent': recent, 'stranded': sorted(stranded), 'window': pursuits.DRIFT_SINCE}
 
     # --- the review register --------------------------------------------------
 
@@ -378,8 +411,9 @@ class Views:
         for entries in config.review.values():
             owned |= set(entries)
         return {
-            'entries': review.statuses_of(config.review, stamps, now.date(), block),
+            'entries': [review.with_status(row) for row in review.statuses_of(config.review, stamps, now.date(), block)],
             'stranded': sorted(entry for entry in stamps if entry not in owned),
+            'blocks': review.block_titles(),
         }
 
     def complete_review(self, entry: str, day: str | None, recorded_by: str) -> dict:
@@ -412,7 +446,7 @@ class Views:
 
     def review_status(self, config: documents.Config, entry: str, now: dt.datetime) -> dict | None:
         rows = review.statuses_of(config.review, self.store.review_stamps(), now.date(), None)
-        return next((row for row in rows if row['id'] == entry), None)
+        return next((review.with_status(row) for row in rows if row['id'] == entry), None)
 
     def nudge(self) -> dict:
         """Whether the shell nudge shows now, the interval it waits between showings, and the entries it would show."""
@@ -426,7 +460,11 @@ class Views:
             'due_total': len(due),
         }
 
-    def set_nudge(self, interval_minutes: int | None, nudged_at: str | None) -> dict:
+    def set_nudge(self, interval_minutes: int | None, nudged_at: str | None, every: str | None = None) -> dict:
+        if every is not None:
+            interval_minutes = review.parse_duration_minutes(every)
+            if not interval_minutes:
+                raise BadRequest(f'every={every!r} is not a duration like 4h, 90m, or a bare number of hours')
         if interval_minutes is not None and interval_minutes <= 0:
             raise BadRequest('interval_minutes must be a positive whole number')
         stamped = instant(nudged_at, 'last_nudged_at')

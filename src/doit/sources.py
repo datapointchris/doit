@@ -34,6 +34,7 @@ that is configured but missing gets a single line naming it. One that runs and
 fails shows its error. A configured lane is never silently dropped.
 """
 
+import datetime as dt
 import shlex
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -261,6 +262,19 @@ def answer(block: str, source: Source, result: Result) -> dict[str, object]:
         'lanes': len(built),
         'via': via,
     }
+
+
+def contract_example() -> dict:
+    """An example of the lane document that each source becomes, which is the interface between a source and every view."""
+    example = lanes.Lane(
+        name='trips',
+        title='TRIPS',
+        meta='2 planned',
+        rows=[lanes.Row(label='next', text='Lisbon', note='in 12d', urgency=lanes.Urgency.DUE)],
+        total=2,
+        hints=['nomad trips list'],
+    )
+    return lanes.to_document([example], dt.datetime(2026, 8, 6, 12, 0, 0))
 
 
 def report_block(title: str, answers: list[dict[str, object]], width: int) -> None:
