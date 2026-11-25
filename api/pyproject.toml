@@ -1,10 +1,10 @@
 # doit's service: the store that holds the register, the review register, the
 # sources and the journal, and the API every view is computed behind.
 #
-# A workspace member beside the CLI at the repo root, and a distribution of its
-# own, because the server imports a web stack the CLI never needs and the CLI
-# ships to every desk. It runs the root package's view code rather than a copy of
-# it, so a view and the service's answer for it cannot drift.
+# A workspace member beside the rules at the repo root, and a distribution of its
+# own, because only the server imports a web stack. It runs the
+# root package's view code rather than a copy of it, so a view and the service's
+# answer for it cannot drift.
 [project]
 name = "doit-api"
 version = "0.1.0"
@@ -24,10 +24,6 @@ dependencies = [
     # Signing the GitHub App's assertion. `crypto` is what signs RS256.
     "pyjwt[crypto]>=2.10",
     "pyyaml>=6.0",
-    # The root package's rules refuse a bad argument with typer.BadParameter, which
-    # a view turns into a 400. typer 0.27 and later carries its own Click, so the
-    # click package's class never matches it.
-    "typer>=0.26.0",
 ]
 
 [project.scripts]

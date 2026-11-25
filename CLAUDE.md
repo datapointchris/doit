@@ -19,7 +19,7 @@ entry's `command` is text in the review document, which doit shows and never run
 
 `cli/cmd/doit` builds `doit`, which runs every command line itself, bare `doit`, `doit --help` and
 `doit tui` among them. `doit tui` draws the boards in `cli/internal/tui`, one per tab, in process.
-doit-python's tree holds no verb, and nothing runs it.
+The Python in `src/doit` is the rules that the service runs, and holds no command.
 
 - **The cobra tree is the one list of verbs.**
   `TestEveryCommandTheRepoPrintsIsInTheCommandTree` in `cli/cmd/doit` walks each `doit` command
@@ -30,9 +30,9 @@ doit-python's tree holds no verb, and nothing runs it.
   starts no self-update check on a Tab. `shell` carries goclikit's `StartsNoUpdateCheck` mark,
   because a shell's startup runs it.
 
-- **`cli/internal/login` holds pyclilogin's identifiers for the product `doit`**: the config file,
+- **`cli/internal/login` holds the login's identifiers for the product `doit`**: the config file,
   the keychain service `doit-cli`, and `$XDG_STATE_HOME/doit` for the fallback token file and the
-  refresh lock. Changing any one logs every desk out.
+  refresh lock. Each desk's login lives under them, so changing any one logs every desk out.
 - **`cli/internal/deskfiles` writes two files in `$XDG_CACHE_HOME/doit/` that a Tab or a new shell
   reads without asking the service.**
   - `next-names.txt` holds one `name<TAB>description` line per pursuit, sorted by name. Each command
@@ -165,8 +165,8 @@ The Go binary starts these:
   `cli/internal/pursuits/on_log.go`. Each runs outside the state file's lock. `TestEachProgramTheWatchStartsHasItsArgvAndBound` is the table of every argv
   and bound.
 
-The libraries start processes of their own. pyclilogin and goclilogin each run a login's configured
-`token_command`. goselfupdate runs `$GITHUB_TOKEN_COMMAND`, which defaults to `gh auth token`, for
+The libraries start processes of their own. goclilogin runs a login's configured `token_command`.
+goselfupdate runs `$GITHUB_TOKEN_COMMAND`, which defaults to `gh auth token`, for
 `doit update` and its daily notice where neither `$GITHUB_TOKEN` nor `$GH_TOKEN` is set.
 
 ## Documents and records are the service's, and a machine keeps its login, its caches and its desk nudge
@@ -177,7 +177,7 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
 - **Records** — the journal, review completions, offered counts, forecast readings and the nudge's
   last showing, in the service's store. A Go verb reaches them only through `cli/internal/service`.
 - **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer and the
-  machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no Python and no request,
+  machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no request,
   each file rewritten by the command that fetches it, and the desk nudge panel's rows, which the
   watch rewrites and `panel show` reads. `$XDG_STATE_HOME/doit/tui-display.json` keeps the tab
   and display that `doit tui` was left on. `doit config show` prints each of these with
@@ -222,13 +222,13 @@ and nothing computes it twice. A change that has `api/` compute a balance, a due
 itself is the drift this arrangement exists to prevent: add a seam to the view module instead, one
 that takes its data rather than reading it.
 
-So a module the service imports holds rules and renderers, and never a command. Every verb that
-asks the service is a Go command, and Python holds no client of the service.
+So the root package holds the rules and writes each view's rows, and never holds a command or a
+client of the service. A refused argument raises a `ValueError` subclass of the rule's module,
+such as `pursuits.SkipSpanRefused`, which `computed_views` maps to `BadRequest` and a 422.
 
 `cli/internal/contract` runs this commit's Go doit against this commit's service, started from
 `api/tests/serve_on_a_temporary_store.py` on a temporary store. A shape changed on one side and not
-the other fails there. `api/tests/test_cli_against_service.py` pins what the service answers on its
-own.
+the other fails there. `api/tests/` pins what the service answers on its own.
 
 Every external effect the service has goes through one wrapper:
 

@@ -611,8 +611,7 @@ defines. With no terminal and neither flag, `doit tui` refuses with exit 2 and n
 `api/` is doit as a service: a FastAPI app over one SQLite database. It holds the three
 documents a person edits — the pursuits, the review register and the sources — and the journal,
 the review completions, the offered counts and the forecast readings. Every pursuit, review,
-lane, forecast and source view the CLI prints with `--json` has a route that answers the same
-document, computed by the same functions.
+lane, forecast and source view has a route, and the CLI's `--json` prints that route's answer.
 
 The CLI is the service's client. A command that reads asks a route and renders what it answers,
 and a command that writes posts what it records, naming the machine and who ran it. A machine
@@ -624,7 +623,7 @@ is one copy of each.
   held, in the table's `_history` twin: the SQL:2011 system-versioned temporal-table pattern, done
   with triggers. `GET /api/v1/history/pursuits?key=read` is every weight the pursuit ever had.
 - **The journal is an event log, and the views are read models of it.** A write appends an entry
-  and never edits one. Every view replays the log as the CLI does.
+  and never edits one. Every view replays the log.
 - **Apps are read over HTTP, with the service's own credential.** Each app is asked as a
   client-credentials client holding read scopes only. A source names an adapter, and the adapter
   name selects the HTTP read. A pursuit's `resolve` and `evidence` name an app, a path and a query,
@@ -714,8 +713,8 @@ needs none of them.
 - **State** is `$XDG_STATE_HOME/doit/`. It holds any edit the service never took, and the desk
   nudge's clock and records.
 - **Cache** is `$XDG_CACHE_HOME/doit/`. It holds what the shell's completion and startup gate read
-  without starting Python or asking the service, and the desk nudge panel's rows. Each file is
-  rewritten by the command that fetches it.
+  without asking the service, each rewritten by the command that fetches it. It also holds the desk
+  nudge panel's rows, which the watch rewrites.
 - **Runtime** is `$XDG_RUNTIME_DIR/doit/`, or `doit/` under logind's `/run/user/<uid>` or
   `$XDG_STATE_HOME` where that variable is unset. It holds `watch.sock`, where the desk nudge watch
   takes picks while it runs.

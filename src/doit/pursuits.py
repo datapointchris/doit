@@ -52,7 +52,6 @@ from collections.abc import Callable
 from collections.abc import Iterable
 from typing import NamedTuple
 
-import typer
 import yaml
 
 from doit import evidence
@@ -1481,7 +1480,7 @@ def goal_text(config: dict) -> str:
 def priced(state: dict, name: str) -> tuple[float, float, float] | None:
     """A pursuit's balance, interval and checkoff size, or None where it has none.
 
-    The draw outlives the register by up to a quarter of an hour, and `cmd_list`
+    The draw outlives the register by up to a quarter of an hour, and :func:`list_rows`
     walks the whole register while the state is built from the active set alone.
     Either way a name can reach a renderer with no schedule behind it.
     """
@@ -1917,6 +1916,10 @@ def due_with(state: dict, name: str, entry: dict) -> float | None:
     return None if days is None else round(days, 2)
 
 
+class SkipSpanRefused(ValueError):
+    """A pass asked for a length that is not a whole number of days or weeks."""
+
+
 def skip_span(duration: str | None, interval: float | None) -> int:
     """How many days a pass covers.
 
@@ -1928,8 +1931,8 @@ def skip_span(duration: str | None, interval: float | None) -> int:
         # A pass is counted in whole days, so a finer unit has nothing to mean here.
         length = span(duration, units='dw')
         if length is None or length.days <= 0:
-            raise typer.BadParameter(
-                f'--for takes days or weeks, such as 3d or 2w, not {duration!r}. There is no month or year unit: write 4w.'
+            raise SkipSpanRefused(
+                f'A pass lasts days or weeks, such as 3d or 2w, not {duration!r}. There is no month or year unit: write 4w.'
             )
         return length.days
     if interval is None or math.isinf(interval):
