@@ -9,16 +9,18 @@ export type Answered<Body> = { ok: true; status: number; body: Body } | { ok: fa
 
 async function ask<Body>(method: string, path: string, body?: unknown): Promise<Answered<Body>> {
   let response: Response
+  let text: string
   try {
     response = await fetch(`/api${path}`, {
       method,
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
+    text = await response.text()
   } catch {
+    // A reply cut off after its headers says no more than none did.
     return { ok: false, status: 0, message: 'the desk nudge watch did not answer' }
   }
-  const text = await response.text()
   let parsed: unknown = null
   try {
     parsed = text ? JSON.parse(text) : null

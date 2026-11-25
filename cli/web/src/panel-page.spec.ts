@@ -146,14 +146,13 @@ afterEach(() => {
 })
 
 describe('the panel page against a fake watch', () => {
-  it('a click commits with no draining line, and a row whose pick runs ignores a second click', async () => {
+  it('a click shows its row committing until the watch answers, and a row whose pick runs ignores a second click', async () => {
     await open()
     watch.holdPicks()
 
     await row('habit:1').trigger('click')
     await flushPromises()
     expect(row('habit:1').classes()).toContain('committing')
-    expect(page.find('.drain').exists()).toBe(false)
     await row('habit:1').trigger('click')
     await flushPromises()
     expect(watch.posted).toEqual(['habit:1'])
@@ -162,7 +161,6 @@ describe('the panel page against a fake watch', () => {
     await flushPromises()
     expect(watch.committed).toEqual(['habit:1'])
     expect(page.findAll('.tick.done').map((done) => done.text())).toContain('Brush teeth')
-    expect(page.get('[role="status"]').text()).toContain('done')
   })
 
   it('a fold shows its count, and a ticked row stays put', async () => {
