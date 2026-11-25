@@ -108,13 +108,19 @@ func TestAnUnportedVerbExecsDoitPythonWithTheSameArgvAndExitCodeAndAMissingOneIs
 	}
 
 	// doit-python's own tests list the Go commands from this file, so it holds
-	// what the Go doit hands on.
+	// what the Go doit hands on. A summary is help prose, so only each command's
+	// path and group are compared.
 	var handed, committed []treeCommand
 	if data, err := os.ReadFile(argvFile + ".commands"); err != nil || json.Unmarshal(data, &handed) != nil {
 		t.Fatalf("doit-python was handed no readable Go tree: %v %q", err, data)
 	}
 	if data, err := os.ReadFile(handedTreeFile); err != nil || json.Unmarshal(data, &committed) != nil {
 		t.Fatalf("reading %s: %v", handedTreeFile, err)
+	}
+	for _, tree := range [][]treeCommand{handed, committed} {
+		for i := range tree {
+			tree[i].Summary = ""
+		}
 	}
 	if !reflect.DeepEqual(handed, committed) {
 		t.Errorf("doit-python was handed %+v, and %s holds %+v; write the first there", handed, handedTreeFile, committed)

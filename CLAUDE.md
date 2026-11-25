@@ -79,15 +79,15 @@ its reason. A merge of every same-named lane was rejected, because it changes wh
 for every other source. Feedback stays the opposite way: one lane per app, never combined, so three
 apps draw three lanes.
 
-**Run every desk nudge pick inside the watch.** The panel's parts live in this desk's cache, a pick
+**Run every desk nudge pick inside the watch.** The panel's view lives in this desk's cache, a pick
 takes the desk nudge's state lock, and a pick runs `life habits complete` and a pursuit's `on_log`,
 none of which the service runs. `doit desk-nudge panel pick` hands the key to the watch over its
 socket rather than running the pick itself. A second runner of picks would be a second owner of the
 state file and of every completion rule.
 
-**Keep `doit-tui` reading the desk nudge panel through `doit desk-nudge panel`.** It lists each
-step's rows with `desknudge.Panel.Rows`, the code that `panel show` prints them with. The board
-parses no key and lists no kind. Where it needs another fact about a row, the row carries it, as
+**Keep `doit-tui` reading the desk nudge panel through `doit desk-nudge panel`.** It draws the
+`rows` that the panel document carries, the rows that `panel show` prints, and the watch writes
+them, so no reader holds the rule that lists them. The board parses no key and lists no kind. Where it needs another fact about a row, the row carries it, as
 `group`, `minutes` and `suggested` do. Only the panel has this reason, so a tab over the service's
 data reads the service's API.
 
@@ -116,7 +116,7 @@ The Go binary starts these:
   - `hyprctl instances -j`, then `hyprctl -i <instance> activewindow -j`, at the same moments. A
     unit started at login never has `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
   - `hyprctl -i <instance> monitors -j`, as a nudge turns ready.
-  - `canberra-gtk-play --id message-new-instant`, by `chimeProgram`, once as a nudge turns ready,
+  - `canberra-gtk-play --id <chimeSound>`, by `chimeProgram`, once as a nudge turns ready,
     unless every display is off. A firing opens nothing else.
   - `notify-send -a doit`, by `notifyProgram`, for a passing notice after an answer or a pick.
   - `loginctl show-session auto -p IdleHint --value`, by `idleHintProgram`, before each timed read
@@ -127,9 +127,9 @@ The Go binary starts these:
     is the asking. The template is split into words before the item's fields fill it, so no field
     can add an argument.
 
-  `life habits complete` and `on_log` are stopped after 30 seconds, and every other one after 5.
-  Each runs outside the state file's lock. `TestEachProgramTheWatchStartsHasItsArgvAndBound` is the
-  table of every argv and bound.
+  Each program's bound is declared beside its argv in `programs.go`, and each runs outside the
+  state file's lock. `TestEachProgramTheWatchStartsHasItsArgvAndBound` is the table of every argv
+  and bound.
 
 The libraries start processes of their own. pyclilogin and goclilogin each run a login's configured
 `token_command`. goselfupdate runs `$GITHUB_TOKEN_COMMAND`, which defaults to `gh auth token`, for
@@ -151,7 +151,8 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
 - **The desk nudge's clock** — the time a desk counts is a fact of that desk, so `$XDG_STATE_HOME/doit/`
   holds the nudge's state file and its record file, which a log shipper reads. Only its answers
   go to the service, so the interval follows the login to any desk. The watch serves its picks on
-  `$XDG_RUNTIME_DIR/doit/watch.sock`, in a 0700 directory.
+  `doit/watch.sock` in the runtime directory, in a 0700 directory. `runtimeDir` in
+  `cli/internal/desknudge/files.go` says which directory that is where `$XDG_RUNTIME_DIR` is unset.
 - **The desk nudge's schemas** — `schemas/desk-nudge-status.schema.json`,
   `desk-nudge-record.schema.json` and `desk-nudge-panel.schema.json` are the source of each shape,
   edited by hand. `TestEachDocumentTheWatchWritesMatchesItsSchemaFile` validates what the Go watch

@@ -211,7 +211,7 @@ func (f *fakeDesk) routes() http.Handler {
 	routes.HandleFunc("GET /api/v1/pursuits/tasks/item", func(response http.ResponseWriter, _ *http.Request) {
 		answer(response, map[string]any{"pursuit": "tasks", "draw_id": nil, "resolved": map[string]any{
 			"pursuit": "tasks", "backend": "life", "candidates": 3, "choices": []map[string]any{
-				{"id": "532", "label": "File the receipts"},
+				{"id": "532", "label": `File the "receipts" now`},
 				{"id": "533", "label": "Return the library books"},
 				{"id": "534", "label": "Descale the kettle"},
 			},

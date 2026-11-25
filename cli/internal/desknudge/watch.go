@@ -19,8 +19,8 @@ const (
 	// desk is in use, beside each firing and each pick. A timed read sends no
 	// draw, so it saves no draw and counts no offer.
 	panelReadEvery = 300 * time.Second
-	// drainWithin is how long an exit waits for a pick or a firing under way,
-	// inside systemd's 90-second stop timeout.
+	// drainWithin is how long an exit waits for a pick or a firing under way. It
+	// has to stay under the stop timeout of the unit that runs the watch.
 	drainWithin = 20 * time.Second
 )
 

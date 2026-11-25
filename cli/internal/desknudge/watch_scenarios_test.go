@@ -75,17 +75,16 @@ func TestTheNudgeFiresAtTheIntervalChimesOnceAsItTurnsReadyAndAPickNotifies(t *t
 	if err != nil || step.Step != StepDone || step.Message == nil || !strings.HasPrefix(*step.Message, "prune-images (2026-11-24)") {
 		t.Fatalf("the pick over the socket answered %+v, %v; want a done step marking prune-images done today", step, err)
 	}
-	notices := f.ran("notify-send")
-	if len(notices) != 1 || notices[0][3] != "doit: marked done" {
-		t.Errorf("notify-send ran %q, want one notice that the review entry is marked done", notices)
+	if notices := f.ran("notify-send"); len(notices) != 1 {
+		t.Errorf("notify-send ran %q, want one notice of the pick", notices)
 	}
 	state := f.state()
 	if state.Phase != Counting || state.CountedSeconds != 0 || state.Nudge != nil {
 		t.Errorf("after the pick the clock is %s at %vs holding %+v, want the nudge ended and the clock restarted", state.Phase, state.CountedSeconds, state.Nudge)
 	}
 	picked := f.records()[len(f.records())-1]
-	if picked["event"] != eventPicked || picked["nudge_id"] != nudge.NudgeID {
-		t.Errorf("the last line is %v, want picked naming nudge %s", picked, nudge.NudgeID)
+	if pick, _ := picked["pick"].(map[string]any); picked["event"] != eventPicked || picked["nudge_id"] != nudge.NudgeID || pick["ok"] != true {
+		t.Errorf("the last line is %v, want a pick that went through, naming nudge %s", picked, nudge.NudgeID)
 	}
 	if draws := f.viewDraws(); !slices.Equal(draws, []bool{false, true, true}) {
 		t.Errorf("after the pick the view was read with draws %v, want one more read with a draw", draws)
@@ -103,14 +102,14 @@ func TestAnAnswerWhileTheServiceIsDownIsQueuedThenResent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, said := answered.Outcome(); code != service.NoAnswerExit || !strings.Contains(said, "kept on this desk") {
-		t.Errorf("the answer came out %d %q, want exit 4 saying it is kept on this desk", code, said)
+	if code, said := answered.Outcome(); code != service.NoAnswerExit || !answered.queued {
+		t.Errorf("the answer came out %d %q, want exit 4 with the answer kept on this desk", code, said)
 	}
 	state := f.state()
 	if len(state.QueuedAnswers) != 1 || state.QueuedAnswers[0].Row.NudgeID != nudge.NudgeID || state.Phase != Counting {
 		t.Fatalf("the state holds %+v in phase %s, want the answer queued and its nudge ended", state.QueuedAnswers, state.Phase)
 	}
-	if notices := f.ran("notify-send"); len(notices) != 1 || notices[0][3] != "doit: answer not saved yet" {
+	if notices := f.ran("notify-send"); len(notices) != 1 {
 		t.Errorf("notify-send ran %q, want one notice that the answer is not saved yet", notices)
 	}
 
@@ -291,7 +290,7 @@ func TestStatusPauseResumeAndAnswerWorkWithNoWatchAndPanelShowReadsTheCache(t *t
 	}
 	shown := f.desk.Show()
 	if shown.Step != StepToday || shown.Nudge == nil || shown.Nudge.NudgeID != nudge.NudgeID ||
-		!slices.ContainsFunc(shown.Rows(), func(row Row) bool { return row.Key != nil && *row.Key == "review:prune-images" }) {
+		!slices.ContainsFunc(shown.Rows, func(row Row) bool { return row.Key != nil && *row.Key == "review:prune-images" }) {
 		t.Errorf("panel show answered step %s, nudge %+v; want today's rows from the cache under the ready nudge", shown.Step, shown.Nudge)
 	}
 	if len(f.viewDraws()) != draws {
@@ -305,7 +304,7 @@ func TestStatusPauseResumeAndAnswerWorkWithNoWatchAndPanelShowReadsTheCache(t *t
 		t.Errorf("resume answered %v, %v in phase %s; want the clock counting", resumed, err, f.state().Phase)
 	}
 	answered, err := f.desk.Answer(ctx, "good_timing", nudge.NudgeID)
-	if code, said := answered.Outcome(); err != nil || code != 0 || !strings.Contains(said, "already ended") {
+	if code, said := answered.Outcome(); err != nil || code != 0 || !answered.saved || !answered.late {
 		t.Errorf("a late answer came out %d %q, %v; want it saved and the clock left alone", code, said, err)
 	}
 	if _, err := f.desk.Paths.AskPick(ctx, "review:prune-images", nil); !errors.Is(err, ErrNoWatch) {

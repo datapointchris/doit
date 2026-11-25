@@ -27,20 +27,31 @@ const (
 	KindAdjustMinutes = "adjust_minutes"
 )
 
+// The completion kinds that the watch completes by an owner of their own. The
+// view's completion_kind definition holds the whole set, and every other kind
+// is an entry of a review register.
+const (
+	KindPursuit = "pursuit"
+	KindHabit   = "habit"
+)
+
 const (
 	keySeparator = ":"
 	minutesStep  = 5
-	// minutesAdjustedFrom is where a minutes step's ±5 rows count from where the pursuit has no usual amount.
+	// minutesAdjustedFrom is where a minutes step's adjust rows count from where the pursuit has no usual amount.
 	minutesAdjustedFrom = 30
 	nothingLeft         = "nothing left today"
+	// viewSchemaVersion is the version of the desk panel view that this doit reads.
+	viewSchemaVersion = 1
 )
 
 // minutesWithoutUsual is what a timed pursuit's minutes step offers where no entry ever kept minutes.
 var minutesWithoutUsual = []int{15, 30, 45, 60}
 
 // View is the service's desk panel view, as schemas/desk-panel-view.schema.json
-// describes it. Each part is carried as the service answered it, so the panel
-// holds every field the service adds.
+// describes it. It names the parts the watch reads, and keeps the document as
+// the service answered it, so a part added to the service's answer reaches the
+// panel with no change here.
 type View struct {
 	SchemaVersion    int             `json:"schema_version"`
 	GeneratedAt      string          `json:"generated_at"`
@@ -52,34 +63,50 @@ type View struct {
 	Habits           json.RawMessage `json:"habits"`
 	Lanes            json.RawMessage `json:"lanes"`
 	Problems         json.RawMessage `json:"problems"`
+
+	whole json.RawMessage
 }
 
-// Panel is one step of the desk nudge's panel: the view's parts as the watch
-// last read them, and what only this desk knows. The watch keeps the today step
-// in desk-nudge-panel.json, `panel show --json` prints it, and `panel pick
-// --json` prints the step a pick leads to.
+// UnmarshalJSON reads the parts and keeps the document whole.
+func (v *View) UnmarshalJSON(text []byte) error {
+	type parts View
+	var decoded parts
+	if err := json.Unmarshal(text, &decoded); err != nil {
+		return err
+	}
+	*v = View(decoded)
+	v.whole = append(json.RawMessage(nil), text...)
+	return nil
+}
+
+// ViewVersionError is a desk panel view at a version that this doit does not read.
+type ViewVersionError struct{ Version int }
+
+func (e *ViewVersionError) Error() string {
+	return fmt.Sprintf("the service's desk panel view is version %d, and this doit reads version %d", e.Version, viewSchemaVersion)
+}
+
+// Panel is one step of the desk nudge's panel: the view as the watch last read
+// it, what only this desk knows, and the rows the step draws. The watch keeps
+// the today step in desk-nudge-panel.json, `panel show --json` prints it, and
+// `panel pick --json` prints the step a pick leads to.
 type Panel struct {
 	SchemaVersion int     `json:"schema_version"`
 	Step          string  `json:"step"`
 	Message       *string `json:"message"`
-	// ReadAt is when the watch began the read that the parts come from, on this desk's clock.
+	// ReadAt is when the watch began the read that the view comes from, on this desk's clock.
 	ReadAt *string `json:"read_at"`
-	// GeneratedAt is when the service computed the parts.
+	// GeneratedAt is when the service computed the view.
 	GeneratedAt *string      `json:"generated_at"`
 	StaleSince  *string      `json:"stale_since"`
 	StaleReason *StaleReason `json:"stale_reason"`
-	Nudge       *ReadyNudge  `json:"nudge"`
-	Picked      []HeldPick   `json:"picked"`
-	Minutes     *MinutesStep `json:"minutes"`
-
-	Suggestion       json.RawMessage `json:"suggestion"`
-	SuggestionReason *string         `json:"suggestion_reason"`
-	Answers          json.RawMessage `json:"answers"`
-	Totals           json.RawMessage `json:"totals"`
-	Pursuits         json.RawMessage `json:"pursuits"`
-	Habits           json.RawMessage `json:"habits"`
-	Lanes            json.RawMessage `json:"lanes"`
-	Problems         json.RawMessage `json:"problems"`
+	// View is the service's desk panel view whole, with its own schema_version, or null before the first read.
+	View json.RawMessage `json:"view"`
+	// Rows are what the step draws, in order, so no reader holds the rule that lists them.
+	Rows    []Row        `json:"rows"`
+	Nudge   *ReadyNudge  `json:"nudge"`
+	Picked  []HeldPick   `json:"picked"`
+	Minutes *MinutesStep `json:"minutes"`
 }
 
 // StaleReason is why the latest read of the view failed.
@@ -103,20 +130,11 @@ type NudgeAnswer struct {
 	Key    string `json:"key"`
 }
 
-// MinutesStep is a timed pursuit's minutes: log an amount, or reopen 5 above or below it.
+// MinutesStep is the timed pursuit that a minutes step logs. The step's rows log
+// an amount, or reopen the step one adjustment above or below it.
 type MinutesStep struct {
-	Key  string       `json:"key"`
-	Text string       `json:"text"`
-	Rows []MinutesRow `json:"rows"`
-}
-
-// MinutesRow is one amount a minutes step offers.
-type MinutesRow struct {
-	Key       string `json:"key"`
-	Kind      string `json:"kind"`
-	Text      string `json:"text"`
-	Minutes   int    `json:"minutes"`
-	Suggested bool   `json:"suggested"`
+	Key  string `json:"key"`
+	Text string `json:"text"`
 }
 
 // Completes is what picking an entry completes, as the view gives it.
@@ -211,8 +229,15 @@ func parts(raw json.RawMessage, found any) {
 	}
 }
 
-// read is whether the parts come from a read of the view.
+// read is whether the panel holds a read of the view.
 func (p *Panel) read() bool { return p.GeneratedAt != nil }
+
+// view is the panel's view, with each part null before the first read.
+func (p *Panel) view() View {
+	var found View
+	parts(p.View, &found)
+	return found
+}
 
 // entries are the parts' rows in the order the panel lists them: why the parts
 // are old, the suggestion, then each owed pursuit, habit and lane row that a
@@ -226,17 +251,18 @@ func (p *Panel) entries() []entry {
 	if !p.read() {
 		return found
 	}
+	view := p.view()
 	var suggestion *suggestionPart
-	parts(p.Suggestion, &suggestion)
+	parts(view.Suggestion, &suggestion)
 	if suggestion != nil {
 		found = append(found, suggestedEntries(suggestion)...)
 	}
 	var pursuits pursuitsPart
-	parts(p.Pursuits, &pursuits)
+	parts(view.Pursuits, &pursuits)
 	var habits habitsPart
-	parts(p.Habits, &habits)
+	parts(view.Habits, &habits)
 	var lanes []lanePart
-	parts(p.Lanes, &lanes)
+	parts(view.Lanes, &lanes)
 	if pursuits.Status == "unavailable" {
 		found = append(found, noteEntry("pursuits unavailable — "+reasonOf(pursuits.Reason)))
 	}
@@ -382,8 +408,11 @@ func (p *Panel) banner() string {
 	if read, ok := instant(p.ReadAt); ok {
 		since = "rows from " + read.Local().Format("15:04")
 	}
-	if p.StaleReason.Error == LoginRefused {
+	switch p.StaleReason.Error {
+	case LoginRefused:
 		return since + " — run doit auth login"
+	case Unreadable:
+		return since + " — doit answered in a shape this doit does not read"
 	}
 	return since + " — doit unreachable"
 }
@@ -418,25 +447,12 @@ type Row struct {
 	Suggested bool    `json:"suggested"`
 }
 
-// Rows are what the step draws, in order. Today's step lists the notes, the
-// suggestion, the answers while a nudge is ready, then each row that a pick
-// completes and that is not picked since the parts were read. A minutes step
-// lists its amounts, and a done step lists none.
-func (p *Panel) Rows() []Row {
-	switch p.Step {
-	case StepMinutes:
-		var rows []Row
-		if p.Minutes != nil {
-			for _, offered := range p.Minutes.Rows {
-				rows = append(rows, Row{Key: &offered.Key, Kind: offered.Kind, Text: offered.Text, Minutes: &offered.Minutes, Suggested: offered.Suggested})
-			}
-		}
-		return rows
-	case StepDone:
-		return nil
-	}
+// todayRows are what today's step draws, in order: the notes, the suggestion,
+// the answers while a nudge is ready, then each row that a pick completes and
+// that is not picked since the view was read.
+func (p *Panel) todayRows() []Row {
 	entries := p.entries()
-	var rows []Row
+	rows := []Row{}
 	at := 0
 	if at < len(entries) && entries[at].note() && p.banner() != "" {
 		rows = append(rows, rowOf(entries[at], p))
@@ -494,8 +510,9 @@ func readyNudge(state *State, answersRaw json.RawMessage) *ReadyNudge {
 	return ready
 }
 
-// panelFor is step built over the cached parts, with what the state says now:
-// the ready nudge and the keys picked since the parts were read.
+// panelFor is today's step or a done step, built over the cached view with what
+// the state says now: the ready nudge and the keys picked since the view was
+// read. A done step draws no row.
 func panelFor(cached *Panel, state *State, step string) Panel {
 	built := Panel{}
 	if cached != nil {
@@ -505,12 +522,16 @@ func panelFor(cached *Panel, state *State, step string) Panel {
 	built.Step = step
 	built.Message = nil
 	built.Minutes = nil
-	built.Nudge = readyNudge(state, built.Answers)
+	built.Nudge = readyNudge(state, built.view().Answers)
 	built.Picked = state.heldPicks(built.ReadAt)
+	built.Rows = []Row{}
+	if step == StepToday {
+		built.Rows = built.todayRows()
+	}
 	return built
 }
 
-// withView is the cached panel with the parts of a view read at readAt.
+// withView is the cached panel with a view read at readAt.
 func withView(cached *Panel, view *View, readAt time.Time) *Panel {
 	built := Panel{}
 	if cached != nil {
@@ -519,9 +540,7 @@ func withView(cached *Panel, view *View, readAt time.Time) *Panel {
 	built.ReadAt = stampPtr(readAt)
 	built.GeneratedAt = &view.GeneratedAt
 	built.StaleSince, built.StaleReason = nil, nil
-	built.Suggestion, built.SuggestionReason = view.Suggestion, view.SuggestionReason
-	built.Answers, built.Totals, built.Pursuits = view.Answers, view.Totals, view.Pursuits
-	built.Habits, built.Lanes, built.Problems = view.Habits, view.Lanes, view.Problems
+	built.View = view.whole
 	return &built
 }
 
@@ -551,11 +570,11 @@ func (p Paths) readPanel() *Panel {
 	return &cached
 }
 
-// minutesRows are a timed pursuit's minutes step: log minutes, or reopen 5
-// above or below it. Opened with none, it starts on the usual amount. With none
-// usual, it offers minutesWithoutUsual, and its ±5 rows count from
-// minutesAdjustedFrom. No amount is ever taken from time away.
-func minutesRows(found entry, minutes *int) MinutesStep {
+// minutesRows are a timed pursuit's minutes step: log minutes, or reopen the
+// step minutesStep above or below it. Opened with none, it starts on the usual
+// amount. With none usual, it offers minutesWithoutUsual, and its adjust rows
+// count from minutesAdjustedFrom. No amount is ever taken from time away.
+func minutesRows(found entry, minutes *int) []Row {
 	name := found.completes.Ref
 	usual := 0
 	if found.usual != nil && *found.usual > 0 {
@@ -570,28 +589,27 @@ func minutesRows(found entry, minutes *int) MinutesStep {
 	if center > 0 {
 		amounts, around = []int{center}, center
 	}
-	step := MinutesStep{Key: found.key, Text: found.text}
+	offered := func(kind string, amount int, text string, suggested bool) Row {
+		key := minutesKey(kind, amount, found.key)
+		return Row{Key: &key, Kind: kind, Text: text, Minutes: &amount, Suggested: suggested}
+	}
+	rows := []Row{}
 	for _, amount := range amounts {
 		text := fmt.Sprintf("%s · log %d min", name, amount)
 		if amount == usual {
 			text += " (usual)"
 		}
-		step.Rows = append(step.Rows, MinutesRow{
-			Key: minutesKey(KindLogMinutes, amount, found.key), Kind: KindLogMinutes, Text: text, Minutes: amount, Suggested: amount == around,
-		})
+		rows = append(rows, offered(KindLogMinutes, amount, text, amount == around))
 	}
 	for _, adjust := range []struct {
 		sign   string
 		amount int
 	}{{"+", around + minutesStep}, {"−", around - minutesStep}} {
 		if adjust.amount > 0 {
-			step.Rows = append(step.Rows, MinutesRow{
-				Key: minutesKey(KindAdjustMinutes, adjust.amount, found.key), Kind: KindAdjustMinutes,
-				Text: fmt.Sprintf("%s · %s%d → %d min", name, adjust.sign, minutesStep, adjust.amount), Minutes: adjust.amount,
-			})
+			rows = append(rows, offered(KindAdjustMinutes, adjust.amount, fmt.Sprintf("%s · %s%d → %d min", name, adjust.sign, minutesStep, adjust.amount), false))
 		}
 	}
-	return step
+	return rows
 }
 
 // minutesKey names the row it logs last, so that row's own key keeps its separators.

@@ -225,6 +225,10 @@ func newPanelPickCommand() *cobra.Command {
 			step, err := paths.AskPick(cmd.Context(), args[0], logged)
 			var failed *desknudge.PickError
 			switch {
+			case errors.Is(err, desknudge.ErrWatchServesNoPicks):
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+					"doit desk-nudge panel pick: %v. That watch is likely an older doit's. Restarting the user service that runs `doit desk-nudge watch` starts this doit's watch.\n", err)
+				return exitCode(service.NoAnswerExit)
 			case errors.Is(err, desknudge.ErrNoWatch):
 				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
 					"doit desk-nudge panel pick: %v. Start the user service that runs `doit desk-nudge watch`, or run it in a terminal.\n", err)
@@ -255,7 +259,7 @@ func printStep(out io.Writer, step desknudge.Panel, asJSON bool) error {
 	if step.Message != nil {
 		_, _ = fmt.Fprintln(out, *step.Message)
 	}
-	rows := step.Rows()
+	rows := step.Rows
 	width := 0
 	for _, row := range rows {
 		if row.Key != nil {

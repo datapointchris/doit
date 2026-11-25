@@ -15,8 +15,9 @@ import (
 	"time"
 )
 
-// StateVersion is the state file's shape. The Python watch wrote version 2, and
-// the Go watch reads and writes the same fields, so it takes over that clock.
+// StateVersion is the state file's shape. It stays 2 with the Python watch's
+// field names, so either watch reads the other's clock: an older doit's Python
+// watch after a revert, and this watch after an upgrade.
 const StateVersion = 2
 
 const (

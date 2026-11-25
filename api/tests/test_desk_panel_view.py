@@ -11,6 +11,7 @@ from jsonschema import Draft7Validator
 
 from doit import journal
 from doit import pursuits
+from doit.lanes import CompletionKind
 from doit_api.computed_views import NOTHING_TO_DRAW
 
 REPO = Path(__file__).resolve().parents[2]
@@ -110,6 +111,7 @@ def test_the_desk_panel_view_carries_each_part_from_a_recorded_store(store):
     )
     assert [row['key'] for row in lanes['practice']['rows']] == ['practice:lab-regex']
     assert lanes['upcoming']['status'] == 'ok' and all(row['key'] is None for row in lanes['upcoming']['rows'])
+    assert SCHEMA['definitions']['completion_kind']['enum'] == list(CompletionKind), 'the schema and the service name one set of kinds'
 
 
 def test_a_read_without_draw_saves_no_draw_and_bumps_no_offer_and_nothing_to_draw_answers_a_null_suggestion_with_its_reason(store):

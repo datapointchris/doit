@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -29,21 +30,34 @@ type Paths struct {
 	Socket string
 }
 
-// DeskPaths are this desk's, under $XDG_STATE_HOME, $XDG_CACHE_HOME and $XDG_RUNTIME_DIR.
+// DeskPaths are this desk's, under $XDG_STATE_HOME, $XDG_CACHE_HOME and the runtime directory.
 func DeskPaths() Paths {
-	state := filepath.Join(xdg("XDG_STATE_HOME", ".local/state"), "doit")
-	runtime := os.Getenv("XDG_RUNTIME_DIR")
-	if runtime == "" {
-		runtime = filepath.Join(os.TempDir(), fmt.Sprintf("doit-%d", os.Getuid()))
-	}
+	stateHome := xdg("XDG_STATE_HOME", ".local/state")
+	state := filepath.Join(stateHome, "doit")
 	return Paths{
 		State:     filepath.Join(state, "desk-nudge.json"),
 		StateLock: filepath.Join(state, "desk-nudge.lock"),
 		WatchLock: filepath.Join(state, "desk-nudge-watch.lock"),
 		Records:   filepath.Join(state, "desk-nudge-events.jsonl"),
 		Panel:     filepath.Join(xdg("XDG_CACHE_HOME", ".cache"), "doit", "desk-nudge-panel.json"),
-		Socket:    filepath.Join(runtime, "doit", "watch.sock"),
+		Socket:    filepath.Join(runtimeDir(stateHome), "doit", "watch.sock"),
 	}
+}
+
+// runtimeDir is $XDG_RUNTIME_DIR. Where a shell lacks it, as an ssh login can,
+// it is logind's /run/user/<uid>, so the shell finds the socket of a watch
+// that systemd started. With neither, it is the state home, which this user
+// owns, rather than a shared temporary directory where another user could
+// plant the socket.
+func runtimeDir(stateHome string) string {
+	if runtime := os.Getenv("XDG_RUNTIME_DIR"); runtime != "" {
+		return runtime
+	}
+	logind := "/run/user/" + strconv.Itoa(os.Getuid())
+	if info, err := os.Stat(logind); err == nil && info.IsDir() {
+		return logind
+	}
+	return stateHome
 }
 
 func xdg(variable, fallback string) string {
@@ -54,9 +68,10 @@ func xdg(variable, fallback string) string {
 	return filepath.Join(home, fallback)
 }
 
-// lockFile takes a POSIX record lock on the whole of path, as Python's
-// fcntl.lockf does, so a Go and a Python process exclude each other. With wait
-// it blocks, and without it a lock held elsewhere is ErrHeldElsewhere.
+// lockFile takes a POSIX record lock on the whole of path, the lock that
+// Python's fcntl.lockf takes, so an older doit's Python watch still running
+// through an upgrade and this watch exclude each other. With wait it blocks,
+// and without it a lock held elsewhere is ErrHeldElsewhere.
 func lockFile(path string, wait bool) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -92,6 +107,16 @@ var ErrHeldElsewhere = errors.New("held by another process")
 // HoldWatchLock holds the watch lock until the returned file closes, or answers
 // ErrHeldElsewhere where another watch holds it.
 func (p Paths) HoldWatchLock() (*os.File, error) { return lockFile(p.WatchLock, false) }
+
+// watchHeld is whether another process holds the watch lock now.
+func (p Paths) watchHeld() bool {
+	lock, err := p.HoldWatchLock()
+	if err != nil {
+		return errors.Is(err, ErrHeldElsewhere)
+	}
+	_ = lock.Close()
+	return false
+}
 
 // replaceFile replaces a JSON file whole, through a temporary file beside it,
 // so no reader sees half of one.

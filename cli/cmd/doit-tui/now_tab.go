@@ -93,7 +93,7 @@ func runPanel(ctx context.Context, args ...string) (panelStep, error) {
 		return panelStep{}, fmt.Errorf("doit desk-nudge panel printed schema_version %d and this doit-tui reads %d, so upgrade %s",
 			printed.SchemaVersion, desknudge.PanelSchemaVersion, older)
 	}
-	return panelStep{Step: printed.Step, Rows: printed.Rows(), Message: printed.Message}, nil
+	return panelStep{Step: printed.Step, Rows: printed.Rows, Message: printed.Message}, nil
 }
 
 // minutesOffer is a timed pursuit's minutes step: the amount enter logs, and the rows that reopen

@@ -97,8 +97,8 @@ func (d *Desk) Pick(ctx context.Context, key string, minutes *int, read func()) 
 
 func minutesPanel(panel Panel, found entry, minutes *int) Panel {
 	panel.Step = StepMinutes
-	step := minutesRows(found, minutes)
-	panel.Minutes = &step
+	panel.Minutes = &MinutesStep{Key: found.key, Text: found.text}
+	panel.Rows = minutesRows(found, minutes)
 	return panel
 }
 
@@ -116,7 +116,7 @@ func (d *Desk) listed(panel *Panel, key string) (entry, *PickError) {
 	if panel.held(key) {
 		return entry{}, refused("%s is picked already, and is taken again once the watch reads the rows again", found.text)
 	}
-	if found.completes.Kind == "habit" && !habitID.MatchString(found.completes.Ref) {
+	if found.completes.Kind == KindHabit && !habitID.MatchString(found.completes.Ref) {
 		return entry{}, refused("%s names habit %q, and a habit id is all digits", found.text, found.completes.Ref)
 	}
 	return found, nil
@@ -134,7 +134,7 @@ func (d *Desk) complete(ctx context.Context, panel Panel, found entry, minutes *
 		return nil
 	})
 	if err != nil {
-		return Panel{}, err
+		return d.refuse(ctx, &PickError{ExitCode: PickFailed, Message: "nothing was picked, because the desk nudge's state file could not be written: " + err.Error()})
 	}
 	if !took {
 		return d.refuse(ctx, refused("%s is picked already, and is taken again once the watch reads the rows again", found.text))
@@ -142,13 +142,17 @@ func (d *Desk) complete(ctx context.Context, panel Panel, found entry, minutes *
 	seen := takeSnapshot(ctx)
 	outcome := d.completed(ctx, found, minutes)
 	var ended *Nudge
-	_ = d.Paths.change(func(state *State) error {
+	err = d.Paths.change(func(state *State) error {
 		state.settlePick(found.key, d.Now(), outcome.recordedNothing)
 		if outcome.ok && state.inHand() != nil {
 			ended = state.endReady()
 		}
 		return nil
 	})
+	if err != nil {
+		logger.Error("could not settle the pick of " + found.key + " in the state file: " + err.Error())
+		outcome.body += ". The desk nudge's state file could not be written, so this row stays held and any nudge in hand stays: " + err.Error()
+	}
 	notify(ctx, outcome.summary, outcome.body)
 	var nudgeID, failure *string
 	if ended != nil {
@@ -170,20 +174,16 @@ func (d *Desk) complete(ctx context.Context, panel Panel, found entry, minutes *
 }
 
 // completed completes one row through its owner, with what doit builds from
-// the row's completes.
+// the row's completes. Every kind but a pursuit and a habit is a review
+// register's entry, so a new register's rows complete with no change here.
 func (d *Desk) completed(ctx context.Context, found entry, minutes *int) completion {
 	switch found.completes.Kind {
-	case "pursuit":
+	case KindPursuit:
 		return d.loggedPursuit(ctx, found, minutes)
-	case "habit":
+	case KindHabit:
 		return completedHabit(ctx, found)
-	case "review", "practice":
-		return d.markedReviewDone(ctx, found)
 	}
-	return completion{
-		summary: "doit: not completed", body: fmt.Sprintf("this doit completes no %s row", found.completes.Kind),
-		exitCode: PickFailed, recordedNothing: true,
-	}
+	return d.markedReviewDone(ctx, found)
 }
 
 // completedHabit runs life habits complete. One that ran out of time may have landed, so it holds the row.
@@ -196,7 +196,7 @@ func completedHabit(ctx context.Context, found entry) completion {
 	return completion{ok: true, summary: "doit: habit completed", body: found.text}
 }
 
-// markedReviewDone records a review or practice entry done today, on the
+// markedReviewDone records a review register's entry done today, on the
 // desk's own day. The service keeps one completion a day for an entry, so a
 // failure frees the row.
 func (d *Desk) markedReviewDone(ctx context.Context, found entry) completion {

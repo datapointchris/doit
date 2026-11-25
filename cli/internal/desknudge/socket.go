@@ -110,6 +110,10 @@ func answer(response http.ResponseWriter, status int, body any) {
 // ErrNoWatch is no watch answering on the socket.
 var ErrNoWatch = errors.New("no desk nudge watch is running")
 
+// ErrWatchServesNoPicks is a watch that holds this desk and answers nothing on
+// the socket, such as an older doit's Python watch still running through an upgrade.
+var ErrWatchServesNoPicks = errors.New("a watch holds this desk and answers no pick")
+
 // pickWithin bounds one pick from the CLI. The watch bounds each request and
 // program a pick makes, so only a pick that never ends reaches it.
 const pickWithin = 5 * time.Minute
@@ -124,6 +128,8 @@ func socketClient(path string) *http.Client {
 
 // AskPick hands a pick to the watch, and answers the step it leads to, a
 // *PickError where the pick did nothing or did not go through, or ErrNoWatch.
+// Where nothing answers and another process holds the watch lock, it is
+// ErrWatchServesNoPicks.
 func (p Paths) AskPick(ctx context.Context, key string, minutes *int) (Panel, error) {
 	ctx, cancel := context.WithTimeout(ctx, pickWithin)
 	defer cancel()
@@ -140,6 +146,9 @@ func (p Paths) AskPick(ctx context.Context, key string, minutes *int) (Panel, er
 	if err != nil {
 		var dialed *net.OpError
 		if errors.As(err, &dialed) && dialed.Op == "dial" {
+			if p.watchHeld() {
+				return Panel{}, fmt.Errorf("%w: nothing answers on %s", ErrWatchServesNoPicks, p.Socket)
+			}
 			return Panel{}, fmt.Errorf("%w: nothing answers on %s", ErrNoWatch, p.Socket)
 		}
 		return Panel{}, &service.NoAnswer{Message: "the desk nudge watch gave no answer to the pick: " + err.Error()}

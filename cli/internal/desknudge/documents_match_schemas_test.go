@@ -79,8 +79,10 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 	ctx := context.Background()
 	minutes, err := watch.Pick(ctx, "pursuit:read", nil)
 	if err != nil || minutes.Step != StepMinutes || minutes.Minutes == nil ||
-		!slices.ContainsFunc(minutes.Minutes.Rows, func(row MinutesRow) bool { return row.Key == "log_minutes:45:pursuit:read" && row.Suggested }) {
-		t.Fatalf("picking a timed pursuit answered %+v, %v; want its minutes step offering its usual 45 first", minutes.Minutes, err)
+		!slices.ContainsFunc(minutes.Rows, func(row Row) bool {
+			return row.Key != nil && *row.Key == "log_minutes:45:pursuit:read" && row.Suggested
+		}) {
+		t.Fatalf("picking a timed pursuit answered %+v, %v; want its minutes step offering its usual 45 first", minutes.Rows, err)
 	}
 	matches(t, compiler, panelSchema, "a timed pursuit's minutes step", minutes)
 	for _, key := range []string{"log_minutes:45:pursuit:read", "pursuit:tasks:532", "habit:1"} {
@@ -90,13 +92,13 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 		}
 		matches(t, compiler, panelSchema, "the done step of "+key, done)
 	}
-	if ticked := f.ran("tick-task"); len(ticked) != 1 || !slices.Equal(ticked[0], []string{"tick-task", "532", "File the receipts"}) {
-		t.Errorf("on_log ran %q, want the task's id and its label as one argument", ticked)
+	if ticked := f.ran("tick-task"); len(ticked) != 1 || !slices.Equal(ticked[0], []string{"tick-task", "532", `File the "receipts" now`}) {
+		t.Errorf("on_log ran %q, want the task's id and its label, quote and spaces kept, as one argument", ticked)
 	}
 	if completed := f.ran("life"); len(completed) != 1 || !slices.Equal(completed[0], habitProgram("1").argv) {
 		t.Errorf("life ran %q, want habit 1 completed", completed)
 	}
-	if _, logs := f.posted(); len(logs) != 2 || logs[0]["duration_minutes"] != 45.0 || logs[1]["item"].(map[string]any)["label"] != "File the receipts" {
+	if _, logs := f.posted(); len(logs) != 2 || logs[0]["duration_minutes"] != 45.0 || logs[1]["item"].(map[string]any)["label"] != `File the "receipts" now` {
 		t.Errorf("the journal took %v, want read logged at 45 minutes, then the task naming its item", logs)
 	}
 

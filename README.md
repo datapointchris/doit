@@ -140,7 +140,9 @@ its pace, which is how much of it you want, and its weight, which is how much it
 the others. The annotated template `doit pursuits edit` starts from explains every field.
 
 `doit pursuits log` writes through to the app that owns the item. It offers to run the pursuit's
-`on_log` command on this machine, such as completing the task it resolved to. `--yes` runs it
+`on_log` command on this machine, such as completing the task it resolved to. The template is split
+into arguments before `{id}`, `{label}`, `{note}`, `{minutes}` and `{pursuit}` are filled in, so a
+label holding a space or a quote stays one argument, as the desk nudge's pick runs it. `--yes` runs it
 without asking, and `--no-write` logs only. The service records the log and what the command did,
 and never runs one itself.
 
@@ -426,26 +428,33 @@ every row of `doit today` that something completes, in each lane's own order:
   `tasks · Bathe Dingo`, and the pick names it as `--item` does. Where those choices could not be
   read, or there are none, the pursuit is a note, because a log naming no choice completes nothing.
 - **A pursuit counted in minutes** opens one more step: log its usual amount, the one most often
-  logged, or step 5 minutes up or down. With nothing logged in minutes yet, it offers 15, 30, 45 and
-  60, and calls none of them usual.
+  logged, or step up or down by `minutesStep`. With nothing logged in minutes yet, it offers
+  `minutesWithoutUsual`, both in `cli/internal/desknudge/panel.go`, and calls none of them usual.
 - **A review or practice entry** is marked done on the service, as `doit review done` marks it.
   These rows stop where `doit today` stops them.
-- **A habit** runs `life habits complete <id>`, stopped after 30 seconds.
+- **A habit** runs `life habits complete <id>`, stopped after `habitBound` in
+  `cli/internal/desknudge/programs.go`.
 - **`upcoming` is left out**, because nothing completes a trip or a countdown.
 
 The watch reads the service's desk panel view into `$XDG_CACHE_HOME/doit/desk-nudge-panel.json`,
-so the panel opens with no request. It reads the view at each firing, after each pick, and every 5
-minutes. Only the reads at a firing and after a pick draw. The timed read leaves the standing draw
+so the panel opens with no request. It reads the view at each firing, after each pick, and every
+`panelReadEvery` in `cli/internal/desknudge/watch.go`. Only the reads at a firing and after a pick
+draw. The timed read leaves the standing draw
 alone, and counts nothing as offered. That read waits while logind marks the session idle, as
 hypridle's 10-minute listener sets it, and the first tick back reads the view. The cache holds what
 each row completes, never a command. The draw after a pick leaves out what was just logged, so the
 suggestion moves on. A read that fails keeps the last rows, and the first row says why:
-`rows from 14:05 — doit unreachable`, or `rows from 14:05 — run doit auth login`.
+`rows from 14:05 — doit unreachable`, `rows from 14:05 — run doit auth login`, or
+`rows from 14:05 — doit answered in a shape this doit does not read`. The last of those comes from
+a view at a version that this doit does not read, which a `doit update` settles.
 
 The watch runs each pick itself, so one desk has one owner of the state file. `panel pick` hands
 the key to the watch over `$XDG_RUNTIME_DIR/doit/watch.sock`, in a directory only this user can
-read. With no watch running, `panel pick` exits 4 and names `doit desk-nudge watch`, and `panel
-show` still prints the cache.
+read. A shell without `$XDG_RUNTIME_DIR` looks in logind's `/run/user/<uid>`, then in
+`$XDG_STATE_HOME`. With no watch running, `panel pick` exits 4 and names `doit desk-nudge watch`,
+and `panel show` still prints the cache. Where a watch holds the desk and answers no pick, such as
+an older doit's, `panel pick` exits 4 and says that restarting the service starts this doit's
+watch.
 
 A pick is taken once. Its row leaves the panel, and the same key is refused until the watch reads
 the rows again after the completion ended. A completion that its owner refused frees the row at
@@ -594,5 +603,6 @@ needs none of them.
 - **Cache** is `$XDG_CACHE_HOME/doit/`. It holds what the shell's completion and startup gate read
   without starting Python or asking the service, and the desk nudge panel's rows. Each file is
   rewritten by the command that fetches it.
-- **Runtime** is `$XDG_RUNTIME_DIR/doit/`. It holds `watch.sock`, where the desk nudge watch takes
-  picks while it runs.
+- **Runtime** is `$XDG_RUNTIME_DIR/doit/`, or `doit/` under logind's `/run/user/<uid>` or
+  `$XDG_STATE_HOME` where that variable is unset. It holds `watch.sock`, where the desk nudge watch
+  takes picks while it runs.

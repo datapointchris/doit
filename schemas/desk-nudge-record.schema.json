@@ -229,13 +229,7 @@
       ],
       "properties": {
         "kind": {
-          "enum": [
-            "pursuit",
-            "habit",
-            "review",
-            "practice"
-          ],
-          "description": "Which owner completes it."
+          "$ref": "urn:doit:desk-panel-view:v1#/definitions/completion_kind"
         },
         "ref": {
           "type": "string",

@@ -47,7 +47,7 @@ func (a Answered) Outcome() (int, string) {
 func (d *Desk) labelOf(answer string) string {
 	if cached := d.Paths.readPanel(); cached != nil {
 		var answers []answerPart
-		parts(cached.Answers, &answers)
+		parts(cached.view().Answers, &answers)
 		for _, found := range answers {
 			if found.Answer == answer {
 				return found.Label

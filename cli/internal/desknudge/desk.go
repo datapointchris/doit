@@ -109,11 +109,12 @@ func newID(now time.Time) string {
 func failureKind(err error) string {
 	var none *service.NoAnswer
 	var missing *service.MissingField
+	var version *ViewVersionError
 	var refused *service.Refused
 	switch {
 	case errors.As(err, &none):
 		return Unreachable
-	case errors.As(err, &missing):
+	case errors.As(err, &missing), errors.As(err, &version):
 		return Unreadable
 	case errors.Is(err, login.ErrNeedsLogin), errors.Is(err, goclilogin.ErrNotConfigured):
 		return LoginRefused
@@ -124,7 +125,8 @@ func failureKind(err error) string {
 }
 
 // readView reads the desk panel view. Only with draw does the service draw,
-// save the draw and count an offer to this desk.
+// save the draw and count an offer to this desk. A view at another version is
+// refused, so the panel keeps the last view it reads rather than misreading one.
 func (d *Desk) readView(ctx context.Context, draw bool) (*View, error) {
 	ctx, cancel := context.WithTimeout(ctx, viewBound)
 	defer cancel()
@@ -139,6 +141,9 @@ func (d *Desk) readView(ctx context.Context, draw bool) (*View, error) {
 	var view View
 	if err := client.Get(ctx, "/desk-panel-view", query, &view); err != nil {
 		return nil, err
+	}
+	if view.SchemaVersion != viewSchemaVersion {
+		return nil, &ViewVersionError{Version: view.SchemaVersion}
 	}
 	return &view, nil
 }
