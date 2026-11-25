@@ -19,45 +19,19 @@ jobs:
   validate:
     uses: ./.github/workflows/validate.yml
 
+  # The service's version, tagged vX.Y.Z from the conventional commits. The
+  # image that api-image builds carries it.
   release:
     needs: validate
     uses: datapointchris/reusable-workflows/.github/workflows/python-semantic-release.yml@v1
     permissions:
       contents: write
 
-  # In the same workflow as the release, because a tag pushed with
-  # GITHUB_TOKEN starts no other workflow run. The shared workflow is a job
-  # apart from the release, so the index credentials reach its steps alone.
-  #
-  # It skips each file the index already holds, so re-running a publish that
-  # failed partway uploads the rest.
-  #
-  # A commit that bumps nothing leaves `released` false, and this is skipped.
-  #
-  # After the Go doit's release, because `doit-python` relies on the `doit`
-  # cut beside it, and a desk updates the two on separate schedules. Where this
-  # push cuts no Go release, cli-version names no tag and this runs alone. A Go
-  # build or release that fails holds the package back.
-  publish:
-    needs: [release, cli-version, cli-publish]
-    if: >-
-      always() && needs.release.outputs.released == 'true' && needs.cli-version.result == 'success'
-      && (needs.cli-publish.result == 'success'
-        || (needs.cli-publish.result == 'skipped' && needs.cli-version.outputs.tag == ''))
-    uses: datapointchris/reusable-workflows/.github/workflows/python-publish.yml@v1
-    with:
-      tag: ${{ needs.release.outputs.tag }}
-      publish-url: https://pypi.ichrisbirch.com/
-      check-url: https://pypi.ichrisbirch.com/simple/
-    secrets:
-      username: ${{ secrets.PYPI_ICB_USERNAME }}
-      password: ${{ secrets.PYPI_ICB_PASSWORD }}
-
   # The Go doit's stream, tagged cli/vX.Y.Z from the conventional commits under
   # cli/. Its release carries doit_<version>_<os>_<arch>.tar.gz for each desk,
   # with the binary at the archive's root, and checksums.txt. `doit update` and
   # a machine's package manager install from those. The release is not marked
-  # latest, so the Python package's own stays the one GitHub shows.
+  # latest, so the service's own stays the one GitHub shows.
   #
   # The tag is not pushed here. It lands with the release, so a failed build
   # leaves no tag, and the next run cuts the same version again.
@@ -156,10 +130,6 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Before the Python package reaches the index, which waits on this. An
-  # earlier Go doit hands `doit tui` to `doit-python tui`, and the package
-  # published after this carries no `tui`. Publishing this release first lets
-  # `doit update` fix that desk.
   cli-publish:
     name: Publish the Go doit's release
     needs: [release, cli-version, cli-build]

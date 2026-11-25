@@ -1,12 +1,4 @@
-"""Tests for doit.render's nudge primitives — the one-line-per-item renderers
-the nudges share.
-
-The bound these hold is the whole point of a nudge: a row that wraps is two rows,
-so a clip that is off by a column silently doubles what shell startup prints. The
-callers' own tests cover their assembly; these cover the primitive.
-
-Color is rich's concern and is not asserted here.
-"""
+"""Tests for doit.render's text helpers, which write the cells of each view's rows."""
 
 from doit import render
 

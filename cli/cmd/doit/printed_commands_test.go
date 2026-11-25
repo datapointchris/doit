@@ -11,11 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// A command printed for a person to run: after rich markup, in a code span or
-// in single quotes in the Python source, or on a line of a shell fence in the
-// README.
+// A command printed for a person to run: in a code span or in single quotes in
+// the Python source, or on a line of a shell fence in the README.
 var (
-	printedInSource = regexp.MustCompile("(?:\\]|`|')doit")
+	printedInSource = regexp.MustCompile("(?:`|')doit")
 	shellFence      = regexp.MustCompile("(?ms)^```(?:bash|sh)\n(.*?)\n```")
 	printedInFence  = regexp.MustCompile("(?m)^doit")
 )

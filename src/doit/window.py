@@ -10,7 +10,12 @@ from typing import NamedTuple
 SPAN = re.compile(r'(\d+)([smhdw])')
 DAY = re.compile(r'\d{4}-\d{2}-\d{2}')
 SPAN_UNITS = {'s': 'seconds', 'm': 'minutes', 'h': 'hours', 'd': 'days', 'w': 'weeks'}
+SPAN_EXAMPLES = {'s': '30s', 'm': '90m', 'h': '3h', 'd': '2d', 'w': '2w'}
 FORMS = 'a span (30m, 12h, 7d, 2w), a day (2026-10-01) or an RFC 3339 instant'
+
+
+class Refused(ValueError):
+    """A span, a day or an instant that this grammar cannot read, or a window that ends before it starts."""
 
 
 def span(value: str, units: str = 'smhdw') -> dt.timedelta | None:
@@ -25,6 +30,25 @@ def span(value: str, units: str = 'smhdw') -> dt.timedelta | None:
     return dt.timedelta(**{SPAN_UNITS[match[2]]: int(match[1])})
 
 
+def span_or_refuse(value: str, what: str, units: str = 'smhdw') -> dt.timedelta:
+    """`value` as a span in `units`, or a refusal saying what `what` takes.
+
+    `what` names the concept rather than a flag or a field, because a command line and a
+    request body each reach this sentence by their own spelling.
+    """
+    if (length := span(value, units)) is not None:
+        return length
+    words = either([SPAN_UNITS[unit] for unit in units])
+    examples = either([SPAN_EXAMPLES[unit] for unit in units])
+    hint = ' There is no month or year unit: write 4w.' if 'w' in units else ''
+    raise Refused(f'{what} is a span in {words}, such as {examples}, not {value!r}.{hint}')
+
+
+def either(choices: list[str]) -> str:
+    """`a, b or c`, the way a refusal lists what it would have taken."""
+    return choices[0] if len(choices) == 1 else f'{", ".join(choices[:-1])} or {choices[-1]}'
+
+
 def first_instant(day: dt.date) -> dt.datetime:
     """The day's first instant, built in the machine's zone rather than reached by adding hours."""
     return dt.datetime(day.year, day.month, day.day).astimezone()
@@ -34,15 +58,15 @@ def bound(value: str, now: dt.datetime, *, end: bool) -> dt.datetime:
     """One flag's value as an instant in the machine's zone; `end` marks `--until`, where a day includes all of itself."""
     if (length := span(value)) is not None:
         return (now - length).astimezone()
-    if DAY.fullmatch(value):
-        day = dt.date.fromisoformat(value)
-        return first_instant(day + dt.timedelta(days=1) if end else day)
     try:
+        if DAY.fullmatch(value):
+            day = dt.date.fromisoformat(value)
+            return first_instant(day + dt.timedelta(days=1) if end else day)
         instant = dt.datetime.fromisoformat(value)
     except ValueError:
         instant = None
     if instant is None or instant.tzinfo is None:
-        raise ValueError(f'{value!r} is not {FORMS}. There is no month or year unit: write 26w, or a day.')
+        raise Refused(f'{value!r} is not {FORMS}. There is no month or year unit: write 26w, or a day.')
     return instant.astimezone()
 
 
@@ -75,5 +99,5 @@ def window(since: str | None, until: str | None, now: dt.datetime) -> tuple[dt.d
     start = bound(since, now, end=False) if since else None
     stop = bound(until, now, end=True) if until else None
     if start and stop and start >= stop:
-        raise ValueError(f'the window starts at {since}, which is not before its end at {until}.')
+        raise Refused(f'the window starts at {since}, which is not before its end at {until}.')
     return start, stop

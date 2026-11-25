@@ -1,9 +1,9 @@
 """Every view the service answers, computed from the store and the apps by doit's own functions.
 
-Each method here is the computing half of a CLI command: it reads the documents,
-the journal and the apps, calls the function the command calls, and returns the
-document the command's `--json` printed. Nothing here re-derives a balance, a
-due date or a lane, so there is one copy of each rule.
+Each method here answers one route: it reads the documents, the journal and the
+apps, calls the root package's function for the view, and returns the document
+that the CLI's `--json` prints. Nothing here re-derives a balance, a due date or
+a lane, so there is one copy of each rule.
 
 Writes go through the same functions. A journal entry is built by
 `pursuits.done_record` and its siblings, and the sightings and paces a build
@@ -16,8 +16,6 @@ import dataclasses as dc
 import datetime as dt
 import logging
 from collections.abc import Callable
-
-import typer
 
 from doit import actor
 from doit import dashboard
@@ -83,9 +81,10 @@ def occurred_at(body: dict, now: dt.datetime) -> dt.datetime:
     if ago is not None and at is not None:
         raise BadRequest('ago and occurred_at each say when it happened, so pass one')
     if ago is not None:
-        length = window.span(ago)
-        if length is None:
-            raise BadRequest(f'--ago takes a span such as 30s, 90m, 3h, 2d or 1w, not {ago!r}')
+        try:
+            length = window.span_or_refuse(ago, 'How long ago it happened')
+        except window.Refused as error:
+            raise BadRequest(str(error)) from error
         return (now - length).astimezone()
     occurred = instant(at, 'occurred_at') or now
     if occurred > now + FUTURE_SKEW:
@@ -342,8 +341,8 @@ class Views:
             raise Conflict(f'{refusal}, so there is nothing to pass')
         try:
             days = pursuits.skip_span(body.get('for'), state['intervals'][name])
-        except typer.BadParameter as error:
-            raise BadRequest(str(error.message)) from error
+        except window.Refused as error:
+            raise BadRequest(str(error)) from error
         expires = now + dt.timedelta(days=days)
         standing = self.standing_draw(now) or {}
         extra = {'expires_at': expires.isoformat(), 'draw_id': standing.get('draw_id')}
@@ -396,7 +395,7 @@ class Views:
         config, now = self.registered(), self.now()
         try:
             start, end = window.window(since or (None if until else pursuits.DRIFT_SINCE), until, now)
-        except ValueError as error:
+        except window.Refused as error:
             raise BadRequest(str(error)) from error
         state = self.state(config, now)
         rows = pursuits.drift_rows(config.pursuits, state, start, end, self.store.offers_by_day())
@@ -669,7 +668,7 @@ class Views:
             since = happened.DEFAULT_SINCE
         try:
             start, stop = window.window(since, until, now)
-        except ValueError as error:
+        except window.Refused as error:
             raise BadRequest(str(error)) from error
         bounds = Bounds(start or happened.EARLIEST, stop or now)
         if bounds.start >= bounds.stop:

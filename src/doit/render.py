@@ -1,44 +1,6 @@
-"""doit's shared console and its text helpers.
-
-Lines carrying content from a register, a Lab or a command are built as `Text`
-rather than markup strings — `Text.append` does not parse `[...]`, so a bracket
-in a description cannot be swallowed as a style tag.
-"""
+"""The text helpers that write a row's cells."""
 
 import re
-import sys
-
-from rich.console import Console
-
-# highlight=False: rich's automatic highlighter colors anything that looks like
-# a number, path or URL, which turns a register id into a surprise.
-console = Console(highlight=False)
-
-# Everything that is not data. stdout carries the answer a caller parses; a
-# diagnostic written there is what turns `doit review list --json` into a broken
-# parse rather than a readable warning.
-error_console = Console(stderr=True, highlight=False)
-
-# Bound to the persistent --no-input flag by the root callback, which runs on
-# every invocation and rewrites it — so an in-process run never inherits the last
-# one's value.
-no_input = False
-
-
-def set_no_input(value: bool) -> None:
-    global no_input
-    no_input = value
-
-
-def can_prompt() -> bool:
-    """Whether the user can be asked anything: --no-input never allows it, and
-    otherwise stdin has to be a terminal.
-
-    Lives beside the consoles because it answers the same question they do —
-    who, if anyone, is on the other end. A prompt written to a stdin that never
-    closes leaves the caller with no output and no exit code."""
-    return not no_input and sys.stdin.isatty()
-
 
 # A sentence ends at punctuation the next character does not continue. Matching
 # the following space rather than the punctuation alone is what keeps `execute.go`

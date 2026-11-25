@@ -52,7 +52,6 @@ from collections.abc import Callable
 from collections.abc import Iterable
 from typing import NamedTuple
 
-import typer
 import yaml
 
 from doit import evidence
@@ -72,8 +71,9 @@ from doit.journal import new_id
 from doit.render import first_sentence
 from doit.render import join_context
 from doit.render import span_text
+from doit.window import Refused
 from doit.window import first_instant
-from doit.window import span
+from doit.window import span_or_refuse
 
 # How many of its own intervals a pursuit goes quiet for before it reads as dormant.
 DORMANT_INTERVALS = 3
@@ -1481,7 +1481,7 @@ def goal_text(config: dict) -> str:
 def priced(state: dict, name: str) -> tuple[float, float, float] | None:
     """A pursuit's balance, interval and checkoff size, or None where it has none.
 
-    The draw outlives the register by up to a quarter of an hour, and `cmd_list`
+    The draw outlives the register by up to a quarter of an hour, and :func:`list_rows`
     walks the whole register while the state is built from the active set alone.
     Either way a name can reach a renderer with no schedule behind it.
     """
@@ -1918,7 +1918,7 @@ def due_with(state: dict, name: str, entry: dict) -> float | None:
 
 
 def skip_span(duration: str | None, interval: float | None) -> int:
-    """How many days a pass covers.
+    """How many days a pass covers, refusing with :class:`doit.window.Refused` a length it cannot read.
 
     One interval when nothing is asked for, so a bare skip still means "not this
     time" rather than committing to a length nobody chose. A pursuit with no
@@ -1926,11 +1926,9 @@ def skip_span(duration: str | None, interval: float | None) -> int:
     """
     if duration:
         # A pass is counted in whole days, so a finer unit has nothing to mean here.
-        length = span(duration, units='dw')
-        if length is None or length.days <= 0:
-            raise typer.BadParameter(
-                f'--for takes days or weeks, such as 3d or 2w, not {duration!r}. There is no month or year unit: write 4w.'
-            )
+        length = span_or_refuse(duration, 'A pass', units='dw')
+        if length.days <= 0:
+            raise Refused(f'A pass lasts at least a day, not {duration!r}.')
         return length.days
     if interval is None or math.isinf(interval):
         return 1

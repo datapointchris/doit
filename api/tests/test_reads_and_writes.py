@@ -223,6 +223,55 @@ def test_the_standing_draw_retries_a_failed_resolve_and_drops_each_logged_pursui
     assert spent['draw_id'] != first['draw_id'], 'a draw with every pursuit logged is drawn again rather than shown empty'
 
 
+def test_a_log_check_resolves_again_past_a_draw_whose_read_failed(store):
+    """A cached failure carries no id, so on_log would complete nothing and nothing on screen would say so."""
+    down = [True]
+
+    def tasks(request):
+        return httpx2.Response(500, json={'message': 'down'}) if down[0] else [{'name': 'Water the plants', 'id': 501}]
+
+    client = client_for(store, apps={'life': stand_in('life', {'/tasks': tasks})})
+    register = 'pursuits:\n  chores:\n    weight: 25\n    cadence: 3d\n    resolve: {app: life, path: /tasks}\n'
+    register += '    label: name\n    id: id\n    on_log: tick {id}\n'
+    client.put('/api/v1/documents/pursuits', json={'text': register}).raise_for_status()
+    client.get('/api/v1/next').raise_for_status()
+    down[0] = False
+
+    check = client.post('/api/v1/journal/done', json={'pursuit': 'chores', 'check': True}).json()
+
+    assert (check['chosen']['id'], check['chosen']['label'], check['on_log']) == ('501', 'Water the plants', 'tick {id}')
+    assert [record for record in store.journal() if record['event'] == 'done'] == [], 'a check logs nothing'
+
+
+def test_a_review_completion_taken_back_stays_in_history(store):
+    client = client_for(store)
+    client.put(
+        '/api/v1/documents/review', json={'text': 'items:\n  stretch:\n    description: Stretch\n    cadence: 1w\n'}
+    ).raise_for_status()
+    for day in ('2026-10-20', '2026-10-30'):
+        client.post('/api/v1/review/stretch/completions', json={'day': day}).raise_for_status()
+        client.delete(f'/api/v1/review/stretch/completions/{day}').raise_for_status()
+
+    history = client.get('/api/v1/history/review_completions', params={'key': 'stretch'}).json()
+    assert sorted(row['done_on'] for row in history) == ['2026-10-20', '2026-10-30']
+    assert all(row['valid_to'] for row in history)
+
+
+def test_a_reason_reaches_every_read_of_a_pursuit_and_a_tracked_one_has_no_weight_or_due_date(api):
+    reason = 'It keeps the [house] standing, per chores.md'
+    register = f'pursuits:\n  build:\n    description: Engineering\n  chores:\n    weight: 25\n    cadence: 3d\n    reason: {reason}\n'
+    api.put('/api/v1/documents/pursuits', json={'text': register}).raise_for_status()
+
+    rows = {row['name']: row for row in api.get('/api/v1/pursuits').json()['rows']}
+    assert (rows['chores']['reason'], rows['build']['reason']) == (reason, '')
+    assert (rows['build']['paced'], rows['build']['weight'], rows['build']['due']) == (False, '', '')
+    drift = api.get('/api/v1/pursuits/drift').json()
+    assert [row['reason'] for row in drift['printed_rows'] if row['pursuit'] == 'chores'] == [reason]
+    assert [row['reason'] for row in api.get('/api/v1/pursuits/dormant').json()['dormant'] if row['pursuit'] == 'chores'] == [reason]
+    explained = api.get('/api/v1/next').json()['explain_rows']
+    assert [row['reason'] for row in explained if row['name'] == 'chores'] == [reason]
+
+
 def test_an_offer_count_whose_pursuit_left_the_register_is_stranded_until_it_ages_out(store):
     """Counts are keyed by name, so a rename strands counts that drift, which walks the register, never shows again."""
     moments = [NOW]
