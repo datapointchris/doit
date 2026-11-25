@@ -6,7 +6,6 @@ import (
 	"math"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -29,8 +28,7 @@ const (
 	KindAdjustMinutes = "adjust_minutes"
 	// KindTick is a habit's checklist item, whose key records one set and
 	// whose untick_key takes the latest set back.
-	KindTick   = "tick"
-	KindUntick = "untick"
+	KindTick = "tick"
 )
 
 // The completion kinds that the watch completes by an owner of their own. The
@@ -191,7 +189,6 @@ type habitsPart struct {
 	Status string  `json:"status"`
 	Reason *string `json:"reason"`
 	Rows   []struct {
-		ID        *int            `json:"id"`
 		Name      string          `json:"name"`
 		Done      bool            `json:"done"`
 		Key       *string         `json:"key"`
@@ -201,10 +198,12 @@ type habitsPart struct {
 }
 
 type checklistItem struct {
-	ID     int    `json:"id"`
-	Name   string `json:"name"`
-	Target int    `json:"target"`
-	Ticks  int    `json:"ticks"`
+	Name      string     `json:"name"`
+	Target    int        `json:"target"`
+	Ticks     int        `json:"ticks"`
+	Key       *string    `json:"key"`
+	UntickKey *string    `json:"untick_key"`
+	Completes *Completes `json:"completes"`
 }
 
 type lanePart struct {
@@ -236,6 +235,8 @@ type entry struct {
 	suggested bool
 	// ticks and target are a checklist item's sets today and its daily target.
 	ticks, target *int
+	// untickKey is the key that takes a checklist item's latest set back, on the entry that ticks it.
+	untickKey string
 }
 
 func (e entry) note() bool  { return e.key == "" }
@@ -249,6 +250,14 @@ const (
 	ActionCancel   = "cancel"
 )
 
+// holdsKey is whether a pick of action holds its key from a second pick until
+// the rows are read again. A completion does. A tick or an untick records
+// another set each time, so it holds nothing.
+func holdsKey(action string) bool { return action == ActionComplete }
+
+// setAction is whether action changes one set of a checklist item, which names the item.
+func setAction(action string) bool { return action == ActionTick || action == ActionUntick }
+
 // actionOf is what a pick of an entry does, where the entry names none.
 func (e entry) actionOf() string {
 	if e.action == "" {
@@ -257,25 +266,24 @@ func (e entry) actionOf() string {
 	return e.action
 }
 
-// checklistEntries are a habit's checklist items, each as a tick and an untick
-// of its id. They stay listed once the habit is done, so a set can still be taken back.
-func checklistEntries(habitID int, habit string, items []checklistItem) []entry {
+// checklistEntries are a habit's checklist items, each as two entries: one
+// ticks a set by the item's key, and one takes it back by the item's
+// untick_key, both as the view names them. They stay listed once the habit is
+// done, so a set can still be taken back.
+func checklistEntries(habit string, items []checklistItem) []entry {
 	var found []entry
-	ref := strconv.Itoa(habitID)
 	for _, item := range items {
-		itemID := strconv.Itoa(item.ID)
-		ticks, target := item.Ticks, item.Target
-		for _, action := range []string{ActionTick, ActionUntick} {
-			found = append(found, entry{
-				key:       action + keySeparator + itemID,
-				completes: Completes{Kind: KindHabit, Ref: ref, ItemID: &itemID},
-				action:    action,
-				text:      habit + " · " + item.Name,
-				group:     "habits",
-				ticks:     &ticks,
-				target:    &target,
-			})
+		if item.Key == nil || item.UntickKey == nil || item.Completes == nil {
+			continue
 		}
+		ticks, target := item.Ticks, item.Target
+		tick := entry{
+			key: *item.Key, completes: *item.Completes, action: ActionTick, text: habit + " · " + item.Name,
+			group: "habits", ticks: &ticks, target: &target, untickKey: *item.UntickKey,
+		}
+		untick := tick
+		untick.key, untick.action, untick.untickKey = *item.UntickKey, ActionUntick, ""
+		found = append(found, tick, untick)
 	}
 	return found
 }
@@ -367,9 +375,7 @@ func (p *Panel) entries() []entry {
 			found = append(found, entry{key: *row.Key, completes: *row.Completes, text: row.Name, group: "habits"})
 			completing++
 		}
-		if row.ID != nil {
-			found = append(found, checklistEntries(*row.ID, row.Name, row.Items)...)
-		}
+		found = append(found, checklistEntries(row.Name, row.Items)...)
 	}
 	for _, lane := range lanes {
 		for _, row := range lane.Rows {
@@ -561,7 +567,8 @@ func rowOf(found entry, p *Panel) Row {
 	keys := []string{key}
 	if found.action == ActionTick {
 		row.Kind = KindTick
-		untick := ActionUntick + keySeparator + *found.completes.ItemID
+		row.Text += fmt.Sprintf(" · %d of %d sets", *found.ticks, *found.target)
+		untick := found.untickKey
 		row.UntickKey = &untick
 		keys = append(keys, untick)
 	}

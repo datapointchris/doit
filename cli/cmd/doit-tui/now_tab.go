@@ -219,11 +219,16 @@ func (b *nowBoard) Actions() []gotermboard.Action {
 		})
 	}
 	onRow := func(m *gotermboard.Model) bool { _, ok := b.rowAt(m.Cursor()); return ok }
+	onSets := func(m *gotermboard.Model) bool { row, ok := b.rowAt(m.Cursor()); return ok && row.UntickKey != nil }
 	offering := func(m *gotermboard.Model) bool { return b.offered != "" && m.Cursor() == b.offered }
 	return append(actions,
 		gotermboard.Action{
 			Keys: []string{"enter"}, Label: "complete the row, or log the minutes it offers", Footer: "enter done",
 			Run: b.complete, Applies: onRow,
+		},
+		gotermboard.Action{
+			Keys: []string{"u"}, Label: "take back the row's latest set", Footer: "u untick",
+			Run: b.untick, Applies: onSets,
 		},
 		gotermboard.Action{
 			Keys: []string{"+", "="}, Label: "offer more minutes", Footer: "+/- minutes",
@@ -272,6 +277,12 @@ func (b *nowBoard) complete(m *gotermboard.Model) tea.Cmd {
 	}
 	row, _ := b.rowAt(key)
 	return b.pick(key, key, "completing "+row.Text)
+}
+
+// untick picks the cursor's checklist row by its untick_key, which takes its latest set back.
+func (b *nowBoard) untick(m *gotermboard.Model) tea.Cmd {
+	row, _ := b.rowAt(m.Cursor())
+	return b.pick(m.Cursor(), *row.UntickKey, "taking back a set of "+row.Text)
 }
 
 func (b *nowBoard) adjust(to *panelRow) tea.Cmd {

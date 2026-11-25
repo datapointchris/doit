@@ -7,6 +7,8 @@ reader of the view needs no copy of any of them.
 
 Every entry that a pick completes carries its `key` and what it completes, as
 `{kind, ref, item_id}`. An entry that completes nothing carries null in both.
+A habit's checklist item carries two keys, `key` to tick one set and
+`untick_key` to take the latest back, beside the one `completes` they share.
 So no reader parses a key or lists a kind to learn what a pick does.
 
 No part holds minutes away from the desk. A timed pursuit's Log starts from its
@@ -37,6 +39,10 @@ from doit.today import due_row_cap
 SCHEMA_VERSION = 1
 
 KEY_SEPARATOR = ':'
+
+# The kinds of a checklist item's two keys: one ticks a set, one takes the latest set back.
+TICK = 'tick'
+UNTICK = 'untick'
 
 # The due lanes carried under the lane contract. Pursuits and habits are parts of their own.
 LANES = (*(register.name for register in happened.registers()), *today.DAY_SHAPED_ROW_LANES)
@@ -174,19 +180,31 @@ def pursuits_part(day: today.Day, register: dict, usual: dict, days: dict[str, d
     return {'status': 'ok', 'reason': None, 'rows': rows}
 
 
-def checklist_items(checklist: dict | None) -> list[dict]:
-    """A habit's checklist items as life counts them today."""
-    return [
-        {
-            'id': item.get('id'),
-            'name': item.get('name') or '',
-            'target': item.get('daily_target'),
-            'ticks': len(item.get('ticks') or []),
-            'done': bool(item.get('done')),
-        }
-        for item in (checklist or {}).get('items') or []
-        if isinstance(item, dict)
-    ]
+def checklist_items(habit_id: int | None, checklist: dict | None) -> list[dict]:
+    """A habit's checklist items as life counts them today.
+
+    Each item's `key` ticks one set and its `untick_key` takes the latest set
+    back. Both carry the same `completes`, naming the habit and the item.
+    """
+    found = []
+    for item in (checklist or {}).get('items') or []:
+        if not isinstance(item, dict):
+            continue
+        item_id = item.get('id')
+        keyed = habit_id is not None and isinstance(item_id, int)
+        found.append(
+            {
+                'id': item_id,
+                'name': item.get('name') or '',
+                'target': item.get('daily_target'),
+                'ticks': len(item.get('ticks') or []),
+                'done': bool(item.get('done')),
+                'key': completion_key(TICK, str(item_id)) if keyed else None,
+                'untick_key': completion_key(UNTICK, str(item_id)) if keyed else None,
+                'completes': {'kind': str(CompletionKind.HABIT), 'ref': str(habit_id), 'item_id': str(item_id)} if keyed else None,
+            }
+        )
+    return found
 
 
 def habits_part(day: today.Day, result: sources.Result | None) -> dict:
@@ -233,7 +251,7 @@ def habits_part(day: today.Day, result: sources.Result | None) -> dict:
                 'category': (habit.get('category') or {}).get('name') or '',
                 'done': target is None and name not in owed_names,
                 **(completion(target.kind, target.ref) if target else NO_COMPLETION),
-                'items': checklist_items(checklists.get(habit_id)),
+                'items': checklist_items(habit_id, checklists.get(habit_id)),
             }
         )
     return {'status': 'ok', 'reason': None, 'rows': rows}

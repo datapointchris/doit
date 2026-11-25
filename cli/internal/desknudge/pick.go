@@ -48,12 +48,14 @@ type completion struct {
 }
 
 // The outcomes of a pick. A refused pick recorded nothing, so its row is free
-// again. An uncertain one may have landed, so its row is held until the next read.
+// again. An uncertain one may have landed, so its row is held until the next
+// read. A canceled one is a pending pick taken back before its commit.
 const (
 	OutcomeDone      = "done"
 	OutcomeSkipped   = "skipped"
 	OutcomeRefused   = "refused"
 	OutcomeUncertain = "uncertain"
+	OutcomeCanceled  = "canceled"
 )
 
 func (c completion) outcome() string {
@@ -74,50 +76,89 @@ var habitID = regexp.MustCompile(`^[0-9]+$`)
 // step once something is completed, or a timed pursuit's minutes. minutes
 // logs a timed pursuit at once. read is called once a completion went
 // through, so the parts are read again.
-//
-// The watch owns the vocabulary of keys. An answer key and a minutes key are
-// read as the watch wrote them, and any other key is resolved against the
-// panel's parts, whose completes says what to run.
 func (d *Desk) Pick(ctx context.Context, key string, minutes *int, read func()) (Panel, error) {
+	panel := panelFor(d.Paths.readPanel(), d.Paths.readState(), StepToday)
+	resolved, refusal := d.resolveKey(&panel, key, minutes)
+	if refusal != nil {
+		return d.refuse(ctx, refusal)
+	}
+	switch resolved.verb {
+	case verbAnswer:
+		return d.pickedAnswer(ctx, resolved.answer, resolved.nudgeID)
+	case verbAdjust:
+		return minutesPanel(panel, resolved.found, resolved.minutes), nil
+	case verbMinutes:
+		return minutesPanel(panel, resolved.found, nil), nil
+	}
+	return d.complete(ctx, panel, resolved.found, resolved.minutes, read)
+}
+
+// keyVerb is what a picked key asks for.
+type keyVerb int
+
+const (
+	// verbComplete completes its row.
+	verbComplete keyVerb = iota
+	// verbAnswer answers the nudge.
+	verbAnswer
+	// verbAdjust reopens a minutes step at another amount.
+	verbAdjust
+	// verbMinutes opens a timed row's minutes step, because the pick names none.
+	verbMinutes
+)
+
+// resolvedKey is what a key names: an answer, or a row with the minutes it logs.
+type resolvedKey struct {
+	verb            keyVerb
+	answer, nudgeID string
+	found           entry
+	minutes         *int
+}
+
+// resolveKey reads a key for a pick from a terminal and for a pending pick
+// alike. The watch owns the vocabulary of keys. An answer key and a minutes
+// key are read as the watch wrote them, and any other key is resolved against
+// the panel's parts, whose completes says what to run.
+func (d *Desk) resolveKey(panel *Panel, key string, minutes *int) (resolvedKey, *PickError) {
 	kind, rest, _ := strings.Cut(key, keySeparator)
-	if kind == KindAnswer {
+	switch kind {
+	case KindAnswer:
 		answer, nudgeID, _ := strings.Cut(rest, keySeparator)
 		if !IsAnswer(answer) {
-			return d.refuse(ctx, refused("%q is not an answer", answer))
+			return resolvedKey{}, refused("%q is not an answer", answer)
 		}
-		return d.pickedAnswer(ctx, answer, nudgeID)
-	}
-	cached := d.Paths.readPanel()
-	panel := panelFor(cached, d.Paths.readState(), StepToday)
-	if kind == KindLogMinutes || kind == KindAdjustMinutes {
+		return resolvedKey{verb: verbAnswer, answer: answer, nudgeID: nudgeID}, nil
+	case KindLogMinutes, KindAdjustMinutes:
 		amount, rowKey, _ := strings.Cut(rest, keySeparator)
 		logged, err := strconv.Atoi(amount)
 		if err != nil || logged < 1 {
-			return d.refuse(ctx, refused("%s names no whole number of minutes", key))
+			return resolvedKey{}, refused("%s names no whole number of minutes", key)
 		}
-		found, pickErr := d.listed(&panel, rowKey)
-		if pickErr == nil && !found.timed() {
-			pickErr = refused("%s is not counted in minutes", found.text)
+		found, refusal := d.listed(panel, rowKey)
+		if refusal == nil && !found.timed() {
+			refusal = refused("%s is not counted in minutes", found.text)
 		}
-		if pickErr != nil {
-			return d.refuse(ctx, pickErr)
+		if refusal != nil {
+			return resolvedKey{}, refusal
 		}
+		verb := verbComplete
 		if kind == KindAdjustMinutes {
-			return minutesPanel(panel, found, &logged), nil
+			verb = verbAdjust
 		}
-		return d.complete(ctx, panel, found, &logged, read)
+		return resolvedKey{verb: verb, found: found, minutes: &logged}, nil
 	}
-	found, err := d.listed(&panel, key)
-	if err != nil {
-		return d.refuse(ctx, err)
-	}
+	found, refusal := d.listed(panel, key)
 	switch {
+	case refusal != nil:
+		return resolvedKey{}, refusal
 	case found.timed() && minutes == nil:
-		return minutesPanel(panel, found, nil), nil
+		return resolvedKey{verb: verbMinutes, found: found}, nil
+	case found.timed() && *minutes < 1:
+		return resolvedKey{}, refused("%s logs a whole number of minutes above zero", found.text)
 	case !found.timed() && minutes != nil:
-		return d.refuse(ctx, refused("%s is not counted in minutes", found.text))
+		return resolvedKey{}, refused("%s is not counted in minutes", found.text)
 	}
-	return d.complete(ctx, panel, found, minutes, read)
+	return resolvedKey{verb: verbComplete, found: found, minutes: minutes}, nil
 }
 
 func minutesPanel(panel Panel, found entry, minutes *int) Panel {
@@ -144,23 +185,26 @@ func (d *Desk) listed(panel *Panel, key string) (entry, *PickError) {
 	if found.completes.Kind == KindHabit && !habitID.MatchString(found.completes.Ref) {
 		return entry{}, refused("%s names habit %q, and a habit id is all digits", found.text, found.completes.Ref)
 	}
-	if found.actionOf() != ActionComplete && (found.completes.ItemID == nil || !habitID.MatchString(*found.completes.ItemID)) {
+	if setAction(found.actionOf()) && (found.completes.ItemID == nil || !habitID.MatchString(*found.completes.ItemID)) {
 		return entry{}, refused("%s names no checklist item by an id of digits", found.text)
 	}
 	return found, nil
 }
 
-// complete holds the pick, completes the row, then settles the pick, ends a
-// nudge in hand where it went through, and writes picked. A completion that
-// recorded nothing frees its row at once. Every other one holds it until a
-// read that begins after it ended, which read starts. A tick or an untick
-// holds nothing, because each one records another set.
+// complete holds the pick, completes the row, then finishes the pick. A
+// completion that recorded nothing frees its row at once. Every other one holds
+// it until a read that begins after it ended, which read starts. A tick or an
+// untick holds nothing, because each one records another set. The pick
+// supersedes how the key's earlier pending picks were refused or skipped.
 func (d *Desk) complete(ctx context.Context, panel Panel, found entry, minutes *int, read func()) (Panel, error) {
 	moment := d.Now()
-	holds := found.actionOf() == ActionComplete
+	holds := holdsKey(found.actionOf())
 	took := false
 	err := d.Paths.change(func(state *State) error {
 		took = !holds || state.takePick(panel.ReadAt, found.key, moment)
+		if took {
+			state.forgetEnded(found.key)
+		}
 		return nil
 	})
 	if err != nil {
@@ -170,27 +214,10 @@ func (d *Desk) complete(ctx context.Context, panel Panel, found entry, minutes *
 		return d.refuse(ctx, refused("%s is picked already, and is taken again once the watch reads the rows again", found.text))
 	}
 	seen := takeSnapshot(ctx)
-	outcome := d.completed(ctx, found, minutes, logWrite{id: newID(moment)}, moment)
-	var ended *Nudge
-	err = d.Paths.change(func(state *State) error {
-		if holds {
-			state.settlePick(found.key, d.Now(), outcome.recordedNothing)
-		}
-		if outcome.ok && state.inHand() != nil {
-			ended = state.endReady()
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Error("could not settle the pick of " + found.key + " in the state file: " + err.Error())
-		outcome.body += ". The desk nudge's state file could not be written, so this row stays held and any nudge in hand stays: " + err.Error()
-	}
-	notify(ctx, outcome.summary, outcome.body)
-	var nudgeID *string
-	if ended != nil {
-		nudgeID = &ended.NudgeID
-	}
-	d.Paths.appendRecords(pickedRecord(moment, nudgeID, outcome.fields(found.completes, found.actionOf(), minutes, nil), seen))
+	outcome := d.finishPick(ctx, pickEnd{
+		key: found.key, target: found.completes, action: found.actionOf(), minutes: minutes, holds: holds,
+		at: moment, seen: seen, notifyDone: true, unwritten: "this row stays held and any nudge in hand stays",
+	}, d.completed(ctx, found, minutes, logWrite{id: newID(moment)}, moment))
 	if read != nil {
 		read()
 	}
@@ -200,6 +227,57 @@ func (d *Desk) complete(ctx context.Context, panel Panel, found entry, minutes *
 	done := panelFor(d.Paths.readPanel(), d.Paths.readState(), StepDone)
 	done.Message = &outcome.body
 	return done, nil
+}
+
+// pickEnd is how one pick that ran is finished.
+type pickEnd struct {
+	key     string
+	target  Completes
+	action  string
+	minutes *int
+	// pendingID is the pending pick it ends, and nil for a pick from a terminal.
+	pendingID *string
+	// holds is whether the pick holds its key, which its outcome frees or keeps.
+	holds bool
+	// at is the moment its picked line carries.
+	at   time.Time
+	seen *snapshot
+	// keep is what else the same write of the state file keeps.
+	keep func(state *State)
+	// unwritten says what a state file that could not be written leaves behind.
+	unwritten  string
+	notifyDone bool
+}
+
+// finishPick settles a pick that ran: it frees or keeps its key, ends a nudge
+// in hand where the pick went through, notifies, and writes picked.
+func (d *Desk) finishPick(ctx context.Context, end pickEnd, outcome completion) completion {
+	var ended *Nudge
+	err := d.Paths.change(func(state *State) error {
+		if end.keep != nil {
+			end.keep(state)
+		}
+		if end.holds {
+			state.settlePick(end.key, d.Now(), outcome.outcome() == OutcomeRefused)
+		}
+		if outcome.ok && state.inHand() != nil {
+			ended = state.endReady()
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Error("could not settle the pick of " + end.key + " in the state file: " + err.Error())
+		outcome.body += ". The desk nudge's state file could not be written, so " + end.unwritten + ": " + err.Error()
+	}
+	if !outcome.ok || end.notifyDone || err != nil {
+		notify(ctx, outcome.summary, outcome.body)
+	}
+	var nudgeID *string
+	if ended != nil {
+		nudgeID = &ended.NudgeID
+	}
+	d.Paths.appendRecords(pickedRecord(end.at, nudgeID, outcome.fields(end.target, end.action, end.minutes, end.pendingID), end.seen))
+	return outcome
 }
 
 // fields are what a picked line says of a pick that ran.
@@ -216,29 +294,38 @@ func (c completion) fields(target Completes, action string, minutes *int, pendin
 }
 
 // completed acts on one row through its owner, with what doit builds from the
-// row's completes. picked is when the person picked it, whose day a review
-// entry is marked done on. Every kind but a pursuit and a habit is a review
-// register's entry, so a new register's rows complete with no change here.
+// row's completes. picked is when the person picked it: a habit, a set and a
+// review entry each land on that day. Where no case below names the kind, the
+// row is a review register's entry, so a new register's rows complete with no
+// change here.
 //
 // Each key kind and what it runs:
 //
-//	habit:<id>               life habits complete <id>
-//	tick:<item>              life habits tick <item>
-//	untick:<item>            life habits untick <item>
+//	habit:<id>               life habits complete <id> --date <day>
+//	tick:<item>              life habits tick <item> --date <day>
+//	untick:<item>            life habits untick <item> --date <day>
 //	pursuit:<name>[:<item>]  its on_log, then POST /journal/done
 //	<kind>:<entry>           POST /review/<entry>/completions, for review, practice and every register
 func (d *Desk) completed(ctx context.Context, found entry, minutes *int, journal logWrite, picked time.Time) completion {
-	switch {
-	case found.actionOf() == ActionTick:
-		return setChanged(ctx, found, tickProgram(*found.completes.ItemID), "set ticked", "set not ticked")
-	case found.actionOf() == ActionUntick:
-		return setChanged(ctx, found, untickProgram(*found.completes.ItemID), "set taken back", "set not taken back")
-	case found.completes.Kind == KindPursuit:
-		return d.loggedPursuit(ctx, found.completes, minutes, journal)
-	case found.completes.Kind == KindHabit:
-		return completedHabit(ctx, found)
+	day := picked.Format(dayLayout)
+	switch found.actionOf() {
+	case ActionTick:
+		return setChanged(ctx, found, tickProgram(*found.completes.ItemID, day), "set ticked", "set not ticked")
+	case ActionUntick:
+		return setChanged(ctx, found, untickProgram(*found.completes.ItemID, day), "set taken back", "set not taken back")
+	case ActionComplete:
+		switch found.completes.Kind {
+		case KindPursuit:
+			return d.loggedPursuit(ctx, found.completes, minutes, journal)
+		case KindHabit:
+			return completedHabit(ctx, found, day)
+		}
+		return d.markedReviewDone(ctx, found.completes.Ref, day)
 	}
-	return d.markedReviewDone(ctx, found.completes.Ref, picked.Format("2006-01-02"))
+	return completion{
+		summary: "doit: not picked", exitCode: PickRefused, recordedNothing: true,
+		body: fmt.Sprintf("%s names action %q, which the watch does not run", found.text, found.actionOf()),
+	}
 }
 
 // lifeFailed is how a life habits call that failed ends. One that ran out of
@@ -249,9 +336,9 @@ func lifeFailed(err error, summary string) completion {
 	return completion{summary: "doit: " + summary, body: err.Error(), exitCode: PickFailed, recordedNothing: !timedOut}
 }
 
-// completedHabit runs life habits complete.
-func completedHabit(ctx context.Context, found entry) completion {
-	if _, err := habitProgram(found.completes.Ref).run(ctx); err != nil {
+// completedHabit runs life habits complete on day.
+func completedHabit(ctx context.Context, found entry, day string) completion {
+	if _, err := habitProgram(found.completes.Ref, day).run(ctx); err != nil {
 		return lifeFailed(err, "habit not completed")
 	}
 	return completion{ok: true, summary: "doit: habit completed", body: found.text}
@@ -265,22 +352,21 @@ func setChanged(ctx context.Context, found entry, changes program, done, failed 
 	return completion{ok: true, summary: "doit: " + done, body: found.text}
 }
 
-// habitDoneToday reads life's today again, and answers whether it lists the habit completed.
-func habitDoneToday(ctx context.Context, habit string) (bool, error) {
-	out, err := habitsTodayProgram().run(ctx)
+// habitDoneOn reads life's completions of day again, and answers whether one is of the habit.
+func habitDoneOn(ctx context.Context, habit, day string) (bool, error) {
+	out, err := habitsCompletedProgram(day).run(ctx)
 	if err != nil {
 		return false, err
 	}
-	var today struct {
-		Completed []struct {
-			HabitID json.Number `json:"habit_id"`
-		} `json:"completed"`
+	var completions []struct {
+		HabitID      json.Number `json:"habit_id"`
+		CompleteDate string      `json:"complete_date"`
 	}
-	if err := json.Unmarshal([]byte(out), &today); err != nil {
-		return false, fmt.Errorf("life habits today --json printed no day of habits: %w", err)
+	if err := json.Unmarshal([]byte(out), &completions); err != nil {
+		return false, fmt.Errorf("life habits completed --json printed no list of completions: %w", err)
 	}
-	for _, done := range today.Completed {
-		if done.HabitID.String() == habit {
+	for _, done := range completions {
+		if done.HabitID.String() == habit && done.CompleteDate == day {
 			return true, nil
 		}
 	}

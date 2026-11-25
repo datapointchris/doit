@@ -532,6 +532,10 @@ func (s *State) settlePick(key string, now time.Time, recordedNothing bool) {
 // stamp is an instant as the state file holds it: ISO 8601 to the millisecond, with its offset.
 func stamp(moment time.Time) string { return moment.Format("2006-01-02T15:04:05.000-07:00") }
 
+// dayLayout is a day as life and the service name it. A stamp keeps the desk's
+// offset, so a stamp read back formats to the desk's own day.
+const dayLayout = "2006-01-02"
+
 func stampPtr(moment time.Time) *string {
 	text := stamp(moment)
 	return &text

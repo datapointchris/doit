@@ -274,9 +274,6 @@ func printStep(out io.Writer, step desknudge.Panel, asJSON bool) error {
 			key = *row.Key
 		}
 		text := row.Text
-		if row.Ticks != nil && row.Target != nil {
-			text += fmt.Sprintf(" · %d of %d sets", *row.Ticks, *row.Target)
-		}
 		if len(row.Picks) > 0 {
 			text += " · " + row.Picks[len(row.Picks)-1].State
 		}

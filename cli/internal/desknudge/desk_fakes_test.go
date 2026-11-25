@@ -28,8 +28,8 @@ var fakedPrograms = []string{"claude-sessions", "hyprctl", "canberra-gtk-play", 
 
 // fakeProgram records its argv, one tab-separated line each run, and answers
 // from the canned files: claude-sessions, each hyprctl query, the idle hint and
-// life's habits today. A life habits call waits while life-<verb>.hold exists
-// and release does not, and exits as life-<verb>.exit says.
+// life's completed habits. A life habits call waits while life-<verb>.hold
+// exists and release does not, and exits as life-<verb>.exit says.
 const fakeProgram = `#!/bin/sh
 name=${0##*/}
 line=$name
@@ -41,7 +41,7 @@ hyprctl) if [ "$1" = instances ]; then cat "$FAKE_DIR/hyprctl-instances.json"; e
 loginctl) cat "$FAKE_DIR/idle-hint" ;;
 life)
 	if [ -f "$FAKE_DIR/life-$2.hold" ]; then while [ ! -f "$FAKE_DIR/release" ]; do sleep 0.02; done; fi
-	if [ "$2" = today ]; then cat "$FAKE_DIR/life-habits-today.json"; fi
+	if [ "$2" = completed ]; then cat "$FAKE_DIR/life-habits-completed.json"; fi
 	if [ -f "$FAKE_DIR/life-$2.exit" ]; then echo "life refused $2" >&2; exit "$(cat "$FAKE_DIR/life-$2.exit")"; fi ;;
 esac
 if [ -f "$FAKE_DIR/$name.exit" ]; then exit "$(cat "$FAKE_DIR/$name.exit")"; fi
@@ -173,14 +173,14 @@ func (f *fakeDesk) advance(by time.Duration) {
 	f.now = f.now.Add(by)
 }
 
-// habitsDoneToday sets the habits that life habits today --json lists completed.
+// habitsDoneToday sets the habits that life habits completed --json lists done on the clock's day.
 func (f *fakeDesk) habitsDoneToday(habitIDs ...int) {
 	completed := []map[string]any{}
 	for _, id := range habitIDs {
-		completed = append(completed, map[string]any{"id": 900 + id, "habit_id": id, "complete_date": "2026-11-24"})
+		completed = append(completed, map[string]any{"id": 900 + id, "habit_id": id, "complete_date": f.clockNow().Format(dayLayout)})
 	}
-	text, _ := json.Marshal(map[string]any{"date": "2026-11-24", "timezone": "US/Eastern", "completed": completed, "due": []any{}})
-	f.write(filepath.Join(f.canned, "life-habits-today.json"), string(text))
+	text, _ := json.Marshal(completed)
+	f.write(filepath.Join(f.canned, "life-habits-completed.json"), string(text))
 }
 
 // lifeHolds holds each life habits call of verb until releaseLife, and lifeExits ends each one with code.

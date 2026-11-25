@@ -330,14 +330,28 @@
             "name": "Squat",
             "target": 5,
             "ticks": 2,
-            "done": false
+            "done": false,
+            "key": "tick:1",
+            "untick_key": "untick:1",
+            "completes": {
+              "kind": "habit",
+              "ref": "7",
+              "item_id": "1"
+            }
           },
           {
             "id": 2,
             "name": "Lunge",
             "target": 5,
             "ticks": 0,
-            "done": false
+            "done": false,
+            "key": "tick:2",
+            "untick_key": "untick:2",
+            "completes": {
+              "kind": "habit",
+              "ref": "7",
+              "item_id": "2"
+            }
           }
         ]
       },

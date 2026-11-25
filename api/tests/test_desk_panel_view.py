@@ -98,10 +98,11 @@ def test_the_desk_panel_view_carries_each_part_from_a_recorded_store(store):
     assert [(habit['id'], habit['key']) for habit in habits if habit['done']] == [(2, None), (5, None)]
     exercise = next(habit for habit in habits if habit['id'] == 7)
     assert (exercise['key'], exercise['category']) == ('habit:7', 'Health')
-    assert [(item['id'], item['name'], item['target'], item['ticks']) for item in exercise['items']] == [
-        (1, 'Squat', 5, 2),
-        (2, 'Lunge', 5, 0),
+    assert [(item['id'], item['name'], item['target'], item['ticks'], item['key'], item['untick_key']) for item in exercise['items']] == [
+        (1, 'Squat', 5, 2, 'tick:1', 'untick:1'),
+        (2, 'Lunge', 5, 0, 'tick:2', 'untick:2'),
     ]
+    assert exercise['items'][0]['completes'] == {'kind': 'habit', 'ref': '7', 'item_id': '1'}
 
     lanes = {lane['name']: lane for lane in view['lanes']}
     assert set(lanes) == {'review', 'practice', 'upcoming'}

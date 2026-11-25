@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -116,9 +118,10 @@ func TestAHabitClickCommitsAfterFourSecondsOnceAndASecondClickCommitsNothing(t *
 	f.fireDue(watch)
 	f.advance(time.Minute)
 	f.fireDue(watch)
-	want := [][]string{habitsTodayProgram().argv, habitProgram("1").argv}
+	day := clicked.Format(dayLayout)
+	want := [][]string{habitsCompletedProgram(day).argv, habitProgram("1", day).argv}
 	if ran := f.ran("life"); !slices.EqualFunc(ran, want, slices.Equal) {
-		t.Errorf("life ran %q, want today's habits read again, then habit 1 completed once", ran)
+		t.Errorf("life ran %q, want the day's completions read again, then habit 1 completed once", ran)
 	}
 	if picks := f.rowOfKey("habit:1").Picks; len(picks) != 1 || picks[0].State != OutcomeDone {
 		t.Errorf("habit 1's row shows %+v, want its pick done in place", picks)
@@ -127,16 +130,21 @@ func TestAHabitClickCommitsAfterFourSecondsOnceAndASecondClickCommitsNothing(t *
 	var waiting, canceled ShownPick
 	f.askSocket(http.MethodPost, "/pending-picks", map[string]any{"key": "habit:3"}, &waiting)
 	code := f.askSocket(http.MethodPost, "/pending-picks", map[string]any{"key": "habit:3"}, &canceled)
-	if code != http.StatusOK || canceled.State != PickCanceled || canceled.ID != waiting.ID {
+	if code != http.StatusOK || canceled.State != OutcomeCanceled || canceled.ID != waiting.ID {
 		t.Errorf("a second click answered %d %+v, want 200 with the first click's pick canceled", code, canceled)
 	}
-	var deleted, gone PickError
+	// A double-pressed undo sends the DELETE twice, and the second reads as the first.
+	var deleted, again ShownPick
 	f.askSocket(http.MethodPost, "/pending-picks", map[string]any{"key": "habit:4"}, &waiting)
-	if code := f.askSocket(http.MethodDelete, "/pending-picks/"+waiting.ID, nil, &deleted); code != http.StatusOK {
-		t.Errorf("deleting the pending pick answered %d, want 200", code)
+	if code := f.askSocket(http.MethodDelete, "/pending-picks/"+waiting.ID, nil, &deleted); code != http.StatusOK || deleted.State != OutcomeCanceled {
+		t.Errorf("deleting the pending pick answered %d %+v, want 200 with it canceled", code, deleted)
 	}
-	if code := f.askSocket(http.MethodDelete, "/pending-picks/"+waiting.ID, nil, &gone); code != http.StatusNotFound {
-		t.Errorf("deleting it again answered %d %+v, want 404", code, gone)
+	if code := f.askSocket(http.MethodDelete, "/pending-picks/"+waiting.ID, nil, &again); code != http.StatusOK || !reflect.DeepEqual(again, deleted) {
+		t.Errorf("deleting it again answered %d %+v, want 200 with the same canceled pick", code, again)
+	}
+	var unknown PickError
+	if code := f.askSocket(http.MethodDelete, "/pending-picks/"+newID(clicked), nil, &unknown); code != http.StatusNotFound {
+		t.Errorf("deleting an id this desk never held answered %d %+v, want 404", code, unknown)
 	}
 	f.advance(time.Minute)
 	f.fireDue(watch)
@@ -164,32 +172,43 @@ func TestTicksAndUnticksRunInClickOrder(t *testing.T) {
 	f.advance(pendingFor)
 	f.fireDue(watch)
 
-	want := [][]string{tickProgram("1").argv, untickProgram("1").argv, tickProgram("2").argv}
+	day := f.clockNow().Format(dayLayout)
+	want := [][]string{tickProgram("1", day).argv, untickProgram("1", day).argv, tickProgram("2", day).argv}
 	if ran := f.ran("life"); !slices.EqualFunc(ran, want, slices.Equal) {
-		t.Errorf("life ran %q, want %q, in click order with no read of today's habits", ran, want)
+		t.Errorf("life ran %q, want %q, in click order with no read of the day's completions", ran, want)
 	}
 	row := f.rowOfKey("tick:1")
 	if row.Kind != KindTick || *row.Ticks != 2 || *row.Target != 5 || *row.UntickKey != "untick:1" || len(row.Picks) != 2 {
 		t.Errorf("the squat row reads %+v, want a tick row at 2 of 5 sets carrying its tick and its untick", row)
+	}
+	// doit-tui draws a row's text alone, so the sets ride in it.
+	if !strings.HasSuffix(row.Text, "2 of 5 sets") {
+		t.Errorf("the squat row's text reads %q, want it to end on its sets", row.Text)
 	}
 }
 
 func TestAHabitDoneElsewhereBeforeItsCommitIsSkippedAndItsRowSaysSo(t *testing.T) {
 	f := newFakeDesk(t)
 	f.habitsDoneToday(1)
-	shown := f.committed("habit:1", nil)
+	watch := f.started()
+	shown := f.committedAfter("habit:1", nil, watch)
 
-	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsTodayProgram().argv}, slices.Equal) {
-		t.Errorf("life ran %q, want only today's habits read again", ran)
+	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsCompletedProgram(f.clockNow().Format(dayLayout)).argv}, slices.Equal) {
+		t.Errorf("life ran %q, want only the day's completions read again", ran)
 	}
-	if shown.State != OutcomeSkipped || *shown.Message != "already done today" {
-		t.Errorf("habit 1's pick shows %+v, want it skipped as already done today", shown)
+	if shown.State != OutcomeSkipped {
+		t.Errorf("habit 1's pick shows %+v, want it skipped", shown)
 	}
 	if notices := f.ran("notify-send"); len(notices) != 1 {
 		t.Errorf("notify-send ran %q, want one notice of the skip", notices)
 	}
 	if picks := f.picks(); len(picks) != 1 || picks[0]["outcome"] != OutcomeSkipped {
 		t.Errorf("the picked lines read %v, want one skipped", picks)
+	}
+	// The row shows the skip only until a view read begins on a later day.
+	f.tick(watch, 24*time.Hour)
+	if picks := f.rowOfKey("habit:1").Picks; len(picks) != 0 {
+		t.Errorf("habit 1's row shows %+v a day later, want the skip gone", picks)
 	}
 }
 
@@ -216,11 +235,15 @@ func TestALifeTimeoutKeepsTheRowUncertainAndARefusalFreesIt(t *testing.T) {
 	if again, err := watch.CreatePending("habit:3", nil); err != nil || again.State != PickPending {
 		t.Errorf("clicking the refused row again answered %+v, %v; want a new pending pick", again, err)
 	}
+	if picks := f.rowOfKey("habit:3").Picks; len(picks) != 1 || picks[0].State != PickPending {
+		t.Errorf("habit 3's row shows %+v, want only the new click, which supersedes the refusal", picks)
+	}
 }
 
 func TestAfterARestartAnUnstartedPickCommitsAndAStartedTickIsRecordedUncertainAndNotRerun(t *testing.T) {
 	f := newFakeDesk(t)
 	first := f.started()
+	clicked := f.clockNow().Format(dayLayout)
 	for _, key := range []string{"habit:1", "tick:1"} {
 		if _, err := first.CreatePending(key, nil); err != nil {
 			t.Fatal(err)
@@ -232,6 +255,8 @@ func TestAfterARestartAnUnstartedPickCommitsAndAStartedTickIsRecordedUncertainAn
 	})
 	f.forgetTimers()
 
+	// The watch died inside the pick's seconds and starts again the next day.
+	f.advance(24 * time.Hour)
 	second := f.started()
 	if ran := f.ran("life"); len(ran) != 0 {
 		t.Errorf("the restarted watch ran %q at its start, want the started tick never run again", ran)
@@ -241,8 +266,8 @@ func TestAfterARestartAnUnstartedPickCommitsAndAStartedTickIsRecordedUncertainAn
 	}
 	f.advance(pendingFor)
 	f.fireDue(second)
-	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsTodayProgram().argv, habitProgram("1").argv}, slices.Equal) {
-		t.Errorf("life ran %q, want the unstarted habit pick committed at its commit_at", ran)
+	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsCompletedProgram(clicked).argv, habitProgram("1", clicked).argv}, slices.Equal) {
+		t.Errorf("life ran %q, want the unstarted habit pick committed on the day it was clicked", ran)
 	}
 	if left := f.state().PendingPicks; len(left) != 0 {
 		t.Errorf("the state still holds %+v, want every pending pick ended", left)
@@ -277,7 +302,8 @@ func TestAnExitDrainsInsideItsDeadline(t *testing.T) {
 	if took := time.Since(began); took > time.Second {
 		t.Errorf("the watch took %s to exit, want it inside its 300ms drain", took)
 	}
-	if ticked := f.ran("life"); !slices.ContainsFunc(ticked, func(argv []string) bool { return slices.Equal(argv, tickProgram("1").argv) }) {
+	day := f.clockNow().Format(dayLayout)
+	if ticked := f.ran("life"); !slices.ContainsFunc(ticked, func(argv []string) bool { return slices.Equal(argv, tickProgram("1", day).argv) }) {
 		t.Errorf("life ran %q, want the pending tick committed by the drain before its commit_at", ticked)
 	}
 	if left := f.state().PendingPicks; len(left) != 1 || left[0].Key != "habit:1" || left[0].StartedAt == nil {
@@ -289,6 +315,7 @@ func TestAnExitDrainsInsideItsDeadline(t *testing.T) {
 
 func TestEachKeyKindCommitsThroughItsCommandAndAnOnLogLabelStaysOneArgument(t *testing.T) {
 	thirty := 30
+	day := deskClockStart.Format(dayLayout)
 	for _, row := range []struct {
 		key      string
 		minutes  *int
@@ -296,9 +323,9 @@ func TestEachKeyKindCommitsThroughItsCommandAndAnOnLogLabelStaysOneArgument(t *t
 		journal  bool
 		reviewed string
 	}{
-		{key: "habit:1", programs: [][]string{habitsTodayProgram().argv, habitProgram("1").argv}},
-		{key: "tick:1", programs: [][]string{tickProgram("1").argv}},
-		{key: "untick:2", programs: [][]string{untickProgram("2").argv}},
+		{key: "habit:1", programs: [][]string{habitsCompletedProgram(day).argv, habitProgram("1", day).argv}},
+		{key: "tick:1", programs: [][]string{tickProgram("1", day).argv}},
+		{key: "untick:2", programs: [][]string{untickProgram("2", day).argv}},
 		{key: "pursuit:tasks:532", programs: [][]string{{"tick-task", "532", `File the "receipts" now`}}, journal: true},
 		{key: "pursuit:read", minutes: &thirty, journal: true},
 		{key: "review:prune-images", reviewed: "prune-images 2026-11-24"},

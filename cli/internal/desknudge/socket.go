@@ -23,12 +23,13 @@ import (
 //	POST   /picks                {"key": "...", "minutes": 30 | null}, which commits at once
 //	                             200 the step the pick leads to: done, or a timed pursuit's minutes
 //	                             409 refused, 502 the completion failed, 504 no answer came
-//	POST   /pending-picks        {"key": "...", "minutes": 30 | null}, a click that commits 4 seconds later
+//	POST   /pending-picks        {"key": "...", "minutes": 30 | null}, a click that commits pendingFor later
 //	                             201 the pending pick, state pending
 //	                             200 the pick that key had waiting, taken back instead, state canceled
 //	                             409 refused, 502 the state file could not be written
-//	DELETE /pending-picks/{id}   200 the pick taken back, state canceled
-//	                             404 this desk never held it, 409 it is committing or ended
+//	                             not safe to repeat: a second one is a second click, so a client never resends it
+//	DELETE /pending-picks/{id}   200 the pick taken back, state canceled, again on a resend
+//	                             404 this desk holds no pick by that id now, 409 it is committing or ended otherwise
 //
 // A failure answers {"exit_code": 2 | 1 | 4, "message": "..."}. A pending pick
 // answers as the panel's picks show one.
@@ -93,7 +94,7 @@ func (w *Watch) serve(ctx context.Context) (*server, error) {
 		case err != nil:
 			failure := pickFailure(err)
 			answer(response, statusFor(failure.ExitCode), failure)
-		case pick.State == PickCanceled:
+		case pick.State == OutcomeCanceled:
 			answer(response, http.StatusOK, pick)
 		default:
 			answer(response, http.StatusCreated, pick)

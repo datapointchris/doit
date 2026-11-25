@@ -24,7 +24,7 @@
     "shown_pick": {
       "type": "object",
       "additionalProperties": false,
-      "description": "A click on the panel page, which the watch commits 4 seconds after it, unless a second click on its key or a DELETE of its id takes it back first.",
+      "description": "A click on the panel page, which the watch commits a few seconds after it, unless a second click on its key or a DELETE of its id takes it back first. The panel's picks show it, and the socket answers it.",
       "required": [
         "id",
         "key",
@@ -65,9 +65,10 @@
             "done",
             "skipped",
             "refused",
-            "uncertain"
+            "uncertain",
+            "canceled"
           ],
-          "description": "pending until commit_at, committing while its command runs, then how it ended. done went through. skipped found the habit already done today, so nothing ran. refused recorded nothing, so its row can be picked again. uncertain may have landed, as a timeout may, so its row is held until the view is read again."
+          "description": "pending until commit_at, committing while its command runs, then how it ended. done went through. skipped found the habit already done on the day it was clicked, so nothing ran. refused recorded nothing, so its row can be picked again. uncertain may have landed, as a timeout may, so its row is held until the view is read again. canceled was taken back before its commit, which only the socket's answers carry, because it changed nothing for a row to show."
         },
         "minutes": {
           "type": [
@@ -79,7 +80,7 @@
         "commit_at": {
           "type": "string",
           "format": "date-time",
-          "description": "When it commits, 4 seconds after the click."
+          "description": "When it commits, a fixed few seconds after the click."
         },
         "message": {
           "type": [
@@ -225,7 +226,8 @@
             ]
           },
           "text": {
-            "type": "string"
+            "type": "string",
+            "description": "What a board draws for the row. A tick row's text ends on its sets today, as `· 2 of 5 sets`, so a board that reads text alone still shows them."
           },
           "group": {
             "type": [
@@ -343,7 +345,7 @@
     },
     "picks": {
       "type": "array",
-      "description": "Every pending pick, then each one that ended while the panel still shows it, in click order. A done or uncertain pick shows until the view is read again, and a refused or skipped one until the panel next opens.",
+      "description": "Every pending pick, then each one that ended while the panel still shows it, in click order. A done or uncertain pick shows until a view read begins after it ended. A refused or skipped one shows until its key is picked again, or a view read begins on a later day. A canceled one is never shown.",
       "items": {
         "$ref": "#/definitions/shown_pick"
       }

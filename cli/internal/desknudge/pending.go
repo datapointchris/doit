@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -17,7 +15,7 @@ import (
 // closing the page keeps the click.
 const (
 	pendingFor = 4 * time.Second
-	// rememberedEndedPicks caps the refused and skipped picks that the panel shows until it next opens.
+	// rememberedEndedPicks caps the refused and skipped picks kept for the panel, newest first.
 	rememberedEndedPicks = 20
 )
 
@@ -38,8 +36,10 @@ type PendingPick struct {
 }
 
 // EndedPick is how a pending pick came out, which the panel shows on its row.
-// A done or uncertain one shows until the view is read again. A refused or
-// skipped one shows until the panel is next opened.
+// A done or uncertain one shows until a view read begins after it ended. A
+// refused or skipped one shows until its key is picked again, or a view read
+// begins on a later day. A canceled one is never drawn. It is kept until a
+// read, so a second DELETE of it answers it again.
 type EndedPick struct {
 	ID       string `json:"id"`
 	Key      string `json:"key"`
@@ -52,11 +52,10 @@ type EndedPick struct {
 	EndedAt  string `json:"ended_at"`
 }
 
-// The states of a pending pick before it ends, and the cancel that the socket answers.
+// The states of a pending pick before it ends. Once it ends, its state is its outcome.
 const (
 	PickPending    = "pending"
 	PickCommitting = "committing"
-	PickCanceled   = "canceled"
 )
 
 // ShownPick is a pending pick as the panel, the status and the socket show it.
@@ -88,9 +87,9 @@ func (e EndedPick) shown() ShownPick {
 	}
 }
 
-// heldUntilRead is whether an ended pick shows only until the view is read again.
+// heldUntilRead is whether an ended pick is kept only until the view is read again.
 func (e EndedPick) heldUntilRead() bool {
-	return e.Outcome == OutcomeDone || e.Outcome == OutcomeUncertain
+	return e.Outcome == OutcomeDone || e.Outcome == OutcomeUncertain || e.Outcome == OutcomeCanceled
 }
 
 func (s *State) pendingPick(id string) *PendingPick {
@@ -124,18 +123,28 @@ func (s *State) dropPending(id string) PendingPick {
 	return dropped
 }
 
-// endedShown are the ended picks still shown over a view read at readAt.
-func (s *State) endedShown(readAt *string) []EndedPick {
+// endedKept are the ended picks still kept over a view read at readAt.
+func (s *State) endedKept(readAt *string) []EndedPick {
 	read, readOnce := instant(readAt)
 	return slices.DeleteFunc(slices.Clone(s.Panel.Ended), func(ended EndedPick) bool {
 		at, _ := instant(&ended.EndedAt)
-		return ended.heldUntilRead() && readOnce && at.Before(read)
+		if !readOnce || !at.Before(read) {
+			return false
+		}
+		return ended.heldUntilRead() || at.Format(dayLayout) != read.Format(dayLayout)
 	})
 }
 
-// endPick keeps how a pending pick came out, beside those still shown.
+// forgetEnded drops the refused and skipped picks of key, because a new pick of key supersedes them.
+func (s *State) forgetEnded(key string) {
+	s.Panel.Ended = slices.DeleteFunc(s.Panel.Ended, func(ended EndedPick) bool {
+		return ended.Key == key && !ended.heldUntilRead()
+	})
+}
+
+// endPick keeps how a pending pick came out, beside those still kept.
 func (s *State) endPick(ended EndedPick, readAt *string) {
-	kept := append(s.endedShown(readAt), ended)
+	kept := append(s.endedKept(readAt), ended)
 	lasting := 0
 	for i := len(kept) - 1; i >= 0; i-- {
 		if kept[i].heldUntilRead() {
@@ -148,14 +157,17 @@ func (s *State) endPick(ended EndedPick, readAt *string) {
 	s.Panel.Ended = kept
 }
 
-// shownPicks are the pending picks, then the ended ones still shown, each in click order.
+// shownPicks are the pending picks, then the ended ones still kept, each in
+// click order. A canceled pick changed nothing, so none is drawn.
 func (s *State) shownPicks(readAt *string) []ShownPick {
 	shown := []ShownPick{}
 	for _, pick := range s.PendingPicks {
 		shown = append(shown, pick.shown())
 	}
-	for _, ended := range s.endedShown(readAt) {
-		shown = append(shown, ended.shown())
+	for _, ended := range s.endedKept(readAt) {
+		if ended.Outcome != OutcomeCanceled {
+			shown = append(shown, ended.shown())
+		}
 	}
 	return shown
 }
@@ -163,42 +175,38 @@ func (s *State) shownPicks(readAt *string) []ShownPick {
 // errUnchanged stops a change that found nothing to write.
 var errUnchanged = errors.New("nothing to change")
 
-// ErrNoPendingPick is a pending pick that this desk never held.
-var ErrNoPendingPick = errors.New("no pending pick")
+// ErrNoPendingPick is an id that this desk holds no pick by now: it never held
+// one, or the pick ended and a later read let it go.
+var ErrNoPendingPick = errors.New("no pick")
 
-// pendingEntry resolves a click to its row and its minutes, as a pick resolves
-// them. An answer and a minutes step's adjustment act at once, so a
-// pending pick refuses them.
+// pendingEntry resolves a click to its row and its minutes, as a pick from a
+// terminal resolves them. An answer and a minutes step's adjustment act at
+// once, so a pending pick refuses them.
 func (d *Desk) pendingEntry(panel *Panel, key string, minutes *int) (entry, *int, *PickError) {
-	kind, rest, _ := strings.Cut(key, keySeparator)
-	switch kind {
-	case KindAnswer, KindAdjustMinutes:
-		return entry{}, nil, refused("%s acts at once, so it is picked through POST /picks", key)
-	case KindLogMinutes:
-		amount, rowKey, _ := strings.Cut(rest, keySeparator)
-		logged, err := strconv.Atoi(amount)
-		if err != nil || logged < 1 {
-			return entry{}, nil, refused("%s names no whole number of minutes", key)
-		}
-		key, minutes = rowKey, &logged
-	}
-	found, refusal := d.listed(panel, key)
+	resolved, refusal := d.resolveKey(panel, key, minutes)
 	switch {
 	case refusal != nil:
 		return entry{}, nil, refusal
-	case found.timed() && minutes == nil:
-		return entry{}, nil, refused("%s is counted in minutes, so its pick names them", found.text)
-	case found.timed() && *minutes < 1:
-		return entry{}, nil, refused("%s logs a whole number of minutes above zero", found.text)
-	case !found.timed() && minutes != nil:
-		return entry{}, nil, refused("%s is not counted in minutes", found.text)
+	case resolved.verb == verbAnswer || resolved.verb == verbAdjust:
+		return entry{}, nil, refused("%s acts at once, so it is picked through POST /picks", key)
+	case resolved.verb == verbMinutes:
+		return entry{}, nil, refused("%s is counted in minutes, so its pick names them", resolved.found.text)
 	}
-	return found, minutes, nil
+	return resolved.found, resolved.minutes, nil
+}
+
+// canceledEnd is how a pending pick taken back before its commit ends.
+func canceledEnd(pick PendingPick, moment time.Time) EndedPick {
+	return EndedPick{
+		ID: pick.ID, Key: pick.Key, Text: pick.Text, Action: pick.Action, Minutes: pick.Minutes, CommitAt: pick.CommitAt,
+		Outcome: OutcomeCanceled, Message: "taken back before it committed", EndedAt: stamp(moment),
+	}
 }
 
 // CreatePending takes one click on the page: a pending pick that commits
 // pendingFor from now. A click on a key whose pick still waits takes that pick
-// back instead, and answers it canceled.
+// back instead, and answers it canceled. The watch serializes the two, so a
+// second click that arrives before the first one's answer still takes it back.
 func (w *Watch) CreatePending(key string, minutes *int) (ShownPick, error) {
 	d := w.desk
 	moment := d.Now()
@@ -207,7 +215,8 @@ func (w *Watch) CreatePending(key string, minutes *int) (ShownPick, error) {
 	if refusal != nil {
 		return ShownPick{}, refusal
 	}
-	var made, canceled *PendingPick
+	var made, taken *PendingPick
+	var canceled *EndedPick
 	err := d.Paths.change(func(state *State) error {
 		if waiting := state.waitingOn(found.key); waiting != nil {
 			if waiting.StartedAt != nil {
@@ -215,10 +224,12 @@ func (w *Watch) CreatePending(key string, minutes *int) (ShownPick, error) {
 				return errUnchanged
 			}
 			dropped := state.dropPending(waiting.ID)
-			canceled = &dropped
+			ended := canceledEnd(dropped, moment)
+			state.endPick(ended, panel.ReadAt)
+			taken, canceled = &dropped, &ended
 			return nil
 		}
-		if found.actionOf() == ActionComplete && slices.ContainsFunc(state.heldPicks(panel.ReadAt), func(held HeldPick) bool { return held.Key == found.key }) {
+		if holdsKey(found.actionOf()) && slices.ContainsFunc(state.heldPicks(panel.ReadAt), func(held HeldPick) bool { return held.Key == found.key }) {
 			refusal = refused("%s is picked already, and is taken again once the watch reads the rows again", found.text)
 			return errUnchanged
 		}
@@ -226,6 +237,7 @@ func (w *Watch) CreatePending(key string, minutes *int) (ShownPick, error) {
 			ID: newID(moment), Key: found.key, Text: found.text, Action: found.actionOf(), Completes: found.completes,
 			Minutes: minutes, PickedAt: stamp(moment), CommitAt: stamp(moment.Add(pendingFor)),
 		}
+		state.forgetEnded(found.key)
 		state.PendingPicks = append(state.PendingPicks, pick)
 		made = &pick
 		return nil
@@ -236,26 +248,37 @@ func (w *Watch) CreatePending(key string, minutes *int) (ShownPick, error) {
 	case err != nil:
 		return ShownPick{}, &PickError{ExitCode: PickFailed, Message: "nothing was picked, because the desk nudge's state file could not be written: " + err.Error()}
 	case canceled != nil:
-		w.stopTimer(canceled.ID)
-		w.recordCancel(*canceled)
-		shown := canceled.shown()
-		shown.State = PickCanceled
-		return shown, nil
+		w.stopTimer(taken.ID)
+		w.recordCancel(*taken)
+		return canceled.shown(), nil
 	}
 	w.schedule(*made)
 	return made.shown(), nil
 }
 
-// CancelPending takes back the pending pick id before it commits.
+// CancelPending takes back the pending pick id before it commits. A pick
+// already taken back answers canceled again, so a resent DELETE reads as the
+// first one did.
 func (w *Watch) CancelPending(id string) (ShownPick, error) {
-	var canceled *PendingPick
+	d := w.desk
+	moment := d.Now()
+	var readAt *string
+	if cached := d.Paths.readPanel(); cached != nil {
+		readAt = cached.ReadAt
+	}
+	var taken PendingPick
+	var canceled, again *EndedPick
 	var refusal error
-	err := w.desk.Paths.change(func(state *State) error {
+	err := d.Paths.change(func(state *State) error {
 		pick := state.pendingPick(id)
 		if pick == nil {
-			refusal = fmt.Errorf("%w %s on this desk", ErrNoPendingPick, id)
+			refusal = fmt.Errorf("%w %s is pending on this desk, or ended lately", ErrNoPendingPick, id)
 			for _, ended := range state.Panel.Ended {
-				if ended.ID == id {
+				switch {
+				case ended.ID != id:
+				case ended.Outcome == OutcomeCanceled:
+					again, refusal = &ended, nil
+				default:
 					refusal = refused("pending pick %s ended %s already, so it can no longer be taken back", id, ended.Outcome)
 				}
 			}
@@ -265,21 +288,23 @@ func (w *Watch) CancelPending(id string) (ShownPick, error) {
 			refusal = refused("%s is committing already, so it can no longer be taken back", pick.Text)
 			return errUnchanged
 		}
-		dropped := state.dropPending(id)
-		canceled = &dropped
+		taken = state.dropPending(id)
+		ended := canceledEnd(taken, moment)
+		state.endPick(ended, readAt)
+		canceled = &ended
 		return nil
 	})
 	switch {
 	case refusal != nil:
 		return ShownPick{}, refusal
+	case again != nil:
+		return again.shown(), nil
 	case err != nil:
 		return ShownPick{}, &PickError{ExitCode: PickFailed, Message: "nothing was taken back, because the desk nudge's state file could not be written: " + err.Error()}
 	}
 	w.stopTimer(id)
-	w.recordCancel(*canceled)
-	shown := canceled.shown()
-	shown.State = PickCanceled
-	return shown, nil
+	w.recordCancel(taken)
+	return canceled.shown(), nil
 }
 
 // recordCancel writes the cancel's picked line, off the asker's request,
@@ -431,7 +456,7 @@ func (d *Desk) commitPending(ctx context.Context, due PendingPick) {
 			gone = true
 			return errUnchanged
 		}
-		if current.Action == ActionComplete {
+		if holdsKey(current.Action) {
 			if resumed {
 				state.settlePick(current.Key, moment, false)
 			} else if !state.takePick(readAt, current.Key, moment) {
@@ -459,41 +484,43 @@ func (d *Desk) commitPending(ctx context.Context, due PendingPick) {
 	} else {
 		outcome = d.committed(ctx, pick, resumed)
 	}
-	holds := pick.Action == ActionComplete && !heldElsewhere
+	holds := holdsKey(pick.Action) && !heldElsewhere
 	d.endPending(ctx, pick, outcome, seen, readAt, holds)
 }
 
-// committed runs a started pending pick through its owner. A habit is read
+// committed runs a started pending pick through its owner, on the desk's day
+// when it was clicked, which a restart past midnight keeps. A habit is read
 // again first, because life accepts a second completion. On a restart, a
 // started pick follows these rules:
 //
-//	habit             read again, which skips a habit already done
+//	habit             read again, which skips a habit already done that day
 //	pursuit           its saved entry sent again under the pick's id, which the service stores once; with none saved, nothing ran, so it runs whole
 //	review, practice  marked done again on the day it was picked, which the service stores once
 //	tick, untick      recorded uncertain and never run again, because life habits tick carries no key
 func (d *Desk) committed(ctx context.Context, pick PendingPick, resumed bool) completion {
 	found := entry{key: pick.Key, completes: pick.Completes, action: pick.Action, text: pick.Text}
 	picked, _ := instant(&pick.PickedAt)
+	day := picked.Format(dayLayout)
 	switch {
-	case resumed && (pick.Action == ActionTick || pick.Action == ActionUntick):
-		changes := tickProgram(*pick.Completes.ItemID)
-		if pick.Action == ActionUntick {
-			changes = untickProgram(*pick.Completes.ItemID)
-		}
+	case resumed && setAction(pick.Action):
 		return completion{
 			summary: "doit: " + pick.Text + " may not have changed", exitCode: PickFailed,
-			body: "the watch stopped while `" + shellJoin(changes.argv) + "` ran, so whether it landed is not known, and it is not run again",
+			body: "the watch stopped while `" + shellJoin(setProgram(pick.Action, *pick.Completes.ItemID, day).argv) + "` ran, so whether it landed is not known, and it is not run again",
 		}
 	case pick.Action == ActionComplete && pick.Completes.Kind == KindHabit:
-		done, err := habitDoneToday(ctx, pick.Completes.Ref)
+		done, err := habitDoneOn(ctx, pick.Completes.Ref, day)
 		if err != nil {
 			return completion{
 				summary: "doit: habit not completed", exitCode: PickFailed, recordedNothing: true,
-				body: "life's habits could not be read again, so " + pick.Text + " was not completed: " + err.Error(),
+				body: "life's completions could not be read again, so " + pick.Text + " was not completed: " + err.Error(),
 			}
 		}
 		if done {
-			return completion{summary: "doit: " + pick.Text + " already done today", body: "already done today", exitCode: PickRefused, skipped: true}
+			said := "already done on " + day
+			if day == d.Now().Format(dayLayout) {
+				said = "already done today"
+			}
+			return completion{summary: "doit: " + pick.Text + " " + said, body: said, exitCode: PickRefused, skipped: true}
 		}
 	case pick.Completes.Kind == KindPursuit && resumed && pick.Log != nil:
 		return resentLog(d.postedLog(ctx, pick.Log), pick.Log)
@@ -524,37 +551,20 @@ func resentLog(posted completion, body map[string]any) completion {
 	return posted
 }
 
-// endPending ends a pending pick as its outcome says, ends a nudge in hand
-// where it went through, notifies what did not, and writes picked. holds is
+// endPending ends a pending pick as its outcome says, keeping how it came out
+// for its row. A done one is not notified, because its row shows it. holds is
 // whether the pick holds its key, which a pick from a terminal may hold instead.
 func (d *Desk) endPending(ctx context.Context, pick PendingPick, outcome completion, seen *snapshot, readAt *string, holds bool) {
 	moment := d.Now()
-	result := outcome.outcome()
-	var ended *Nudge
-	err := d.Paths.change(func(state *State) error {
-		state.dropPending(pick.ID)
-		if holds {
-			state.settlePick(pick.Key, moment, result == OutcomeRefused)
-		}
-		state.endPick(EndedPick{
-			ID: pick.ID, Key: pick.Key, Text: pick.Text, Action: pick.Action, Minutes: pick.Minutes,
-			CommitAt: pick.CommitAt, Outcome: result, Message: outcome.body, EndedAt: stamp(moment),
-		}, readAt)
-		if outcome.ok && state.inHand() != nil {
-			ended = state.endReady()
-		}
-		return nil
-	})
-	if err != nil {
-		logger.Error("could not end the pending pick of " + pick.Key + " in the state file: " + err.Error())
-		outcome.body += ". The desk nudge's state file could not be written, so this pick commits again when the watch starts: " + err.Error()
-	}
-	if result != OutcomeDone || err != nil {
-		notify(ctx, outcome.summary, outcome.body)
-	}
-	var nudgeID *string
-	if ended != nil {
-		nudgeID = &ended.NudgeID
-	}
-	d.Paths.appendRecords(pickedRecord(moment, nudgeID, outcome.fields(pick.Completes, pick.Action, pick.Minutes, &pick.ID), seen))
+	d.finishPick(ctx, pickEnd{
+		key: pick.Key, target: pick.Completes, action: pick.Action, minutes: pick.Minutes, pendingID: &pick.ID,
+		holds: holds, at: moment, seen: seen, unwritten: "this pick commits again when the watch starts",
+		keep: func(state *State) {
+			state.dropPending(pick.ID)
+			state.endPick(EndedPick{
+				ID: pick.ID, Key: pick.Key, Text: pick.Text, Action: pick.Action, Minutes: pick.Minutes,
+				CommitAt: pick.CommitAt, Outcome: outcome.outcome(), Message: outcome.body, EndedAt: stamp(moment),
+			}, readAt)
+		},
+	}, outcome)
 }

@@ -95,23 +95,28 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 	if ticked := f.ran("tick-task"); len(ticked) != 1 || !slices.Equal(ticked[0], []string{"tick-task", "532", `File the "receipts" now`}) {
 		t.Errorf("on_log ran %q, want the task's id and its label, quote and spaces kept, as one argument", ticked)
 	}
-	if completed := f.ran("life"); len(completed) != 1 || !slices.Equal(completed[0], habitProgram("1").argv) {
+	if completed := f.ran("life"); len(completed) != 1 || !slices.Equal(completed[0], habitProgram("1", f.clockNow().Format(dayLayout)).argv) {
 		t.Errorf("life ran %q, want habit 1 completed", completed)
 	}
 	if _, logs := f.posted(); len(logs) != 2 || logs[0]["duration_minutes"] != 45.0 || logs[1]["item"].(map[string]any)["label"] != `File the "receipts" now` {
 		t.Errorf("the journal took %v, want read logged at 45 minutes, then the task naming its item", logs)
 	}
 
+	const shownPick = panelSchema + "#/definitions/shown_pick"
 	for _, key := range []string{"tick:1", "habit:3"} {
-		if _, err := watch.CreatePending(key, nil); err != nil {
+		made, err := watch.CreatePending(key, nil)
+		if err != nil {
 			t.Fatal(err)
 		}
+		matches(t, compiler, shownPick, "the socket's answer to a click on "+key, made)
 	}
 	matches(t, compiler, "urn:doit:desk-nudge-status:v3", "status with picks pending", f.desk.Status())
 	matches(t, compiler, panelSchema, "panel show with picks pending", f.desk.Show())
-	if canceled, err := watch.CreatePending("habit:3", nil); err != nil || canceled.State != PickCanceled {
+	canceled, err := watch.CreatePending("habit:3", nil)
+	if err != nil || canceled.State != OutcomeCanceled {
 		t.Fatalf("a second click on habit:3 answered %+v, %v; want its pick canceled", canceled, err)
 	}
+	matches(t, compiler, shownPick, "the socket's answer to a second click", canceled)
 	f.advance(pendingFor)
 	f.fireDue(watch)
 	matches(t, compiler, panelSchema, "panel show with a tick done", f.desk.Show())
