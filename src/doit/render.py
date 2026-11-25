@@ -1,4 +1,4 @@
-"""The text helpers that write a row's cells: a joined context, a note's first sentence, and a span of days."""
+"""The text helpers that write a row's cells."""
 
 import re
 
