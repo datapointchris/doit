@@ -17,8 +17,88 @@
     "rows",
     "nudge",
     "picked",
-    "minutes"
+    "minutes",
+    "picks"
   ],
+  "definitions": {
+    "shown_pick": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A click on the panel page, which the watch commits 4 seconds after it, unless a second click on its key or a DELETE of its id takes it back first.",
+      "required": [
+        "id",
+        "key",
+        "text",
+        "action",
+        "state",
+        "minutes",
+        "commit_at",
+        "message",
+        "ended_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "description": "The pick's UUIDv7, which DELETE /pending-picks/{id} takes back, its picked line names, and a pursuit's journal entry is kept under."
+        },
+        "key": {
+          "type": "string",
+          "description": "The key that was clicked."
+        },
+        "text": {
+          "type": "string",
+          "description": "The row's text when it was clicked."
+        },
+        "action": {
+          "enum": [
+            "complete",
+            "tick",
+            "untick"
+          ],
+          "description": "What the pick does: complete its row, or record or take back one set of a checklist item."
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "committing",
+            "done",
+            "skipped",
+            "refused",
+            "uncertain"
+          ],
+          "description": "pending until commit_at, committing while its command runs, then how it ended. done went through. skipped found the habit already done today, so nothing ran. refused recorded nothing, so its row can be picked again. uncertain may have landed, as a timeout may, so its row is held until the view is read again."
+        },
+        "minutes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The minutes it logs for a timed pursuit."
+        },
+        "commit_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When it commits, 4 seconds after the click."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What it did, or why not, once it ended. Null before."
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "When it ended. Null before."
+        }
+      }
+    }
+  },
   "properties": {
     "schema_version": {
       "const": 3
@@ -103,7 +183,7 @@
     },
     "rows": {
       "type": "array",
-      "description": "What the step draws, in order. Today lists the notes, the suggestion, the answers while a nudge is ready, then each row that a pick completes and that is not picked since the view was read. A minutes step lists its amounts, and a done step lists none.",
+      "description": "What the step draws, in order. Today lists the notes, the suggestion, the answers while a nudge is ready, then each row that a pick completes. A row picked from a terminal leaves until the view is read again, and a row with a pending pick stays, showing how the pick stands. A minutes step lists its amounts, and a done step lists none.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -113,7 +193,11 @@
           "text",
           "group",
           "minutes",
-          "suggested"
+          "suggested",
+          "ticks",
+          "target",
+          "untick_key",
+          "picks"
         ],
         "properties": {
           "key": {
@@ -124,7 +208,7 @@
             "description": "What `panel pick` takes. Null on a note."
           },
           "kind": {
-            "description": "What the row completes, as the view names it, or what else the row is: a note, an answer to the nudge, or a minutes step's amount to log or to reopen the step at.",
+            "description": "What the row completes, as the view names it, or what else the row is: a note, an answer to the nudge, a minutes step's amount to log or to reopen the step at, or a habit's checklist item, whose key ticks one set.",
             "anyOf": [
               {
                 "$ref": "urn:doit:desk-panel-view:v1#/definitions/completion_kind"
@@ -134,7 +218,8 @@
                   "note",
                   "answer",
                   "log_minutes",
-                  "adjust_minutes"
+                  "adjust_minutes",
+                  "tick"
                 ]
               }
             ]
@@ -159,6 +244,36 @@
           "suggested": {
             "type": "boolean",
             "description": "On the suggestion's rows, and on the amount that a minutes step offers first."
+          },
+          "ticks": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "A checklist item's sets today, as the view was read. Null on every other row."
+          },
+          "target": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "A checklist item's sets a day. Null on every other row."
+          },
+          "untick_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key that takes a checklist item's latest set back. Null on every other row."
+          },
+          "picks": {
+            "type": "array",
+            "description": "The pending picks of the row's key and untick_key, then how each one that ended came out, in click order.",
+            "items": {
+              "$ref": "#/definitions/shown_pick"
+            }
           }
         }
       }
@@ -226,9 +341,16 @@
         }
       ]
     },
+    "picks": {
+      "type": "array",
+      "description": "Every pending pick, then each one that ended while the panel still shows it, in click order. A done or uncertain pick shows until the view is read again, and a refused or skipped one until the panel next opens.",
+      "items": {
+        "$ref": "#/definitions/shown_pick"
+      }
+    },
     "picked": {
       "type": "array",
-      "description": "The keys picked on this desk since the view was read, each held out of the rows until a read drops what it completed.",
+      "description": "The keys picked on this desk since the view was read, each held from a second pick until a read drops what it completed.",
       "items": {
         "type": "object",
         "additionalProperties": false,

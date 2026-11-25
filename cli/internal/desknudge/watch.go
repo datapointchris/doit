@@ -41,12 +41,30 @@ type Watch struct {
 	intervalRead time.Time
 	panelRead    time.Time
 	started      binaryID
+
+	// after starts a pending pick's timer, and answers what stops it.
+	after func(time.Duration, func()) func() bool
+	// drainFor is how long an exit waits, drainWithin outside a test.
+	drainFor time.Duration
+	// commitCtx outlives the asker's request and the watch's stop, because a commit under way runs to its end.
+	commitCtx context.Context
+	// pending guards the pending picks' timers and which commits run.
+	pending    sync.Mutex
+	timers     map[string]func() bool
+	fired      map[string]bool
+	taken      map[string]bool
+	committing map[string]bool
+	draining   bool
 }
 
 // NewWatch is a watch over desk.
 func NewWatch(desk *Desk) *Watch {
 	executable, _ := os.Executable()
-	return &Watch{desk: desk, Executable: executable}
+	return &Watch{
+		desk: desk, Executable: executable, drainFor: drainWithin, commitCtx: context.Background(),
+		after:  func(delay time.Duration, run func()) func() bool { return time.AfterFunc(delay, run).Stop },
+		timers: map[string]func() bool{}, fired: map[string]bool{}, taken: map[string]bool{}, committing: map[string]bool{},
+	}
 }
 
 // ErrAnotherWatch is a watch already running on this desk.
@@ -88,16 +106,20 @@ func (w *Watch) Run(ctx context.Context) error {
 	}
 }
 
+// drain stops the socket, commits each pending pick now, and waits for what is
+// under way, within drainFor. A pick still committing at the deadline stays
+// marked started, and the next watch follows the restart rules for it.
 func (w *Watch) drain(serving *server) error {
-	ctx, cancel := context.WithTimeout(context.Background(), drainWithin)
+	ctx, cancel := context.WithTimeout(context.Background(), w.drainFor)
 	defer cancel()
 	serving.stop(ctx)
+	w.drainPending()
 	done := make(chan struct{})
 	go func() { w.work.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-ctx.Done():
-		logger.Warn(fmt.Sprintf("work was still under way after %s, so the watch exits without it", drainWithin))
+		logger.Warn(fmt.Sprintf("work was still under way after %s, so the watch exits without it", w.drainFor))
 	}
 	return nil
 }
@@ -117,9 +139,10 @@ func (w *Watch) background(busy *atomic.Bool, run func()) {
 // Wait waits for every request and program under way.
 func (w *Watch) Wait() { w.work.Wait() }
 
-// Start writes started, then finishes a nudge that a stopped watch left firing.
-// A ready one stays on the pill, unchimed.
+// Start writes started, then finishes a nudge that a stopped watch left firing,
+// and takes up the pending picks it left. A ready nudge stays on the pill, unchimed.
 func (w *Watch) Start(ctx context.Context) {
+	w.commitCtx = context.WithoutCancel(ctx)
 	moment := w.desk.Now()
 	var left *Nudge
 	var started Record
@@ -144,6 +167,7 @@ func (w *Watch) Start(ctx context.Context) {
 	if left != nil {
 		w.background(&w.firing, func() { w.fire(ctx, *left) })
 	}
+	w.resumePending()
 	w.refreshIntervalWhenDue(ctx)
 	w.readPanelWhenDue(ctx)
 }

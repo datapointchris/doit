@@ -434,6 +434,9 @@ every row of `doit today` that something completes, in each lane's own order:
   These rows stop where `doit today` stops them.
 - **A habit** runs `life habits complete <id>`, stopped after `habitBound` in
   `cli/internal/desknudge/programs.go`.
+- **A habit's checklist item** is one row, such as `tick:3`, whose pick runs `life habits tick 3`
+  to record one set. Its `untick_key`, `untick:3`, runs `life habits untick 3` to take the latest
+  set back. The row stays once the habit is done, so a set can still be taken back.
 - **`upcoming` is left out**, because nothing completes a trip or a countdown.
 
 The watch reads the service's desk panel view into `$XDG_CACHE_HOME/doit/desk-nudge-panel.json`,
@@ -468,6 +471,49 @@ recorded and exits as `doit desk-nudge answer` records and exits it.
 either. It exits 2 where it will not act on the key, such as a row picked already, and nothing ran.
 It exits 1 where the completion did not go through, and 4 where the service gave no answer.
 `schemas/desk-nudge-panel.schema.json` describes each step.
+
+### A click on the panel page commits 4 seconds later, and a second click takes it back
+
+`panel pick` commits at once. A click on the panel page is a pending pick instead, which the watch
+holds for 4 seconds before it commits, as an email client's undo send holds a message. The watch
+keeps the timer and the state file keeps the pick, so closing the page keeps the click. The socket
+takes and gives back pending picks:
+
+```text
+POST   /pending-picks       {"key": "habit:17", "minutes": null}
+                            201 the pick, pending until its commit_at
+                            200 the pick that key had waiting, taken back instead
+DELETE /pending-picks/{id}  200 the pick, taken back
+                            404 this desk never held it, 409 it is committing or ended
+```
+
+A refusal answers `{"exit_code": 2, "message": "..."}` with 409, as `POST /picks` does. An answer
+to the nudge and a minutes step's adjustment act at once, so they go through `POST /picks`.
+
+- **A habit** is read again from `life habits today` as it commits. One already done today is
+  skipped, and its row reads `already done today`. Otherwise `life habits complete` runs.
+- **A habit's ticks and unticks** run one at a time, in the order clicked.
+- **A pursuit and a review entry** commit as `panel pick` commits them. The journal keeps a
+  pursuit's entry under the pick's id, so the service stores a resent entry once.
+
+Each row carries its `picks`, and the panel's `picks` lists them all, each `pending`,
+`committing`, or how it ended:
+
+- **`done`** went through. Its row stays in place until the view is read again.
+- **`refused`** recorded nothing, so its row can be clicked again. It says why.
+- **`uncertain`** may have landed, as a call that ran out of time may. Its row is held until
+  the view is read again.
+- **`skipped`** found the habit already done today.
+
+A pick that did not go through also sends a notification. `status --json` lists the picks still
+waiting in `pending_picks`. Each pending pick commits on a timer of its own, off the 15-second tick.
+
+When the watch exits, it commits every pending pick at once and waits up to 20 seconds for them.
+A pick still committing then stays marked started in the state file, and the next watch reads the
+mark. A habit is read again, so one already done is skipped. A pursuit's entry is sent again
+under its id. A review entry is marked done again on the day it was picked, which the service
+stores once. A tick or an untick is recorded `uncertain` and never run again, because
+`life habits tick` carries no key that would stop a second set.
 
 ### `doit tui` draws the panel as a page that a click drives
 

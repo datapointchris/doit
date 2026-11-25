@@ -19,14 +19,16 @@ import (
 const (
 	// programBound is how long claude-sessions, hyprctl, loginctl, the chime and notify-send may each take.
 	programBound = 5 * time.Second
-	// habitBound is how long life habits complete may take.
-	habitBound = 30 * time.Second
 	// onLogBound is how long a pursuit's on_log may take. It completes one item
 	// in another app, as a habit's completion does in life.
 	onLogBound = 30 * time.Second
 	// chimeSound is the XDG sound theme's event that a firing plays, named so the desk's own theme chooses the sound.
 	chimeSound = "message-new-instant"
 )
+
+// habitBound is how long each life habits call may take: today's re-read,
+// complete, tick and untick. A test shortens it to reach a timeout.
+var habitBound = 30 * time.Second
 
 // program is one argv the desk nudge starts, with its bound.
 type program struct {
@@ -63,6 +65,22 @@ func idleHintProgram() program {
 // habitProgram completes one habit in life. Its id is all digits, which the pick checks first.
 func habitProgram(habitID string) program {
 	return program{[]string{"life", "habits", "complete", habitID}, habitBound}
+}
+
+// habitsTodayProgram is life's read of today's habits, which a pending habit
+// pick reads again at its commit, because life accepts a second completion.
+func habitsTodayProgram() program {
+	return program{[]string{"life", "habits", "today", "--json"}, habitBound}
+}
+
+// tickProgram records one set of a checklist item, and untickProgram takes the
+// latest one back. The item's id is all digits, which the pick checks first.
+func tickProgram(itemID string) program {
+	return program{[]string{"life", "habits", "tick", itemID}, habitBound}
+}
+
+func untickProgram(itemID string) program {
+	return program{[]string{"life", "habits", "untick", itemID}, habitBound}
 }
 
 // programFailed is a program that was missing, timed out or exited non-zero.

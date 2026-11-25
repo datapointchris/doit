@@ -183,8 +183,9 @@ func newPanelShowCommand() *cobra.Command {
 		Use:   "show",
 		Short: "The suggestion, the answers while a nudge is ready, and every row that something can complete",
 		Long: "The suggestion, the four answers while a nudge is ready, and every row that something\n" +
-			"can complete. Read with no request from the parts the watch keeps, so a row picked since\n" +
-			"they were read is left out. Exits 0.",
+			"can complete. Read with no request from the parts the watch keeps. A row picked here\n" +
+			"since they were read is left out, and a row clicked on the panel page says how its\n" +
+			"pick stands. Exits 0.",
 		Example: "  doit desk-nudge panel show         today's rows with the key that picks each\n" +
 			"  doit desk-nudge panel show --json  the step as data, for a board to draw",
 		Args: cobra.NoArgs,
@@ -273,6 +274,12 @@ func printStep(out io.Writer, step desknudge.Panel, asJSON bool) error {
 			key = *row.Key
 		}
 		text := row.Text
+		if row.Ticks != nil && row.Target != nil {
+			text += fmt.Sprintf(" · %d of %d sets", *row.Ticks, *row.Target)
+		}
+		if len(row.Picks) > 0 {
+			text += " · " + row.Picks[len(row.Picks)-1].State
+		}
 		if row.Kind == desknudge.KindNote {
 			text = style(text, "yellow")
 		}

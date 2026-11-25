@@ -74,7 +74,7 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 	_ = json.Unmarshal(must(os.ReadFile(f.desk.Paths.Panel)), &cached)
 	matches(t, compiler, panelSchema, "the panel the watch keeps", cached)
 	matches(t, compiler, panelSchema, "panel show under a ready nudge", f.desk.Show())
-	matches(t, compiler, "urn:doit:desk-nudge-status:v2", "status under a ready nudge", f.desk.Status())
+	matches(t, compiler, "urn:doit:desk-nudge-status:v3", "status under a ready nudge", f.desk.Status())
 
 	ctx := context.Background()
 	minutes, err := watch.Pick(ctx, "pursuit:read", nil)
@@ -102,10 +102,24 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 		t.Errorf("the journal took %v, want read logged at 45 minutes, then the task naming its item", logs)
 	}
 
+	for _, key := range []string{"tick:1", "habit:3"} {
+		if _, err := watch.CreatePending(key, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	matches(t, compiler, "urn:doit:desk-nudge-status:v3", "status with picks pending", f.desk.Status())
+	matches(t, compiler, panelSchema, "panel show with picks pending", f.desk.Show())
+	if canceled, err := watch.CreatePending("habit:3", nil); err != nil || canceled.State != PickCanceled {
+		t.Fatalf("a second click on habit:3 answered %+v, %v; want its pick canceled", canceled, err)
+	}
+	f.advance(pendingFor)
+	f.fireDue(watch)
+	matches(t, compiler, panelSchema, "panel show with a tick done", f.desk.Show())
+
 	if _, err := f.desk.Pause(); err != nil {
 		t.Fatal(err)
 	}
-	matches(t, compiler, "urn:doit:desk-nudge-status:v2", "status while paused", f.desk.Status())
+	matches(t, compiler, "urn:doit:desk-nudge-status:v3", "status while paused", f.desk.Status())
 	if _, err := f.desk.Resume(); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +136,7 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 			t.Fatalf("an events line is not JSON: %q", line)
 		}
 		events = append(events, record.(map[string]any)["event"].(string))
-		matches(t, compiler, "urn:doit:desk-nudge-record:v3", "the events line "+line, record)
+		matches(t, compiler, "urn:doit:desk-nudge-record:v4", "the events line "+line, record)
 	}
 	for _, event := range []string{eventStarted, eventFired, eventPicked, eventPaused, eventResumed, eventAnswered} {
 		if !slices.Contains(events, event) {

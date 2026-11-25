@@ -85,6 +85,11 @@ none of which the service runs. `doit desk-nudge panel pick` hands the key to th
 socket rather than running the pick itself. A second runner of picks would be a second owner of the
 state file and of every completion rule.
 
+**Never run a started tick again after the watch restarts.** `life habits tick` carries no key, so
+a second run records a second set. A tick that the watch stopped inside is recorded uncertain, and
+the person ticks again where it did not land. A started habit, log or review does run again,
+because life's re-read, the journal entry's id and the review's day each stop a second record.
+
 **Keep `doit-tui` reading the desk nudge panel through `doit desk-nudge panel`.** It draws the
 `rows` that the panel document carries, the rows that `panel show` prints, and the watch writes
 them, so no reader holds the rule that lists them. The board parses no key and lists no kind. Where it needs another fact about a row, the row carries it, as
@@ -123,6 +128,10 @@ The Go binary starts these:
     of the desk panel view. It never moves the clock.
   - `life habits complete <id>`, by `habitProgram`, at a pick on a habit. The argv is built from
     the habit's id in code, never read from the panel's cache.
+  - `life habits today --json`, by `habitsTodayProgram`, as a pending pick on a habit commits,
+    because life accepts a second completion of a habit already done.
+  - `life habits tick <item>` and `untick <item>`, by `tickProgram` and `untickProgram`, at a pick
+    on a checklist item.
   - A pursuit's `on_log`, by `onLogProgram`, at a pick on that pursuit, unasked, because the pick
     is the asking. The template is split into words before the item's fields fill it, so no field
     can add an argument.
