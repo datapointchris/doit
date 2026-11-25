@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,16 +67,6 @@ type fakeDesk struct {
 	logs    []map[string]any
 	// reviews are each review entry marked done, with its day.
 	reviews []string
-
-	// timers are each pending pick's timer, which fireDue ends once the clock reaches it.
-	timing sync.Mutex
-	timers []*fakeTimer
-}
-
-type fakeTimer struct {
-	at            time.Time
-	run           func()
-	stopped, done bool
 }
 
 var deskClockStart = time.Date(2026, 11, 24, 18, 20, 0, 0, time.FixedZone("EST", -5*60*60))
@@ -195,47 +184,6 @@ func (f *fakeDesk) lifeExits(verb string, code int) {
 // releaseLife lets each held life habits call end.
 func (f *fakeDesk) releaseLife() {
 	f.write(filepath.Join(f.canned, "release"), "")
-}
-
-// after is the watch's timer on the fake clock.
-func (f *fakeDesk) after(delay time.Duration, run func()) func() bool {
-	timer := &fakeTimer{at: f.clockNow().Add(delay), run: run}
-	f.timing.Lock()
-	defer f.timing.Unlock()
-	f.timers = append(f.timers, timer)
-	return func() bool {
-		f.timing.Lock()
-		defer f.timing.Unlock()
-		running := !timer.stopped && !timer.done
-		timer.stopped = true
-		return running
-	}
-}
-
-// fireDue ends each timer that the clock has reached, the newest first, as the
-// runtime may order them, then waits for what they began.
-func (f *fakeDesk) fireDue(watch *Watch) {
-	now := f.clockNow()
-	f.timing.Lock()
-	var due []*fakeTimer
-	for _, timer := range f.timers {
-		if !timer.stopped && !timer.done && !now.Before(timer.at) {
-			timer.done = true
-			due = append(due, timer)
-		}
-	}
-	f.timing.Unlock()
-	for _, timer := range slices.Backward(due) {
-		timer.run()
-	}
-	watch.Wait()
-}
-
-// forgetTimers drops every timer, as a watch that stopped loses its own.
-func (f *fakeDesk) forgetTimers() {
-	f.timing.Lock()
-	defer f.timing.Unlock()
-	f.timers = nil
 }
 
 // idle sets what logind's idle hint answers.
@@ -389,10 +337,9 @@ func (f *fakeDesk) posted() ([]AnswerRow, []map[string]any) {
 	return append([]AnswerRow(nil), f.answers...), append([]map[string]any(nil), f.logs...)
 }
 
-// started is a watch on the fake clock's timers that has run its start and everything the start began.
+// started is a watch that has run its start and everything the start began.
 func (f *fakeDesk) started() *Watch {
 	watch := NewWatch(f.desk)
-	watch.after = f.after
 	watch.Start(context.Background())
 	watch.Wait()
 	return watch

@@ -135,8 +135,6 @@ function logText(look: Look): string {
   const amount = logPick.value?.minutes ?? minutes.value
   const what = timed.value ? minutesText(amount) : ''
   switch (look) {
-    case 'pending':
-      return timed.value ? `Logging ${what} · undo` : 'Done · undo'
     case 'committing':
       return timed.value ? `Logging ${what}` : 'Marking done'
     case 'done':

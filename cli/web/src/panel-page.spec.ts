@@ -3,8 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 import type { HabitRow, Lane, LaneRow, Panel, ShownPick, View } from './panel'
 
-const HOLD_MS = 4_000
-
 function laneRow(label: string): LaneRow {
   return { label, text: `what ${label} does`, note: 'never run', urgency: 'overdue', key: `review:${label}` }
 }
@@ -36,26 +34,32 @@ function invented(): View {
 }
 
 /**
- * The watch's routes as the page reaches them: a click waits HOLD_MS, a second
- * POST of its key or a DELETE of its id takes it back, and a pick that went
- * through leaves the view at the watch's next read. The panel lists picks as
- * the watch's shownPicks does: never a canceled one, and a done or uncertain
- * one only until a read begins after it ended. GET answers any pick by id.
+ * The watch's routes as the page reaches them: a click commits in its own
+ * request, and a pick that went through leaves the view at the watch's next
+ * read, which ends after the page's first read of the panel. The panel lists
+ * picks as the watch's shownPicks does: a done or uncertain one only until a
+ * read begins after it ended.
  */
 class FakeWatch {
   view = invented()
   readAt = new Date().toISOString()
   staleSince: string | null = null
   picks: ShownPick[] = []
+  posted: string[] = []
   committed: string[] = []
-  deleted: string[] = []
-  asked: string[] = []
   reads = 0
   private serial = 0
+  private unread = false
+  private held: Promise<void> | null = null
+  release = () => {}
+
+  /** Holds each pick's answer until release, as a pick whose command runs a while does. */
+  holdPicks() {
+    this.held = new Promise((resolve) => (this.release = resolve))
+  }
 
   panel(): Panel {
-    this.commitDue()
-    return {
+    const panel: Panel = {
       schema_version: 3,
       read_at: this.readAt,
       stale_since: this.staleSince,
@@ -65,39 +69,18 @@ class FakeWatch {
       picked: [],
       picks: structuredClone(this.listed()),
     }
+    if (this.unread) this.readAgain()
+    return panel
   }
 
   private listed(): ShownPick[] {
     const heldUntilRead = (pick: ShownPick) => pick.state === 'done' || pick.state === 'uncertain'
-    return this.picks.filter(
-      (pick) => pick.state !== 'canceled' && !(heldUntilRead(pick) && Date.parse(pick.ended_at!) < Date.parse(this.readAt)),
-    )
-  }
-
-  private end(pick: ShownPick, state: ShownPick['state']) {
-    pick.state = state
-    pick.ended_at = new Date().toISOString()
-  }
-
-  /** A pick taken back by another client of the socket, such as a second window or a terminal's DELETE. */
-  takeBackElsewhere(key: string) {
-    const waiting = this.picks.find((pick) => pick.key === key && pick.state === 'pending')
-    if (waiting) this.end(waiting, 'canceled')
-  }
-
-  private commitDue() {
-    let read = false
-    for (const pick of this.picks) {
-      if (pick.state !== 'pending' || Date.parse(pick.commit_at) > Date.now()) continue
-      this.end(pick, 'done')
-      this.committed.push(pick.key)
-      read = true
-    }
-    if (read) this.readAgain()
+    return this.picks.filter((pick) => !(heldUntilRead(pick) && Date.parse(pick.ended_at!) < Date.parse(this.readAt)))
   }
 
   /** The watch's next read of the view, which counts each done pick in its rows. */
   readAgain() {
+    this.unread = false
     const done = this.picks.filter((pick) => pick.state === 'done').map((pick) => pick.key)
     for (const row of this.view.habits.rows) if (row.key && done.includes(row.key)) Object.assign(row, { done: true, key: null })
     for (const shown of this.view.lanes) shown.rows = shown.rows.filter((row) => !done.includes(row.key ?? ''))
@@ -113,38 +96,26 @@ class FakeWatch {
       this.reads++
       return json(200, this.panel())
     }
-    if (method === 'POST' && path === '/api/pending-picks') {
+    if (method === 'POST' && path === '/api/picks') {
       const { key, minutes } = JSON.parse(String(init?.body)) as { key: string; minutes: number | null }
-      const waiting = this.picks.find((pick) => pick.key === key && pick.state === 'pending')
-      if (waiting) {
-        this.end(waiting, 'canceled')
-        return json(200, waiting)
-      }
+      this.posted.push(key)
       const pick: ShownPick = {
         id: `pick-${++this.serial}`,
         key,
         text: key,
         action: 'complete',
-        state: 'pending',
+        state: 'committing',
         minutes,
-        commit_at: new Date(Date.now() + HOLD_MS).toISOString(),
         message: null,
         ended_at: null,
       }
       this.picks.push(pick)
-      return json(201, pick)
-    }
-    const byID = path.match(/^\/api\/pending-picks\/(.+)$/)
-    const pick = byID ? this.picks.find((shown) => shown.id === byID[1]) : undefined
-    if (byID && !pick) return json(404, { exit_code: 2, message: 'no pick' })
-    if (method === 'GET' && pick) {
-      this.asked.push(pick.id)
-      return json(200, pick)
-    }
-    if (method === 'DELETE' && pick) {
-      this.deleted.push(pick.id)
-      this.end(pick, 'canceled')
-      return json(200, pick)
+      if (this.held) await this.held
+      pick.state = 'done'
+      pick.ended_at = new Date().toISOString()
+      this.committed.push(key)
+      this.unread = true
+      return json(200, { schema_version: 3, step: 'done', message: key })
     }
     return json(404, { exit_code: 2, message: `no route ${method} ${path}` })
   }
@@ -175,28 +146,21 @@ afterEach(() => {
 })
 
 describe('the panel page against a fake watch', () => {
-  it('a click drains then commits, and a second click cancels', async () => {
+  it('a click shows its row committing until the watch answers, and a row whose pick runs ignores a second click', async () => {
     await open()
+    watch.holdPicks()
 
     await row('habit:1').trigger('click')
     await flushPromises()
-    expect(row('habit:1').classes()).toContain('pending')
-    expect(row('habit:1').find('.drain').exists()).toBe(true)
+    expect(row('habit:1').classes()).toContain('committing')
+    await row('habit:1').trigger('click')
+    await flushPromises()
+    expect(watch.posted).toEqual(['habit:1'])
 
-    await vi.advanceTimersByTimeAsync(HOLD_MS + 500)
+    watch.release()
+    await flushPromises()
     expect(watch.committed).toEqual(['habit:1'])
     expect(page.findAll('.tick.done').map((done) => done.text())).toContain('Brush teeth')
-
-    await row('habit:3').trigger('click')
-    await flushPromises()
-    expect(row('habit:3').classes()).toContain('pending')
-    await row('habit:3').trigger('click')
-    await flushPromises()
-    expect(watch.deleted).toHaveLength(1)
-    expect(row('habit:3').classes()).not.toContain('pending')
-
-    await vi.advanceTimersByTimeAsync(HOLD_MS * 2)
-    expect(watch.committed).toEqual(['habit:1'])
   })
 
   it('a fold shows its count, and a ticked row stays put', async () => {
@@ -210,27 +174,12 @@ describe('the panel page against a fake watch', () => {
 
     await row('review:check-disks').trigger('click')
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(HOLD_MS + 500)
     expect(watch.committed).toEqual(['review:check-disks'])
-    expect(watch.view.lanes[0]!.rows.map((shown) => shown.label)).not.toContain('check-disks')
 
     await vi.advanceTimersByTimeAsync(5_000)
+    expect(watch.view.lanes[0]!.rows.map((shown) => shown.label)).not.toContain('check-disks')
     expect(laneLabels()).toEqual(before)
     expect(row('review:check-disks').classes()).toContain('done')
-  })
-
-  it('a pick that another client takes back is never told done', async () => {
-    await open()
-    await row('habit:1').trigger('click')
-    await flushPromises()
-    expect(row('habit:1').classes()).toContain('pending')
-
-    watch.takeBackElsewhere('habit:1')
-    await vi.advanceTimersByTimeAsync(HOLD_MS + 500)
-    expect(watch.committed).toEqual([])
-    expect(watch.asked).toHaveLength(1)
-    expect(row('habit:1').classes()).not.toContain('pending')
-    expect(page.get('[role="status"]').text()).not.toContain('done')
   })
 
   it('a desk whose watch has not read the view says why, and reads again', async () => {

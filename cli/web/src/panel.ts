@@ -3,7 +3,7 @@
 // describe. The page names only what it draws. Each vocabulary below is held
 // to its schema enum by schema-vocabularies.spec.ts.
 
-export const PICK_STATES = ['pending', 'committing', 'done', 'skipped', 'refused', 'uncertain', 'canceled'] as const
+export const PICK_STATES = ['committing', 'done', 'skipped', 'refused', 'uncertain'] as const
 export type PickState = (typeof PICK_STATES)[number]
 export const PICK_ACTIONS = ['complete', 'tick', 'untick'] as const
 export const UNITS = ['minutes', 'checkoffs'] as const
@@ -18,7 +18,6 @@ export interface ShownPick {
   action: (typeof PICK_ACTIONS)[number]
   state: PickState
   minutes: number | null
-  commit_at: string
   message: string | null
   ended_at: string | null
 }
@@ -158,7 +157,7 @@ export interface Panel {
   picks: ShownPick[]
 }
 
-export type Look = 'idle' | 'pending' | 'committing' | 'done' | 'uncertain'
+export type Look = 'idle' | 'committing' | 'done' | 'uncertain'
 
 /**
  * How a row looks under its pick, and what the pick said where the row shows
@@ -167,7 +166,6 @@ export type Look = 'idle' | 'pending' | 'committing' | 'done' | 'uncertain'
  */
 export function lookOf(pick: ShownPick | null, done: boolean): { look: Look; said: string | null } {
   switch (pick?.state) {
-    case 'pending':
     case 'committing':
     case 'done':
     case 'uncertain':
@@ -180,9 +178,9 @@ export function lookOf(pick: ShownPick | null, done: boolean): { look: Look; sai
   return { look: done ? 'done' : 'idle', said: null }
 }
 
-/** A pick still running: waiting for its commit_at, or committing. */
+/** A pick still running. */
 export function underWay(pick: ShownPick): boolean {
-  return pick.state === 'pending' || pick.state === 'committing'
+  return pick.state === 'committing'
 }
 
 /** The pick a row of key shows: the one under way, else the latest that ended. */

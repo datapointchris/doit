@@ -99,9 +99,9 @@ data reads the service's API.
 **Let the panel page draw the panel document's `view`, not its `rows`.** The page places each part
 of the view on a card of its own, the suggestion, the habits, the pursuits and each lane, which a
 flat list of rows cannot carry. It still parses no key: every key it posts is one the view names,
-and the watch runs every pick. How a pick ended is the watch's to say, so the page asks
-`GET /pending-picks/{id}` for one the panel stopped listing, and never infers it from the absence.
-The Log button's chips are the page's own control, not the terminal's minutes step.
+and the watch runs every pick. How a pick ended is the watch's to say, so the page takes it from the
+answer to its `POST /api/picks` and from the panel's `picks`, and never infers it from a row's
+absence. The Log button's chips are the page's own control, not the terminal's minutes step.
 
 **Keep the placeholder at `cli/internal/panelpage/dist/index.html`.** `go:embed` needs a file there,
 so a checkout with no page build still compiles. `npm run build` in `cli/web` writes over it, and git
@@ -145,8 +145,7 @@ The Go binary starts these:
     day when it was picked. The argv is built from the habit's id in code, never read from the
     panel's cache.
   - `life habits completed --since <day> --until <day> --json`, by `habitsCompletedProgram`, as a
-    pending pick on a habit commits, because life accepts a second completion of a habit already
-    done.
+    pick on a habit commits, because life accepts a second completion of a habit already done.
   - `life habits tick <item> --date <day>` and `untick`, by `tickProgram` and `untickProgram`, at a
     pick on a checklist item.
   - A pursuit's `on_log`, by `onLogProgram`, at a pick on that pursuit, unasked, because the pick

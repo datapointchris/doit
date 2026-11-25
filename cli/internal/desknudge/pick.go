@@ -49,13 +49,12 @@ type completion struct {
 
 // The outcomes of a pick. A refused pick recorded nothing, so its row is free
 // again. An uncertain one may have landed, so its row is held until the next
-// read. A canceled one is a pending pick taken back before its commit.
+// read.
 const (
 	OutcomeDone      = "done"
 	OutcomeSkipped   = "skipped"
 	OutcomeRefused   = "refused"
 	OutcomeUncertain = "uncertain"
-	OutcomeCanceled  = "canceled"
 )
 
 func (c completion) outcome() string {
@@ -72,11 +71,11 @@ func (c completion) outcome() string {
 
 var habitID = regexp.MustCompile(`^[0-9]+$`)
 
-// Pick acts on one panel row by its key, and answers the next step: a done
+// pick acts on one panel row by its key, and answers the next step: a done
 // step once something is completed, or a timed pursuit's minutes. minutes
-// logs a timed pursuit at once. read is called once a completion went
-// through, so the parts are read again.
-func (d *Desk) Pick(ctx context.Context, key string, minutes *int, read func()) (Panel, error) {
+// logs a timed pursuit at once.
+func (w *Watch) pick(ctx context.Context, key string, minutes *int, notifyDone bool) (Panel, error) {
+	d := w.desk
 	panel := panelFor(d.Paths.readPanel(), d.Paths.readState(), StepToday)
 	resolved, refusal := d.resolveKey(&panel, key, minutes)
 	if refusal != nil {
@@ -90,7 +89,7 @@ func (d *Desk) Pick(ctx context.Context, key string, minutes *int, read func()) 
 	case verbMinutes:
 		return minutesPanel(panel, resolved.found, nil), nil
 	}
-	return d.complete(ctx, panel, resolved.found, resolved.minutes, read)
+	return w.complete(ctx, resolved.found, resolved.minutes, notifyDone)
 }
 
 // keyVerb is what a picked key asks for.
@@ -115,10 +114,9 @@ type resolvedKey struct {
 	minutes         *int
 }
 
-// resolveKey reads a key for a pick from a terminal and for a pending pick
-// alike. The watch owns the vocabulary of keys. An answer key and a minutes
-// key are read as the watch wrote them, and any other key is resolved against
-// the panel's parts, whose completes says what to run.
+// resolveKey reads a picked key. The watch owns the vocabulary of keys. An
+// answer key and a minutes key are read as the watch wrote them, and any other
+// key is resolved against the panel's parts, whose completes says what to run.
 func (d *Desk) resolveKey(panel *Panel, key string, minutes *int) (resolvedKey, *PickError) {
 	kind, rest, _ := strings.Cut(key, keySeparator)
 	switch kind {
@@ -191,19 +189,33 @@ func (d *Desk) listed(panel *Panel, key string) (entry, *PickError) {
 	return found, nil
 }
 
-// complete holds the pick, completes the row, then finishes the pick. A
-// completion that recorded nothing frees its row at once. Every other one holds
-// it until a read that begins after it ended, which read starts. A tick or an
+// complete runs a pick of one row in its turn. The state file marks the pick
+// running before its command runs, and the pick ends with how it came out. A
+// completion holds its key from a second pick until a read that begins after
+// it ended, and one that recorded nothing frees it at once. A tick or an
 // untick holds nothing, because each one records another set. The pick
-// supersedes how the key's earlier pending picks were refused or skipped.
-func (d *Desk) complete(ctx context.Context, panel Panel, found entry, minutes *int, read func()) (Panel, error) {
+// supersedes how the key's earlier picks were refused or skipped.
+func (w *Watch) complete(ctx context.Context, found entry, minutes *int, notifyDone bool) (Panel, error) {
+	d := w.desk
+	before, leave, ok := w.turns.enter(commitGroup(found.completes, found.key), found.key)
+	if !ok {
+		return d.refuse(ctx, refused("%s is being picked already, so this pick does nothing", found.text))
+	}
+	defer leave()
+	picked := d.Now()
+	<-before
 	moment := d.Now()
-	holds := holdsKey(found.actionOf())
+	pick := RunningPick{
+		ID: newID(moment), Key: found.key, Text: found.text, Action: found.actionOf(), Completes: found.completes,
+		Minutes: minutes, PickedAt: stamp(picked), StartedAt: stamp(moment),
+	}
+	readAt := d.Paths.panelReadAt()
 	took := false
 	err := d.Paths.change(func(state *State) error {
-		took = !holds || state.takePick(panel.ReadAt, found.key, moment)
+		took = !holdsKey(pick.Action) || state.takePick(readAt, pick.Key, moment)
 		if took {
-			state.forgetEnded(found.key)
+			state.forgetEnded(pick.Key)
+			state.RunningPicks = append(state.RunningPicks, pick)
 		}
 		return nil
 	})
@@ -213,14 +225,7 @@ func (d *Desk) complete(ctx context.Context, panel Panel, found entry, minutes *
 	if !took {
 		return d.refuse(ctx, refused("%s is picked already, and is taken again once the watch reads the rows again", found.text))
 	}
-	seen := takeSnapshot(ctx)
-	outcome := d.finishPick(ctx, pickEnd{
-		key: found.key, target: found.completes, action: found.actionOf(), minutes: minutes, holds: holds,
-		at: moment, seen: seen, notifyDone: true, unwritten: "this row stays held and any nudge in hand stays",
-	}, d.completed(ctx, found, minutes, logWrite{id: newID(moment)}, moment))
-	if read != nil {
-		read()
-	}
+	outcome := w.commitRunning(ctx, pick, false, notifyDone, moment)
 	if !outcome.ok {
 		return Panel{}, &PickError{ExitCode: outcome.exitCode, Message: strings.TrimPrefix(outcome.summary, "doit: ") + ": " + outcome.body}
 	}
@@ -235,8 +240,6 @@ type pickEnd struct {
 	target  Completes
 	action  string
 	minutes *int
-	// pendingID is the pending pick it ends, and nil for a pick from a terminal.
-	pendingID *string
 	// holds is whether the pick holds its key, which its outcome frees or keeps.
 	holds bool
 	// at is the moment its picked line carries.
@@ -276,55 +279,19 @@ func (d *Desk) finishPick(ctx context.Context, end pickEnd, outcome completion) 
 	if ended != nil {
 		nudgeID = &ended.NudgeID
 	}
-	d.Paths.appendRecords(pickedRecord(end.at, nudgeID, outcome.fields(end.target, end.action, end.minutes, end.pendingID), end.seen))
+	d.Paths.appendRecords(pickedRecord(end.at, nudgeID, outcome.fields(end.target, end.action, end.minutes), end.seen))
 	return outcome
 }
 
 // fields are what a picked line says of a pick that ran.
-func (c completion) fields(target Completes, action string, minutes *int, pendingID *string) pickedFields {
-	outcome := c.outcome()
+func (c completion) fields(target Completes, action string, minutes *int) pickedFields {
 	var failure *string
 	if !c.ok {
 		failure = &c.body
 	}
 	return pickedFields{
 		Kind: target.Kind, Ref: target.Ref, ItemID: target.ItemID, Minutes: minutes,
-		Action: action, Outcome: &outcome, PendingPickID: pendingID, OK: c.ok, Error: failure,
-	}
-}
-
-// completed acts on one row through its owner, with what doit builds from the
-// row's completes. picked is when the person picked it: a habit, a set and a
-// review entry each land on that day. Where no case below names the kind, the
-// row is a review register's entry, so a new register's rows complete with no
-// change here.
-//
-// Each key kind and what it runs:
-//
-//	habit:<id>               life habits complete <id> --date <day>
-//	tick:<item>              life habits tick <item> --date <day>
-//	untick:<item>            life habits untick <item> --date <day>
-//	pursuit:<name>[:<item>]  its on_log, then POST /journal/done
-//	<kind>:<entry>           POST /review/<entry>/completions, for review, practice and every register
-func (d *Desk) completed(ctx context.Context, found entry, minutes *int, journal logWrite, picked time.Time) completion {
-	day := picked.Format(dayLayout)
-	switch found.actionOf() {
-	case ActionTick:
-		return setChanged(ctx, found, tickProgram(*found.completes.ItemID, day), "set ticked", "set not ticked")
-	case ActionUntick:
-		return setChanged(ctx, found, untickProgram(*found.completes.ItemID, day), "set taken back", "set not taken back")
-	case ActionComplete:
-		switch found.completes.Kind {
-		case KindPursuit:
-			return d.loggedPursuit(ctx, found.completes, minutes, journal)
-		case KindHabit:
-			return completedHabit(ctx, found, day)
-		}
-		return d.markedReviewDone(ctx, found.completes.Ref, day)
-	}
-	return completion{
-		summary: "doit: not picked", exitCode: PickRefused, recordedNothing: true,
-		body: fmt.Sprintf("%s names action %q, which the watch does not run", found.text, found.actionOf()),
+		Action: action, Outcome: c.outcome(), OK: c.ok, Error: failure,
 	}
 }
 
@@ -336,8 +303,24 @@ func lifeFailed(err error, summary string) completion {
 	return completion{summary: "doit: " + summary, body: err.Error(), exitCode: PickFailed, recordedNothing: !timedOut}
 }
 
-// completedHabit runs life habits complete on day.
-func completedHabit(ctx context.Context, found entry, day string) completion {
+// completedHabit runs life habits complete on day, once a read of day's
+// completions finds the habit not done there, because life accepts a second
+// completion of a habit.
+func (d *Desk) completedHabit(ctx context.Context, found entry, day string) completion {
+	done, err := habitDoneOn(ctx, found.completes.Ref, day)
+	if err != nil {
+		return completion{
+			summary: "doit: habit not completed", exitCode: PickFailed, recordedNothing: true,
+			body: "life's completions could not be read again, so " + found.text + " was not completed: " + err.Error(),
+		}
+	}
+	if done {
+		said := "already done on " + day
+		if day == d.Now().Format(dayLayout) {
+			said = "already done today"
+		}
+		return completion{summary: "doit: " + found.text + " not completed", body: said, exitCode: PickRefused, skipped: true}
+	}
 	if _, err := habitProgram(found.completes.Ref, day).run(ctx); err != nil {
 		return lifeFailed(err, "habit not completed")
 	}
@@ -404,8 +387,8 @@ type resolvedItem struct {
 }
 
 // logWrite is how one pursuit log is written. Its id names the journal entry,
-// so the service stores a resend once. A pending pick saves its progress on the
-// way, so a restart knows how far it got, and a terminal pick saves nothing.
+// so the service stores a resend once. save keeps its progress on the way, so a
+// restart knows how far it got.
 type logWrite struct {
 	id string
 	// save keeps the entry as on_log begins, saying it may not have run, and
