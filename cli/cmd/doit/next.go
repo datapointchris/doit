@@ -26,10 +26,10 @@ func newNextCommand() *cobra.Command {
 			"is this table: everything owed, heaviest first, then the rest picked by weight.\n" +
 			"It stands for a while, so running this again shows the same one. `doit dashboard`\n" +
 			"lists everything outstanding rather than picking.",
-		Example: "  doit next           what to do now, with every other pursuit under it\n" +
-			"  doit next --explain the same draw with every number behind it\n" +
-			"  doit next --reroll  a fresh draw, before the standing one expires\n" +
-			"  doit next --json    the draw and the state behind it, as data",
+		Example: "  doit next            what to do now, with every other pursuit under it\n" +
+			"  doit next --explain  the same draw with every number behind it\n" +
+			"  doit next --reroll   a fresh draw, before the standing one expires\n" +
+			"  doit next --json     the draw and the state behind it, as data",
 		GroupID: whatToDoNow,
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
