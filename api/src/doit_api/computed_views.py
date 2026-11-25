@@ -172,11 +172,15 @@ class Views:
             raise Conflict(NOTHING_TO_DRAW)
         selection = self.drawn(config, state, now, machine, reroll)
         context, context_error = self.context(now)
+        payload = pursuits.explain_payload(state)
+        # Priced from the rounded payload rather than the state behind it, so a
+        # row never says `due today` beside a `due` of 1.0 in the same answer.
+        published = pursuits.standing_from(payload, config.pursuits, now)
         return {
             **selection,
-            'state': pursuits.explain_payload(state),
-            'offer_rows': pursuits.offer_rows(state, selection),
-            'explain_rows': pursuits.explain_rows(state, selection),
+            'state': payload,
+            'offer_rows': pursuits.offer_rows(published, selection),
+            'explain_rows': pursuits.explain_rows(published, selection),
             'context': context,
             'context_error': context_error,
             'pursuits': config.pursuits,
