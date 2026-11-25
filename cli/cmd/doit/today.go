@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -33,23 +32,14 @@ func newTodayCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if asJSON {
-				raw, err := client.Raw(cmd.Context(), "/today", nil)
-				if err != nil {
-					return err
-				}
-				var said struct {
-					Problems []string `json:"problems"`
-				}
-				_ = json.Unmarshal(raw, &said)
-				sourceProblems(cmd.ErrOrStderr(), said.Problems)
-				return printJSON(cmd.OutOrStdout(), raw)
-			}
-			answer, err := client.Today(cmd.Context())
+			raw, answer, err := client.Today(cmd.Context())
 			if err != nil {
 				return err
 			}
 			sourceProblems(cmd.ErrOrStderr(), answer.Problems)
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), raw)
+			}
 			return screens.Today(cmd.OutOrStdout(), answer, screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout))
 		},
 	}

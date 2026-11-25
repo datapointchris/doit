@@ -166,14 +166,19 @@ func ExitCode(err error) int {
 }
 
 // Get reads the route at path into answer, refusing an answer that lacks a
-// field answer's type declares without omitempty.
-func (c *Client) Get(ctx context.Context, path string, query url.Values, answer any) error {
+// field answer's type declares without omitempty. It also answers the body as
+// it came, for a --json that prints it whole, fields this doit does not read
+// included.
+func (c *Client) Get(ctx context.Context, path string, query url.Values, answer any) (json.RawMessage, error) {
 	route := Prefix + path
 	body, err := c.read(ctx, route, query, budget)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return c.decode(ctx, http.MethodGet, route, body, answer)
+	if err := c.decode(ctx, http.MethodGet, route, body, answer); err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 // decode reads the body that method on route answered into answer, refusing
@@ -192,21 +197,6 @@ func (c *Client) decode(ctx context.Context, method, route string, body []byte, 
 		return &Refused{Message: fmt.Sprintf("%s answered %s %s in a shape this doit does not read: %v", c.where, method, route, err)}
 	}
 	return nil
-}
-
-// Raw is the route's answer at path as it came, for a --json that prints it
-// whole. It refuses only an answer that is not JSON, because a field this doit
-// does not read is the reader's own.
-func (c *Client) Raw(ctx context.Context, path string, query url.Values) (json.RawMessage, error) {
-	route := Prefix + path
-	body, err := c.read(ctx, route, query, budget)
-	if err != nil {
-		return nil, err
-	}
-	if !json.Valid(body) {
-		return nil, &Refused{Message: fmt.Sprintf("%s answered GET %s with a body that is not JSON", c.where, route)}
-	}
-	return body, nil
 }
 
 // Post sends body to the route at path and reads the answer into answer, which
@@ -255,11 +245,16 @@ func (c *Client) Post(ctx context.Context, path string, body any, repeatable boo
 
 // LaterSendCanStore is whether the same write sent later could be stored: no
 // answer came, the login was refused, or the service broke. A refusal of the
-// write itself is refused again however often it is sent.
+// write itself is refused again however often it is sent, and an answer
+// lacking a field came after the write was stored.
 func LaterSendCanStore(err error) bool {
 	var none *NoAnswer
 	if errors.As(err, &none) || errors.Is(err, login.ErrNeedsLogin) || errors.Is(err, goclilogin.ErrNotConfigured) {
 		return true
+	}
+	var missing *MissingField
+	if errors.As(err, &missing) {
+		return false
 	}
 	var refused *Refused
 	if errors.As(err, &refused) {

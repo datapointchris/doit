@@ -1,6 +1,9 @@
 package service
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Today is GET /today: what the day still owes, above what it has had, in the
 // lane contract's shape. The screens read every field it declares.
@@ -56,9 +59,9 @@ type QuotaChecklist struct {
 	Unavailable string `json:"unavailable"`
 }
 
-// Today reads the day.
-func (c *Client) Today(ctx context.Context) (Today, error) {
+// Today reads the day, and answers the body it came in too.
+func (c *Client) Today(ctx context.Context) (json.RawMessage, Today, error) {
 	var answer Today
-	err := c.Get(ctx, "/today", nil, &answer)
-	return answer, err
+	raw, err := c.Get(ctx, "/today", nil, &answer)
+	return raw, answer, err
 }

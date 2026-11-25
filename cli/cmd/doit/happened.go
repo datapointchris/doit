@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -14,9 +13,6 @@ import (
 	"github.com/datapointchris/doit/cli/internal/service"
 )
 
-// windowForms is every form --since and --until take, as the service reads them.
-const windowForms = "a span (30m, 12h, 7d, 2w), a day (2026-10-01) or an RFC 3339 instant"
-
 func newHappenedCommand() *cobra.Command {
 	var since, until string
 	var asJSON bool
@@ -25,7 +21,7 @@ func newHappenedCommand() *cobra.Command {
 		Short: "What happened over a span of time, from every app and log, and who did it",
 		Long: "What happened over a span of time, from every app and log, and who did it.\n\n" +
 			"`doit today` folds the same records over the one day, beside what the day still owes.",
-		Example: "  doit happened                                         the past week\n" +
+		Example: "  doit happened                                         the service's default window, which the title names\n" +
 			"  doit happened --since 30d                             the past month\n" +
 			"  doit happened --since 2026-11-01 --until 2026-11-03  three whole days, since a day includes all of itself\n" +
 			"  doit happened --json                                  every group as data",
@@ -39,27 +35,18 @@ func newHappenedCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			var answer service.Happened
+			raw, answer, err := client.Happened(cmd.Context(), since, until)
+			if err != nil {
+				return windowRefused(err)
+			}
+			sourceProblems(cmd.ErrOrStderr(), answer.Problems)
 			if asJSON {
-				raw, err := client.Raw(cmd.Context(), "/happened", service.HappenedQuery(since, until))
-				if err != nil {
-					return windowRefused(err)
-				}
-				_ = json.Unmarshal(raw, &answer)
-				sourceProblems(cmd.ErrOrStderr(), answer.Problems)
-				if err := printJSON(cmd.OutOrStdout(), raw); err != nil {
-					return err
-				}
+				err = printJSON(cmd.OutOrStdout(), raw)
 			} else {
-				answer, err = client.Happened(cmd.Context(), since, until)
-				if err != nil {
-					return windowRefused(err)
-				}
-				sourceProblems(cmd.ErrOrStderr(), answer.Problems)
-				widths, palette := screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout)
-				if err := screens.Happened(cmd.OutOrStdout(), answer, until == "", widths, palette); err != nil {
-					return err
-				}
+				err = screens.Happened(cmd.OutOrStdout(), answer, until == "", screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout))
+			}
+			if err != nil {
+				return err
 			}
 			if len(answer.Unavailable) == len(answer.Asked) {
 				return exitCode(1)
@@ -68,7 +55,8 @@ func newHappenedCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "",
-		"Start of the window: "+windowForms+". 7d ago where neither end is given, the earliest record where only --until is")
+		"Start of the window: a span back from now such as 7d, a day such as 2026-11-01, or an RFC 3339 instant. "+
+			"The service picks it where neither end is given, and the earliest record where only --until is")
 	cmd.Flags().StringVar(&until, "until", "", "End of the window, in the same forms; a day includes all of itself. Now where omitted")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output every group as JSON to stdout")
 	return cmd

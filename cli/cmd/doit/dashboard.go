@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -27,7 +26,7 @@ func newDashboardCommand() *cobra.Command {
 			"ranks across lanes, so `doit next` is the command that picks one thing. A lane\n" +
 			"that could not be read says why, and the last line names any pursuit that is behind.",
 		Example: "  doit dashboard               every lane at a glance\n" +
-			"  doit dashboard --lane tasks  one lane, with all its rows\n" +
+			"  doit dashboard --lane tasks  one lane, with more of its rows\n" +
 			"  doit dashboard --json        the lanes as data, where each says whether it was read",
 		GroupID: whatToDoNow,
 		Args:    cobra.NoArgs,
@@ -39,21 +38,14 @@ func newDashboardCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if asJSON {
-				raw, err := client.Raw(cmd.Context(), "/dashboard", service.DashboardQuery(lanes))
-				if err != nil {
-					return err
-				}
-				var said service.Dashboard
-				_ = json.Unmarshal(raw, &said)
-				dashboardNotices(cmd.ErrOrStderr(), said, lanes)
-				return printJSON(cmd.OutOrStdout(), raw)
-			}
-			answer, err := client.Dashboard(cmd.Context(), lanes)
+			raw, answer, err := client.Dashboard(cmd.Context(), lanes)
 			if err != nil {
 				return err
 			}
 			dashboardNotices(cmd.ErrOrStderr(), answer, lanes)
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), raw)
+			}
 			return screens.Dashboard(cmd.OutOrStdout(), answer, screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout))
 		},
 	}

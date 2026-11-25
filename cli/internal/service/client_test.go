@@ -38,12 +38,12 @@ func TestAnAnswerMissingAFieldTheVerbNeedsIsRefusedNamingTheFieldAndTheServicesV
 	client := New(server.URL, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}), "", "Run `doit auth login`.")
 
 	var whole panel
-	if err := client.Get(t.Context(), "/whole", nil, &whole); err != nil || len(whole.Rows) != 1 || whole.Rows[0].Group != nil {
+	if _, err := client.Get(t.Context(), "/whole", nil, &whole); err != nil || len(whole.Rows) != 1 || whole.Rows[0].Group != nil {
 		t.Fatalf("an answer with every field, one null and one left out by omitempty: %v, %+v", err, whole)
 	}
 
 	var partial panel
-	err := client.Get(t.Context(), "/missing", nil, &partial)
+	_, err := client.Get(t.Context(), "/missing", nil, &partial)
 	var refused *MissingField
 	if !errors.As(err, &refused) || refused.Field != "rows[1].minutes" || refused.Version != "3.4.0" {
 		t.Fatalf("got %v; want a refusal naming rows[1].minutes and version 3.4.0", err)

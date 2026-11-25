@@ -139,7 +139,7 @@ func (d *Desk) readView(ctx context.Context, draw bool) (*View, error) {
 		query.Set("draw", "true")
 	}
 	var view View
-	if err := client.Get(ctx, "/desk-panel-view", query, &view); err != nil {
+	if _, err := client.Get(ctx, "/desk-panel-view", query, &view); err != nil {
 		return nil, err
 	}
 	if view.SchemaVersion != viewSchemaVersion {
@@ -155,7 +155,7 @@ func (d *Desk) readInterval(ctx context.Context) (Interval, error) {
 	var answered Interval
 	client, err := d.Open(ctx)
 	if err == nil {
-		err = client.Get(ctx, "/desk-nudge", nil, &answered)
+		_, err = client.Get(ctx, "/desk-nudge", nil, &answered)
 	}
 	return answered, err
 }
@@ -198,7 +198,8 @@ func (d *Desk) get(ctx context.Context, path string, answer any) error {
 	if err != nil {
 		return err
 	}
-	return client.Get(ctx, path, nil, answer)
+	_, err = client.Get(ctx, path, nil, answer)
+	return err
 }
 
 // interval reads as the status prints it, as Python's %g does.

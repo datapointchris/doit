@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,7 +32,7 @@ type ReadingRow struct {
 	// Goal is null for a reading taken before goals were recorded.
 	Goal   *string `json:"goal"`
 	OfGoal string  `json:"of_goal"`
-	// ShortOfGoal is a month reaching under 90% of its goal.
+	// ShortOfGoal is the service judging the month short of its goal.
 	ShortOfGoal bool   `json:"short_of_goal"`
 	Estimate    string `json:"estimate"`
 }
@@ -55,55 +56,55 @@ type TrendRow struct {
 	Missed bool `json:"missed"`
 }
 
-// ForecastPath is the route of the reading a timestamp prefix names, or the newest where handle is "".
-func ForecastPath(handle string) string {
+// forecastPath is the route of the reading a timestamp prefix names, or the newest where handle is "".
+func forecastPath(handle string) string {
 	if handle == "" {
 		handle = "latest"
 	}
 	return "/forecasts/" + url.PathEscape(handle)
 }
 
-// Forecast reads the reading handle names, or the newest where it is "".
-func (c *Client) Forecast(ctx context.Context, handle string) (Reading, error) {
+// Forecast reads the reading handle names, or the newest where it is "", and
+// answers the body it came in too.
+func (c *Client) Forecast(ctx context.Context, handle string) (json.RawMessage, Reading, error) {
 	var answer Reading
-	err := c.Get(ctx, ForecastPath(handle), nil, &answer)
-	return answer, err
+	raw, err := c.Get(ctx, forecastPath(handle), nil, &answer)
+	return raw, answer, err
 }
 
-// Forecasts reads every stored reading, oldest first.
-func (c *Client) Forecasts(ctx context.Context) ([]Reading, error) {
+// Forecasts reads every stored reading, oldest first, and answers the body it came in too.
+func (c *Client) Forecasts(ctx context.Context) (json.RawMessage, []Reading, error) {
 	var answer []Reading
-	err := c.Get(ctx, "/forecasts", nil, &answer)
-	return answer, err
+	raw, err := c.Get(ctx, "/forecasts", nil, &answer)
+	return raw, answer, err
 }
 
-// TrendQuery is the query GET /forecasts/trend takes.
-func TrendQuery(days int) url.Values {
-	return url.Values{"days": {strconv.Itoa(days)}}
-}
-
-// Trend grades the readings whose days-long window has closed.
-func (c *Client) Trend(ctx context.Context, days int) (Trend, error) {
+// Trend grades the readings whose days-long window has closed, at the
+// service's own horizon where days is nil, and answers the body it came in too.
+func (c *Client) Trend(ctx context.Context, days *int) (json.RawMessage, Trend, error) {
+	query := url.Values{}
+	if days != nil {
+		query.Set("days", strconv.Itoa(*days))
+	}
 	var answer Trend
-	err := c.Get(ctx, "/forecasts/trend", TrendQuery(days), &answer)
-	return answer, err
+	raw, err := c.Get(ctx, "/forecasts/trend", query, &answer)
+	return raw, answer, err
 }
 
 // TakeForecast takes a forecast at budget minutes a day, or at the register's
-// budget where budget is 0, and stores it. It answers the reading as the
+// budget where budget is nil, and stores it. It answers the reading as the
 // service sent it, for a --json that prints it whole, beside the reading read.
-func (c *Client) TakeForecast(ctx context.Context, budget int) (json.RawMessage, Reading, error) {
-	body := map[string]any{"budget_minutes": nil}
-	if budget > 0 {
-		body["budget_minutes"] = budget
-	}
+// Where the answer cannot be read, the reading is still stored, so the body
+// comes back beside the error, and the error says so.
+func (c *Client) TakeForecast(ctx context.Context, budget *int) (json.RawMessage, Reading, error) {
+	body := map[string]any{"budget_minutes": budget}
 	var raw json.RawMessage
 	if err := c.Post(ctx, "/forecasts", body, false, &raw); err != nil {
 		return nil, Reading{}, err
 	}
 	var reading Reading
 	if err := c.decode(ctx, http.MethodPost, Prefix+"/forecasts", raw, &reading); err != nil {
-		return nil, Reading{}, err
+		return raw, Reading{}, fmt.Errorf("%w The reading was stored, so `doit forecast show` reads it back, and running this again stores a second one", err)
 	}
 	return raw, reading, nil
 }

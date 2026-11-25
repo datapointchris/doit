@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 )
 
@@ -37,15 +38,15 @@ type PursuitStanding struct {
 }
 
 // Dashboard reads every lane, or only those named in lanes, each then
-// listing more of its rows.
-func (c *Client) Dashboard(ctx context.Context, lanes []string) (Dashboard, error) {
+// listing more of its rows. It answers the body it came in too.
+func (c *Client) Dashboard(ctx context.Context, lanes []string) (json.RawMessage, Dashboard, error) {
 	var answer Dashboard
-	err := c.Get(ctx, "/dashboard", DashboardQuery(lanes), &answer)
-	return answer, err
+	raw, err := c.Get(ctx, "/dashboard", dashboardQuery(lanes), &answer)
+	return raw, answer, err
 }
 
-// DashboardQuery is the query GET /dashboard takes, which `doit dashboard --json` sends too.
-func DashboardQuery(lanes []string) url.Values {
+// dashboardQuery is the query GET /dashboard takes.
+func dashboardQuery(lanes []string) url.Values {
 	if len(lanes) == 0 {
 		return nil
 	}

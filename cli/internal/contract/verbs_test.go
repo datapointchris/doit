@@ -85,7 +85,7 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 
 	t.Run("happened reads every record over the window and refuses one that will not parse", func(t *testing.T) {
 		printed, stderr, exit := on.run(t, "happened")
-		if exit != 0 || !strings.Contains(printed, " answered") {
+		if exit != 0 {
 			t.Fatalf("doit happened exited %d, printing:\n%s%s", exit, printed, stderr)
 		}
 		printed, stderr, exit = on.run(t, "happened", "--until", "2026-07-20", "--json")

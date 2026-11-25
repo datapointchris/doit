@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 )
 
@@ -19,20 +20,25 @@ type Happened struct {
 	Asked       []string `json:"asked"`
 	Unavailable []string `json:"unavailable"`
 	Partial     []string `json:"partial"`
-	Groups      []Lane   `json:"groups"`
-	Problems    []string `json:"problems"`
+	// RecordedBy names each group whose record wrote who did each entry.
+	RecordedBy []string `json:"recorded_by"`
+	// UnknownActors counts the entries whose actor the service does not recognize.
+	UnknownActors int      `json:"unknown_actors"`
+	Groups        []Lane   `json:"groups"`
+	Problems      []string `json:"problems"`
 }
 
-// Happened reads the window that since and until bound. Either may be "",
-// and the service starts a window with neither a week back.
-func (c *Client) Happened(ctx context.Context, since, until string) (Happened, error) {
+// Happened reads the window that since and until bound, and answers the body
+// it came in too. Either end may be "", and the service picks the start of a
+// window given neither end.
+func (c *Client) Happened(ctx context.Context, since, until string) (json.RawMessage, Happened, error) {
 	var answer Happened
-	err := c.Get(ctx, "/happened", HappenedQuery(since, until), &answer)
-	return answer, err
+	raw, err := c.Get(ctx, "/happened", happenedQuery(since, until), &answer)
+	return raw, answer, err
 }
 
-// HappenedQuery is the query GET /happened takes, which `doit happened --json` sends too.
-func HappenedQuery(since, until string) url.Values {
+// happenedQuery is the query GET /happened takes.
+func happenedQuery(since, until string) url.Values {
 	query := url.Values{}
 	if since != "" {
 		query.Set("since", since)

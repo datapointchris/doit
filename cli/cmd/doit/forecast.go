@@ -1,7 +1,7 @@
 package main
 
 import (
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -42,16 +42,25 @@ func newForecastRunCommand() *cobra.Command {
 			"  doit forecast run --json        the same reading as data",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			var chosen *int
+			if cmd.Flags().Changed("budget") {
+				if budget < 1 {
+					return goclikit.UsageError(errors.New("--budget takes a whole number of minutes above 0"))
+				}
+				chosen = &budget
+			}
 			client, err := service.Open(cmd.Context())
 			if err != nil {
 				return err
 			}
-			raw, reading, err := client.TakeForecast(cmd.Context(), budget)
+			raw, reading, err := client.TakeForecast(cmd.Context(), chosen)
+			// The reading is stored once raw is back, and --json reads none
+			// of its fields, so it prints what was stored either way.
+			if asJSON && raw != nil {
+				return printJSON(cmd.OutOrStdout(), raw)
+			}
 			if err != nil {
 				return err
-			}
-			if asJSON {
-				return printJSON(cmd.OutOrStdout(), raw)
 			}
 			return screens.Forecast(cmd.OutOrStdout(), reading, screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout))
 		},
@@ -81,16 +90,12 @@ func newForecastShowCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if asJSON {
-				raw, err := client.Raw(cmd.Context(), service.ForecastPath(handle), nil)
-				if err != nil {
-					return err
-				}
-				return printJSON(cmd.OutOrStdout(), raw)
-			}
-			reading, err := client.Forecast(cmd.Context(), handle)
+			raw, reading, err := client.Forecast(cmd.Context(), handle)
 			if err != nil {
 				return err
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), raw)
 			}
 			return screens.Forecast(cmd.OutOrStdout(), reading, screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout))
 		},
@@ -113,27 +118,16 @@ func newForecastListCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			noneStored := func() error {
-				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "No forecast stored yet:  doit forecast run")
-				return exitCode(1)
-			}
-			if asJSON {
-				raw, err := client.Raw(cmd.Context(), "/forecasts", nil)
-				if err != nil {
-					return err
-				}
-				var stored []json.RawMessage
-				if json.Unmarshal(raw, &stored) == nil && len(stored) == 0 {
-					return noneStored()
-				}
-				return printJSON(cmd.OutOrStdout(), raw)
-			}
-			readings, err := client.Forecasts(cmd.Context())
+			raw, readings, err := client.Forecasts(cmd.Context())
 			if err != nil {
 				return err
 			}
 			if len(readings) == 0 {
-				return noneStored()
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "No forecast stored yet:  doit forecast run")
+				return exitCode(1)
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), raw)
 			}
 			return screens.Forecasts(cmd.OutOrStdout(), readings, screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout))
 		},
@@ -148,7 +142,7 @@ func newForecastTrendCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "trend",
 		Short: "Grade the forecasts whose window has closed against the journal",
-		Example: "  doit forecast trend            how the week ahead held up\n" +
+		Example: "  doit forecast trend            how forecasts held up at the service's default horizon\n" +
 			"  doit forecast trend --days 30  how the month ahead held up\n" +
 			"  doit forecast trend --json     the same verdicts as data",
 		Args: cobra.NoArgs,
@@ -158,34 +152,25 @@ func newForecastTrendCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			noneMatured := func() error {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "No reading is %d days old yet, so nothing can be graded:  doit forecast run\n", days)
-				return exitCode(1)
+			var horizon *int
+			if cmd.Flags().Changed("days") {
+				horizon = &days
 			}
-			if asJSON {
-				raw, err := client.Raw(cmd.Context(), "/forecasts/trend", service.TrendQuery(days))
-				if err != nil {
-					return err
-				}
-				var graded struct {
-					Verdicts []json.RawMessage `json:"verdicts"`
-				}
-				if json.Unmarshal(raw, &graded) == nil && len(graded.Verdicts) == 0 {
-					return noneMatured()
-				}
-				return printJSON(cmd.OutOrStdout(), raw)
-			}
-			trend, err := client.Trend(cmd.Context(), days)
+			raw, trend, err := client.Trend(cmd.Context(), horizon)
 			if err != nil {
 				return err
 			}
 			if len(trend.Rows) == 0 {
-				return noneMatured()
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "No reading is %d days old yet, so nothing can be graded:  doit forecast run\n", trend.Days)
+				return exitCode(1)
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), raw)
 			}
 			return screens.Trend(cmd.OutOrStdout(), trend, screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout))
 		},
 	}
-	cmd.Flags().IntVar(&days, "days", 7, "Which horizon to grade: 7, 14 or 30")
+	cmd.Flags().IntVar(&days, "days", 0, "Which horizon to grade, in days")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON to stdout")
 	return cmd
 }

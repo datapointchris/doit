@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 )
 
@@ -61,15 +62,15 @@ type RegisterEntry struct {
 }
 
 // Next reads the draw. machine is the desk it is offered to, and reroll asks
-// for a fresh draw though one stands.
-func (c *Client) Next(ctx context.Context, machine string, reroll bool) (Next, error) {
+// for a fresh draw though one stands. It answers the body it came in too.
+func (c *Client) Next(ctx context.Context, machine string, reroll bool) (json.RawMessage, Next, error) {
 	var answer Next
-	err := c.Get(ctx, "/next", NextQuery(machine, reroll), &answer)
-	return answer, err
+	raw, err := c.Get(ctx, "/next", nextQuery(machine, reroll), &answer)
+	return raw, answer, err
 }
 
-// NextQuery is the query GET /next takes, which `doit next --json` sends too.
-func NextQuery(machine string, reroll bool) url.Values {
+// nextQuery is the query GET /next takes.
+func nextQuery(machine string, reroll bool) url.Values {
 	query := url.Values{"machine": {machine}}
 	if reroll {
 		query.Set("reroll", "true")

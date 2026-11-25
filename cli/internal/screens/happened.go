@@ -12,9 +12,6 @@ import (
 	"github.com/datapointchris/doit/cli/internal/service"
 )
 
-// unknownActor is the kind the service names for an actor whose spelling it does not recognize.
-const unknownActor = "unknown"
-
 // Happened prints what every record says happened over the window: which
 // records were asked and which answered, then each group that holds
 // something. openEnded is a window that runs to now, which the title says
@@ -72,20 +69,6 @@ func verdictLines(answer service.Happened, width int) []line {
 	for _, named := range filled(strings.Join(answer.Asked, ", "), width, lead, strings.Repeat(" ", len(lead))) {
 		lines = append(lines, line{}.add(named, ""))
 	}
-	var recording []string
-	unknown := 0
-	for _, lane := range answer.Groups {
-		recorded := false
-		for _, cell := range lane.Grid {
-			recorded = recorded || cell.ActorKind != ""
-			if cell.ActorKind == unknownActor {
-				unknown++
-			}
-		}
-		if recorded {
-			recording = append(recording, lane.Name)
-		}
-	}
 	answered := line{}.add(groupIndent, "")
 	if failed := len(answer.Unavailable); failed > 0 {
 		answered = answered.add(fmt.Sprintf("%d of %d answered", len(answer.Asked)-failed, len(answer.Asked)), gotermstyle.CodeRed)
@@ -95,13 +78,13 @@ func verdictLines(answer service.Happened, width int) []line {
 	if len(answer.Partial) > 0 {
 		answered = answered.add(" · "+strings.Join(answer.Partial, ", ")+" partial", gotermstyle.CodeYellow)
 	}
-	if len(recording) > 0 {
-		answered = answered.add(" · actor recorded by "+strings.Join(recording, ", "), "")
+	if len(answer.RecordedBy) > 0 {
+		answered = answered.add(" · actor recorded by "+strings.Join(answer.RecordedBy, ", "), "")
 	} else {
 		answered = answered.add(" · no actor recorded", "")
 	}
-	if unknown > 0 {
-		answered = answered.add(fmt.Sprintf(" · %d by an actor of unknown kind", unknown), gotermstyle.CodeYellow)
+	if answer.UnknownActors > 0 {
+		answered = answered.add(fmt.Sprintf(" · %d by an actor of unknown kind", answer.UnknownActors), gotermstyle.CodeYellow)
 	}
 	return append(lines, answered)
 }

@@ -16,8 +16,8 @@ const (
 	clockWidth  = len("00:00")
 	dayFormat   = "Mon 02 Jan"
 	dayWidth    = len("Mon 26 Oct")
-	// actorWidth fits the service's longest actor kind, and unrecorded, the word for none.
-	actorWidth = max(len("unattended"), len("unrecorded"))
+	// noActor is what the actor column says of an entry whose record named nobody.
+	noActor = "unrecorded"
 )
 
 // noteCodes color a row's note by its urgency, as the lane contract names it.
@@ -54,7 +54,7 @@ func doneGroups(pr *printer, groups []service.Lane, dated bool) {
 		actors := 0
 		for _, cell := range lane.Grid {
 			if cell.ActorKind != "" {
-				actors = actorWidth
+				actors = max(actors, len(noActor), runes(cell.ActorKind))
 			}
 		}
 		used := len(itemIndent) + clockWidth + columnGap
@@ -80,7 +80,7 @@ func doneGroups(pr *printer, groups []service.Lane, dated bool) {
 			if actors > 0 {
 				who, code := cell.ActorKind, ""
 				if who == "" {
-					who, code = "unrecorded", codeDim
+					who, code = noActor, codeDim
 				}
 				printed = printed.add(fitted(who, actors, true), code).add(strings.Repeat(" ", columnGap), "")
 			}
