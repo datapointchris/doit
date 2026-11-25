@@ -596,7 +596,8 @@ class Views:
             raise BadRequest(str(error)) from error
         bounds = Bounds(start or happened.EARLIEST, stop or now)
         if bounds.start >= bounds.stop:
-            raise BadRequest(f'since={since} is not before {until or "now"}')
+            end = f'its end at {until}' if until else 'now'
+            raise BadRequest(f'the window starts at {since or "the earliest record"}, which is not before {end}.')
         results = self.readers.results(list(config.registry.completions.values()), bounds, now)
         groups = happened.fold(config.registry, results, self.kept(config, now), bounds, now)
         return {

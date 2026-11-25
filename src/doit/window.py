@@ -75,5 +75,5 @@ def window(since: str | None, until: str | None, now: dt.datetime) -> tuple[dt.d
     start = bound(since, now, end=False) if since else None
     stop = bound(until, now, end=True) if until else None
     if start and stop and start >= stop:
-        raise ValueError(f'--since {since} is not before --until {until}.')
+        raise ValueError(f'the window starts at {since}, which is not before its end at {until}.')
     return start, stop
