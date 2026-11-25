@@ -181,6 +181,7 @@ class Views:
             'state': payload,
             'offer_rows': pursuits.offer_rows(published, selection),
             'explain_rows': pursuits.explain_rows(published, selection),
+            'draw_size': pursuits.DRAW_SIZE,
             'context': context,
             'context_error': context_error,
             'pursuits': config.pursuits,
