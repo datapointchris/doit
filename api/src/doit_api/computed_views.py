@@ -73,6 +73,22 @@ def instant(text: str | None, name: str) -> dt.datetime | None:
     return parsed.astimezone()
 
 
+def occurred_at(body: dict, now: dt.datetime) -> dt.datetime:
+    """When a log's entry happened: `ago` back from now, its `occurred_at`, or now."""
+    ago, at = body.get('ago'), body.get('occurred_at')
+    if ago is not None and at is not None:
+        raise BadRequest('ago and occurred_at each say when it happened, so pass one')
+    if ago is not None:
+        length = window.span(ago)
+        if length is None:
+            raise BadRequest(f'--ago takes a span such as 30s, 90m, 3h, 2d or 1w, not {ago!r}')
+        return (now - length).astimezone()
+    occurred = instant(at, 'occurred_at') or now
+    if occurred > now + FUTURE_SKEW:
+        raise BadRequest(f'occurred_at={at!r} is later than now, and a log records what has happened')
+    return occurred
+
+
 def completion_day(text: str) -> dt.date:
     """A completion's day, or a refusal naming the field."""
     try:
@@ -249,15 +265,14 @@ class Views:
         name = self.matched(str(body['pursuit']), config.pursuits)
         minutes = body.get('duration_minutes')
         refusal = pursuits.minutes_refusal(name, config.pursuits[name], minutes)
+        occurred = occurred_at(body, now)
         if body.get('check'):
             if refusal and minutes is not None:
                 raise BadRequest(refusal)
-            return self.log_check(name, config.pursuits[name], refusal, body.get('item_id'))
+            checked = self.log_check(name, config.pursuits[name], refusal, body.get('item_id'))
+            return {**checked, 'occurred_at': occurred.isoformat()}
         if refusal:
             raise BadRequest(refusal)
-        occurred = instant(body.get('occurred_at'), 'occurred_at') or now
-        if occurred > now + FUTURE_SKEW:
-            raise BadRequest(f'occurred_at={body["occurred_at"]!r} is later than now, and a log records what has happened')
         state = self.state(config, now)
         standing = self.standing_draw(now)
         entry = pursuits.done_record(

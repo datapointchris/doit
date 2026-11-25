@@ -179,13 +179,18 @@ def test_a_logged_pursuit_counts_toward_its_standing_and_names_who_logged_it(sto
     logged = client.post('/api/v1/journal/done', json={'pursuit': 'wa', 'note': 'around the block', 'machine': 'Desk.local'})
     unmeasured = client.post('/api/v1/journal/done', json={'pursuit': 'run'})
     ahead = client.post('/api/v1/journal/done', json={'pursuit': 'walk', 'occurred_at': '2030-01-01T00:00:00Z'})
+    unread = client.post('/api/v1/journal/done', json={'pursuit': 'walk', 'ago': '3x'})
+    checked = client.post('/api/v1/journal/done', json={'pursuit': 'walk', 'ago': '2d', 'check': True})
+    earlier = client.post('/api/v1/journal/done', json={'pursuit': 'walk', 'ago': '3h'})
 
     assert logged.status_code == 201
     entry = logged.json()['entry']
     assert (entry['pursuit'], entry['machine'], entry['actor'], entry['note']) == ('walk', 'desk', 'chris', 'around the block')
-    assert client.get('/api/v1/pursuits').json()['state']['done']['walk'] == 1
-    assert (unmeasured.status_code, ahead.status_code) == (422, 422)
-    assert [record['event'] for record in store.journal()].count('done') == 1
+    assert (unmeasured.status_code, ahead.status_code, unread.status_code) == (422, 422, 422)
+    assert dt.datetime.fromisoformat(checked.json()['occurred_at']) == NOW - dt.timedelta(days=2)
+    assert dt.datetime.fromisoformat(earlier.json()['entry']['occurred_at']) == NOW - dt.timedelta(hours=3)
+    assert client.get('/api/v1/pursuits').json()['state']['done']['walk'] == 2
+    assert [record['event'] for record in store.journal()].count('done') == 2
 
 
 def test_the_standing_draw_retries_a_failed_resolve_and_drops_each_logged_pursuit_until_none_is_left(store):
