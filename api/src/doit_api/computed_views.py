@@ -636,24 +636,24 @@ class Views:
         reading = forecast.forecast_from(
             config.pursuits, now, float(minutes), live, self.store.journal(), config.cycles, replicates, machine=MACHINE
         )
-        stored = dc.asdict(reading)
         with self.store.write() as connection:
-            self.store.add_reading(connection, stored, stamp(now))
-        return stored
+            self.store.add_reading(connection, dc.asdict(reading), stamp(now))
+        return forecast.answered(reading)
 
     def readings(self) -> list[forecast.Reading]:
         return [forecast.reading_from(held) for held in self.store.readings()]
 
     def forecast_list(self) -> list[dict]:
-        return [dc.asdict(reading) for reading in self.readings()]
+        return [forecast.answered(reading) for reading in self.readings()]
 
     def forecast_show(self, handle: str) -> dict:
         reading = forecast.select(self.readings(), handle)
         if reading is None:
             raise NotFound('no forecast stored yet' if not handle else f'no forecast taken at {handle}')
-        return dc.asdict(reading)
+        return forecast.answered(reading)
 
     def forecast_trend(self, days: int) -> dict:
+        """The matured readings graded at one horizon, with the row `doit forecast trend` prints for each verdict."""
         if days not in forecast.HORIZONS:
             raise BadRequest(f'days must be one of {", ".join(str(horizon) for horizon in forecast.HORIZONS)}')
         stored = self.readings()
@@ -662,4 +662,5 @@ class Views:
             'days': days,
             'readings': len(forecast.matured(stored, self.now(), days)),
             'verdicts': [dc.asdict(verdict) for verdict in verdicts],
+            'rows': forecast.trend_rows(verdicts),
         }

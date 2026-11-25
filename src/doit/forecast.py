@@ -418,6 +418,55 @@ def goal_met(prediction: dict) -> float | None:
     return did / asked * 100
 
 
+def reading_rows(reading: Reading) -> list[dict]:
+    """Each pursuit's row of `doit forecast show`, doing most over the month first, each cell as it prints.
+
+    `goal` is None for a reading taken before goals were recorded. A row whose
+    month reaches under 90% of its goal is `short_of_goal`.
+    """
+    month = reading.horizons.get('30', {})
+    week = reading.horizons.get('7', {})
+    rows = []
+    for name in sorted(month, key=lambda row: -month[row]['occasions']):
+        met = goal_met(month[name])
+        estimate = reading.durations.get(name, {})
+        rows.append(
+            {
+                'name': name,
+                'week': f'{week.get(name, {}).get("occasions", 0):.1f}',
+                'month': f'{month[name]["occasions"]:.1f}',
+                'hours': f'{month[name]["minutes"] / 60:.1f}',
+                'goal': reading.goals.get(name),
+                'of_goal': '—' if met is None else f'{met:.0f}%',
+                'short_of_goal': met is not None and met < 90,
+                'estimate': f'{int(estimate.get("minutes", 0))}m {estimate.get("source", "")}',
+            }
+        )
+    return rows
+
+
+def answered(reading: Reading) -> dict:
+    """A reading as the service answers it: as stored, with the rows its screen prints and what its estimates rest on."""
+    return {**dc.asdict(reading), 'rows': reading_rows(reading), 'estimates': source_summary(reading)}
+
+
+def trend_rows(verdicts: list[Verdict]) -> list[dict]:
+    """Each verdict's row of `doit forecast trend`, each cell as it prints.
+
+    A row whose prediction missed by a whole occasion or more is `missed`.
+    """
+    return [
+        {
+            'pursuit': verdict.pursuit,
+            'said': f'{verdict.predicted:.1f}',
+            'did': f'{verdict.actual:.1f}',
+            'error': f'{verdict.error:+.1f}',
+            'missed': abs(verdict.error) >= 1,
+        }
+        for verdict in verdicts
+    ]
+
+
 def emit(reading: Reading) -> None:
     """One reading, as occasions and hours against what each goal asks for in a month."""
     month = reading.horizons.get('30', {})
