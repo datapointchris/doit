@@ -98,7 +98,7 @@ import PickButton from './PickButton.vue'
 const props = defineProps<{ view: View; picks: ShownPick[]; answers: NudgeAnswer[] }>()
 const store = usePanelStore()
 
-/** The amounts a timed pursuit offers beside its usual one, as the terminal's minutes step does. */
+/** The fixed amounts a timed pursuit's Log offers as chips, beside its usual one. */
 const amounts = [15, 30, 45, 60]
 /** Where a Log starts on a pursuit with no usual amount. */
 const UNUSUAL_START = 30

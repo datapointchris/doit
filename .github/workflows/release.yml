@@ -112,15 +112,15 @@ jobs:
 
       # The binary embeds the panel page from cli/internal/panelpage/dist, which a
       # checkout holds only as a placeholder. A binary built without this build
-      # would serve that placeholder, so a dist still carrying its marker fails
-      # the release.
+      # would serve that placeholder, so a dist holding no script that the build
+      # wrote fails the release.
       - name: Build the panel page
         working-directory: cli/web
         run: |
           npm ci
           npm run build
-          if grep -q 'name="doit-panel-page" content="placeholder"' ../internal/panelpage/dist/index.html; then
-            echo "::error::cli/internal/panelpage/dist/index.html is still the placeholder after the page's build"
+          if ! compgen -G '../internal/panelpage/dist/assets/*.js' > /dev/null; then
+            echo "::error::the page's build wrote no script under cli/internal/panelpage/dist/assets, so the binary would embed the placeholder"
             exit 1
           fi
 

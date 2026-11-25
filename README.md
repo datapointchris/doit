@@ -478,7 +478,7 @@ It exits 1 where the completion did not go through, and 4 where the service gave
 ### `panel open` shows today's rows as a page in a window that closes when it loses focus
 
 ```bash
-doit desk-nudge panel open   # 0 once the window opens, 4 with no watch, 1 with no webviewrs
+doit desk-nudge panel open   # 0 once the window opens, 4 with no watch, 1 where it cannot open
 ```
 
 `panel open` asks the watch over its socket for the page's address, then replaces itself with
@@ -486,9 +486,12 @@ doit desk-nudge panel open   # 0 once the window opens, 4 with no watch, 1 with 
 so does focus moving elsewhere. A second `panel open` while the window is open raises that window,
 because webviewrs focuses a window name that is already open.
 
-- **With no watch**, it exits 4 and names the `desk-nudge` user service. A key binding has no
-  terminal, so a notification says the same. An older doit's watch serves no page, and that also
-  exits 4, saying that restarting the service starts this doit's watch.
+- **Where no watch answers**, it exits 4 and names the `desk-nudge` user service. A key binding has
+  no terminal, so a notification says the same. A later run can outlast this, once the service
+  starts.
+- **Where the watch answers and serves no page**, it exits 1, and a notification says why. An older
+  doit's watch serves none, and neither does a watch that could not listen on `127.0.0.1` at its
+  start. Restarting the service settles both.
 - **With no `webviewrs` on `PATH`**, it names it and exits 1.
 
 The watch serves the page on `127.0.0.1`, on a port it picks at each start:
@@ -500,18 +503,27 @@ The watch serves the page on `127.0.0.1`, on a port it picks at each start:
   `cli/internal/panelpage/page.go`. Only a process that can open the socket gets one.
 - **The page reaches the socket's routes under `/api/`**, so `GET /api/panel` and
   `POST /api/pending-picks` answer as `GET /panel` and the routes below do.
+- **It assumes one person per desk.** The code travels in webviewrs's argv, which any local user
+  can read from `/proc`, and redeem in the moments before the window does.
+
+A restarted watch listens on a new port and admits no earlier cookie. So a window open across the
+restart can reach nothing, and says so: Esc closes it, and the next `panel open` starts a fresh one.
 
 The page draws the suggestion first. Its Log button starts from the pursuit's usual minutes, and
-chips step to 15, 30, 45 or 60. Beside it are today's figures, the habits with a circle per set, the
-pursuits owed, and each lane. A click is a pending pick, and a row ticked done stays in its place
-for the rest of the day. A lane that failed draws its reason, and rows read before the service
-stopped answering are marked stale. The page reads the panel again whenever its window shows, and
-starts afresh when the desk's day changes. Every control takes Tab and Space.
+chips offer a few fixed amounts. Beside it are today's figures, the habits with a circle per set,
+the pursuits owed, and each lane. A click is a pending pick, and a row ticked done stays in its
+place for the rest of the day. When the panel stops listing a pick that the page saw under way,
+the page asks `GET /pending-picks/{id}` how it ended, rather than taking it as done. A lane that
+failed draws its reason, and rows read before the service stopped answering are marked stale. A
+watch that has not read the view yet shows why, such as a desk with no login, and the page asks
+again every few seconds. The page reads the panel again whenever its window shows, and starts
+afresh when the desk's day changes. Every control takes Tab and Space.
 
 The page is Vue, in `cli/web`. `npm run build` there writes it into
 `cli/internal/panelpage/dist/`, which the binary embeds. A checkout holds only a placeholder page
 there, so a binary from `go build` alone serves a page saying how to build it. The release builds
-the page first, and fails where the placeholder is still in place. `.nvmrc` names the Node version.
+the page first, and fails where the build wrote no script under `dist/assets`. `.nvmrc` names the
+Node version.
 
 ### A click on the panel page commits a few seconds later, and a second click takes it back
 
@@ -524,6 +536,8 @@ closing the page keeps the click. The socket takes and gives back pending picks:
 POST   /pending-picks       {"key": "habit:17", "minutes": null}
                             201 the pick, pending until its commit_at
                             200 the pick that key had waiting, taken back instead
+GET    /pending-picks/{id}  200 the pick: pending, committing, or how it ended, for endedAnsweredFor
+                            after the panel stops listing it, 404 this desk holds no pick by that id now
 DELETE /pending-picks/{id}  200 the pick, taken back, and again on a resend
                             404 this desk holds no pick by that id now, 409 it is committing or ended
 ```

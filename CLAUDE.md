@@ -99,12 +99,14 @@ data reads the service's API.
 **Let the panel page draw the panel document's `view`, not its `rows`.** The page places each part
 of the view on a card of its own, the suggestion, the habits, the pursuits and each lane, which a
 flat list of rows cannot carry. It still parses no key: every key it posts is one the view names,
-and the watch runs every pick.
+and the watch runs every pick. How a pick ended is the watch's to say, so the page asks
+`GET /pending-picks/{id}` for one the panel stopped listing, and never infers it from the absence.
+The Log button's chips are the page's own control, not the terminal's minutes step.
 
 **Keep the placeholder at `cli/internal/panelpage/dist/index.html`.** `go:embed` needs a file there,
 so a checkout with no page build still compiles. `npm run build` in `cli/web` writes over it, and git
 then shows it modified, so `git restore -- cli/internal/panelpage/dist/index.html` before a commit.
-The release builds the page and fails where the placeholder is still in place.
+The release builds the page and fails where the build wrote no script under `dist/assets`.
 
 ## The service runs no command, and the CLI's own code starts the processes below
 

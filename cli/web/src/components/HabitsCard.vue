@@ -80,7 +80,7 @@ const held = (key: string | null) => key !== null && props.picked.some((pick) =>
 const setsDone = (row: HabitRow) => row.items.reduce((sum, item) => sum + Math.min(setsCounted(item, props.picks), item.target), 0)
 const setsTarget = (row: HabitRow) => row.items.reduce((sum, item) => sum + item.target, 0)
 
-// Each checklist's sets start open, as layout C draws them.
+// Each checklist's sets start open, so a set takes one click.
 const closed = reactive(new Set<string>())
 const isOpen = (row: HabitRow) => !closed.has(identity(row))
 function toggle(row: HabitRow) {

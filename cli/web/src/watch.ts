@@ -40,6 +40,11 @@ export function click(key: string, minutes: number | null): Promise<Answered<Sho
   return ask<ShownPick>('POST', '/pending-picks', { key, minutes })
 }
 
+/** How a pick stands, or how it ended, for a while after the panel stops listing it. */
+export function readPick(id: string): Promise<Answered<ShownPick>> {
+  return ask<ShownPick>('GET', `/pending-picks/${encodeURIComponent(id)}`)
+}
+
 /** Takes a waiting pick back. A resend answers as the first did, so one that got no answer is sent once more. */
 export async function takeBack(id: string): Promise<Answered<ShownPick>> {
   const first = await ask<ShownPick>('DELETE', `/pending-picks/${encodeURIComponent(id)}`)

@@ -10,6 +10,8 @@ const COMMITTING_POLL_MS = 1_000
 const SETTLING_POLL_MS = 3_000
 /** How long after a pick ends the page waits for that read before it stops asking. */
 const SETTLING_FOR_MS = 30_000
+/** How often a panel whose watch has not read the view yet is read again. */
+const VIEWLESS_POLL_MS = 5_000
 
 /** A row as a section draws it, and whether the view has dropped it since this page drew it. */
 export interface Placed<Row> {
@@ -32,6 +34,12 @@ export function createPanelStore(now: () => Date = () => new Date()) {
     panel: null as Panel | null,
     /** Why the latest read of the panel got no answer, while the page shows the one before it. */
     unanswered: null as string | null,
+    /**
+     * Whether the latest read found no watch, or one that does not admit this
+     * page. A restarted watch listens at a new address, so this window cannot
+     * reach it again.
+     */
+    cutOff: false,
     /** The desk's day that the page shows. */
     day: dayOf(now()),
     notice: null as string | null,
@@ -61,7 +69,7 @@ export function createPanelStore(now: () => Date = () => new Date()) {
     if (!state.done.includes(key)) state.done.push(key)
   }
 
-  function apply(panel: Panel) {
+  async function apply(panel: Panel) {
     const listed = new Set(panel.picks.map((pick) => pick.id))
     for (const pick of panel.picks) {
       if (underWay(pick)) {
@@ -71,24 +79,39 @@ export function createPanelStore(now: () => Date = () => new Date()) {
       if (pick.state === 'done' || pick.state === 'skipped') markDone(pick.key)
       if (seenUnderWay.delete(pick.id)) tell(endedText(pick))
     }
-    // The watch lists a pick that went through only until its next read of the
-    // view, which may begin before this page's next read. A refused or skipped
-    // pick stays listed, so a pick seen under way that left the list went through.
-    for (const [id, pick] of seenUnderWay) {
-      if (listed.has(id)) continue
-      seenUnderWay.delete(id)
-      markDone(pick.key)
-      tell(endedText({ ...pick, state: 'done' }))
-    }
+    // The watch's next read of the view drops a done, uncertain or canceled
+    // pick from the list, and that read may begin before this page's next one.
+    // So the page asks the watch how each pick it saw under way ended, before it
+    // draws the panel, so a row whose pick went through keeps its place.
+    const left = [...seenUnderWay.values()].filter((pick) => !listed.has(pick.id))
+    await Promise.all(left.map(settle))
     for (const held of panel.picked) markDone(held.key)
     state.panel = panel
     state.unanswered = null
+    state.cutOff = false
+  }
+
+  async function settle(pick: ShownPick) {
+    const answered = await watch.readPick(pick.id)
+    if (answered.ok && underWay(answered.body)) return
+    if (answered.ok) {
+      seenUnderWay.delete(pick.id)
+      if (answered.body.state === 'done' || answered.body.state === 'skipped') markDone(answered.body.key)
+      tell(endedText(answered.body))
+    } else if (answered.status === 404) {
+      seenUnderWay.delete(pick.id)
+      tell(`${pick.text}: the watch no longer says how it ended, so its row shows what the latest read found.`)
+    }
   }
 
   function schedule() {
     clearTimeout(timer)
     const panel = state.panel
     if (stopped || !panel) return
+    if (!panel.view) {
+      timer = setTimeout(() => void load(), VIEWLESS_POLL_MS)
+      return
+    }
     const moment = now().getTime()
     const readAt = panel.read_at ? Date.parse(panel.read_at) : 0
     const waits: number[] = []
@@ -105,8 +128,11 @@ export function createPanelStore(now: () => Date = () => new Date()) {
   function load(): Promise<void> {
     reading ??= (async () => {
       const answered = await watch.readPanel()
-      if (answered.ok) apply(answered.body)
-      else state.unanswered = answered.message
+      if (answered.ok) await apply(answered.body)
+      else {
+        state.unanswered = answered.message
+        state.cutOff = answered.status === 0 || answered.status === 403
+      }
       schedule()
     })().finally(() => {
       reading = null
@@ -232,6 +258,8 @@ function endedText(pick: ShownPick): string {
       return `${pick.text}: done.`
     case 'skipped':
       return `${pick.text}: ${pick.message ?? 'already done'}.`
+    case 'canceled':
+      return `${pick.text} was taken back. Nothing was written.`
     default:
       return pick.message ? `${pick.text}: ${pick.message}` : `${pick.text}: ${pick.state}.`
   }

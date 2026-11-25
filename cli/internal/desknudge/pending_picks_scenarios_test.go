@@ -142,6 +142,11 @@ func TestAHabitClickCommitsAfterFourSecondsOnceAndASecondClickCommitsNothing(t *
 	if code := f.askSocket(http.MethodDelete, "/pending-picks/"+waiting.ID, nil, &again); code != http.StatusOK || !reflect.DeepEqual(again, deleted) {
 		t.Errorf("deleting it again answered %d %+v, want 200 with the same canceled pick", code, again)
 	}
+	// The panel never lists a canceled pick, so a page that saw it pending asks for it by id.
+	var asked ShownPick
+	if code := f.askSocket(http.MethodGet, "/pending-picks/"+canceled.ID, nil, &asked); code != http.StatusOK || asked.State != OutcomeCanceled {
+		t.Errorf("asking for habit 3's pick answered %d %+v, want 200 with it canceled", code, asked)
+	}
 	var unknown PickError
 	if code := f.askSocket(http.MethodDelete, "/pending-picks/"+newID(clicked), nil, &unknown); code != http.StatusNotFound {
 		t.Errorf("deleting an id this desk never held answered %d %+v, want 404", code, unknown)

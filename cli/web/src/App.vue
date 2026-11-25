@@ -2,17 +2,29 @@
   <div
     v-if="!panel || !view"
     class="empty-board">
-    <p>the watch is starting</p>
+    <p>{{ emptyText }}</p>
     <p
-      v-if="state.unanswered"
+      v-if="emptyReason"
       class="muted">
-      {{ state.unanswered }}
+      {{ emptyReason }}
+    </p>
+    <p
+      v-if="state.cutOff"
+      class="failed"
+      role="alert">
+      {{ CUT_OFF }}
     </p>
   </div>
   <main
     v-else
     class="board"
     :class="{ stale: marked }">
+    <p
+      v-if="state.cutOff"
+      class="failed full"
+      role="alert">
+      {{ CUT_OFF }}
+    </p>
     <header class="topline full">
       <span class="date">{{ dateText }}</span>
       <span>
@@ -92,12 +104,21 @@ const panel = computed(() => state.panel)
 const view = computed(() => state.panel?.view ?? null)
 const minutes = computed(() => view.value?.totals.minutes ?? null)
 const habitsDone = computed(() => view.value?.habits.rows.filter((row) => row.done).length ?? 0)
-// Lanes a pick completes come first, as layout C stacks review and practice over upcoming.
+// Lanes a pick completes come first, so the rows a click acts on sit above those it cannot.
 const lanes = computed(() => {
   const all = view.value?.lanes ?? []
   const pickable = (lane: (typeof all)[number]) => lane.rows.some((row) => row.key !== null)
   return [...all.filter(pickable), ...all.filter((lane) => !pickable(lane))]
 })
+
+const CUT_OFF =
+  'This window lost the desk nudge watch, which listens at a new address after each restart. Esc closes it, and the next panel open shows the panel afresh.'
+
+// Before the first answer the watch is being asked. A panel with no view is one whose watch has not read it yet, and says why.
+const emptyText = computed(() =>
+  panel.value ? "the watch has not read today's rows yet" : (state.unanswered ?? 'asking the desk nudge watch'),
+)
+const emptyReason = computed(() => panel.value?.stale_reason?.detail ?? null)
 
 const clock = ref(store.now())
 const dateText = computed(() =>

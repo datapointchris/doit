@@ -271,11 +271,11 @@ func chime(ctx context.Context) {
 	}
 }
 
-// notify is a passing notification, for what the person should know now.
 // Notify shows a passing notice, for a command whose stderr nobody reads, such
 // as one a waybar pill or a key starts.
 func Notify(ctx context.Context, summary, body string) { notify(ctx, summary, body) }
 
+// notify is a passing notification, for what the person should know now.
 func notify(ctx context.Context, summary, body string) {
 	if _, err := notifyProgram(summary, body).run(ctx); err != nil {
 		logger.Warn(fmt.Sprintf("could not notify %q: %v", summary, err))

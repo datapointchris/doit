@@ -29,10 +29,13 @@ import (
 //	                             200 the pick that key had waiting, taken back instead, state canceled
 //	                             409 refused, 502 the state file could not be written
 //	                             not safe to repeat: a second one is a second click, so a client never resends it
+//	GET    /pending-picks/{id}   200 the pick: pending, committing, or how it ended, for endedAnsweredFor
+//	                             after the panel stops listing it
+//	                             404 this desk holds no pick by that id now
 //	DELETE /pending-picks/{id}   200 the pick taken back, state canceled, again on a resend
 //	                             404 this desk holds no pick by that id now, 409 it is committing or ended otherwise
 //	POST   /page-codes           201 {"url", "expires_at"}: the panel page's URL with a one-use code
-//	                             503 the watch serves no panel page
+//	                             409 the watch serves no panel page until the service restarts
 //
 // A failure answers {"exit_code": 2 | 1 | 4, "message": "..."}. A pending pick
 // answers as the panel's picks show one. The panel page reaches every route but
@@ -83,15 +86,19 @@ func (w *Watch) serve(ctx context.Context) (*server, error) {
 	}
 	pageRoutes := w.pageRoutes()
 	page := panelpage.New(pageRoutes, w.desk.Now)
+	unserved := ""
 	if err := page.Listen(ctx); err != nil {
 		logger.Error("the panel page is not served: " + err.Error())
-		page = nil
+		page, unserved = nil, err.Error()
 	}
 	routes := http.NewServeMux()
 	routes.Handle("/", pageRoutes)
 	routes.HandleFunc("POST /page-codes", func(response http.ResponseWriter, _ *http.Request) {
 		if page == nil {
-			answer(response, http.StatusServiceUnavailable, PickError{ExitCode: PickFailed, Message: "this watch serves no panel page, because it could not listen on 127.0.0.1"})
+			answer(response, http.StatusConflict, PickError{
+				ExitCode: PickFailed,
+				Message:  "this watch serves no panel page, because it could not listen at its start (" + unserved + "). Restarting the desk-nudge user service tries again.",
+			})
 			return
 		}
 		url, expires := page.Mint()
@@ -143,6 +150,14 @@ func (w *Watch) pageRoutes() *http.ServeMux {
 		default:
 			answer(response, http.StatusCreated, pick)
 		}
+	})
+	routes.HandleFunc("GET /pending-picks/{id}", func(response http.ResponseWriter, request *http.Request) {
+		pick, err := w.PickByID(request.PathValue("id"))
+		if err != nil {
+			answer(response, http.StatusNotFound, PickError{ExitCode: PickRefused, Message: err.Error()})
+			return
+		}
+		answer(response, http.StatusOK, pick)
 	})
 	routes.HandleFunc("DELETE /pending-picks/{id}", func(response http.ResponseWriter, request *http.Request) {
 		pick, err := w.CancelPending(request.PathValue("id"))
@@ -248,7 +263,8 @@ const pageCodeWithin = 5 * time.Second
 // AskPageCode asks the watch for the panel page's URL with a fresh one-use
 // code. Where nothing answers, it is ErrNoWatch or ErrWatchServesNoPicks, as
 // AskPick's is. Where the watch has no such route, or answers in a shape that
-// this doit cannot read, it is ErrWatchServesNoPage. A watch that refuses says why.
+// this doit cannot read, it is ErrWatchServesNoPage. A refusal is a *PickError
+// carrying the exit code the watch named, and why.
 func (p Paths) AskPageCode(ctx context.Context) (PageCode, error) {
 	ctx, cancel := context.WithTimeout(ctx, pageCodeWithin)
 	defer cancel()
@@ -270,7 +286,11 @@ func (p Paths) AskPageCode(ctx context.Context) (PageCode, error) {
 		if json.NewDecoder(response.Body).Decode(&failure) != nil || failure.Message == "" {
 			failure.Message = fmt.Sprintf("it answered HTTP %d to POST /page-codes", response.StatusCode)
 		}
-		return PageCode{}, errors.New("the desk nudge watch minted no code for the panel page: " + failure.Message)
+		if failure.ExitCode == 0 {
+			failure.ExitCode = PickFailed
+		}
+		failure.Message = "the desk nudge watch minted no code for the panel page: " + failure.Message
+		return PageCode{}, &failure
 	case json.NewDecoder(response.Body).Decode(&minted) != nil || minted.URL == "":
 		return PageCode{}, fmt.Errorf("%w: it answered a code this doit does not read", ErrWatchServesNoPage)
 	}

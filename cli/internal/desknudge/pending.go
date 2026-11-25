@@ -17,6 +17,10 @@ const (
 	pendingFor = 4 * time.Second
 	// rememberedEndedPicks caps the refused and skipped picks kept for the panel, newest first.
 	rememberedEndedPicks = 20
+	// endedAnsweredFor is how long GET /pending-picks/{id} still answers an
+	// ended pick that the panel no longer lists. A page that saw the pick under
+	// way then reads how it ended, rather than guessing from its absence.
+	endedAnsweredFor = 10 * time.Minute
 )
 
 // PendingPick is one click waiting for its commit_at, or committing.
@@ -38,8 +42,10 @@ type PendingPick struct {
 // EndedPick is how a pending pick came out, which the panel shows on its row.
 // A done or uncertain one shows until a view read begins after it ended. A
 // refused or skipped one shows until its key is picked again, or a view read
-// begins on a later day. A canceled one is never drawn. It is kept until a
-// read, so a second DELETE of it answers it again.
+// begins on a later day. A canceled one is never drawn. Each stays kept for at
+// least endedAnsweredFor after it ended, past the read that drops it from the panel, so
+// GET /pending-picks/{id} answers how it ended, and a second DELETE of a
+// canceled one answers it again.
 type EndedPick struct {
 	ID       string `json:"id"`
 	Key      string `json:"key"`
@@ -142,9 +148,17 @@ func (s *State) forgetEnded(key string) {
 	})
 }
 
-// endPick keeps how a pending pick came out, beside those still kept.
+// endPick keeps how a pending pick came out, beside those the panel still
+// lists and those that ended within endedAnsweredFor of it.
 func (s *State) endPick(ended EndedPick, readAt *string) {
-	kept := append(s.endedKept(readAt), ended)
+	newest, _ := instant(&ended.EndedAt)
+	listed := s.endedKept(readAt)
+	kept := slices.DeleteFunc(slices.Clone(s.Panel.Ended), func(earlier EndedPick) bool {
+		at, _ := instant(&earlier.EndedAt)
+		stillListed := slices.ContainsFunc(listed, func(shown EndedPick) bool { return shown.ID == earlier.ID })
+		return !stillListed && newest.Sub(at) > endedAnsweredFor
+	})
+	kept = append(kept, ended)
 	lasting := 0
 	for i := len(kept) - 1; i >= 0; i-- {
 		if kept[i].heldUntilRead() {
@@ -170,6 +184,21 @@ func (s *State) shownPicks(readAt *string) []ShownPick {
 		}
 	}
 	return shown
+}
+
+// PickByID is the pick id as the panel shows one: pending, committing, or how
+// it ended, while this desk still keeps it.
+func (w *Watch) PickByID(id string) (ShownPick, error) {
+	state := w.desk.Paths.readState()
+	if pick := state.pendingPick(id); pick != nil {
+		return pick.shown(), nil
+	}
+	for _, ended := range state.Panel.Ended {
+		if ended.ID == id {
+			return ended.shown(), nil
+		}
+	}
+	return ShownPick{}, fmt.Errorf("%w %s is pending on this desk, or ended lately", ErrNoPendingPick, id)
 }
 
 // errUnchanged stops a change that found nothing to write.

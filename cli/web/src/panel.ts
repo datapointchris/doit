@@ -1,14 +1,21 @@
 // The watch serves the panel document at /api/panel, in the shape that
 // schemas/desk-nudge-panel.schema.json and schemas/desk-panel-view.schema.json
-// describe. The page names only what it draws.
+// describe. The page names only what it draws. Each vocabulary below is held
+// to its schema enum by schema-vocabularies.spec.ts.
 
-export type PickState = 'pending' | 'committing' | 'done' | 'skipped' | 'refused' | 'uncertain' | 'canceled'
+export const PICK_STATES = ['pending', 'committing', 'done', 'skipped', 'refused', 'uncertain', 'canceled'] as const
+export type PickState = (typeof PICK_STATES)[number]
+export const PICK_ACTIONS = ['complete', 'tick', 'untick'] as const
+export const UNITS = ['minutes', 'checkoffs'] as const
+export const URGENCIES = ['none', 'due', 'overdue'] as const
+export const PART_STATUSES = ['ok', 'unavailable'] as const
+export const CHECKLIST_NAMES = ['habits', 'review', 'practice'] as const
 
 export interface ShownPick {
   id: string
   key: string
   text: string
-  action: 'complete' | 'tick' | 'untick'
+  action: (typeof PICK_ACTIONS)[number]
   state: PickState
   minutes: number | null
   commit_at: string
@@ -30,7 +37,8 @@ export interface Choice {
   completes: Completes | null
 }
 
-export type Unit = 'minutes' | 'checkoffs'
+export type Unit = (typeof UNITS)[number]
+export type PartStatus = (typeof PART_STATUSES)[number]
 
 export interface Suggestion {
   pursuit: string
@@ -85,14 +93,14 @@ export interface LaneRow {
   label: string
   text: string
   note: string
-  urgency: 'none' | 'due' | 'overdue'
+  urgency: (typeof URGENCIES)[number]
   key: string | null
 }
 
 export interface Lane {
   name: string
   title: string
-  status: 'ok' | 'unavailable'
+  status: PartStatus
   reason: string | null
   rows: LaneRow[]
   total: number
@@ -105,14 +113,14 @@ export interface UnitTotals {
 }
 
 export interface Checklist {
-  name: 'habits' | 'review' | 'practice'
+  name: (typeof CHECKLIST_NAMES)[number]
   done: number | null
   total: number | null
   unavailable: string
 }
 
 export interface Part<Row> {
-  status: 'ok' | 'unavailable'
+  status: PartStatus
   reason: string | null
   rows: Row[]
 }

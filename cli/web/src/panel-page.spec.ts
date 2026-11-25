@@ -38,7 +38,9 @@ function invented(): View {
 /**
  * The watch's routes as the page reaches them: a click waits HOLD_MS, a second
  * POST of its key or a DELETE of its id takes it back, and a pick that went
- * through leaves the view at the watch's next read.
+ * through leaves the view at the watch's next read. The panel lists picks as
+ * the watch's shownPicks does: never a canceled one, and a done or uncertain
+ * one only until a read begins after it ended. GET answers any pick by id.
  */
 class FakeWatch {
   view = invented()
@@ -47,6 +49,7 @@ class FakeWatch {
   picks: ShownPick[] = []
   committed: string[] = []
   deleted: string[] = []
+  asked: string[] = []
   reads = 0
   private serial = 0
 
@@ -60,28 +63,44 @@ class FakeWatch {
       view: structuredClone(this.view),
       nudge: null,
       picked: [],
-      picks: structuredClone(this.picks.filter((pick) => pick.state !== 'canceled')),
+      picks: structuredClone(this.listed()),
     }
+  }
+
+  private listed(): ShownPick[] {
+    const heldUntilRead = (pick: ShownPick) => pick.state === 'done' || pick.state === 'uncertain'
+    return this.picks.filter(
+      (pick) => pick.state !== 'canceled' && !(heldUntilRead(pick) && Date.parse(pick.ended_at!) < Date.parse(this.readAt)),
+    )
+  }
+
+  private end(pick: ShownPick, state: ShownPick['state']) {
+    pick.state = state
+    pick.ended_at = new Date().toISOString()
+  }
+
+  /** A pick taken back by another client of the socket, such as a second window or a terminal's DELETE. */
+  takeBackElsewhere(key: string) {
+    const waiting = this.picks.find((pick) => pick.key === key && pick.state === 'pending')
+    if (waiting) this.end(waiting, 'canceled')
   }
 
   private commitDue() {
     let read = false
     for (const pick of this.picks) {
       if (pick.state !== 'pending' || Date.parse(pick.commit_at) > Date.now()) continue
-      pick.state = 'done'
-      pick.ended_at = new Date().toISOString()
+      this.end(pick, 'done')
       this.committed.push(pick.key)
       read = true
     }
     if (read) this.readAgain()
   }
 
-  /** The watch's next read of the view, which a done pick no longer lists. */
+  /** The watch's next read of the view, which counts each done pick in its rows. */
   readAgain() {
     const done = this.picks.filter((pick) => pick.state === 'done').map((pick) => pick.key)
     for (const row of this.view.habits.rows) if (row.key && done.includes(row.key)) Object.assign(row, { done: true, key: null })
     for (const shown of this.view.lanes) shown.rows = shown.rows.filter((row) => !done.includes(row.key ?? ''))
-    this.picks = this.picks.filter((pick) => pick.state !== 'done')
     this.readAt = new Date(Date.now() + 1).toISOString()
   }
 
@@ -98,7 +117,7 @@ class FakeWatch {
       const { key, minutes } = JSON.parse(String(init?.body)) as { key: string; minutes: number | null }
       const waiting = this.picks.find((pick) => pick.key === key && pick.state === 'pending')
       if (waiting) {
-        waiting.state = 'canceled'
+        this.end(waiting, 'canceled')
         return json(200, waiting)
       }
       const pick: ShownPick = {
@@ -115,12 +134,16 @@ class FakeWatch {
       this.picks.push(pick)
       return json(201, pick)
     }
-    const deleted = path.match(/^\/api\/pending-picks\/(.+)$/)
-    if (method === 'DELETE' && deleted) {
-      const pick = this.picks.find((shown) => shown.id === deleted[1])
-      if (!pick) return json(404, { exit_code: 2, message: 'no pick' })
+    const byID = path.match(/^\/api\/pending-picks\/(.+)$/)
+    const pick = byID ? this.picks.find((shown) => shown.id === byID[1]) : undefined
+    if (byID && !pick) return json(404, { exit_code: 2, message: 'no pick' })
+    if (method === 'GET' && pick) {
+      this.asked.push(pick.id)
+      return json(200, pick)
+    }
+    if (method === 'DELETE' && pick) {
       this.deleted.push(pick.id)
-      pick.state = 'canceled'
+      this.end(pick, 'canceled')
       return json(200, pick)
     }
     return json(404, { exit_code: 2, message: `no route ${method} ${path}` })
@@ -196,6 +219,39 @@ describe('the panel page against a fake watch', () => {
     expect(row('review:check-disks').classes()).toContain('done')
   })
 
+  it('a pick that another client takes back is never told done', async () => {
+    await open()
+    await row('habit:1').trigger('click')
+    await flushPromises()
+    expect(row('habit:1').classes()).toContain('pending')
+
+    watch.takeBackElsewhere('habit:1')
+    await vi.advanceTimersByTimeAsync(HOLD_MS + 500)
+    expect(watch.committed).toEqual([])
+    expect(watch.asked).toHaveLength(1)
+    expect(row('habit:1').classes()).not.toContain('pending')
+    expect(page.get('[role="status"]').text()).not.toContain('done')
+  })
+
+  it('a desk whose watch has not read the view says why, and reads again', async () => {
+    const detail = 'not configured: config.toml sets no api; run `doit auth login <url>`'
+    vi.spyOn(watch, 'panel').mockImplementation(() => ({
+      schema_version: 3,
+      read_at: null,
+      stale_since: new Date().toISOString(),
+      stale_reason: { error: 'login', detail },
+      view: null,
+      nudge: null,
+      picked: [],
+      picks: [],
+    }))
+    await open()
+    expect(page.get('.empty-board').text()).toContain(detail)
+    const reads = watch.reads
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(watch.reads).toBeGreaterThan(reads)
+  })
+
   it('a failed lane draws its reason', async () => {
     watch.view.lanes.push({ ...lane('practice', []), status: 'unavailable', reason: 'practice timed out after 10s' })
     await open()
@@ -212,6 +268,6 @@ describe('the panel page against a fake watch', () => {
     await flushPromises()
     expect(watch.reads).toBe(reads + 1)
     expect(page.get('.topline .read').classes()).toContain('stale')
-    expect(page.get('.topline').text()).toContain('stale since')
+    expect(page.get('.topline .read').attributes('title')).toBe('no answer from the doit service')
   })
 })
