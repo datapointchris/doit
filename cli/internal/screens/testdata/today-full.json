@@ -1,0 +1,577 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T12:00:00-05:00",
+  "done": [
+    {
+      "name": "habits",
+      "title": "HABITS",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Make the bed",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T07:05:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "sam@desk",
+          "actor_kind": "by hand"
+        },
+        {
+          "text": "Vitamins",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T08:30:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 2,
+      "in_flight": 0,
+      "hints": [
+        "life habits list"
+      ]
+    },
+    {
+      "name": "pursuits",
+      "title": "PURSUITS",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "stretch · twelve minutes on the mat",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T09:15:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "sam@desk",
+          "actor_kind": "by hand"
+        },
+        {
+          "text": "errands · posted the parcel",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T10:40:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "claude-code/0f1e2d3c",
+          "actor_kind": "session"
+        },
+        {
+          "text": "novel",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T11:02:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "claude-code-unattended/4a5b6c",
+          "actor_kind": "unattended"
+        },
+        {
+          "text": "soup",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T11:30:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "a-runner-nobody-knows/x/y",
+          "actor_kind": "unknown"
+        }
+      ],
+      "total": 4,
+      "in_flight": 0,
+      "hints": [
+        "doit pursuits list"
+      ]
+    },
+    {
+      "name": "review",
+      "title": "REVIEW",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "water-heater-flush · Drain a bucket from the valve",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 1,
+      "in_flight": 0,
+      "hints": [
+        "doit review list"
+      ]
+    },
+    {
+      "name": "books",
+      "title": "BOOKS",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "only the first page of finished books was read",
+      "rows": [],
+      "grid": [
+        {
+          "text": "Finished a long book whose title runs well past the width of a narrow pane",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T06:45:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 1,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "meso",
+      "title": "MESO",
+      "meta": "",
+      "status": "unavailable",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "meso answered 502 on /review",
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": []
+    }
+  ],
+  "due": [
+    {
+      "name": "upcoming",
+      "title": "UPCOMING",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "nomad is not configured",
+      "rows": [
+        {
+          "label": "",
+          "text": "Dentist on Elm Street",
+          "note": "today 15:30",
+          "urgency": "due",
+          "handle": "life events show 88"
+        },
+        {
+          "label": "",
+          "text": "Return the library books before the branch closes for the holiday",
+          "note": "2d late",
+          "urgency": "overdue",
+          "handle": ""
+        }
+      ],
+      "grid": [],
+      "total": 2,
+      "in_flight": 0,
+      "hints": [
+        "life events list"
+      ],
+      "row_cap": 3
+    },
+    {
+      "name": "pursuits",
+      "title": "PURSUITS",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "garden",
+          "text": "Weed and water the raised beds",
+          "note": "3d overdue",
+          "urgency": "overdue",
+          "handle": "doit pursuits log garden",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "garden"
+          }
+        },
+        {
+          "label": "sketch",
+          "text": "Draw something from life",
+          "note": "1w overdue",
+          "urgency": "overdue",
+          "handle": "doit pursuits log sketch",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "sketch"
+          }
+        },
+        {
+          "label": "errands",
+          "text": "Clear the errand list",
+          "note": "due today",
+          "urgency": "overdue",
+          "handle": "doit pursuits log errands",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "errands"
+          }
+        },
+        {
+          "label": "letters",
+          "text": "Answer one letter from the pile on the hall table, oldest first",
+          "note": "2d overdue",
+          "urgency": "overdue",
+          "handle": "doit pursuits log letters",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "letters"
+          }
+        },
+        {
+          "label": "stretch",
+          "text": "Ten minutes of stretching",
+          "note": "due today",
+          "urgency": "overdue",
+          "handle": "doit pursuits log stretch",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "stretch"
+          }
+        },
+        {
+          "label": "piano",
+          "text": "Practise scales and one piece",
+          "note": "5d overdue",
+          "urgency": "overdue",
+          "handle": "doit pursuits log piano",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "piano"
+          }
+        },
+        {
+          "label": "novel",
+          "text": "Read the novel on the nightstand",
+          "note": "due today",
+          "urgency": "overdue",
+          "handle": "doit pursuits log novel",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "novel"
+          }
+        },
+        {
+          "label": "bike",
+          "text": "Ride the long loop",
+          "note": "2w overdue",
+          "urgency": "overdue",
+          "handle": "doit pursuits log bike",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "bike"
+          }
+        },
+        {
+          "label": "soup",
+          "text": "Cook a pot of soup for the week",
+          "note": "due today",
+          "urgency": "overdue",
+          "handle": "doit pursuits log soup",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "soup"
+          }
+        },
+        {
+          "label": "budget",
+          "text": "Reconcile the household budget",
+          "note": "4d overdue",
+          "urgency": "overdue",
+          "handle": "doit pursuits log budget",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "budget"
+          }
+        },
+        {
+          "label": "closet",
+          "text": "Sort one shelf of the closet",
+          "note": "due today",
+          "urgency": "overdue",
+          "handle": "doit pursuits log closet",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "closet"
+          }
+        },
+        {
+          "label": "photos",
+          "text": "Back up the camera roll",
+          "note": "3w overdue",
+          "urgency": "overdue",
+          "handle": "doit pursuits log photos",
+          "completes": {
+            "kind": "pursuit",
+            "ref": "photos"
+          }
+        }
+      ],
+      "grid": [],
+      "total": 12,
+      "in_flight": 0,
+      "hints": [
+        "doit next --explain"
+      ],
+      "row_cap": 10
+    },
+    {
+      "name": "review",
+      "title": "REVIEW",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "rotate-backup-drives",
+          "text": "Swap the offsite drive",
+          "note": "12d overdue",
+          "urgency": "overdue",
+          "handle": "doit review done rotate-backup-drives",
+          "completes": {
+            "kind": "review",
+            "ref": "rotate-backup-drives"
+          }
+        },
+        {
+          "label": "check-smoke-alarms",
+          "text": "Press the test button on each alarm",
+          "note": "due today",
+          "urgency": "due",
+          "handle": "doit review done check-smoke-alarms",
+          "completes": {
+            "kind": "review",
+            "ref": "check-smoke-alarms"
+          }
+        },
+        {
+          "label": "renew-library-card",
+          "text": "Renew before it lapses",
+          "note": "3d overdue",
+          "urgency": "overdue",
+          "handle": "doit review done renew-library-card",
+          "completes": {
+            "kind": "review",
+            "ref": "renew-library-card"
+          }
+        },
+        {
+          "label": "clean-the-dryer-vent-and-the-duct-behind-it",
+          "text": "Pull the hose and vacuum it",
+          "note": "due today",
+          "urgency": "due",
+          "handle": "doit review done clean-the-dryer-vent-and-the-duct-behind-it",
+          "completes": {
+            "kind": "review",
+            "ref": "clean-the-dryer-vent-and-the-duct-behind-it"
+          }
+        },
+        {
+          "label": "descale-kettle",
+          "text": "Vinegar soak",
+          "note": "due today",
+          "urgency": "due",
+          "handle": "doit review done descale-kettle",
+          "completes": {
+            "kind": "review",
+            "ref": "descale-kettle"
+          }
+        }
+      ],
+      "grid": [],
+      "total": 5,
+      "in_flight": 0,
+      "hints": [
+        "doit review list"
+      ],
+      "row_cap": 3
+    },
+    {
+      "name": "practice",
+      "title": "PRACTICE",
+      "meta": "",
+      "status": "unavailable",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "the practice register would not load: line 4 is not a mapping",
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": [],
+      "row_cap": 3
+    },
+    {
+      "name": "habits",
+      "title": "HABITS",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "Floss",
+          "text": "",
+          "note": "",
+          "urgency": "none",
+          "handle": "life habits complete 41",
+          "completes": {
+            "kind": "habit",
+            "ref": "41"
+          }
+        },
+        {
+          "label": "Water the ferns",
+          "text": "",
+          "note": "",
+          "urgency": "none",
+          "handle": "life habits complete 42",
+          "completes": {
+            "kind": "habit",
+            "ref": "42"
+          }
+        },
+        {
+          "label": "Ten pushups",
+          "text": "",
+          "note": "",
+          "urgency": "none",
+          "handle": "life habits complete 1043",
+          "completes": {
+            "kind": "habit",
+            "ref": "1043"
+          }
+        }
+      ],
+      "grid": [],
+      "total": 3,
+      "in_flight": 0,
+      "hints": [
+        "doit dashboard --lane habits"
+      ],
+      "row_cap": 10
+    }
+  ],
+  "quota": {
+    "minutes": {
+      "pace": 30.0,
+      "need": 45.0,
+      "done": 52.5,
+      "behind": 95.0,
+      "asked_of": 2
+    },
+    "checkoffs": {
+      "pace": 2.0,
+      "need": 3.0,
+      "done": 1.0,
+      "behind": 2.0,
+      "asked_of": 3
+    },
+    "pursuits": [
+      {
+        "name": "sketch",
+        "unit": "minutes",
+        "pace": 12.86,
+        "need": 25.0,
+        "done": 22.5,
+        "behind": 60.0
+      },
+      {
+        "name": "piano",
+        "unit": "minutes",
+        "pace": 17.14,
+        "need": 20.0,
+        "done": 30.0,
+        "behind": 35.0
+      },
+      {
+        "name": "garden",
+        "unit": "checkoffs",
+        "pace": 0.33,
+        "need": 1.0,
+        "done": 0.0,
+        "behind": 1.0
+      }
+    ],
+    "catch_up": [
+      {
+        "days": 3,
+        "label": "3 days",
+        "minutes_per_day": 31.7,
+        "checkoffs_per_day": 1,
+        "shown": false
+      },
+      {
+        "days": 7,
+        "label": "1 week",
+        "minutes_per_day": 13.6,
+        "checkoffs_per_day": 1,
+        "shown": true
+      },
+      {
+        "days": 14,
+        "label": "2 weeks",
+        "minutes_per_day": 6.8,
+        "checkoffs_per_day": 1,
+        "shown": true
+      },
+      {
+        "days": 30,
+        "label": "1 month",
+        "minutes_per_day": 3.2,
+        "checkoffs_per_day": 1,
+        "shown": false
+      }
+    ],
+    "checklists": [
+      {
+        "name": "habits",
+        "done": 2,
+        "total": 5,
+        "unavailable": ""
+      },
+      {
+        "name": "review",
+        "done": 1,
+        "total": 6,
+        "unavailable": ""
+      },
+      {
+        "name": "practice",
+        "done": null,
+        "total": null,
+        "unavailable": "the register would not load"
+      }
+    ],
+    "unavailable": ""
+  },
+  "problems": [
+    "weather declares no adapter"
+  ]
+}

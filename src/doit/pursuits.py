@@ -46,10 +46,12 @@ whichever app owns that domain, exactly as the dashboard delegates its lanes.
 
 import datetime as dt
 import math
+import os
 import random
 import re
 import shlex
 import subprocess
+import tempfile
 from collections.abc import Callable
 from collections.abc import Iterable
 from typing import NamedTuple
@@ -80,7 +82,6 @@ from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
 from doit.render import first_sentence
-from doit.render import fitted
 from doit.render import join_context
 from doit.render import span_text
 from doit.window import first_instant
@@ -123,14 +124,6 @@ GUTTER = 3
 
 # The window `pursuits drift` reads when given neither --since nor --until.
 DRIFT_SINCE = '90d'
-
-# Below this a choice is an ellipsis and a letter, so the backstop clips instead.
-MIN_CHOICE_WIDTH = 12
-
-# What a choice keeps before `doit next` gives up a column for it. A title cut
-# at a dozen characters names nothing, and the standing columns are only there
-# to explain a date the row already states.
-READABLE_CHOICE_WIDTH = 30
 
 # Fields a pursuit may declare. Anything else is a typo, and a typo in a weight
 # file fails silently, allocating attention by a number nobody wrote.
@@ -1282,15 +1275,27 @@ def without_logged(selection: dict) -> dict:
 
 
 def write_names_cache(pursuits: dict) -> None:
-    """Rewrite the name<TAB>description file the shell completion reads.
+    """Replace the name<TAB>description file the shell completion reads.
 
     Completion has to be instant and starting this process is not, so every run
     leaves behind a flat file the completion function can read with no subprocess
-    at all.
+    at all. `WriteCompletionNames` in cli/internal/deskfiles writes the same
+    lines from the Go doit, so a change to the format changes both. A
+    description that is not a string is written as nothing.
     """
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    lines = [f'{name}\t{config.get("description", "")}' for name, config in sorted(pursuits.items())]
-    NAMES_CACHE.write_text('\n'.join(lines) + '\n' if lines else '')
+    lines = []
+    for name, config in sorted(pursuits.items()):
+        said = config.get('description')
+        lines.append(f'{name}\t{said if isinstance(said, str) else ""}\n')
+    NAMES_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=NAMES_CACHE.parent, prefix=f'.{NAMES_CACHE.name}-')
+    try:
+        with os.fdopen(handle, 'w') as written:
+            written.write(''.join(lines))
+        os.replace(temporary, NAMES_CACHE)
+    except OSError:
+        os.unlink(temporary)
+        raise
 
 
 def dig(document, path: str):
@@ -1505,9 +1510,14 @@ def why_unpriced(state: dict, name: str) -> str:
     return 'weight 0'
 
 
+def late(days: float | None) -> bool:
+    """Whether a pursuit is a day or more past its due date."""
+    return days is not None and days <= -1
+
+
 def due_style(days: float | None) -> str:
     """Yellow once something is genuinely late, and plain until then."""
-    return 'yellow' if days is not None and days <= -1 else ''
+    return 'yellow' if late(days) else ''
 
 
 def standing_line(state: dict) -> str:
@@ -1562,7 +1572,7 @@ class Offer(NamedTuple):
 
     name: str
     due: str
-    due_style: str
+    late: bool
     choices: list[str]
     failed: bool
     weight: str = ''
@@ -1594,18 +1604,18 @@ def offer(name: str, state: dict, resolved: dict) -> Offer:
         # What the backend said, never a verdict about the backend. A register
         # naming a verb the CLI dropped fails identically to one that is logged
         # out, and only the message it printed tells the two apart.
-        return Offer(name, due, due_style(days), [f'{detail.get("backend") or "resolve"}: {failure}'], True, **columns)
+        return Offer(name, due, late(days), [f'{detail.get("backend") or "resolve"}: {failure}'], True, **columns)
     if detail.get('candidates') == 0:
         flag = f'{detail.get("backend") or "resolve"}: matched nothing'
         # The flag leads, so a narrow pane clips the description rather than it.
-        return Offer(name, due, due_style(days), [join_context([flag, config.get('description')])], True, **columns)
+        return Offer(name, due, late(days), [join_context([flag, config.get('description')])], True, **columns)
 
     # Title and place on one line rather than in two columns. A context column is
     # sized by the longest title anywhere on screen, so an eight-character title
     # beside a thirty-five-character one puts its place most of a pane away from
     # the thing it places.
     lines = choice_lines(detail.get('choices') or [])
-    return Offer(name, due, due_style(days), lines or [config.get('description') or ''], False, **columns)
+    return Offer(name, due, late(days), lines or [config.get('description') or ''], False, **columns)
 
 
 def choice_lines(choices: list[dict]) -> list[str]:
@@ -1621,7 +1631,7 @@ def unoffered(name: str, state: dict) -> Offer:
     """
     row = offer(name, state, {})._replace(choices=[])
     if name in state['suppressed']:
-        return row._replace(due='skipped', due_style='')
+        return row._replace(due='skipped', late=False)
     return row
 
 
@@ -1634,7 +1644,7 @@ def offer_row(row: Offer, offered: bool) -> dict:
         'goal': row.goal,
         'tally': row.tally,
         'due': row.due,
-        'late': bool(row.due_style),
+        'late': row.late,
         'choices': row.choices,
         'failed': row.failed,
     }
@@ -1673,75 +1683,6 @@ def explain_rows(state: dict, selection: dict) -> list[dict]:
         }
         for name in offered_order(state, state['active'])
     ]
-
-
-# Each column of `doit next` before the item, as (heading, Offer field).
-OFFER_COLUMNS = (
-    ('pursuit', 'name'),
-    ('wt', 'weight'),
-    ('goal', 'goal'),
-    ('done', 'tally'),
-    ('due', 'due'),
-)
-
-# Given up in this order where a pane cannot fit every column and still leave a
-# choice readable. The name and the date are what the screen is read for.
-NARROW_DROPS = ('weight', 'goal', 'tally')
-
-
-def render_offers(offered: list[Offer], rest: list[Offer], width: int) -> None:
-    """Every pursuit as a row: what the draw offered, then the rest, dimmed.
-
-    The standing columns come first at fixed widths, so a narrow pane eats the
-    tail of a choice rather than which pursuit the row is or how late it is.
-    Where a choice would be left unreadable, the weight goes first, then the
-    goal, then the tally, and the name and date stay.
-    """
-    rows = [*offered, *rest]
-    if not rows:
-        return
-    widths = {field: max(len(heading), *(len(getattr(row, field)) for row in rows)) for heading, field in OFFER_COLUMNS}
-    shown = [(heading, field) for heading, field in OFFER_COLUMNS]
-    for dropped in NARROW_DROPS:
-        if width - GUTTER - sum(widths[field] + GUTTER for _, field in shown) >= READABLE_CHOICE_WIDTH:
-            break
-        shown = [(heading, field) for heading, field in shown if field != dropped]
-    body = max(width - GUTTER - sum(widths[field] + GUTTER for _, field in shown), MIN_CHOICE_WIDTH)
-
-    def cell(text: str, field: str) -> str:
-        return text.rjust(widths[field]) if field == 'weight' else text.ljust(widths[field])
-
-    gutter = ' ' * GUTTER
-    heading = gutter + gutter.join(cell(title, field) for title, field in shown) + gutter + 'item'
-    console.print(Text(heading, style='bold'), no_wrap=True, overflow='ellipsis')
-
-    # A pursuit offering several choices is a block, and blocks printed flush run
-    # the last choice of one into the name of the next. The gap goes in whenever
-    # any block is taller than a line, so one screen never mixes the two spacings.
-    spaced = any(len(row.choices) > 1 for row in offered)
-    for position, row in enumerate(offered):
-        if spaced and position:
-            console.print()
-        for index, choice in enumerate(row.choices):
-            line = Text(gutter)
-            # The standing is the pursuit's, not each choice's, so it is said once.
-            # Repeating it down a block reads as three pursuits.
-            for _, field in shown:
-                text = cell(getattr(row, field), field) if index == 0 else ' ' * widths[field]
-                line.append(text, style=row.due_style if field == 'due' else 'white' if field == 'name' else '')
-                line.append(gutter)
-            line.append(fitted(choice, body, style='red' if row.failed else 'green'))
-            console.print(line, no_wrap=True, overflow='ellipsis')
-
-    if rest:
-        console.print()
-    for row in rest:
-        line = Text(gutter, style='dim')
-        for position, (_, field) in enumerate(shown):
-            if position:
-                line.append(gutter)
-            line.append(cell(getattr(row, field), field), style=row.due_style if field == 'due' else '')
-        console.print(line, no_wrap=True, overflow='ellipsis')
 
 
 def explain_payload(state: dict) -> dict:
@@ -1827,37 +1768,6 @@ def render_reasons(named: Iterable[tuple[str, str | None]]) -> None:
     if table.row_count:
         console.print()
         console.print(table)
-
-
-def render_explain(state: dict, selection: dict) -> int:
-    console.rule('[cyan]Why these', align='left')
-    console.print(f'draw {selection["draw_id"][:8]}\n')
-
-    table = Table(box=None, pad_edge=False)
-    table.add_column('')
-    table.add_column('pursuit')
-    for heading in ('wt', 'goal', 'last', 'due', 'pick'):
-        table.add_column(heading, justify='right')
-
-    passed = set(state['suppressed'])
-    pins = set(selection.get('pinned') or [])
-    for name in offered_order(state, state['active']):
-        chosen = name in selection['offered']
-        table.add_row(
-            '[green]●[/]' if chosen else '',
-            f'[yellow]{name}[/]' if name in passed else name,
-            f'{state["weights"][name]:g}',
-            goal_text(state['active'][name]),
-            format_elapsed(state['days_since'][name]),
-            format_due(due_in_days(state, name)),
-            'owed' if name in pins else f'{state["probability"][name] * 100:.1f}%',
-        )
-    console.print(table)
-    render_reasons((name, state['active'][name].get('reason')) for name in offered_order(state, state['active']))
-    console.print(f'\n  every owed row is shown, heaviest first · the rest is drawn by weight to fill {DRAW_SIZE} rows')
-    console.print('  pick is the chance of being drawn [bold]first[/] · [yellow]yellow[/] is skipped')
-    console.print('  [cyan]doit next --json[/] carries the raw balance every column here is derived from')
-    return 0
 
 
 def match_pursuit(needle: str, pursuits: dict) -> str | None:

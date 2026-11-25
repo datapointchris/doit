@@ -25,8 +25,8 @@ from doit import cli
 from doit import happened
 from doit import journal
 from doit import lanes
+from doit import paths
 from doit import pursuits
-from doit import render
 from doit import review
 from doit import service
 from doit.cli import app as cli_app
@@ -36,7 +36,6 @@ from doit.service_commands import happened as happened_commands
 from doit.service_commands import pursuits as pursuit_commands
 from doit.service_commands import review as review_commands
 from doit.service_commands import sources as sources_commands
-from doit.service_commands import today as today_commands
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures'
 SCHEMAS = Path(__file__).resolve().parents[2] / 'schemas'
@@ -86,12 +85,12 @@ def write_through(store, monkeypatch, tmp_path, answer: Callable[[], object], ar
 def test_a_refusal_exits_1_with_the_services_sentence_and_a_service_that_never_answers_exits_4(store, monkeypatch, tmp_path, capsys):
     down = [False]
     client = connected(store, monkeypatch, tmp_path, around=lambda request, forward: httpx2.Response(503) if down[0] else forward(request))
-    monkeypatch.setattr(sys, 'argv', ['doit', 'next'])
+    monkeypatch.setattr(sys, 'argv', ['doit', 'pursuits', 'list'])
 
     with pytest.raises(SystemExit) as refused:
         cli.main()
     assert refused.value.code == 1
-    assert capsys.readouterr().err.split() == f'doit: {client.get("/api/v1/next").json()["message"]}'.split()
+    assert capsys.readouterr().err.split() == f'doit: {client.get("/api/v1/pursuits").json()["message"]}'.split()
 
     down[0] = True
     with pytest.raises(SystemExit) as unanswered:
@@ -99,23 +98,16 @@ def test_a_refusal_exits_1_with_the_services_sentence_and_a_service_that_never_a
     assert unanswered.value.code == service.NO_ANSWER_EXIT
 
 
-def test_next_gives_every_active_pursuit_a_row_from_the_register_the_service_holds(api, capsys, monkeypatch):
+def test_next_answers_a_row_for_every_active_pursuit_with_the_offered_ones_first(api):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
-    monkeypatch.setattr(render.console, '_width', 10_000)
 
-    assert pursuit_commands.cmd_next(explain=False, as_json=True, reroll=False) == 0
-    drawn = json.loads(capsys.readouterr().out)
-    assert pursuit_commands.cmd_next(explain=False, as_json=False, reroll=False) == 0
-    assert pursuit_commands.cmd_next(explain=True, as_json=False, reroll=False) == 0
+    drawn = api.get('/api/v1/next', params={'machine': 'desk'}).json()
 
-    shown = capsys.readouterr().out
     assert drawn['offered'] and set(drawn['offered']) <= set(drawn['state']['weights'])
-    assert all(name in shown for name in drawn['state']['weights']), 'a pursuit missing from the screen reads as one with nothing to say'
     offered_rows = [row['name'] for row in drawn['offer_rows'] if row['offered']]
     assert offered_rows == drawn['offered'] == [row['name'] for row in drawn['offer_rows']][: len(offered_rows)]
     assert {row['name'] for row in drawn['offer_rows']} == {row['name'] for row in drawn['explain_rows']} == set(drawn['state']['active'])
     assert 'paused-thing' not in drawn['offered']
-    assert 'chores\t' in pursuits.NAMES_CACHE.read_text()
 
 
 def test_a_log_is_counted_by_the_list_drift_and_dormant_views_that_follow(api, capsys):
@@ -170,10 +162,11 @@ def test_a_reason_reaches_every_read_of_a_pursuit_and_its_json(api, capsys):
     for read in (
         lambda: pursuit_commands.cmd_list(as_json=False),
         lambda: pursuit_commands.cmd_drift(None, None, as_json=False),
-        lambda: pursuit_commands.cmd_next(explain=True, as_json=False, reroll=False),
     ):
         assert read() == 0
         assert ' '.join(capsys.readouterr().out.split()).count(reason) == 1
+    explained = api.get('/api/v1/next', params={'machine': 'desk'}).json()['explain_rows']
+    assert [row['reason'] for row in explained if row['name'] == 'chores'] == [reason]
 
 
 def test_a_log_asks_for_what_was_not_passed_and_minutes_only_of_a_timed_pursuit(api, store, monkeypatch, capsys):
@@ -235,7 +228,7 @@ def test_a_log_resolves_again_past_a_draw_whose_read_failed(store, monkeypatch, 
     """A cached failure carries no id, so the write-through would complete nothing and nothing on screen would say so."""
     down = [True]
     marker = write_through(store, monkeypatch, tmp_path, lambda: httpx2.Response(500, json={'message': 'down'}) if down[0] else TASKS[:1])
-    assert pursuit_commands.cmd_next(explain=False, as_json=False, reroll=False) == 0
+    service.client().get('/next', machine=paths.machine_name())
     down[0] = False
 
     assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
@@ -359,12 +352,10 @@ def test_a_forecast_taken_is_read_back_and_not_graded_before_its_window_closes(a
     assert captured.out == ''
 
 
-def test_the_day_and_the_dashboard_render_without_any_source(api, capsys):
+def test_happened_and_the_dashboard_render_without_any_source(api, capsys):
     write(api, 'pursuits', 'pursuits/pursuits.yml')
     write(api, 'review', 'review/register.yml')
 
-    assert today_commands.cmd_today(as_json=False) == 0
-    assert 'never-done' in capsys.readouterr().out
     assert happened_commands.cmd_happened(None, None, as_json=False) == 0
     capsys.readouterr()
 
@@ -416,10 +407,9 @@ def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store,
     assert 'MESO - FEEDBACK  1 open' in printed
     assert 'The rest timer' in printed
 
-    assert today_commands.cmd_today(as_json=False) == 0
-    printed = capsys.readouterr().out
-    assert 'Portland' in printed
-    assert 'partial — life is not configured' in printed, 'the due list says what it could not ask'
+    upcoming = next(lane for lane in client.get('/api/v1/today').json()['due'] if lane['name'] == 'upcoming')
+    assert 'Portland' in [row['label'] for row in upcoming['rows']] + [row['text'] for row in upcoming['rows']]
+    assert 'life' in (upcoming['reason'] or ''), 'the due list says which source it could not ask'
 
     listed = CliRunner().invoke(sources_commands.app, ['list', '--json'])
     assert {row['id']: row['failure'] for row in json.loads(listed.output)} == {'life': 'failed', 'nomad': None, 'meso-feedback': None}

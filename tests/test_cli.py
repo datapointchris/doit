@@ -80,27 +80,39 @@ def visible_nodes(command, path=()):
             yield from visible_nodes(child, (*path, name))
 
 
-def test_every_root_command_sits_in_a_named_panel_at_its_place():
-    """A command left out falls into a panel named Commands, at the foot of the screen."""
+def test_every_root_command_sits_in_a_named_panel_at_its_place(monkeypatch):
+    """A command left out falls into a panel named Commands, at the foot of the screen.
+
+    The Go doit's commands are listed as it hands them on, and ROOT_ORDER places
+    those that lead a panel above Python's own.
+    """
+    python_root = get_command(app)
+    assert isinstance(python_root, TyperGroup)
+    own = set(python_root.commands)
+    monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
+    list_go_commands({GO_COMMANDS_VARIABLE: HANDED_GO_TREE.read_text()})
     root = get_command(app)
     assert isinstance(root, TyperGroup)
     commands = root.commands
 
-    assert set(commands) == set(ROOT_ORDER)
+    assert own <= set(ROOT_ORDER) <= set(commands)
     assert not [
         name for name, command in commands.items() if not (isinstance(command, TyperCommand | TyperGroup) and command.rich_help_panel)
     ]
 
 
-def test_every_screen_carries_examples_that_parse():
+def test_every_screen_carries_examples_that_parse(monkeypatch):
     """An example is copied whole, so one naming a verb or flag doit lacks is the reader's first error.
 
     A trailing --help answers only once the line parses, so an unknown command or flag still fails.
+    The Go doit's commands are listed as it hands them on, so an example naming one parses.
     """
     runnable = []
     for path, command in visible_nodes(get_command(app)):
         assert command.epilog, f'doit {" ".join(path)} shows no example'
         runnable += re.findall(r'`(?:eval "\$\()?(doit [^`)"]+)', command.epilog)
+    monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
+    list_go_commands({GO_COMMANDS_VARIABLE: HANDED_GO_TREE.read_text()})
 
     assert runner.invoke(app, ['review', 'done', 'x', '--onn', 'y', '--help']).exit_code == 2, 'a bad flag must fail through --help'
     for example in runnable:
@@ -199,11 +211,11 @@ def test_unknown_command_exits_2(argv):
 
 
 def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
-    """`doit next --no-input` is refused by `next`; the root is where it goes."""
+    """`doit dashboard --no-input` is refused by `dashboard`; the root is where it goes."""
     with pytest.raises(NoSuchOption) as refused:
-        get_command(app).main(['next', '--no-input'], prog_name='doit', standalone_mode=False)
+        get_command(app).main(['dashboard', '--no-input'], prog_name='doit', standalone_mode=False)
 
-    assert accepted_placements(refused.value) == ['doit --no-input next']
+    assert accepted_placements(refused.value) == ['doit --no-input dashboard']
 
 
 def test_a_command_the_go_doit_hands_on_is_listed_under_its_parent_and_runs_nothing(monkeypatch):

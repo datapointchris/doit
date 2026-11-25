@@ -10,6 +10,7 @@ import (
 
 	"github.com/datapointchris/goclikit"
 	"github.com/datapointchris/goselfupdate/autoupdate"
+	"github.com/datapointchris/gotermboard/terminalcontrol"
 	"github.com/datapointchris/gotermstyle/cobrahelp"
 	"github.com/spf13/cobra"
 
@@ -63,7 +64,7 @@ func newRootCommand() *cobra.Command {
 	// -V as the Python doit spells it, which leaves -v free for a --verbose.
 	// Declared before cobra's own, which then stands aside.
 	root.Flags().BoolP("version", "V", false, "Show the installed version and exit")
-	root.AddCommand(newAuthCommand(), newUpdateCommand(), newDeskNudgeCommand())
+	root.AddCommand(newNextCommand(), newTodayCommand(), newAuthCommand(), newUpdateCommand(), newDeskNudgeCommand())
 	return root
 }
 
@@ -165,7 +166,8 @@ func execute() int {
 	err := goclikit.Execute(context.Background(), newRootCommand(), autoupdate.Config{Update: updateConfig()})
 	var chosen exitCode
 	if err != nil && !errors.As(err, &chosen) && !errors.Is(err, goclikit.ErrReported) {
-		fmt.Fprintln(os.Stderr, "doit:", err)
+		// A refusal carries the service's words, which may quote stored text.
+		fmt.Fprintln(os.Stderr, "doit:", terminalcontrol.Strip(err.Error()))
 	}
 	return exitCodeFor(err)
 }

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/datapointchris/doit/cli/internal/deskfiles"
 )
 
 // Paths are the files the desk nudge keeps on this desk.
@@ -32,40 +34,31 @@ type Paths struct {
 
 // DeskPaths are this desk's, under $XDG_STATE_HOME, $XDG_CACHE_HOME and the runtime directory.
 func DeskPaths() Paths {
-	stateHome := xdg("XDG_STATE_HOME", ".local/state")
-	state := filepath.Join(stateHome, "doit")
+	state := deskfiles.StateDir()
 	return Paths{
 		State:     filepath.Join(state, "desk-nudge.json"),
 		StateLock: filepath.Join(state, "desk-nudge.lock"),
 		WatchLock: filepath.Join(state, "desk-nudge-watch.lock"),
 		Records:   filepath.Join(state, "desk-nudge-events.jsonl"),
-		Panel:     filepath.Join(xdg("XDG_CACHE_HOME", ".cache"), "doit", "desk-nudge-panel.json"),
-		Socket:    filepath.Join(runtimeDir(stateHome), "doit", "watch.sock"),
+		Panel:     filepath.Join(deskfiles.CacheDir(), "desk-nudge-panel.json"),
+		Socket:    filepath.Join(runtimeDir(state), "watch.sock"),
 	}
 }
 
-// runtimeDir is $XDG_RUNTIME_DIR. Where a shell lacks it, as an ssh login can,
-// it is logind's /run/user/<uid>, so the shell finds the socket of a watch
-// that systemd started. With neither, it is the state home, which this user
-// owns, rather than a shared temporary directory where another user could
-// plant the socket.
-func runtimeDir(stateHome string) string {
+// runtimeDir is doit's directory under $XDG_RUNTIME_DIR. Where a shell lacks
+// it, as an ssh login can, it is under logind's /run/user/<uid>, so the shell
+// finds the socket of a watch that systemd started. With neither, it is doit's
+// state directory, which this user owns, rather than a shared temporary
+// directory where another user could plant the socket.
+func runtimeDir(state string) string {
 	if runtime := os.Getenv("XDG_RUNTIME_DIR"); runtime != "" {
-		return runtime
+		return filepath.Join(runtime, "doit")
 	}
 	logind := "/run/user/" + strconv.Itoa(os.Getuid())
 	if info, err := os.Stat(logind); err == nil && info.IsDir() {
-		return logind
+		return filepath.Join(logind, "doit")
 	}
-	return stateHome
-}
-
-func xdg(variable, fallback string) string {
-	if dir := os.Getenv(variable); dir != "" {
-		return dir
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, fallback)
+	return state
 }
 
 // lockFile takes a POSIX record lock on the whole of path, the lock that
@@ -118,29 +111,13 @@ func (p Paths) watchHeld() bool {
 	return false
 }
 
-// replaceFile replaces a JSON file whole, through a temporary file beside it,
-// so no reader sees half of one.
+// replaceFile replaces a JSON file whole, so no reader sees half of one.
 func replaceFile(path string, document any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".desk-nudge-*.json")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(temporary.Name()) }()
-	if _, err := temporary.Write(append(encoded, '\n')); err != nil {
-		_ = temporary.Close()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temporary.Name(), path)
+	return deskfiles.Replace(path, append(encoded, '\n'))
 }
 
 // stateMutex keeps this process's goroutines apart. A POSIX lock excludes other

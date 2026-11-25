@@ -35,6 +35,10 @@ in the same change, so no verb has two implementations.
 - **`cli/internal/login` holds pyclilogin's identifiers for the product `doit`**: the config file,
   the keychain service `doit-cli`, and `$XDG_STATE_HOME/doit` for the fallback token file and the
   refresh lock. Changing any one logs every desk out of one side.
+- **`cli/internal/deskfiles` writes `next-names.txt` as `write_names_cache` in `pursuits.py`
+  does**: at `$XDG_CACHE_HOME/doit/next-names.txt`, one `name<TAB>description` line per pursuit,
+  sorted by name. The zsh completion that `doit shell completion zsh` prints reads that path. The
+  contract test runs the Go `next` and fails where the completion reads any other file.
 - **`cli/internal/service` is the Go client of the service.** A route's call is a method that names
   the path and the Go type of its answer. Each field that type declares without `omitempty` is one
   the verb needs, and an answer lacking it is refused with the service's version, never drawn empty.

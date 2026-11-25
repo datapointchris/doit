@@ -1,0 +1,19 @@
+What now · Mon 02 Nov ────────────────────────────
+   events unavailable — life answered 503 on /events
+
+   pursuit   due          item
+   sketch    due today    Draw something from life
+
+   novel     5d overdue   life: matched nothing ·…
+
+   errands   2d overdue   Post the parcel · Town
+                          Pick up the dry cleanin…
+                          Order the replacement f…
+
+   letters   due in 1d    life: life answered 500…
+
+   stretch   due in 1d    Ten minutes of stretchi…
+
+   bike      skipped
+   piano     due in 2d
+   garden    due in 3d

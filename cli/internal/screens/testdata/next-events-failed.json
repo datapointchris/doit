@@ -1,0 +1,467 @@
+{
+  "draw_id": "01a19d34-1a80-7eb0-95b0-508e9036bf88",
+  "created_at": "2026-11-02T12:00:00-05:00",
+  "pinned": [
+    "sketch",
+    "novel",
+    "errands"
+  ],
+  "offered": [
+    "sketch",
+    "novel",
+    "errands",
+    "letters",
+    "stretch"
+  ],
+  "resolved": {
+    "novel": {
+      "pursuit": "novel",
+      "candidates": 0,
+      "backend": "life",
+      "choices": []
+    },
+    "errands": {
+      "pursuit": "errands",
+      "candidates": 3,
+      "backend": "life",
+      "choices": [
+        {
+          "label": "Post the parcel",
+          "id": "501",
+          "context": "Town",
+          "detail": "",
+          "view": "",
+          "raw": {
+            "name": "Post the parcel",
+            "id": 501,
+            "area": "Town"
+          }
+        },
+        {
+          "label": "Pick up the dry cleaning",
+          "id": "512",
+          "context": "Town",
+          "detail": "",
+          "view": "",
+          "raw": {
+            "name": "Pick up the dry cleaning",
+            "id": 512,
+            "area": "Town"
+          }
+        },
+        {
+          "label": "Order the replacement filter for the kitchen tap",
+          "id": "474",
+          "context": "Home",
+          "detail": "",
+          "view": "",
+          "raw": {
+            "name": "Order the replacement filter for the kitchen tap",
+            "id": 474,
+            "area": "Home"
+          }
+        }
+      ]
+    },
+    "letters": {
+      "pursuit": "letters",
+      "error": "life answered 500 to GET /broken: the letters table is locked",
+      "backend": "life"
+    }
+  },
+  "state": {
+    "cycles": [],
+    "active": [
+      "bike",
+      "errands",
+      "garden",
+      "letters",
+      "novel",
+      "piano",
+      "sketch",
+      "stretch"
+    ],
+    "weights": {
+      "garden": 2.5,
+      "sketch": 10.0,
+      "errands": 4.0,
+      "novel": 6.0,
+      "letters": 3.0,
+      "stretch": 1.0,
+      "piano": 8.0,
+      "bike": 0.5
+    },
+    "intervals": {
+      "garden": 3.0,
+      "sketch": 7.0,
+      "errands": 2.0,
+      "novel": 1.0,
+      "letters": 7.0,
+      "stretch": 1.0,
+      "piano": 7.0,
+      "bike": 5.0
+    },
+    "days_since": {
+      "garden": 1.0,
+      "sketch": 2.0,
+      "errands": 4.5,
+      "novel": 0.5,
+      "letters": 3.0,
+      "stretch": 0.1,
+      "piano": 1.0,
+      "bike": 3.0
+    },
+    "balance": {
+      "garden": 0.0,
+      "sketch": 102.14,
+      "errands": 2.0,
+      "novel": 6.0,
+      "letters": 0.86,
+      "stretch": 0.0,
+      "piano": 87.86,
+      "bike": 1.18
+    },
+    "asked": {
+      "garden": 3.0,
+      "sketch": 167.14,
+      "errands": 4.0,
+      "novel": 7.0,
+      "letters": 1.86,
+      "stretch": 7.0,
+      "piano": 222.86,
+      "bike": 2.18
+    },
+    "done": {
+      "garden": 3.0,
+      "sketch": 65.0,
+      "errands": 2.0,
+      "novel": 1.0,
+      "letters": 1.0,
+      "stretch": 7.0,
+      "piano": 135.0,
+      "bike": 1.0
+    },
+    "due": {
+      "garden": 3.0,
+      "sketch": -0.94,
+      "errands": -2.0,
+      "novel": -5.0,
+      "letters": 1.0,
+      "stretch": 1.0,
+      "piano": 1.87,
+      "bike": -0.92
+    },
+    "checkoff_size": {
+      "garden": 1.0,
+      "sketch": 90.0,
+      "errands": 1.0,
+      "novel": 1.0,
+      "letters": 1.0,
+      "stretch": 1.0,
+      "piano": 120.0,
+      "bike": 1.0
+    },
+    "weekly_minutes": {
+      "sketch": 90.0,
+      "piano": 120.0
+    },
+    "zero_points": {
+      "garden": "2026-10-24T12:00:00-05:00",
+      "sketch": "2026-10-20T12:00:00-05:00",
+      "errands": "2026-10-25T12:00:00-05:00",
+      "novel": "2026-10-26T12:00:00-05:00",
+      "letters": "2026-10-20T12:00:00-05:00",
+      "stretch": "2026-10-26T12:00:00-05:00",
+      "piano": "2026-10-20T12:00:00-05:00",
+      "bike": "2026-10-22T12:00:00-05:00"
+    },
+    "suppressed": [
+      "bike"
+    ],
+    "pool": {
+      "garden": 2.5,
+      "letters": 3.0,
+      "stretch": 1.0,
+      "piano": 8.0
+    },
+    "probability": {
+      "garden": 0.1724,
+      "sketch": 0.0,
+      "errands": 0.0,
+      "novel": 0.0,
+      "letters": 0.2069,
+      "stretch": 0.069,
+      "piano": 0.5517,
+      "bike": 0.0
+    },
+    "paused": [
+      "pottery"
+    ],
+    "term_ended": [],
+    "tracked": []
+  },
+  "offer_rows": [
+    {
+      "name": "sketch",
+      "offered": true,
+      "weight": "10",
+      "goal": "1h 30m a week",
+      "tally": "1h 5m of 2h 47m in 13d",
+      "due": "due today",
+      "late": false,
+      "choices": [
+        "Draw something from life"
+      ],
+      "failed": false
+    },
+    {
+      "name": "novel",
+      "offered": true,
+      "weight": "6",
+      "goal": "every 1d",
+      "tally": "1 of 7 in 7d",
+      "due": "5d overdue",
+      "late": true,
+      "choices": [
+        "life: matched nothing · Read the novel on the nightstand"
+      ],
+      "failed": true
+    },
+    {
+      "name": "errands",
+      "offered": true,
+      "weight": "4",
+      "goal": "every 2d",
+      "tally": "2 of 4 in 8d",
+      "due": "2d overdue",
+      "late": true,
+      "choices": [
+        "Post the parcel · Town",
+        "Pick up the dry cleaning · Town",
+        "Order the replacement filter for the kitchen tap · Home"
+      ],
+      "failed": false
+    },
+    {
+      "name": "letters",
+      "offered": true,
+      "weight": "3",
+      "goal": "every 7d",
+      "tally": "1 of 1 in 13d",
+      "due": "due in 1d",
+      "late": false,
+      "choices": [
+        "life: life answered 500 to GET /broken: the letters table is locked"
+      ],
+      "failed": true
+    },
+    {
+      "name": "stretch",
+      "offered": true,
+      "weight": "1",
+      "goal": "every 1d",
+      "tally": "7 of 7 in 7d",
+      "due": "due in 1d",
+      "late": false,
+      "choices": [
+        "Ten minutes of stretching"
+      ],
+      "failed": false
+    },
+    {
+      "name": "bike",
+      "offered": false,
+      "weight": "0.5",
+      "goal": "every 5d",
+      "tally": "1 of 2 in 11d",
+      "due": "skipped",
+      "late": false,
+      "choices": [],
+      "failed": false
+    },
+    {
+      "name": "piano",
+      "offered": false,
+      "weight": "8",
+      "goal": "2h a week",
+      "tally": "2h 15m of 3h 43m in 13d",
+      "due": "due in 2d",
+      "late": false,
+      "choices": [],
+      "failed": false
+    },
+    {
+      "name": "garden",
+      "offered": false,
+      "weight": "2.5",
+      "goal": "every 3d",
+      "tally": "3 of 3 in 9d",
+      "due": "due in 3d",
+      "late": false,
+      "choices": [],
+      "failed": false
+    }
+  ],
+  "explain_rows": [
+    {
+      "name": "sketch",
+      "offered": true,
+      "skipped": false,
+      "weight": "10",
+      "goal": "1h 30m a week",
+      "last": "2d ago",
+      "due": "due today",
+      "pick": "owed",
+      "reason": ""
+    },
+    {
+      "name": "novel",
+      "offered": true,
+      "skipped": false,
+      "weight": "6",
+      "goal": "every 1d",
+      "last": "today",
+      "due": "5d overdue",
+      "pick": "owed",
+      "reason": ""
+    },
+    {
+      "name": "errands",
+      "offered": true,
+      "skipped": false,
+      "weight": "4",
+      "goal": "every 2d",
+      "last": "4d ago",
+      "due": "2d overdue",
+      "pick": "owed",
+      "reason": ""
+    },
+    {
+      "name": "bike",
+      "offered": false,
+      "skipped": true,
+      "weight": "0.5",
+      "goal": "every 5d",
+      "last": "3d ago",
+      "due": "due today",
+      "pick": "0.0%",
+      "reason": ""
+    },
+    {
+      "name": "letters",
+      "offered": true,
+      "skipped": false,
+      "weight": "3",
+      "goal": "every 7d",
+      "last": "3d ago",
+      "due": "due in 1d",
+      "pick": "20.7%",
+      "reason": ""
+    },
+    {
+      "name": "stretch",
+      "offered": true,
+      "skipped": false,
+      "weight": "1",
+      "goal": "every 1d",
+      "last": "today",
+      "due": "due in 1d",
+      "pick": "6.9%",
+      "reason": ""
+    },
+    {
+      "name": "piano",
+      "offered": false,
+      "skipped": false,
+      "weight": "8",
+      "goal": "2h a week",
+      "last": "1d ago",
+      "due": "due in 2d",
+      "pick": "55.2%",
+      "reason": "Lessons resume in the spring"
+    },
+    {
+      "name": "garden",
+      "offered": false,
+      "skipped": false,
+      "weight": "2.5",
+      "goal": "every 3d",
+      "last": "1d ago",
+      "due": "due in 3d",
+      "pick": "17.2%",
+      "reason": "The beds dry out after three days of sun, and the seedlings go first"
+    }
+  ],
+  "context": [],
+  "context_error": "life answered 503 on /events",
+  "pursuits": {
+    "garden": {
+      "description": "Weed and water the raised beds",
+      "weight": 2.5,
+      "cadence": "3d",
+      "reason": "The beds dry out after three days of sun, and the seedlings go first"
+    },
+    "sketch": {
+      "description": "Draw something from life",
+      "weight": 10,
+      "weekly_minutes": 90
+    },
+    "errands": {
+      "description": "Clear the errand list",
+      "weight": 4,
+      "cadence": "2d",
+      "resolve": {
+        "app": "life",
+        "path": "/tasks"
+      },
+      "label": "name",
+      "id": "id",
+      "context": [
+        "area"
+      ]
+    },
+    "novel": {
+      "description": "Read the novel on the nightstand",
+      "weight": 6,
+      "cadence": "1d",
+      "resolve": {
+        "app": "life",
+        "path": "/books"
+      },
+      "label": "title"
+    },
+    "letters": {
+      "description": "Answer one letter",
+      "weight": 3,
+      "cadence": "7d",
+      "resolve": {
+        "app": "life",
+        "path": "/broken"
+      },
+      "label": "subject"
+    },
+    "stretch": {
+      "description": "Ten minutes of stretching",
+      "weight": 1,
+      "cadence": "1d"
+    },
+    "piano": {
+      "description": "Practise scales and one piece",
+      "weight": 8,
+      "weekly_minutes": 120,
+      "reason": "Lessons resume in the spring"
+    },
+    "bike": {
+      "description": "Ride the long loop",
+      "weight": 0.5,
+      "cadence": "5d"
+    },
+    "pottery": {
+      "description": "Throw a bowl at the studio",
+      "weight": 5,
+      "cadence": "14d",
+      "paused": true
+    }
+  },
+  "draw_size": 5
+}

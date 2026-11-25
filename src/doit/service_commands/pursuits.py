@@ -1,4 +1,4 @@
-"""The `doit pursuits` commands and `doit next`, each asking the service and rendering its answer."""
+"""The `doit pursuits` commands, each asking the service and rendering its answer."""
 
 import datetime as dt
 import json
@@ -12,9 +12,7 @@ from rich.text import Text
 
 from doit import service
 from doit.journal import new_id
-from doit.paths import machine_name
 from doit.pursuits import DRIFT_SINCE
-from doit.pursuits import GUTTER
 from doit.pursuits import TEMPLATE
 from doit.pursuits import Abandoned
 from doit.pursuits import ask
@@ -28,19 +26,14 @@ from doit.pursuits import goal_text
 from doit.pursuits import item_refusal
 from doit.pursuits import match_pursuit
 from doit.pursuits import minutes_refusal
-from doit.pursuits import offer
-from doit.pursuits import offered_order
 from doit.pursuits import paced
 from doit.pursuits import print_reason
 from doit.pursuits import prompt_for_minutes
 from doit.pursuits import prompt_for_pursuit
 from doit.pursuits import render_drift
-from doit.pursuits import render_explain
-from doit.pursuits import render_offers
 from doit.pursuits import render_stranded_counts
 from doit.pursuits import run_on_log
 from doit.pursuits import standing_from
-from doit.pursuits import unoffered
 from doit.pursuits import which_choice
 from doit.pursuits import write_names_cache
 from doit.pursuits import writes_through
@@ -48,50 +41,8 @@ from doit.render import can_prompt
 from doit.render import console
 from doit.render import error_console
 from doit.render import examples
-from doit.render import terminal_width
 from doit.window import span
 from doit.window import window
-
-NEXT_EXAMPLES = examples(
-    ('doit next', 'what to do now, with every other pursuit under it'),
-    ('doit next --explain', 'the same draw with every number behind it'),
-    ('doit next --reroll', 'a fresh draw, before the standing one expires'),
-    ('doit next --json', 'the draw and the state behind it, as data'),
-)
-
-
-def cmd_next(explain: bool, as_json: bool, reroll: bool) -> int:
-    """The service's draw: the one standing for this window, or a fresh one where none stands or ``reroll`` asks."""
-    selection = service.client().get('/next', machine=machine_name(), reroll=reroll or None)
-    if as_json:
-        # Plain print, never the rich console: a Console soft-wraps at terminal
-        # width, which would put newlines inside JSON strings.
-        print(json.dumps(selection, indent=2))
-        return 0
-
-    now = dt.datetime.now().astimezone()
-    write_names_cache(selection['pursuits'])
-    state = standing_from(selection['state'], selection['pursuits'], now)
-    names = selection['offered']
-    if explain:
-        return render_explain(state, selection)
-
-    width = terminal_width()
-    console.rule(f'[cyan]What now[/] · {now:%a %d %b}', align='left')
-    # One per line. Joined on one line, two dates read as one event.
-    for event in selection.get('context') or []:
-        console.print(Text(f'{" " * GUTTER}{event}', style='magenta'), no_wrap=True, overflow='ellipsis')
-    if selection.get('context_error'):
-        # Said rather than left blank, because a blank reads as a quiet day.
-        console.print(Text(f'{" " * GUTTER}events unavailable — {selection["context_error"]}', style='yellow'), soft_wrap=True)
-
-    resolved = selection.get('resolved') or {}
-    # The offered rows keep the order the draw gave them, never re-sorted here.
-    # Every other pursuit follows, so the screen answers for the whole register.
-    rest = offered_order(state, [name for name in state['active'] if name not in names])
-    console.print()
-    render_offers([offer(name, state, resolved) for name in names], [unoffered(name, state) for name in rest], width)
-    return 0
 
 
 class LogRefused(Exception):
@@ -406,7 +357,7 @@ def cmd_list(as_json: bool) -> int:
     client = service.client()
     listed = client.get('/pursuits')
     if as_json:
-        # See cmd_next: a Console would soft-wrap this into invalid JSON.
+        # Plain print, never the rich console, which soft-wraps at the terminal's width into invalid JSON.
         print(json.dumps(listed, indent=2))
         return 0
 
@@ -459,7 +410,7 @@ def cmd_drift(since: str | None, until: str | None, as_json: bool) -> int:
         raise typer.BadParameter(str(error)) from None
     report = service.client().get('/pursuits/drift', since=since, until=until)
     if as_json:
-        # See cmd_next: a Console would soft-wrap this into invalid JSON.
+        # Plain print, never the rich console, which soft-wraps at the terminal's width into invalid JSON.
         print(json.dumps(report, indent=2))
         return 0
 
@@ -481,7 +432,7 @@ def cmd_dormant(as_json: bool = False) -> int:
     """Pursuits gone quiet for more than three of their own intervals."""
     answered = service.client().get('/pursuits/dormant')
     if as_json:
-        # See cmd_next: a Console would soft-wrap this into invalid JSON.
+        # Plain print, never the rich console, which soft-wraps at the terminal's width into invalid JSON.
         print(json.dumps(answered, indent=2))
         return 0
     stale = answered['dormant']
@@ -554,21 +505,6 @@ def cmd_names() -> int:
     for name, config in sorted(pursuits.items()):
         print(f'{name}\t{config.get("description", "")}')
     return 0
-
-
-def next_command(
-    explain: Annotated[bool, typer.Option('--explain', help='The same draw with every number behind it.')] = False,
-    reroll: Annotated[bool, typer.Option('--reroll', help='Force a fresh draw before the standing one expires.')] = False,
-    as_json: Annotated[bool, typer.Option('--json', help='Output as JSON to stdout.')] = False,
-) -> None:
-    """What to do now, drawn from your pursuits.
-
-    A pursuit is something you mean to keep doing, at a pace you declare. The draw
-    is this table: everything owed, heaviest first, then the rest picked by weight.
-    It stands for a while, so running this again shows the same one. `doit dashboard`
-    lists everything outstanding rather than picking.
-    """
-    run(lambda: cmd_next(explain, as_json, reroll))
 
 
 def log_command(

@@ -70,6 +70,11 @@ def unconfigured(name: str) -> App:
     )
 
 
+def unconfigured_apps() -> dict[str, App]:
+    """Every app the service reads, each with no address, so a read of one fails as unconfigured."""
+    return {name: unconfigured(name) for name in ('life', 'learning', 'meso', 'nomad', 'slate')}
+
+
 @pytest.fixture
 def store(tmp_path: Path) -> Store:
     return Store(tmp_path / 'doit.db')
@@ -82,7 +87,7 @@ def client_for(
     clock: Callable[[], dt.datetime] | None = lambda: NOW,
 ) -> TestClient:
     """The service over `store`, at `NOW` unless handed another clock; None is the real one."""
-    apps = {name: unconfigured(name) for name in ('life', 'learning', 'meso', 'nomad', 'slate')} | (apps or {})
+    apps = unconfigured_apps() | (apps or {})
     readers = Readers(apps, github or GitHub(GitHubSettings()), ClickHouseSettings())
     views = Views(store, readers, clock=clock)
     settings = Settings(issuer='https://id.test', public_url='https://doit.test', database_path=store.path)

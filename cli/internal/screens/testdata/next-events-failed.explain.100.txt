@@ -1,0 +1,19 @@
+Why these ──────────────────────────────────────────────────────────────────────────────────────────
+draw 01a19d34
+
+   pursuit   wt           goal    last         due   pick
+●  sketch    10  1h 30m a week  2d ago   due today   owed
+●  novel      6       every 1d   today  5d overdue   owed
+●  errands    4       every 2d  4d ago  2d overdue   owed
+   bike     0.5       every 5d  3d ago   due today   0.0%
+●  letters    3       every 7d  3d ago   due in 1d  20.7%
+●  stretch    1       every 1d   today   due in 1d   6.9%
+   piano      8      2h a week  1d ago   due in 2d  55.2%
+   garden   2.5       every 3d  1d ago   due in 3d  17.2%
+
+piano   Lessons resume in the spring
+garden  The beds dry out after three days of sun, and the seedlings go first
+
+  every owed row is shown, heaviest first · the rest is drawn by weight to fill 5 rows
+  pick is the chance of being drawn first · yellow is skipped
+  doit next --json carries the raw balance every column here is derived from

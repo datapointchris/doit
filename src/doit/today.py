@@ -42,22 +42,13 @@ The model is `doit.lanes`. Every group in either list is a Lane. A done group
 is a grid of finished cells carrying `done_at`, and a due group is ranked rows.
 `--json` emits the two lists side by side, each lane in the contract's shape.
 Two lists rather than one, because a record appears in both under one name:
-habits done and habits still to do.
-
-**Color finds the structure and marks a state, and never fills a whole row.**
-The two list headings are cyan and each group's name is blue, so the eye
-reaches a group before it reads a row. A done entry's hour is green, the color
-this screen says done with. A due row's note is yellow or red by how late it
-is, and a group that could not be read is red. The text, the labels and the
-handles stay plain.
+habits done and habits still to do. The service answers them, and the Go doit's
+`cli/internal/screens` draws them.
 """
 
 import dataclasses as dc
 import datetime as dt
-from itertools import chain
 from typing import NamedTuple
-
-from rich.text import Text
 
 from doit import dashboard
 from doit import happened
@@ -65,24 +56,12 @@ from doit import lanes
 from doit import pursuits
 from doit import quota
 from doit import sources
-from doit.happened import GROUP_INDENT
-from doit.happened import HOUR_STYLE
-from doit.happened import ITEM_INDENT
-from doit.happened import group_heading
-from doit.happened import has_something
-from doit.happened import render_unavailable
 from doit.lanes import CompletionKind
 from doit.lanes import CompletionTarget
 from doit.lanes import Lane
 from doit.lanes import Row
 from doit.lanes import Urgency
-from doit.render import column_width
-from doit.render import console
-from doit.render import fitted
-from doit.render import handle_column
-from doit.render import print_handle_below
 from doit.render import span_text
-from doit.render import terminal_width
 from doit.window import Bounds
 
 # The one row-based lane whose urgency means today. Every other lane marks DUE
@@ -108,16 +87,6 @@ DUE_PER_GROUP = 3
 # routine whole without letting it push every register off the screen.
 ROUTINE_GROUPS = (*DAY_SET_LANES, lanes.PURSUITS)
 DUE_PER_ROUTINE_GROUP = 10
-
-# A review slug or a Lab id is the longest label here and fits. A longer one is
-# clipped rather than pushing every description in its group off the line.
-DUE_LABEL_MAX = 20
-
-# What a row's text keeps after the widest label, before a handle may sit beside
-# it. A handle that would take more goes on the line under its row.
-DUE_TEXT_MIN = 16
-
-LIST_STYLE = 'cyan'
 
 OFF_THE_DAY_ADAPTERS = ('slate-issues',)
 
@@ -358,98 +327,6 @@ def assemble(
     return Day(done, due, day_quota(kept.state, done, due))
 
 
-def render(day: Day, today: dt.date) -> None:
-    width = terminal_width()
-    console.rule(f'[cyan]Today[/] · {today.strftime("%a %d %b")}', align='left')
-    if day.figures is not None:
-        render_quota(day.figures)
-    due = [lane for lane in day.due if has_something(lane)]
-    done = [lane for lane in day.done if has_something(lane)]
-    if due:
-        console.print('STILL DUE', style=LIST_STYLE)
-        render_due(due, width)
-    if done:
-        if due:
-            console.print()
-        console.print('DONE', style=LIST_STYLE)
-        happened.render_groups(done, width)
-
-
-def checkoffs_text(count: float) -> str:
-    whole = round(count)
-    return f'{whole} checkoff' if whole == 1 else f'{whole} checkoffs'
-
-
-def joined(parts: list[Text]) -> Text:
-    line = Text(GROUP_INDENT)
-    for index, part in enumerate(parts):
-        if index:
-            line.append(' · ')
-        line.append_text(part)
-    return line
-
-
-def today_parts(figures: quota.Quota) -> list[Text]:
-    """What today asks in each unit, green once today has paid it."""
-    if figures.unavailable:
-        return [Text('pursuits unavailable', style='red')]
-    parts = []
-    minutes, checkoffs = figures.minutes, figures.checkoffs
-    if minutes is not None and minutes.need > 0:
-        part = Text(pursuits.minutes_text(minutes.done), style=HOUR_STYLE if minutes.done >= minutes.need else '')
-        noun = 'pursuit' if minutes.asked_of == 1 else 'pursuits'
-        part.append(f' of {pursuits.minutes_text(minutes.need)} across {minutes.asked_of} {noun}')
-        parts.append(part)
-    if checkoffs is not None and checkoffs.need > 0:
-        part = Text(f'{round(checkoffs.done)}', style=HOUR_STYLE if checkoffs.done >= checkoffs.need else '')
-        part.append(f' of {checkoffs_text(checkoffs.need)}')
-        parts.append(part)
-    return parts
-
-
-def checklist_parts(figures: quota.Quota) -> list[Text]:
-    parts = []
-    for entry in figures.checklists:
-        if entry.unavailable:
-            parts.append(Text(f'{entry.name} unavailable', style='red'))
-        else:
-            parts.append(Text(f'{entry.name} {entry.done} of {entry.total}'))
-    return parts
-
-
-def behind_lines(figures: quota.Quota) -> list[Text]:
-    """What is behind beyond today in each unit, then each timescale worth showing."""
-    minutes, checkoffs = figures.minutes, figures.checkoffs
-    if minutes is None or checkoffs is None or not (minutes.behind or checkoffs.behind):
-        return []
-
-    def amounts(extra_minutes: float, extra_checkoffs: float) -> str:
-        said = [pursuits.minutes_text(extra_minutes)] if round(extra_minutes) else []
-        return ' and '.join(said + ([checkoffs_text(extra_checkoffs)] if extra_checkoffs else []))
-
-    lines = [Text(f'{GROUP_INDENT}{amounts(minutes.behind, checkoffs.behind)} behind')]
-    for entry in figures.catch_up:
-        if entry.shown:
-            extra = amounts(entry.minutes_per_day, entry.checkoffs_per_day)
-            lines.append(Text(f'{GROUP_INDENT}{extra} more a day catches up in {entry.label}'))
-    return lines
-
-
-def quota_lines(figures: quota.Quota) -> list[Text]:
-    """Today's ask, the checklists, what is behind, and each catch-up worth showing.
-
-    A figure is green once today has paid it, the color this screen says done
-    with. Nothing else is colored but a part that could not be read.
-    """
-    lines = [joined(parts) for parts in (today_parts(figures), checklist_parts(figures)) if parts]
-    return lines + behind_lines(figures)
-
-
-def render_quota(figures: quota.Quota) -> None:
-    for line in quota_lines(figures):
-        console.print(line, no_wrap=True, overflow='ellipsis')
-
-
 def due_row_cap(lane_name: str, *, whole_routine: bool = False) -> int | None:
     """How many of a due group's rows are shown, or None for all of them.
 
@@ -459,63 +336,3 @@ def due_row_cap(lane_name: str, *, whole_routine: bool = False) -> int | None:
     if lane_name in ROUTINE_GROUPS:
         return None if whole_routine else DUE_PER_ROUTINE_GROUP
     return DUE_PER_GROUP
-
-
-def visible_rows(lane: Lane) -> list[Row]:
-    """A group's first rows, then one saying how many more it holds and where."""
-    rows = lane.rows[: due_row_cap(lane.name)]
-    hidden = max(lane.total, len(lane.rows)) - len(rows)
-    if hidden > 0:
-        rows = [*rows, Row(f'{hidden} more', '', handle=' · '.join(lane.hints))]
-    return rows
-
-
-def render_due(groups: list[Lane], width: int) -> None:
-    """One line per outstanding thing: what, how late, what to type.
-
-    The note and handle columns are sized across every group, so they line up
-    down the whole list. The label column is sized per group, so a group of long
-    review slugs does not push a pursuit's description off the line.
-
-    The label, text and note are clipped rather than wrapped, because a wrapped
-    row is two rows and this screen is read at a glance. A handle is never
-    clipped, since a clipped command fails when typed. One that would leave a
-    row less than `DUE_TEXT_MIN` columns of text beside the widest label goes on
-    the line under its row.
-    """
-    shown = [(lane, visible_rows(lane)) for lane in groups]
-    every = list(chain.from_iterable(rows for _, rows in shown))
-    note_width = column_width(width, [row.note for row in every], 0.2, 10)
-    note_gap = note_width + 1 if note_width else 0
-    widest_label = min(DUE_LABEL_MAX, max((len(row.label) for row in every), default=0))
-    label_gap = widest_label + 1 if widest_label else 0
-    handle_room = width - len(ITEM_INDENT) - label_gap - DUE_TEXT_MIN - note_gap - 1
-    handle_width = handle_column([f'↳ {row.handle}' for row in every if row.handle], handle_room)
-    what_width = max(DUE_TEXT_MIN, width - len(ITEM_INDENT) - note_gap - (handle_width + 1 if handle_width else 0))
-    for lane, rows in shown:
-        console.print(group_heading(lane))
-        if not lane.available:
-            render_unavailable(lane)
-            continue
-        label_width = min(DUE_LABEL_MAX, max((len(row.label) for row in rows), default=0))
-        text_width = max(0, what_width - label_width - (1 if label_width else 0))
-        for row in rows:
-            line = Text(ITEM_INDENT)
-            if label_width:
-                line.append(fitted(row.label, label_width, pad=True))
-                line.append(' ')
-            line.append(fitted(row.text, text_width, pad=True))
-            if note_width:
-                line.append(' ')
-                line.append(fitted(row.note, note_width, pad=True, style=dashboard.NOTE_STYLES[row.urgency] or ''))
-            handle = f'↳ {row.handle}' if row.handle else ''
-            inline = bool(handle) and len(handle) <= handle_width
-            if inline:
-                line.append(' ')
-                line.append(handle)
-            line.rstrip()
-            console.print(line, no_wrap=True, overflow='ellipsis')
-            if handle and not inline:
-                print_handle_below(handle, len(ITEM_INDENT) + label_width + (1 if label_width else 0), width)
-        if lane.reason:
-            console.print(Text(f'{ITEM_INDENT}partial — {lane.reason}', style='yellow'))

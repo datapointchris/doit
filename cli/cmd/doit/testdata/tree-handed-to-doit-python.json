@@ -1,6 +1,20 @@
 [
   {
     "path": [
+      "next"
+    ],
+    "summary": "What to do now, drawn from your pursuits",
+    "group": "What to do now"
+  },
+  {
+    "path": [
+      "today"
+    ],
+    "summary": "What today still owes, above what it has had",
+    "group": "What to do now"
+  },
+  {
+    "path": [
       "auth"
     ],
     "summary": "Log this machine in to doit's service, and out",
