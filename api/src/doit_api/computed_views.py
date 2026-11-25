@@ -478,12 +478,24 @@ class Views:
         return found
 
     def dashboard(self, wanted: list[str] | None) -> dict:
-        """`doit dashboard --json`: every lane, from one round of every configured source."""
+        """`doit dashboard --json`: every lane, from one round of every configured source.
+
+        Each lane carries how many of its rows the screen lists and whether the
+        screen leaves it out, and `lane_names` names every lane the round built,
+        so a client can say which of `wanted` matched none.
+        """
         config, now = self.config(), self.now()
         results = self.readers.results(list(config.registry.sources.values()), window.day_of(now), now)
-        collected = dashboard.arranged([*dashboard.source_lanes(config.registry, results), self.maintenance_lane(config, now)], wanted)
+        built = dashboard.arranged([*dashboard.source_lanes(config.registry, results), self.maintenance_lane(config, now)], None)
+        collected = dashboard.arranged(built, wanted)
+        row_cap = dashboard.FOCUSED_ROW_CAP if wanted else dashboard.ROW_CAP
         return {
             **lanes.to_document(collected, now),
+            'lanes': [
+                {**lanes.lane_to_dict(lane), 'row_cap': dashboard.cap_for(lane.name, row_cap), 'quiet': dashboard.quiet_lane(lane)}
+                for lane in collected
+            ],
+            'lane_names': [lane.name for lane in built],
             'problems': config.registry.problems,
             'configured': len(config.registry.sources),
             'pursuit_standing': self.pursuit_standing(config, now),
