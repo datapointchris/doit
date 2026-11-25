@@ -462,12 +462,13 @@ and `panel show` still prints the cache. Where a watch holds the desk and answer
 an older doit's, `panel pick` exits 4 and says that restarting the service starts this doit's
 watch.
 
-A pick is taken once. Its row stays, showing how the pick stands, and the same key is refused until
-the watch reads the rows again after the completion ended. A completion that its owner refused frees
+A pick is taken once. Its row shows the pick while it commits, then leaves the panel, and the same
+key is refused until the watch reads the rows again after the completion ended. A completion that its owner refused frees
 the row at once, so it can be picked again. A pick that completes a row while a nudge is ready ends the nudge,
 as an answer does, and restarts the clock. Opening a minutes step ends nothing, and neither does a
 completion that failed. A pick at any other time leaves the clock alone. Each completing pick
-appends a `picked` line, and a notification confirms it or names what failed. An answer row is
+appends a `picked` line. A notification names a pick that failed, and confirms one from `panel pick`
+that went through. An answer row is
 recorded and exits as `doit desk-nudge answer` records and exits it.
 
 `panel pick` prints the next step, or a `done` step saying what was completed, and exits 0 for
@@ -527,15 +528,14 @@ Node version.
 
 A click on the panel page posts its key to `POST /api/picks`, the route that `panel pick` uses, and
 the answer says how the pick ended. The watch runs the pick under a context that the request cannot
-cancel, so a window that closes on blur mid-pick still lets the pick finish. A misclicked habit or
-pursuit log stays recorded, because life cannot delete a completion. A set is taken back by its
-untick.
+cancel, so a window that closes on blur mid-pick still lets the pick finish.
 
-```text
-POST   /picks   {"key": "habit:17", "minutes": null}
-                200 the step it leads to: done, or a timed pursuit's minutes
-                409 refused or skipped, 502 the completion failed, 504 no answer came
-```
+The panel takes back only a set, by its untick. A misclicked habit is taken back on life's own
+page, and a review entry with `doit review undo`. A pursuit log stays in the journal.
+
+`POST /picks` takes `{"key": "habit:17", "minutes": null}`. It answers the step the pick leads to,
+or a refusal as `{"exit_code", "message"}`. The route table at the top of
+`cli/internal/desknudge/socket.go` lists each status it answers.
 
 A POST of a key whose pick still runs is refused, so a double click is one pick. A POST after the
 pick ended is a second pick, so a client never resends one. A pick that went through on the page
@@ -544,8 +544,10 @@ sends no notification, because its row shows it.
 Every pick lands on the desk's day when it was picked, so one that a restart takes up the next day
 still counts for the day it was picked.
 
-- **A habit** is read again from `life habits completed` for its day as it commits. One already
-  done that day is skipped. Otherwise `life habits complete` runs.
+- **A habit** is read again from `life habits completed` for its day as it commits, because life
+  stores a second completion of a habit. One already done that day is skipped. Otherwise
+  `life habits complete` runs. A completion that another client records between the read and the
+  write still lands twice.
 - **A habit's ticks and unticks** run one at a time, in the order picked.
 - **A pursuit and a review entry** commit through the service. The journal keeps a pursuit's entry
   under the pick's id, so the service stores a resent entry once.
@@ -553,7 +555,8 @@ still counts for the day it was picked.
 Each row carries its `picks`, and the panel's `picks` lists them all, each `committing` while its
 command runs, or how it ended:
 
-- **`done`** went through. Its row stays in place until the view is read again.
+- **`done`** went through. Until the view is read again, its row stays in place on the page and
+  leaves `panel show`.
 - **`refused`** recorded nothing, so its row can be picked again. It says why.
 - **`uncertain`** may have landed, as a call that ran out of time may. Its row is held until
   the view is read again.
