@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -166,15 +167,71 @@ func newPanelCommand() *cobra.Command {
 		Use:   "panel",
 		Short: "The desk nudge's panel, which completes any of today's rows in one pick",
 		Long: "The desk nudge's panel, which completes any of today's rows in one pick.\n\n" +
-			"The watch reads the service's desk panel view and keeps it on this desk. `panel show`\n" +
-			"prints it with the key that picks each row, and `panel pick` hands a key to the watch,\n" +
-			"which completes the row it names and prints the next step.",
-		Example: "  doit desk-nudge panel show           today's rows with the key that picks each\n" +
+			"The watch reads the service's desk panel view and keeps it on this desk. `panel open`\n" +
+			"shows it as a page in a window, where a click completes a row a few seconds later\n" +
+			"unless a second click takes it back. `panel show` prints it with the key that picks\n" +
+			"each row, and `panel pick` hands a key to the watch, which completes the row it names\n" +
+			"at once and prints the next step.",
+		Example: "  doit desk-nudge panel open           today's rows as a page in a window\n" +
+			"  doit desk-nudge panel show           today's rows with the key that picks each\n" +
 			"  doit desk-nudge panel pick habit:17  complete habit 17 through life",
 	})
 	cmd.Annotations[portedWhole] = "true"
-	cmd.AddCommand(newPanelShowCommand(), newPanelPickCommand())
+	cmd.AddCommand(newPanelOpenCommand(), newPanelShowCommand(), newPanelPickCommand())
 	return cmd
+}
+
+// The panel's window. A second open of the same name raises it, and a Hyprland
+// window rule and the events file's focused window see its title.
+const (
+	panelWindowName  = "doit-panel"
+	panelWindowTitle = "doit panel"
+)
+
+// panelWindowArgv is webviewrs showing the panel page at url, closed by the
+// page's Esc or once the window loses focus.
+func panelWindowArgv(url string) []string {
+	return []string{"webviewrs", "-n", panelWindowName, "-t", panelWindowTitle, "--dark", "--close-on-blur", url}
+}
+
+func newPanelOpenCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "open",
+		Short: "Show today's rows as a page in a window, where a click completes a row",
+		Long: "Show today's rows as a page in a window, where a click completes a row 4 seconds later\n" +
+			"unless a second click takes it back. The watch serves the page, and webviewrs draws\n" +
+			"the window, which closes on Esc or once it loses focus. A second open raises the\n" +
+			"window that is already open.\n\n" +
+			"Replaces itself with webviewrs once the watch answers. Exits 4 where no watch answers,\n" +
+			"with a notification saying so, because a pill or a key shows no stderr. Exits 1 where\n" +
+			"webviewrs is not installed.",
+		Example: "  doit desk-nudge panel open  today's rows as a page in a window",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			webviewrs, err := exec.LookPath("webviewrs")
+			if err != nil {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(),
+					"doit desk-nudge panel open: webviewrs is not on PATH, and it draws the panel's window. Install webviewrs, or read the rows with `doit desk-nudge panel show`.")
+				return exitCode(1)
+			}
+			minted, err := desknudge.DeskPaths().AskPageCode(cmd.Context())
+			var said string
+			switch {
+			case errors.Is(err, desknudge.ErrNoWatch):
+				said = "no desk nudge watch is running. Start the desk-nudge user service, which runs `doit desk-nudge watch`, or run it in a terminal."
+			case errors.Is(err, desknudge.ErrWatchServesNoPicks), errors.Is(err, desknudge.ErrWatchServesNoPage):
+				said = "the desk nudge watch running is an older doit's, which serves no panel page. Restarting the desk-nudge user service starts this doit's watch."
+			case err != nil:
+				said = err.Error()
+			}
+			if err != nil {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "doit desk-nudge panel open: %s\n  (%v)\n", said, err)
+				desknudge.Notify(cmd.Context(), "doit: the panel did not open", said)
+				return exitCode(service.NoAnswerExit)
+			}
+			return syscall.Exec(webviewrs, panelWindowArgv(minted.URL), os.Environ())
+		},
+	}
 }
 
 func newPanelShowCommand() *cobra.Command {

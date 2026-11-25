@@ -4,6 +4,9 @@ go 1.26.8
 
 toolchain go1.26.11
 
+// The panel page's npm dependencies ship Go packages of their own.
+ignore ./web/node_modules
+
 require (
 	charm.land/bubbletea/v2 v2.1.2
 	github.com/charmbracelet/x/ansi v0.11.10

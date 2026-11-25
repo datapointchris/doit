@@ -96,6 +96,16 @@ them, so no reader holds the rule that lists them. The board parses no key and l
 `group`, `minutes`, `suggested` and `untick_key` do. Only the panel has this reason, so a tab over the service's
 data reads the service's API.
 
+**Let the panel page draw the panel document's `view`, not its `rows`.** The page places each part
+of the view on a card of its own, the suggestion, the habits, the pursuits and each lane, which a
+flat list of rows cannot carry. It still parses no key: every key it posts is one the view names,
+and the watch runs every pick.
+
+**Keep the placeholder at `cli/internal/panelpage/dist/index.html`.** `go:embed` needs a file there,
+so a checkout with no page build still compiles. `npm run build` in `cli/web` writes over it, and git
+then shows it modified, so `git restore -- cli/internal/panelpage/dist/index.html` before a commit.
+The release builds the page and fails where the placeholder is still in place.
+
 ## The service runs no command, and the CLI's own code starts the processes below
 
 - **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`, with no timeout.
@@ -115,6 +125,8 @@ The Go binary starts these:
 - **`doit-python`**, in `passthrough.Exec`, which replaces the process with it for every command line
   that `owns` turns down.
 - **The browser**, through pkg/browser's `xdg-open` or `open`, at `doit auth login`.
+- **`webviewrs -n doit-panel -t "doit panel" --dark --close-on-blur <url>`**, by `panelWindowArgv` in
+  `cli/cmd/doit/desk_nudge.go`, at `doit desk-nudge panel open`, which replaces the process with it.
 - **The desk nudge's programs**, each an argv built by a function in
   `cli/internal/desknudge/programs.go`:
   - `claude-sessions --json`, by `claudeSessionsProgram`, at each firing, answer and pick.
@@ -123,7 +135,8 @@ The Go binary starts these:
   - `hyprctl -i <instance> monitors -j`, as a nudge turns ready.
   - `canberra-gtk-play --id <chimeSound>`, by `chimeProgram`, once as a nudge turns ready,
     unless every display is off. A firing opens nothing else.
-  - `notify-send -a doit`, by `notifyProgram`, for a passing notice after an answer or a pick.
+  - `notify-send -a doit`, by `notifyProgram`, for a passing notice after an answer or a pick,
+    and through `Notify` where `panel open` finds no watch to answer it.
   - `loginctl show-session auto -p IdleHint --value`, by `idleHintProgram`, before each timed read
     of the desk panel view. It never moves the clock.
   - `life habits complete <id> --date <day>`, by `habitProgram`, at a pick on a habit, on the desk's
@@ -164,6 +177,9 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
   go to the service, so the interval follows the login to any desk. The watch serves its picks on
   `doit/watch.sock` in the runtime directory, in a 0700 directory. `runtimeDir` in
   `cli/internal/desknudge/files.go` says which directory that is where `$XDG_RUNTIME_DIR` is unset.
+  The watch also serves the panel page on `127.0.0.1`, at a port it picks at each start. The page's
+  cookie is bought with a one-use code that only the socket's `POST /page-codes` mints, so a process
+  that cannot open the socket reaches no route.
 - **The desk nudge's schemas** — `schemas/desk-nudge-status.schema.json`,
   `desk-nudge-record.schema.json` and `desk-nudge-panel.schema.json` are the source of each shape,
   edited by hand. `TestEachDocumentTheWatchWritesMatchesItsSchemaFile` validates what the Go watch

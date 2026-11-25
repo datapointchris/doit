@@ -3,3 +3,9 @@ coverage.xml
 dist/
 *.egg-info/
 __pycache__/
+node_modules/
+# The panel page's build lands here, over the committed placeholder that lets
+# go:embed compile in a checkout with no build.
+!cli/internal/panelpage/dist/
+cli/internal/panelpage/dist/*
+!cli/internal/panelpage/dist/index.html

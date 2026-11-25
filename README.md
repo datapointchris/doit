@@ -112,7 +112,7 @@ flag that would have answered.
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |
 | What is this machine set to, and who set it | `config show` | the config file, the environment and the defaults, asking no service |
 | How long have I been at the desk | `desk-nudge status` | this desk's clock, asking no service |
-| What can I mark done from here | `desk-nudge panel show`, or `tui` to click them done | the rows that the desk nudge's watch last read from `today` and `pursuits`, asking no service |
+| What can I mark done from here | `desk-nudge panel open` to click them done in a window, `desk-nudge panel show`, or `tui` | the rows that the desk nudge's watch last read from `today` and `pursuits`, asking no service |
 
 The service answers every row except those marked asking no service, reading what the row names.
 
@@ -367,6 +367,7 @@ doit desk-nudge watch                      # the loop that a desk's user service
 doit desk-nudge status                     # where the clock stands, and what the nudge suggests
 doit desk-nudge answer too_soon            # answer the nudge that is showing
 doit desk-nudge pause                      # hold the clock until resume
+doit desk-nudge panel open                 # the panel as a page in a window, where a click completes a row
 doit desk-nudge panel show --json          # the panel's rows, read with no request
 doit desk-nudge panel pick habit:17 --json # complete one row, and print the next step
 ```
@@ -473,6 +474,44 @@ recorded and exits as `doit desk-nudge answer` records and exits it.
 either. It exits 2 where it will not act on the key, such as a row picked already, and nothing ran.
 It exits 1 where the completion did not go through, and 4 where the service gave no answer.
 `schemas/desk-nudge-panel.schema.json` describes each step.
+
+### `panel open` shows today's rows as a page in a window that closes when it loses focus
+
+```bash
+doit desk-nudge panel open   # 0 once the window opens, 4 with no watch, 1 with no webviewrs
+```
+
+`panel open` asks the watch over its socket for the page's address, then replaces itself with
+`webviewrs -n doit-panel -t "doit panel" --dark --close-on-blur <url>`. Esc closes the window, and
+so does focus moving elsewhere. A second `panel open` while the window is open raises that window,
+because webviewrs focuses a window name that is already open.
+
+- **With no watch**, it exits 4 and names the `desk-nudge` user service. A key binding has no
+  terminal, so a notification says the same. An older doit's watch serves no page, and that also
+  exits 4, saying that restarting the service starts this doit's watch.
+- **With no `webviewrs` on `PATH`**, it names it and exits 1.
+
+The watch serves the page on `127.0.0.1`, on a port it picks at each start:
+
+- **It refuses any `Host` but that address and port**, so a site that rebinds its own name to
+  `127.0.0.1` reaches nothing.
+- **Every route needs a `SameSite=Strict`, HttpOnly cookie.** The first load trades a one-use code
+  for it. The socket's `POST /page-codes` mints the code, which expires after `CodeLifetime` in
+  `cli/internal/panelpage/page.go`. Only a process that can open the socket gets one.
+- **The page reaches the socket's routes under `/api/`**, so `GET /api/panel` and
+  `POST /api/pending-picks` answer as `GET /panel` and the routes below do.
+
+The page draws the suggestion first. Its Log button starts from the pursuit's usual minutes, and
+chips step to 15, 30, 45 or 60. Beside it are today's figures, the habits with a circle per set, the
+pursuits owed, and each lane. A click is a pending pick, and a row ticked done stays in its place
+for the rest of the day. A lane that failed draws its reason, and rows read before the service
+stopped answering are marked stale. The page reads the panel again whenever its window shows, and
+starts afresh when the desk's day changes. Every control takes Tab and Space.
+
+The page is Vue, in `cli/web`. `npm run build` there writes it into
+`cli/internal/panelpage/dist/`, which the binary embeds. A checkout holds only a placeholder page
+there, so a binary from `go build` alone serves a page saying how to build it. The release builds
+the page first, and fails where the placeholder is still in place. `.nvmrc` names the Node version.
 
 ### A click on the panel page commits a few seconds later, and a second click takes it back
 

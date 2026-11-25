@@ -1,0 +1,846 @@
+:root {
+  --page: #1d1f21;
+  --card: #25282b;
+  --card-hover: #2d3135;
+  --card-pressed: #363b40;
+  --border: #3a3f45;
+  --text: #d2d5d3;
+  --text-strong: #f1f3f2;
+  --text-muted: #8f9392;
+  --text-faint: #62676b;
+  --up-next: #ffb52e;
+  --up-next-ink: #1d1f21;
+  --up-next-wash: rgba(255, 181, 46, 0.14);
+  --up-next-border: #6b5a33;
+  --done: #7cc56f;
+  --done-wash: rgba(124, 197, 111, 0.16);
+  --done-border: #5c7a43;
+  --late: #d9907e;
+  --focus: #ffb52e;
+  --radius: 0.9rem;
+  --sans: 'Adwaita Sans', 'Nimbus Sans', sans-serif;
+  --mono: 'JetBrains Mono Nerd Font', 'JetBrains Mono', monospace;
+  /* Every size is rem off this root. */
+  font-size: 20px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text);
+  font-family: var(--sans);
+  line-height: 1.35;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+.num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.late {
+  color: var(--late);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ---------- the board ---------- */
+
+.board {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+  padding: 1.1rem 1.3rem;
+}
+
+/* A window narrower than half a wide monitor stacks the cards two across. */
+@media (max-width: 70rem) {
+  .board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.board > .wide {
+  grid-column: span 2;
+}
+
+.board > .full {
+  grid-column: 1 / -1;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.empty-board {
+  padding: 3rem 1.3rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+/* ---------- top line and foot ---------- */
+
+.topline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.topline .date {
+  color: var(--text-strong);
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.topline .read {
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+.topline .stale {
+  color: var(--late);
+}
+
+.foot {
+  color: var(--text-faint);
+  font-size: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.foot kbd {
+  font-family: var(--mono);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  padding: 0 0.3rem;
+}
+
+.problems {
+  color: var(--late);
+  font-size: 0.8rem;
+}
+
+/* ---------- card ---------- */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0 0 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.card-title .count {
+  font-family: var(--mono);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.list-card {
+  padding: 0.8rem 0.6rem;
+}
+
+.list-card .card-title {
+  padding: 0 0.5rem;
+}
+
+.failed {
+  color: var(--late);
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+}
+
+.not-listed {
+  color: var(--text-faint);
+  font-size: 0.8rem;
+  padding: 0.3rem 0.7rem;
+}
+
+/* ---------- the suggestion ---------- */
+
+.hero {
+  background: linear-gradient(160deg, #2e2a22 0%, var(--card) 55%);
+  border-color: #54472c;
+}
+
+.hero .eyebrow {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--up-next);
+}
+
+.hero .eyebrow .why {
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 0.85rem;
+}
+
+.hero h1 {
+  margin: 0.35rem 0 0.1rem;
+  font-size: 1.55rem;
+  line-height: 1.15;
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.hero .sub {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.8rem 0 0.2rem;
+}
+
+.choice {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  text-align: left;
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.6rem;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+}
+
+.choice:hover {
+  background: var(--card-hover);
+}
+
+.choice.on {
+  border-color: var(--up-next-border);
+  background: var(--up-next-wash);
+  color: var(--text-strong);
+}
+
+.choice .dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  flex: none;
+  transform: translateY(0.05rem);
+}
+
+.choice.on .dot {
+  background: var(--up-next);
+  border-color: var(--up-next);
+}
+
+.choice .title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.choice .by {
+  color: var(--text-faint);
+  white-space: nowrap;
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+
+.logbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+  background: var(--up-next);
+  color: var(--up-next-ink);
+  font-weight: 700;
+  font-size: 1.1rem;
+  padding: 0.65rem 1.3rem;
+  border-radius: 0.7rem;
+  min-width: 9rem;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.08);
+}
+
+.btn-primary.pending {
+  background: var(--done);
+}
+
+.btn-primary.done {
+  background: var(--done-wash);
+  color: var(--done);
+}
+
+.chip {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 0.6rem;
+  background: var(--card-hover);
+  border: 1px solid var(--border);
+}
+
+.chip:hover {
+  background: var(--card-pressed);
+}
+
+.chip.on {
+  border-color: var(--up-next);
+  color: var(--up-next);
+}
+
+.feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.9rem;
+  font-size: 0.85rem;
+}
+
+.feedback .label {
+  color: var(--text-faint);
+  margin-right: 0.2rem;
+}
+
+.answer {
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.answer:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
+.nothing-offered {
+  color: var(--text-muted);
+  margin-top: 0.6rem;
+}
+
+/* ---------- progress ---------- */
+
+.bar {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--card-pressed);
+  overflow: hidden;
+}
+
+.bar > i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--done);
+  transition: width 300ms ease;
+}
+
+.bar.minutes > i {
+  background: var(--up-next);
+}
+
+.meter {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.55rem 0;
+}
+
+.meter .name {
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.meter .value {
+  font-family: var(--mono);
+  font-size: 1rem;
+  color: var(--text-strong);
+  min-width: 7.5rem;
+  text-align: right;
+}
+
+.meter .bar {
+  height: 0.6rem;
+}
+
+.behind {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.behind strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ---------- tick rows ---------- */
+
+.tick {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.65rem;
+  min-height: 2.6rem;
+}
+
+.tick:hover {
+  background: var(--card-hover);
+}
+
+.box {
+  flex: none;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 0.4rem;
+  border: 2px solid var(--text-faint);
+  display: grid;
+  place-items: center;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: transparent;
+  transition: all 150ms ease;
+}
+
+.tick:hover .box {
+  border-color: var(--text-muted);
+}
+
+.tick .label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tick .label .sub {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tick .note {
+  flex: none;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.tick .note.late {
+  color: var(--late);
+}
+
+.tick .said {
+  flex: none;
+  max-width: 50%;
+  font-size: 0.78rem;
+  color: var(--late);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tick.pending .box,
+.tick.committing .box,
+.tick.done .box {
+  background: var(--done);
+  border-color: var(--done);
+  color: var(--page);
+}
+
+.tick.pending .box::after,
+.tick.committing .box::after,
+.tick.done .box::after {
+  content: '✓';
+}
+
+.tick.done .label {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+}
+
+.tick.pending,
+.tick.committing {
+  background: var(--done-wash);
+}
+
+.tick.uncertain .box {
+  border-style: dashed;
+  border-color: var(--late);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.15rem 0.4rem;
+}
+
+.grid2 .tick .label {
+  white-space: normal;
+  line-height: 1.2;
+}
+
+/* The delayed commit: the shrinking line is the time left to take the click back. */
+.drain {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 3px;
+  width: 100%;
+  background: var(--done);
+  transform-origin: left;
+  animation-name: drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.btn-primary .drain {
+  background: var(--up-next-ink);
+  opacity: 0.5;
+}
+
+@keyframes drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* ---------- checklist sets ---------- */
+
+.habit-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.habit-head .tick {
+  flex: 1;
+}
+
+.sets-total {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.sets {
+  padding: 0.2rem 0.7rem 0.5rem 2.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.set-row {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.92rem;
+}
+
+.set-row .count {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.set-row.full .count {
+  color: var(--done);
+}
+
+.circles {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.circle {
+  position: relative;
+  overflow: hidden;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 50%;
+  border: 2px solid var(--text-faint);
+  transition: all 120ms ease;
+}
+
+.circle:hover {
+  border-color: var(--done);
+}
+
+.circle.filled {
+  background: var(--done);
+  border-color: var(--done);
+}
+
+.circle.pending {
+  background: var(--done-wash);
+  border-color: var(--done);
+}
+
+.circle.filled.pending {
+  background: var(--done-wash);
+  border-style: dashed;
+}
+
+.circle .drain {
+  height: 2px;
+}
+
+/* ---------- pursuit rows ---------- */
+
+.prow {
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.65rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.prow:hover {
+  background: var(--card-hover);
+}
+
+.phead {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 1.9rem;
+}
+
+.prow .pname {
+  font-weight: 600;
+  color: var(--text-strong);
+  flex: none;
+}
+
+.prow .pwhat {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prow .pnote {
+  flex: none;
+  font-size: 0.8rem;
+  color: var(--late);
+  white-space: nowrap;
+}
+
+.prow .pact {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+}
+
+.prow .pact .bar {
+  flex: 1;
+}
+
+.prow .pact .value {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  min-width: 6.5rem;
+  text-align: right;
+}
+
+.prow .pitems {
+  margin: 0.2rem 0 0 0.4rem;
+}
+
+.prow .pitems .tick {
+  min-height: 2.1rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.92rem;
+}
+
+.prow.done .pname {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.prow.done .pnote {
+  color: var(--done);
+}
+
+.mini {
+  position: relative;
+  overflow: hidden;
+  font-size: 0.8rem;
+  font-family: var(--mono);
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.5rem;
+  background: var(--card-hover);
+  border: 1px solid var(--border);
+}
+
+.mini:hover {
+  background: var(--card-pressed);
+}
+
+.mini.go {
+  border-color: var(--done-border);
+  color: var(--done);
+}
+
+.mini.pending,
+.mini.committing {
+  border-color: var(--done);
+  color: var(--done);
+  background: var(--done-wash);
+}
+
+.mini.done {
+  color: var(--done);
+  border-color: transparent;
+  background: none;
+}
+
+.said-row {
+  font-size: 0.78rem;
+  color: var(--late);
+  margin-top: 0.2rem;
+}
+
+/* ---------- folds ---------- */
+
+.more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.65rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.more:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.more .chev {
+  transition: transform 150ms ease;
+  font-size: 0.8rem;
+}
+
+.more.open .chev {
+  transform: rotate(90deg);
+}
+
+.more.inline {
+  width: auto;
+}
+
+/* ---------- a passing notice ---------- */
+
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  background: var(--card-pressed);
+  color: var(--text-strong);
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  padding: 0.55rem 1rem;
+  font-size: 0.9rem;
+  max-width: 80%;
+}
+
+.tick .note.undo {
+  color: var(--done);
+}
+
+.habits-bar {
+  margin: -0.2rem 0 0.6rem;
+}
+
+.prow .pwhat.plain {
+  color: var(--text);
+}
