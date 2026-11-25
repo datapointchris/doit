@@ -176,7 +176,7 @@
     },
     "rows": {
       "type": "array",
-      "description": "What the step draws, in order. Today lists the notes, the suggestion, the answers while a nudge is ready, then each row that a pick completes. A picked row stays, showing how its pick stands. A minutes step lists its amounts, and a done step lists none.",
+      "description": "What the step draws, in order. Today lists the notes, the suggestion, the answers while a nudge is ready, then each row that a pick completes. A row whose key a pick holds leaves until the view is read again, and one whose pick still commits stays, showing that it commits. A minutes step lists its amounts, and a done step lists none.",
       "items": {
         "type": "object",
         "additionalProperties": false,

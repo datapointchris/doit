@@ -524,7 +524,9 @@ type Row struct {
 
 // todayRows are what today's step draws, in order: the notes, the suggestion,
 // the answers while a nudge is ready, then each row that a pick completes. A
-// picked row stays, showing how its pick stands.
+// row whose key a pick holds leaves until the view is read again, unless its
+// pick still commits, so a reader of rows never draws a row just completed as
+// one to pick.
 func (p *Panel) todayRows() []Row {
 	entries := p.entries()
 	rows := []Row{}
@@ -547,7 +549,14 @@ func (p *Panel) todayRows() []Row {
 			rows = append(rows, rowOf(found, p))
 		}
 	}
-	return rows
+	committing := func(pick ShownPick) bool { return pick.State == PickCommitting }
+	kept := rows[:0]
+	for _, row := range rows {
+		if row.Key == nil || row.Kind == KindAnswer || !p.held(*row.Key) || slices.ContainsFunc(row.Picks, committing) {
+			kept = append(kept, row)
+		}
+	}
+	return kept
 }
 
 func rowOf(found entry, p *Panel) Row {

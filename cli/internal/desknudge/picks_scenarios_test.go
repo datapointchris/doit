@@ -183,8 +183,8 @@ func TestAHabitDoneElsewhereBeforeItsPickIsSkippedAndItsRowSaysSo(t *testing.T) 
 	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsCompletedProgram(f.clockNow().Format(dayLayout)).argv}, slices.Equal) {
 		t.Errorf("life ran %q, want only the day's completions read again", ran)
 	}
-	if shown := f.shownPick("habit:1"); shown.State != OutcomeSkipped || shown.Message == nil || *shown.Message != "already done today" {
-		t.Errorf("habit 1's pick shows %+v, want it skipped, saying it is already done today", shown)
+	if shown := f.shownPick("habit:1"); shown.State != OutcomeSkipped {
+		t.Errorf("habit 1's pick shows %+v, want it skipped", shown)
 	}
 	if notices := f.ran("notify-send"); len(notices) != 1 {
 		t.Errorf("notify-send ran %q, want one notice of the skip", notices)
@@ -304,14 +304,15 @@ func TestEachKeyKindCommitsThroughItsCommandAndAnOnLogLabelStaysOneArgument(t *t
 		programs [][]string
 		journal  bool
 		reviewed string
+		held     bool
 	}{
-		{key: "habit:1", programs: [][]string{habitsCompletedProgram(day).argv, habitProgram("1", day).argv}},
+		{key: "habit:1", held: true, programs: [][]string{habitsCompletedProgram(day).argv, habitProgram("1", day).argv}},
 		{key: "tick:1", programs: [][]string{tickProgram("1", day).argv}},
 		{key: "untick:2", programs: [][]string{untickProgram("2", day).argv}},
-		{key: "pursuit:tasks:532", programs: [][]string{{"tick-task", "532", `File the "receipts" now`}}, journal: true},
-		{key: "pursuit:read", minutes: &thirty, journal: true},
-		{key: "review:prune-images", reviewed: "prune-images 2026-11-24"},
-		{key: "practice:lab-regex", reviewed: "lab-regex 2026-11-24"},
+		{key: "pursuit:tasks:532", programs: [][]string{{"tick-task", "532", `File the "receipts" now`}}, journal: true, held: true},
+		{key: "pursuit:read", minutes: &thirty, journal: true, held: true},
+		{key: "review:prune-images", reviewed: "prune-images 2026-11-24", held: true},
+		{key: "practice:lab-regex", reviewed: "lab-regex 2026-11-24", held: true},
 	} {
 		t.Run(row.key, func(t *testing.T) {
 			f := newFakeDesk(t)
@@ -332,6 +333,10 @@ func TestEachKeyKindCommitsThroughItsCommandAndAnOnLogLabelStaysOneArgument(t *t
 			}
 			if reviewed := slices.Clone(f.reviews); row.reviewed != "" != (len(reviewed) == 1) || row.reviewed != "" && reviewed[0] != row.reviewed {
 				t.Errorf("the service marked done %v, want %q", reviewed, row.reviewed)
+			}
+			// doit-tui draws panel show's rows and never their picks, so a row whose key the pick holds leaves them.
+			if row.held && slices.ContainsFunc(f.desk.Show().Rows, func(listed Row) bool { return listed.Key != nil && *listed.Key == row.key }) {
+				t.Errorf("panel show still lists %s, which doit-tui would draw as a row to pick", row.key)
 			}
 		})
 	}
