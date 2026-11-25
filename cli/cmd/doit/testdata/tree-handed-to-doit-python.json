@@ -48,7 +48,7 @@
       "items",
       "drop"
     ],
-    "summary": "Drop an item, which keeps its row in ingestion, as your decision"
+    "summary": "Drop an item, as your decision"
   },
   {
     "path": [

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -113,28 +114,24 @@ func TestIngestionReviewLaneListsItemsAndPlacesThemThroughIngestion(t *testing.T
 	served.writeText(t, "sources", "sources:\n  ingestion-review:\n    adapter: ingestion-review\n")
 	on := newDesk(t, served.url, root)
 
-	t.Run("dashboard lists each waiting item with its zone, title, guess below the floor and key", func(t *testing.T) {
-		printed, stderr, exit := on.run(t, "dashboard", "--lane", "ingestion-review")
-		if exit != 0 {
-			t.Fatalf("doit dashboard --lane ingestion-review exited %d, printing:\n%s%s", exit, printed, stderr)
+	t.Run("each row shows the guess only below the floor, and a child's key quoted for zsh's extendedglob", func(t *testing.T) {
+		lane := laneRead(t, on)
+		want := []laneRow{
+			{Label: "outside", Note: "personal 0.58", Handle: "reddit/t3_1h9xk2"},
+			{Label: "owner", Note: "tags-disagree", Handle: "'memo/7c41e09a2b3d55f1#2'"},
 		}
-		for _, wanted := range []string{
-			"INGESTION-REVIEW", "2 waiting", "outside", "r/productivity: Anyone read Deep Work", "personal 0.58", "reddit/t3_1h9xk2",
-			"owner", "tags-disagree", "memo/7c41e09a2b3d55f1#2", "doit ingestion items place <key> <destination>",
-		} {
-			if !strings.Contains(printed, wanted) {
-				t.Errorf("the lane does not show %q:\n%s", wanted, printed)
-			}
+		if lane.Total != 2 || !slices.Equal(lane.Rows, want) {
+			t.Errorf("the lane read %+v, wanting total 2 and rows %+v", lane, want)
 		}
 	})
 
 	t.Run("place and drop reach ingestion as the caller's decision, with its cause", func(t *testing.T) {
 		printed, stderr, exit := on.run(t, "ingestion", "items", "place", "reddit/t3_1h9xk2", "life-articles", "--cause", "subreddit")
-		if exit != 0 || !strings.Contains(printed, "Placed reddit/t3_1h9xk2 on life-articles: side personal, read as-is.") {
+		if exit != 0 || !strings.Contains(printed, "Decided reddit/t3_1h9xk2 on life-articles: side personal, read as-is.") {
 			t.Fatalf("doit ingestion items place exited %d, printing:\n%s%s", exit, printed, stderr)
 		}
 		printed, stderr, exit = on.run(t, "ingestion", "items", "drop", "memo/7c41e09a2b3d55f1#2")
-		if exit != 0 || !strings.Contains(printed, "Dropped memo/7c41e09a2b3d55f1#2, cause unstated.") {
+		if exit != 0 || !strings.Contains(printed, "Decided memo/7c41e09a2b3d55f1#2: side drop.") {
 			t.Fatalf("doit ingestion items drop exited %d, printing:\n%s%s", exit, printed, stderr)
 		}
 		sent := ingestion.decisions()
@@ -154,19 +151,27 @@ func TestIngestionReviewLaneListsItemsAndPlacesThemThroughIngestion(t *testing.T
 
 	t.Run("an ingestion that cannot be reached shows the lane unavailable, never empty", func(t *testing.T) {
 		ingestion.Close()
-		printed, stderr, exit := on.run(t, "dashboard", "--lane", "ingestion-review", "--json")
-		var answer struct {
-			Lanes []struct {
-				Name   string `json:"name"`
-				Status string `json:"status"`
-				Reason string `json:"reason"`
-			} `json:"lanes"`
-		}
-		if exit != 0 || json.Unmarshal([]byte(printed), &answer) != nil || len(answer.Lanes) != 1 {
-			t.Fatalf("doit dashboard --lane ingestion-review --json exited %d, printing:\n%s%s", exit, printed, stderr)
-		}
-		if lane := answer.Lanes[0]; lane.Status != "unavailable" || !strings.Contains(lane.Reason, "ingestion could not be reached") {
+		if lane := laneRead(t, on); lane.Status != "unavailable" || !strings.Contains(lane.Reason, "ingestion could not be reached") {
 			t.Errorf("the lane read %+v", lane)
 		}
 	})
+}
+
+type laneRow struct{ Label, Note, Handle string }
+
+type ingestionLane struct {
+	Status, Reason string
+	Total          int
+	Rows           []laneRow
+}
+
+// laneRead is the ingestion-review lane as `doit dashboard --json` prints it.
+func laneRead(t *testing.T, on desk) ingestionLane {
+	t.Helper()
+	printed, stderr, exit := on.run(t, "dashboard", "--lane", "ingestion-review", "--json")
+	var answer struct{ Lanes []ingestionLane }
+	if exit != 0 || json.Unmarshal([]byte(printed), &answer) != nil || len(answer.Lanes) != 1 {
+		t.Fatalf("doit dashboard --lane ingestion-review --json exited %d, printing:\n%s%s", exit, printed, stderr)
+	}
+	return answer.Lanes[0]
 }

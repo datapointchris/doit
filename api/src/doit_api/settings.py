@@ -144,8 +144,7 @@ def app_settings(name: str, client_id: str, scopes: tuple[str, ...]) -> AppSetti
 
 
 # Each app's client and the scopes it is asked for: every read the service
-# makes of that app, and the one write it passes on, ingestion's placement of
-# an item a person reviewed.
+# makes of that app, and each write it passes on for a person.
 LIFE_SCOPES = (
     'life.overview.read',
     'life.habits.read',

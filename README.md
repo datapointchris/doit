@@ -271,8 +271,8 @@ doit ingestion items drop reddit/t3_1hb0qa --cause subreddit
 
 The service sends each decision to ingestion with your login, and ingestion records it as yours.
 The records stay in ingestion. `--cause` names what decided it, such as the subreddit or the title,
-so a filter can learn from it. A destination that ingestion does not declare is refused with the
-ones it does.
+and ingestion records it with the decision. A destination that ingestion does not declare is refused
+with the ones it does.
 
 The dashboard is the glance across tasks, habits, books and learning. `fleet info` is the other
 pane: the development brief across repos that a coding session reads.

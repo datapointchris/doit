@@ -36,14 +36,19 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 class AppFailed(RuntimeError):
     """An app could not answer a request, for a reason worth one sentence."""
 
-    def __init__(self, reason: str, *, timed_out: bool = False, refused: bool = False, status: int | None = None) -> None:
+    def __init__(
+        self, reason: str, *, refused: bool = False, status: int | None = None, transient: bool = False, outcome_unknown: bool = False
+    ) -> None:
         super().__init__(reason)
         self.reason = reason
-        self.timed_out = timed_out
         # The app turned the service's credential away: a 401, a 403, or a token it would not mint.
         self.refused = refused
         # The app's HTTP status, where it answered at all.
         self.status = status
+        # The app was down, slow or broken, which clears with nobody acting.
+        self.transient = transient
+        # The request reached the app and its answer was lost, so a write may have been recorded.
+        self.outcome_unknown = outcome_unknown
 
 
 class ReadFailed(AppFailed):
@@ -116,21 +121,24 @@ class App:
                 timeout=timeout,
                 **request,
             )
+        except (httpx2.ConnectError, httpx2.ConnectTimeout) as error:
+            raise failed(f'{self.name} could not be reached for {asked}: {error}', transient=True) from error
         except httpx2.TimeoutException as error:
-            raise failed(f'{self.name} did not answer {asked} within {timeout:g}s', timed_out=True) from error
+            raise failed(f'{self.name} did not answer {asked} within {timeout:g}s', transient=True, outcome_unknown=True) from error
         except httpx2.HTTPError as error:
-            raise failed(f'{self.name} could not be reached for {asked}: {error}') from error
+            raise failed(f'{self.name} broke off its answer to {asked}: {error}', transient=True, outcome_unknown=True) from error
         if response.status_code >= 400:
             said = answer_message(response)
             raise failed(
                 f'{self.name} answered {response.status_code} to {asked}' + (f': {said}' if said else ''),
                 refused=response.status_code in (401, 403),
                 status=response.status_code,
+                transient=response.status_code >= 500,
             )
         try:
             return response.json()
         except ValueError as error:
-            raise failed(f'{self.name} answered {asked} with something other than JSON') from error
+            raise failed(f'{self.name} answered {asked} with something other than JSON', outcome_unknown=True) from error
 
 
 def value_text(value: object) -> str:

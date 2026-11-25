@@ -41,6 +41,7 @@ from .errors import BadRequest
 from .errors import Conflict
 from .errors import NotFound
 from .errors import RequestFailed
+from .errors import Unavailable
 from .readers import ingestion
 from .readers.apps import AppFailed
 from .readers.apps import ReadFailed
@@ -104,15 +105,20 @@ def refusal_of(error: AppFailed) -> RequestFailed:
     """How the service answers the caller when an app refuses or misses a write passed on for them.
 
     The app's 404 for an item it does not hold stays a 404, and its refusal of a
-    value is a 422, so the caller reads either as their own mistake. Anything
-    else, an app unreached or a credential refused, is a 409, as an unreadable
-    app answers a write that needs it.
+    value is a 422, so the caller reads either as their own mistake. An app down,
+    slow or broken is a 503, which the CLI sends again. An app unconfigured or
+    refusing the service's credential is a 409, because a person has to act.
     """
+    reason = error.reason
+    if error.outcome_unknown:
+        reason += '. It may have been recorded, so send the same request again before deciding it another way'
     if error.status == 404:
-        return NotFound(error.reason)
+        return NotFound(reason)
     if error.status in (400, 422):
-        return BadRequest(error.reason)
-    return Conflict(error.reason)
+        return BadRequest(reason)
+    if error.transient:
+        return Unavailable(reason)
+    return Conflict(reason)
 
 
 def registered_entry(config: documents.Config, entry: str) -> bool:

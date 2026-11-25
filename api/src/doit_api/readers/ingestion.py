@@ -21,6 +21,6 @@ def decide(ingestion: App, verb: str, key: str, body: dict[str, object]) -> obje
     """`POST /review/<key>/<verb>`, which answers the decisions it made.
 
     A key holds `/` and may hold `#`, so it is escaped whole into one path
-    segment, which ingestion resolves back to the key.
+    segment.
     """
     return ingestion.post(f'/review/{quote(key, safe="")}/{verb}', body, f'POST /review/{key}/{verb}')

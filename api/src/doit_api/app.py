@@ -135,11 +135,11 @@ class DeskNudgeAnswerBody(Strict):
 class IngestionDecisionBody(Strict):
     """A person's decision on an item in ingestion, which the service passes on as theirs."""
 
-    key: str = Field(min_length=1, description="The item's key, as the ingestion-review lane prints it, or its URL.")
-    cause: str | None = Field(
-        None, description='The aspect that decided it, such as subreddit, channel, theme or title. Kept as unstated when omitted.'
+    key: str = Field(
+        min_length=1, description="The item's key, as the ingestion-review lane prints it. It is passed to ingestion unchanged."
     )
-    note: str | None = Field(None, description='The questions and why the item was saved, for a model read to answer.')
+    cause: str | None = Field(None, description='What decided it, such as the subreddit or the title, in the words ingestion reads.')
+    note: str | None = Field(None, description='A note ingestion records with the decision.')
 
 
 class IngestionPlacementBody(IngestionDecisionBody):
@@ -416,13 +416,13 @@ def create_app(*, settings: Settings, store: Store, views: Views, verifier, fore
         """Place an item on a destination in ingestion, as the caller's decision.
 
         The key travels in the body, because a key holds `/`. ingestion's answer
-        is passed on whole, and the same body sent again records nothing more.
+        is passed on whole.
         """
         return views.decide_ingestion_item('place', body.key, body.model_dump(exclude={'key'}), caller.who)
 
     @api.post('/ingestion/items/drop')
     def ingestion_drop(body: IngestionDecisionBody, caller: Person) -> Any:
-        """Drop an item in ingestion, which keeps its row, as the caller's decision."""
+        """Drop an item in ingestion, as the caller's decision."""
         return views.decide_ingestion_item('drop', body.key, body.model_dump(exclude={'key'}), caller.who)
 
     @api.get('/forecasts')

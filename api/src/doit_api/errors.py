@@ -48,6 +48,12 @@ class Conflict(RequestFailed):
     status = 409
 
 
+class Unavailable(RequestFailed):
+    """An app is down, slow or broken, which clears with nobody acting."""
+
+    status = 503
+
+
 def body(status: int, message: str) -> dict[str, str]:
     try:
         phrase = HTTPStatus(status).phrase

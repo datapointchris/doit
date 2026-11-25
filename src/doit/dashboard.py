@@ -37,6 +37,7 @@ a coding session. Same plumbing, different audience.
 """
 
 import datetime as dt
+import shlex
 from dataclasses import dataclass
 from dataclasses import field
 from itertools import chain
@@ -763,7 +764,9 @@ def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
 
     A row is the item's zone, its title, and the quality gate's guess where it
     fell below the floor, else why the item waits. Its handle is the item's
-    key, which `doit ingestion items place` and `drop` take.
+    key, which `doit ingestion items place` and `drop` take. A child's key
+    ends in `#<n>`, which zsh's extendedglob reads as a pattern, so the handle
+    is quoted for the shell.
     """
     title = INGESTION_REVIEW.upper()
     payload = result.payload
@@ -780,7 +783,7 @@ def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
             str(item.get('zone') or ''),
             clean(item.get('title')) or str(item.get('key') or ''),
             waiting_note(item),
-            handle=str(item.get('key') or ''),
+            handle=shlex.quote(str(item.get('key') or '')),
         )
         for item in items
     ]
