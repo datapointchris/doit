@@ -127,6 +127,7 @@ func TestDoitTuiExecsDoitPythonWithItsArgumentsAndEveryOtherLineStaysInGo(t *tes
 	}{
 		{nil, 0},
 		{[]string{"--help"}, 0},
+		{[]string{"--help", "next"}, 0},
 		{[]string{"--version"}, 0},
 		{[]string{"-V"}, 0},
 		{[]string{"--no-input", "--version"}, 0},
@@ -177,23 +178,5 @@ func TestATabCompletesEveryVerbAndThePursuitNamesWithNoPythonAndNoRequest(t *tes
 	}
 	if _, reached := passedArgv(t, argvFile); reached {
 		t.Error("a Tab started doit-python")
-	}
-}
-
-func TestATabAndALineThatReplacesOrFeedsTheShellStartNoUpdateCheck(t *testing.T) {
-	for _, line := range []struct {
-		args   []string
-		checks bool
-	}{
-		{[]string{"__complete", "pursuits", "log", ""}, false},
-		{[]string{"__completeNoDesc", ""}, false},
-		{[]string{"--no-input", "tui", "--tab", "now"}, false},
-		{[]string{"shell", "init", "zsh"}, false},
-		{[]string{"config", "show"}, true},
-		{[]string{"next"}, true},
-	} {
-		if got := startsUpdateCheck(newRootCommand(), line.args); got != line.checks {
-			t.Errorf("doit %q starts an update check: %v, want %v", line.args, got, line.checks)
-		}
 	}
 }

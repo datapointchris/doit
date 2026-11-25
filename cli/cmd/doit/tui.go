@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/datapointchris/goclikit"
 	"github.com/spf13/cobra"
 
 	"github.com/datapointchris/doit/cli/internal/passthrough"
@@ -12,9 +13,10 @@ import (
 
 // newTUICommand is `doit tui`, the one verb doit-python still runs. It is in
 // this tree so the help lists it and a Tab completes it. Its arguments reach
-// doit-python as they were typed.
+// doit-python as they were typed. The exec ends this process, so it starts no
+// update check.
 func newTUICommand() *cobra.Command {
-	return &cobra.Command{
+	return goclikit.StartsNoUpdateCheck(&cobra.Command{
 		Use:   "tui",
 		Short: "The screens where a click or a key completes a row",
 		Long: "Open doit's screens, where a click or a key completes a row.\n\n" +
@@ -26,7 +28,6 @@ func newTUICommand() *cobra.Command {
 		GroupID:            whatToDoNow,
 		DisableFlagParsing: true,
 		ValidArgsFunction:  cobra.NoFileCompletions,
-		Annotations:        map[string]string{startsNoUpdateCheck: ""},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			err := passthrough.Exec(pythonTUIArgv(args), treeCommands(cmd.Root()))
 			if errors.Is(err, passthrough.ErrNotInstalled) {
@@ -34,7 +35,7 @@ func newTUICommand() *cobra.Command {
 			}
 			return err
 		},
-	}
+	})
 }
 
 // pythonTUIArgv is doit-python's command line for `doit tui` given args. cobra

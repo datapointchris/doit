@@ -23,19 +23,13 @@ var version = "dev"
 // noInput is bound to --no-input, which the Python doit's root declares too.
 var noInput bool
 
-// The help's sections. doit-python draws a panel of the same title for each, and
-// lists a Go command under its group's.
+// The help's sections, in the order the root help lists them.
 const (
 	whatToDoNow     = "now"
 	whatCameOfIt    = "came-of-it"
 	whatYouDeclared = "declared"
 	thisMachine     = "machine"
 )
-
-// startsNoUpdateCheck marks a command whose line, or any line below it, starts
-// no update check: one whose output a shell evals at startup, or one that
-// replaces this process before a check could print.
-const startsNoUpdateCheck = "doit.starts-no-update-check"
 
 func newRootCommand() *cobra.Command {
 	root := goclikit.AsNamespace(&cobra.Command{
@@ -91,23 +85,6 @@ func newRootCommand() *cobra.Command {
 	return root
 }
 
-// startsUpdateCheck is false for a line that must start no update check: a
-// Tab's completion request, which has to answer at once, and a line under a
-// command marked startsNoUpdateCheck. goclikit knows cobra's completion request
-// only once it is in the tree, and cobra adds it only as the command runs.
-func startsUpdateCheck(root *cobra.Command, args []string) bool {
-	if len(args) > 0 && (args[0] == cobra.ShellCompRequestCmd || args[0] == cobra.ShellCompNoDescRequestCmd) {
-		return false
-	}
-	target, _, err := root.Find(args)
-	for ; err == nil && target != nil; target = target.Parent() {
-		if _, quiet := target.Annotations[startsNoUpdateCheck]; quiet {
-			return false
-		}
-	}
-	return true
-}
-
 // treeCommand is one command of this tree, as doit-python reads
 // passthrough.CommandsVariable.
 type treeCommand struct {
@@ -153,9 +130,7 @@ func (e exitCode) Error() string { return "" }
 
 // execute runs the tree on os.Args and returns the process's exit status.
 func execute() int {
-	root := newRootCommand()
-	quiet := !startsUpdateCheck(root, os.Args[1:])
-	err := goclikit.Execute(context.Background(), root, autoupdate.Config{Update: updateConfig(), Suppress: quiet})
+	err := goclikit.Execute(context.Background(), newRootCommand(), autoupdate.Config{Update: updateConfig()})
 	var chosen exitCode
 	if err != nil && !errors.As(err, &chosen) && !errors.Is(err, goclikit.ErrReported) {
 		// A refusal carries the service's words, which may quote stored text.

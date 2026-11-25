@@ -16,18 +16,17 @@ import (
 var shells = []string{"zsh"}
 
 func newShellCommand() *cobra.Command {
-	cmd := goclikit.AsNamespace(&cobra.Command{
+	cmd := goclikit.StartsNoUpdateCheck(goclikit.AsNamespace(&cobra.Command{
 		Use:   "shell",
 		Short: "What your shell loads from doit: a reminder of due review items, and completion",
 		Long: "What your shell loads from doit: a reminder of due review items, and completion.\n\n" +
 			"Each prints a script for your rc, and no shell waits on the service. The reminder\n" +
-			"starts `doit review nudge` in the background, and a Tab reads the pursuit names that\n" +
-			"the last `doit next` or `doit pursuits list` left on this desk.",
+			"starts `doit review nudge` in the background, and a Tab reads the pursuit names this\n" +
+			"desk last fetched from the service.",
 		Example: "  eval \"$(doit shell init zsh)\"        in your rc: a reminder of due review items\n" +
 			"  eval \"$(doit shell completion zsh)\"  in your rc: completion for the verbs and your pursuit names",
-		GroupID:     thisMachine,
-		Annotations: map[string]string{startsNoUpdateCheck: ""},
-	})
+		GroupID: thisMachine,
+	}))
 	cmd.AddCommand(newShellInitCommand(), newShellCompletionCommand())
 	return cmd
 }
