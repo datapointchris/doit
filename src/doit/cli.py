@@ -19,15 +19,11 @@ from typer.main import get_command_name
 
 from doit import __version__
 from doit import config_commands
-from doit import service
 from doit import shell
 from doit import tui
 from doit.render import error_console
 from doit.render import examples
 from doit.render import set_no_input
-from doit.service_commands import pursuits
-from doit.service_commands import review
-from doit.service_commands import sources
 
 # A command list answers "what is there" and the reader arrives with "what do I
 # do now". Routing lives on this screen and on a hub that owns several children,
@@ -62,7 +58,6 @@ ROOT_EXAMPLES = examples(
 )
 
 WHAT_TO_DO_NOW = 'What to do now'
-WHAT_YOU_DECLARED = 'What you declared'
 THIS_MACHINE = 'This machine'
 
 # Typer lists a group's commands ahead of its sub-apps and draws each panel where
@@ -148,9 +143,6 @@ app = typer.Typer(
 
 
 app.command('tui', rich_help_panel=WHAT_TO_DO_NOW, epilog=tui.TUI_EXAMPLES)(tui.tui_command)
-app.add_typer(pursuits.app, name='pursuits', rich_help_panel=WHAT_YOU_DECLARED)
-app.add_typer(review.app, name='review', rich_help_panel=WHAT_YOU_DECLARED)
-app.add_typer(sources.app, name='sources', rich_help_panel=WHAT_YOU_DECLARED)
 app.add_typer(config_commands.app, name='config', rich_help_panel=THIS_MACHINE)
 app.add_typer(shell.app, name='shell', rich_help_panel=THIS_MACHINE)
 
@@ -256,6 +248,6 @@ def main() -> None:
     # usage line and refusal names doit.
     try:
         app(prog_name='doit')
-    except (service.ServiceFailed, LoginError) as failure:
+    except LoginError as failure:
         error_console.print(f'doit: {failure}', soft_wrap=True, markup=False)
-        raise SystemExit(service.exit_code(failure)) from None
+        raise SystemExit(1) from None

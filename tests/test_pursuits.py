@@ -19,7 +19,6 @@ import pytest
 import typer
 
 from doit import pursuits
-from doit import render
 from doit import window
 
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'pursuits' / 'pursuits.yml'
@@ -286,29 +285,13 @@ def test_a_just_logged_pursuit_never_outranks_anything_owed(sandbox):
     assert selection['offered'][-1] == 'read-library'
 
 
-def test_the_names_cache_is_what_the_shell_completion_reads():
-    pursuits.write_names_cache(load())
-    lines = pursuits.NAMES_CACHE.read_text().splitlines()
-    assert 'chores\tThe maintenance list' in lines
-    # Paused pursuits are still completable — you log them by hand all the time.
-    assert any(line.startswith('paused-thing\t') for line in lines)
-
-
-def test_match_pursuit_takes_an_exact_name():
-    assert pursuits.match_pursuit('chores', load()) == 'chores'
-
-
-def test_match_pursuit_takes_an_unambiguous_prefix():
-    assert pursuits.match_pursuit('stu', load()) == 'study-computer-science'
-
-
-def test_match_pursuit_refuses_an_ambiguous_prefix():
-    # read-library and read-longform both match; guessing either would log the wrong one.
-    assert pursuits.match_pursuit('read', load()) is None
-
-
-def test_match_pursuit_returns_none_for_a_miss():
-    assert pursuits.match_pursuit('nope', load()) is None
+@pytest.mark.parametrize(
+    ('typed', 'matches'),
+    [('chores', ['chores']), ('stu', ['study-computer-science']), ('read', ['read-library', 'read-longform']), ('nope', [])],
+)
+def test_a_typed_name_is_the_pursuit_it_names_or_each_one_it_begins(typed, matches):
+    """Two matches are refused rather than guessed, because either guess logs the wrong pursuit."""
+    assert pursuits.pursuit_matches(typed, load()) == matches
 
 
 def test_dig_follows_a_dotted_path():
@@ -459,50 +442,6 @@ def test_a_resolve_offers_a_handful_however_many_matched():
 def test_a_resolve_counts_after_the_register_narrows_the_rows():
     config = {'label': 'name', 'resolve_where': {'name': 'Journal'}}
     assert resolution('journal', config, [{'name': 'Journal'}, {'name': 'Pumice Stone'}])['candidates'] == 1
-
-
-def test_on_log_substitutes_the_offered_items_id(tmp_path):
-    marker = tmp_path / 'ran.txt'
-    config = {'on_log': f'cp {tmp_path / "seed.txt"} {marker}'}
-    (tmp_path / 'seed.txt').write_text('422')
-    result = pursuits.run_on_log(config, {'id': '422', 'label': 'Task'}, '', None, assume_yes=True)
-    assert result is not None and result['ran'] is True
-    assert marker.read_text() == '422'
-
-
-def test_a_registers_on_log_keeps_a_label_with_a_space_and_a_quote_as_one_argument_as_the_desk_nudge_pick_does():
-    fill = {'id': '532', 'label': 'File the "receipts" now', 'note': '', 'minutes': '', 'pursuit': 'tasks'}
-    assert pursuits.on_log_argv('tick-task {id} {label}', fill) == ['tick-task', '532', 'File the "receipts" now']
-
-
-def test_on_log_is_not_run_when_there_is_nobody_to_confirm_with(tmp_path):
-    """The prompt would block on a stdin that never closes, so an unconfirmed
-    on_log is skipped rather than asked about. -y is what runs it unattended."""
-    marker = tmp_path / 'ran.txt'
-    config = {'on_log': f'touch {marker}'}
-
-    assert pursuits.run_on_log(config, {'id': '1', 'label': 'Task'}, '', None, assume_yes=False) is None
-    assert not marker.exists()
-
-
-def test_on_log_is_not_run_under_no_input_even_on_a_terminal(tmp_path, monkeypatch):
-    monkeypatch.setattr('sys.stdin.isatty', lambda: True)
-    monkeypatch.setattr(render, 'no_input', True)
-    marker = tmp_path / 'ran.txt'
-    config = {'on_log': f'touch {marker}'}
-
-    assert pursuits.run_on_log(config, {'id': '1', 'label': 'Task'}, '', None, assume_yes=False) is None
-    assert not marker.exists()
-
-
-def test_on_log_is_skipped_when_the_item_has_no_id():
-    # Nothing was offered, so there is nothing to complete — better than guessing.
-    config = {'on_log': 'life tasks complete {id}'}
-    assert pursuits.run_on_log(config, {'label': 'no id here'}, '', None, assume_yes=True) is None
-
-
-def test_on_log_is_skipped_when_the_pursuit_declares_none():
-    assert pursuits.run_on_log({}, {'id': '1'}, '', None, assume_yes=True) is None
 
 
 def test_a_record_carries_the_state_that_produced_it_and_when_it_happened():
@@ -1146,13 +1085,6 @@ def test_an_unpriced_row_sorts_last_rather_than_first():
     assert pursuits.offered_order(state, ['edited-away', 'chore']) == ['chore', 'edited-away']
 
 
-def test_the_due_column_is_colored_only_once_something_is_late():
-    assert pursuits.due_style(-2.0) == 'yellow'
-    assert pursuits.due_style(-0.5) == '', 'due today is not late'
-    assert pursuits.due_style(6.0) == ''
-    assert pursuits.due_style(None) == ''
-
-
 def test_the_due_text_says_which_side_of_the_schedule_it_is_on():
     """The sign carried the whole reading and is the first character a reader skips."""
     assert pursuits.format_due(None) == '—'
@@ -1187,21 +1119,6 @@ def test_a_paused_pursuit_still_reports_the_goal_it_declares():
     assert pursuits.goal_text({'cadence': '9d', 'paused': True}) == 'every 9d'
 
 
-def answers(monkeypatch, *replies: str) -> list[str]:
-    """Feed the prompts a script, recording what each one asked."""
-    asked: list[str] = []
-    queued = list(replies)
-
-    def fake_input(prompt: str = '') -> str:
-        asked.append(prompt)
-        return queued.pop(0)
-
-    monkeypatch.setattr(pursuits.console, 'input', fake_input)
-    monkeypatch.setattr(render, 'no_input', False)
-    monkeypatch.setattr(pursuits, 'can_prompt', lambda: True)
-    return asked
-
-
 @pytest.mark.parametrize(
     ('config', 'minutes', 'refused'),
     [
@@ -1219,18 +1136,6 @@ def test_minutes_are_required_of_a_timed_log_refused_on_a_counted_one_and_option
     refusal = pursuits.minutes_refusal('p', config, minutes)
 
     assert refusal is None if refused is None else refused in (refusal or '')
-
-
-def test_the_minutes_prompt_refuses_what_is_not_a_positive_whole_number(monkeypatch):
-    answers(monkeypatch, 'ages', '-3', '0', '', '30')
-    assert pursuits.prompt_for_minutes() == 30
-
-
-def test_the_pursuit_prompt_marks_what_the_draw_offered(monkeypatch, capsys):
-    answers(monkeypatch, 'chores')
-    assert pursuits.prompt_for_pursuit(load(), ['chores']) == 'chores'
-    printed = capsys.readouterr().out
-    assert '› chores' in printed
 
 
 def test_a_bare_skip_covers_one_interval_and_a_day_where_there_is_none():
@@ -1378,30 +1283,13 @@ def test_a_paused_pursuit_with_no_days_gets_no_row():
     assert 'paused-thing' not in drift([], {'chores': [day(1)]})
 
 
-def test_a_paused_pursuit_with_days_keeps_them_and_asks_nothing_and_renders_a_dash(capsys):
+def test_a_paused_pursuit_with_days_keeps_them_and_asks_nothing_and_prints_a_dash():
     """Paused mid-window, its history is still history. It asked for nothing
     while paused though, and zero would read as a goal it was held to."""
     row = drift([done('paused-thing', 1.0)])['paused-thing']
-    pursuits.render_drift([row])
 
-    assert row['done'] == 1.0
-    assert row['asked'] is None
-    printed = [line for line in capsys.readouterr().out.splitlines() if 'paused-thing' in line]
-    assert printed and '—' in printed[0], printed
-
-
-def test_the_stranded_count_warning_names_the_box_holding_each_count(capsys):
-    """Saying whose a stranded count is turns a nag into an instruction, and a count whose pursuit is held says nothing."""
-    counts = {'testbox': {'retired-here': 8, 'chores': 4}, 'otherbox': {'retired-there': 7}}
-
-    pursuits.render_stranded_counts({'recent': counts, 'stranded': []})
-    assert capsys.readouterr().out == ''
-
-    pursuits.render_stranded_counts({'recent': counts, 'stranded': ['retired-here', 'retired-there']})
-    printed = capsys.readouterr().out
-    assert 'retired-here  8  testbox' in printed
-    assert 'retired-there  7  otherbox' in printed
-    assert 'chores' not in printed
+    assert (row['done'], row['asked']) == (1.0, None)
+    assert pursuits.printed_drift_rows([row])[0]['asked'] == '—'
 
 
 def resolving(rows: list[dict], **config) -> dict:

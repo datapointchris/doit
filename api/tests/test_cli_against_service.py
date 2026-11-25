@@ -1,96 +1,38 @@
-"""The CLI's commands against the real service, in process.
+"""What the service answers the CLI, in process.
 
-Each command decodes what a route answers, so a shape changed on one side and
-not the other fails here rather than on a desk. The service runs on the real
-clock, because the CLI stamps a log with the desk's.
+The Go doit runs every verb that asks the service, and cli/internal/contract runs
+each against this commit's service. These pin what the service does on its own:
+what each read carries, what a log's check resolves, and what a taken-back
+completion leaves in history.
 """
 
 import datetime as dt
-import json
-import re
-import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import httpx2
-import pytest
-from conftest import Forward
-from conftest import connected
+from conftest import client_for
 from conftest import stand_in
 from fastapi.testclient import TestClient
-from jsonschema import Draft7Validator
-from typer.testing import CliRunner
 
-from doit import cli
-from doit import journal
 from doit import paths
-from doit import pursuits
-from doit import review
-from doit import service
-from doit.cli import app as cli_app
-from doit.service_commands import pursuits as pursuit_commands
-from doit.service_commands import review as review_commands
-from doit.service_commands import sources as sources_commands
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures'
-SCHEMAS = Path(__file__).resolve().parents[2] / 'schemas'
-TASKS = [{'name': 'Face Mud', 'id': 501}, {'name': 'Return hoodies', 'id': 512}, {'name': 'Journal', 'id': 474}]
-
-
-def at_terminal(monkeypatch, there: bool) -> None:
-    """Whether someone is at the terminal, for the commands and for the prompts they call."""
-    for module in (pursuits, pursuit_commands):
-        monkeypatch.setattr(module, 'can_prompt', lambda: there)
+TASKS = [{'name': 'Water the plants', 'id': 501}, {'name': 'Return the parcel', 'id': 512}, {'name': 'Sort the mail', 'id': 474}]
 
 
 def write(client: TestClient, name: str, fixture: str) -> None:
     client.put(f'/api/v1/documents/{name}', json={'text': (FIXTURES / fixture).read_text()}).raise_for_status()
 
 
-def answers(monkeypatch, *replies: str) -> list[str]:
-    """Answer the prompts from a script, recording what each one asked."""
-    asked: list[str] = []
-    queued = list(replies)
-
-    def reply(prompt: str) -> str:
-        asked.append(prompt.strip())
-        return queued.pop(0)
-
-    for module in (pursuits, pursuit_commands):
-        monkeypatch.setattr(module, 'ask', reply)
-    at_terminal(monkeypatch, True)
-    return asked
-
-
-def logged(store) -> list[dict]:
-    return [record for record in store.journal() if record['event'] == journal.Event.DONE]
-
-
-def write_through(store, monkeypatch, tmp_path, answer: Callable[[], object], around=None) -> Path:
-    """`chores` resolved from a tasks app giving ``answer()``, completing the chosen item by writing its id to the file returned."""
-    marker = tmp_path / 'completed'
-    client = connected(store, monkeypatch, tmp_path, {'life': stand_in('life', {'/tasks': lambda request: answer()})}, around)
+def tasks_from(store, answer: Callable[[], object]) -> TestClient:
+    """`chores` resolved from a tasks app giving ``answer()``."""
+    client = client_for(store, {'life': stand_in('life', {'/tasks': lambda request: answer()})}, clock=None)
     register = (
         'pursuits:\n  chores:\n    weight: 25\n    cadence: 3d\n    resolve: {app: life, path: /tasks}\n    label: name\n    id: id\n'
     )
-    client.put('/api/v1/documents/pursuits', json={'text': register + f'    on_log: sh -c "echo {{id}} > {marker}"\n'}).raise_for_status()
-    return marker
-
-
-def test_a_refusal_exits_1_with_the_services_sentence_and_a_service_that_never_answers_exits_4(store, monkeypatch, tmp_path, capsys):
-    down = [False]
-    client = connected(store, monkeypatch, tmp_path, around=lambda request, forward: httpx2.Response(503) if down[0] else forward(request))
-    monkeypatch.setattr(sys, 'argv', ['doit', 'pursuits', 'list'])
-
-    with pytest.raises(SystemExit) as refused:
-        cli.main()
-    assert refused.value.code == 1
-    assert capsys.readouterr().err.split() == f'doit: {client.get("/api/v1/pursuits").json()["message"]}'.split()
-
-    down[0] = True
-    with pytest.raises(SystemExit) as unanswered:
-        cli.main()
-    assert unanswered.value.code == service.NO_ANSWER_EXIT
+    client.put('/api/v1/documents/pursuits', json={'text': register + '    on_log: tick {id}\n'}).raise_for_status()
+    return client
 
 
 def test_next_answers_a_row_for_every_active_pursuit_with_the_offered_ones_first(api):
@@ -105,235 +47,52 @@ def test_next_answers_a_row_for_every_active_pursuit_with_the_offered_ones_first
     assert 'paused-thing' not in drawn['offered']
 
 
-def test_a_log_is_counted_by_the_list_drift_and_dormant_views_that_follow(api, capsys):
-    write(api, 'pursuits', 'pursuits/pursuits.yml')
-
-    assert pursuit_commands.cmd_log('chores', ['swept'], None, None, assume_yes=True, no_write=True) == 0
-    assert 'Logged chores' in capsys.readouterr().out
-
-    assert pursuit_commands.cmd_list(as_json=True) == 0
-    assert json.loads(capsys.readouterr().out)['state']['done']['chores'] == 1.0
-    assert pursuit_commands.cmd_list(as_json=False) == 0
-    assert pursuit_commands.cmd_drift(None, None, as_json=False) == 0
-    assert any(line.startswith('chores') for line in capsys.readouterr().out.splitlines())
-
-    assert pursuit_commands.cmd_dormant() == 0
-    printed = capsys.readouterr().out
-    cold = [line for line in printed.splitlines() if 'never' in line]
-    assert len(cold) > 1 and len({line.index('never') for line in cold}) == 1, 'the rows align'
-
-    assert pursuit_commands.cmd_dormant(as_json=True) == 0
-    answered = json.loads(capsys.readouterr().out)
-    Draft7Validator(json.loads((SCHEMAS / 'pursuits-dormant.schema.json').read_text())).validate(answered)
-    assert len(answered['dormant']) == len(cold)
-
-
-def test_the_list_gives_a_tracked_pursuit_no_weight_and_no_due_date(api):
-    register = 'pursuits:\n  build:\n    description: Engineering\n  chores:\n    weight: 25\n    cadence: 3d\n'
-    api.put('/api/v1/documents/pursuits', json={'text': register}).raise_for_status()
-
-    ran = CliRunner().invoke(cli_app, ['pursuits', 'list'])
-
-    line = next(line for line in ran.output.splitlines() if line.strip().startswith('build'))
-    assert 'tracked' in line
-    assert 'due' not in line
-    assert not re.search(r'\d', line.split('last')[0]), 'a weight was printed'
-
-
-def test_a_reason_reaches_every_read_of_a_pursuit_and_its_json(api, capsys):
+def test_a_reason_reaches_every_read_of_a_pursuit_and_a_tracked_one_has_no_weight_or_due_date(api):
     reason = 'It keeps the [house] standing, per chores.md'
-    register = f'pursuits:\n  chores:\n    weight: 25\n    cadence: 3d\n    reason: {reason}\n  walk:\n    weight: 5\n    cadence: 3d\n'
+    register = f'pursuits:\n  build:\n    description: Engineering\n  chores:\n    weight: 25\n    cadence: 3d\n    reason: {reason}\n'
     api.put('/api/v1/documents/pursuits', json={'text': register}).raise_for_status()
 
-    assert pursuit_commands.cmd_list(as_json=True) == 0
-    assert json.loads(capsys.readouterr().out)['pursuits']['chores']['reason'] == reason
-    assert pursuit_commands.cmd_drift(None, None, as_json=True) == 0
-    assert [row['reason'] for row in json.loads(capsys.readouterr().out)['rows']] == [reason, None]
-    assert pursuit_commands.cmd_dormant() == 0
-    assert reason in ' '.join(capsys.readouterr().out.split())
-
-    assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
-    capsys.readouterr()
-    for read in (
-        lambda: pursuit_commands.cmd_list(as_json=False),
-        lambda: pursuit_commands.cmd_drift(None, None, as_json=False),
-    ):
-        assert read() == 0
-        assert ' '.join(capsys.readouterr().out.split()).count(reason) == 1
+    rows = {row['name']: row for row in api.get('/api/v1/pursuits').json()['rows']}
+    assert (rows['chores']['reason'], rows['build']['reason']) == (reason, '')
+    assert (rows['build']['paced'], rows['build']['weight'], rows['build']['due']) == (False, '', '')
+    drift = api.get('/api/v1/pursuits/drift').json()
+    assert [row['reason'] for row in drift['printed_rows'] if row['pursuit'] == 'chores'] == [reason]
+    assert [row['reason'] for row in api.get('/api/v1/pursuits/dormant').json()['dormant'] if row['pursuit'] == 'chores'] == [reason]
     explained = api.get('/api/v1/next', params={'machine': 'desk'}).json()['explain_rows']
     assert [row['reason'] for row in explained if row['name'] == 'chores'] == [reason]
 
 
-def test_a_log_asks_for_what_was_not_passed_and_minutes_only_of_a_timed_pursuit(api, store, monkeypatch, capsys):
-    write(api, 'pursuits', 'pursuits/pursuits.yml')
-    asked = answers(monkeypatch, 'read-library', '', '45', '')
-
-    assert pursuit_commands.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 0
-    assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=True) == 0
-    assert pursuit_commands.cmd_log('read-library', ['trimmed'], None, 20, assume_yes=True, no_write=True) == 0
-
-    assert asked == ['pursuit:', 'note, or Enter to skip:', 'minutes:', 'note, or Enter to skip:']
-    entries = [(record['pursuit'], record['duration_minutes'], record['note']) for record in logged(store)]
-    assert entries == [('read-library', 45, None), ('chores', None, None), ('read-library', 20, 'trimmed')]
-
-    capsys.readouterr()
-    assert pursuit_commands.cmd_list(as_json=True) == 0
-    assert json.loads(capsys.readouterr().out)['usual_minutes'] == {'read-library': 20.0}, 'the latest of two amounts logged once each'
-
-
-@pytest.mark.parametrize('arguments', [['chores', '--minutes', '20'], ['read-library', '--minutes', '-5'], ['read-library']])
-def test_a_log_the_run_cannot_honor_is_a_usage_error_and_records_nothing(api, store, monkeypatch, arguments):
-    """Minutes on a counted pursuit, a negative duration, and a timed pursuit with nobody to ask its minutes."""
-    write(api, 'pursuits', 'pursuits/pursuits.yml')
-    at_terminal(monkeypatch, False)
-
-    ran = CliRunner().invoke(cli_app, ['pursuits', 'log', *arguments, '--yes', '--no-write'])
-
-    assert ran.exit_code == 2
-    assert logged(store) == []
-
-
-@pytest.mark.parametrize('present', [True, False])
-def test_a_log_naming_no_pursuit_records_nothing_until_one_is_chosen(api, store, monkeypatch, present):
-    write(api, 'pursuits', 'pursuits/pursuits.yml')
-    answers(monkeypatch, '')
-    at_terminal(monkeypatch, present)
-
-    assert pursuit_commands.cmd_log(None, [], None, None, assume_yes=True, no_write=True) == 1
-    assert logged(store) == []
-
-
-@pytest.mark.parametrize(('present', 'answer', 'completed'), [(True, '2', ('512', 'Return hoodies')), (True, '', None), (False, '1', None)])
-def test_a_log_among_several_choices_completes_only_the_one_you_named(store, monkeypatch, tmp_path, present, answer, completed):
-    """Three tasks on screen, so which one got done is a question only you can answer.
-    Enter, or nobody there to ask, completes nothing: a guess is a wrong completion in another app's data."""
-    marker = write_through(store, monkeypatch, tmp_path, lambda: TASKS)
-    answers(monkeypatch, answer)
-    at_terminal(monkeypatch, present)
-
-    assert pursuit_commands.cmd_log('chores', ['done'], None, None, assume_yes=True, no_write=False) == 0
-
-    item = logged(store)[0]['item']
-    found = (marker.read_text().strip(), item['label']) if marker.exists() else None
-    assert found == completed
-    assert marker.exists() or item is None, 'the pursuit happened, and no one item is claimed'
-
-
-def test_a_log_resolves_again_past_a_draw_whose_read_failed(store, monkeypatch, tmp_path):
-    """A cached failure carries no id, so the write-through would complete nothing and nothing on screen would say so."""
+def test_a_log_check_resolves_again_past_a_draw_whose_read_failed(store):
+    """A cached failure carries no id, so on_log would complete nothing and nothing on screen would say so."""
     down = [True]
-    marker = write_through(store, monkeypatch, tmp_path, lambda: httpx2.Response(500, json={'message': 'down'}) if down[0] else TASKS[:1])
-    service.client().get('/next', machine=paths.machine_name())
+    client = tasks_from(store, lambda: httpx2.Response(500, json={'message': 'down'}) if down[0] else TASKS[:1])
+    client.get('/api/v1/next', params={'machine': paths.machine_name()}).raise_for_status()
     down[0] = False
 
-    assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
+    check = client.post('/api/v1/journal/done', json={'pursuit': 'chores', 'check': True}).json()
 
-    assert marker.read_text().strip() == '501'
-    assert logged(store)[0]['item']['label'] == 'Face Mud'
-
-
-def test_a_log_whose_answer_was_lost_is_stored_once_and_one_never_taken_names_the_repair(store, monkeypatch, tmp_path, capsys):
-    """on_log has already run by the time the entry is sent, so the entry is sent again rather than lost,
-    and where it never lands the log says how to record it without running on_log a second time."""
-    outcomes = ['lost']
-
-    def around(request: httpx2.Request, forward: Forward) -> httpx2.Response:
-        if request.method != 'POST' or not request.url.path.endswith('/journal/done') or not outcomes:
-            return forward(request)
-        if outcomes.pop(0) == 'lost':
-            forward(request)
-        return httpx2.Response(504)
-
-    marker = write_through(store, monkeypatch, tmp_path, lambda: TASKS[:1], around)
-    assert pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=False) == 0
-    assert (len(logged(store)), marker.read_text().strip()) == (1, '501')
-
-    outcomes.extend(['down'] * service.ATTEMPTS)
-    with pytest.raises(service.NoAnswer):
-        pursuit_commands.cmd_log('chores', [], None, None, assume_yes=True, no_write=False)
-    assert len(logged(store)) == 1
-    assert 'doit pursuits log chores --no-write' in capsys.readouterr().err
-
-
-def test_a_skip_says_when_the_pursuit_returns_and_how_to_bring_it_back_sooner(api, store, capsys):
-    write(api, 'pursuits', 'pursuits/pursuits.yml')
-
-    assert pursuit_commands.cmd_skip('read-library', '3d') == 0
-    printed = capsys.readouterr().out
-    assert pursuit_commands.cmd_resume('read-library') == 0
-
-    # The date comes from the record, so a run straddling midnight compares one clock reading with itself.
-    expires = journal.parse_time(next(record for record in store.journal() if record['event'] == 'skip')['expires_at'])
-    assert expires is not None and f'{expires:%d %b %Y}' in printed
-    assert 'doit pursuits resume read-library' in printed
-    assert 'Resumed read-library' in capsys.readouterr().out
-
-
-def test_zeroing_the_whole_register_is_refused_unattended_and_one_pursuit_goes_through(api, store, monkeypatch):
-    """Every accrued balance goes at once and nothing the tool ships puts one back, so only the whole register is confirmed."""
-    write(api, 'pursuits', 'pursuits/pursuits.yml')
-    at_terminal(monkeypatch, False)
-
-    assert pursuit_commands.cmd_reset(None, assume_yes=False) == 1
-    assert pursuit_commands.cmd_reset('chores', assume_yes=False) == 0
-
-    resets = [record['pursuit'] for record in store.journal() if record['event'] == 'reset' and record.get('note') != pursuits.FIRST_SEEN]
-    assert resets == ['chores']
-
-
-def test_the_review_nudge_shows_what_is_due_once_per_interval(api, capsys):
-    write(api, 'review', 'review/register.yml')
-
-    assert review_commands.cmd_nudge() == 0
-    lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
-    assert any('never-done' in line for line in lines)
-    assert any('echo overdue' in line for line in lines), 'the command a row carries is the point of the row'
-
-    assert review_commands.cmd_nudge() == 0
-    assert capsys.readouterr().out == '', 'the service holds when it last showed, so a second shell stays quiet'
-    assert review_commands.NUDGE_INTERVAL.read_text().strip() == str(review.DEFAULT_NUDGE_MINUTES)
-
-
-def test_marking_an_item_done_takes_it_off_the_due_list(api, capsys):
-    write(api, 'review', 'review/register.yml')
-
-    assert review_commands.cmd_done('never-done') == 0
-    capsys.readouterr()
-    assert review_commands.cmd_list(as_json=True) == 0
-
-    rows = {row['id']: row for row in json.loads(capsys.readouterr().out)}
-    assert rows['never-done']['due'] is False
-    assert rows['overdue-item']['due'] is True
+    assert (check['chosen']['id'], check['chosen']['label'], check['on_log']) == ('501', 'Water the plants', 'tick {id}')
+    assert [record for record in client.get('/api/v1/journal').json() if record['event'] == 'done'] == [], 'a check logs nothing'
 
 
 def test_a_completion_taken_back_leaves_the_entry_as_it_read_and_stays_in_history(api):
     write(api, 'review', 'review/register.yml')
-    runner = CliRunner()
+    today = dt.date.today().isoformat()
+    for day in ('2026-07-17', today):
+        api.post('/api/v1/review/never-done/completions', json={'day': day}).raise_for_status()
 
-    def last() -> str | None:
-        return next(row['last'] for row in api.get('/api/v1/review').json()['entries'] if row['id'] == 'never-done')
-
-    assert runner.invoke(cli_app, ['review', 'done', 'never-done', '--on', '2026-07-17']).exit_code == 0
-    assert last() == '2026-07-17'
-    assert runner.invoke(cli_app, ['review', 'done', 'never-done']).exit_code == 0
-    assert last() == dt.date.today().isoformat()
-
-    assert runner.invoke(cli_app, ['review', 'undo', 'never-done']).exit_code == 0
-    assert last() == '2026-07-17'
-    assert 'Now: never done.' in runner.invoke(cli_app, ['review', 'undo', 'never-done']).output
-    assert last() is None
-    assert runner.invoke(cli_app, ['review', 'undo', 'never-done']).exit_code == 1
+    undone = api.delete(f'/api/v1/review/never-done/completions/{today}').json()
+    assert undone['status']['last'] == '2026-07-17'
+    assert undone['status']['status'].startswith('overdue')
+    undone = api.delete('/api/v1/review/never-done/completions/2026-07-17').json()
+    assert (undone['status']['last'], undone['status']['status']) == (None, 'never done')
 
     history = api.get('/api/v1/history/review_completions', params={'key': 'never-done'}).json()
-    assert sorted(row['done_on'] for row in history) == ['2026-07-17', dt.date.today().isoformat()]
+    assert sorted(row['done_on'] for row in history) == ['2026-07-17', today]
     assert all(row['valid_to'] for row in history)
 
-    tomorrow = (dt.date.today() + dt.timedelta(days=1)).isoformat()
-    assert runner.invoke(cli_app, ['review', 'done', 'never-done', '--on', tomorrow]).exit_code == 2
-    assert last() is None
 
-
-def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store, monkeypatch, tmp_path):
+def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store):
     overview = {
         'schema_version': 1,
         'as_of_month': '2026-07',
@@ -349,7 +108,7 @@ def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store,
         'nomad': stand_in('nomad', {'/overview': lambda request: overview}),
         'meso': stand_in('meso', {'/feedback': lambda request: feedback if request.url.params['status'] == 'open' else []}),
     }
-    client = connected(store, monkeypatch, tmp_path, apps=apps)
+    client = client_for(store, apps, clock=None)
     document = 'sources:\n  life:\n    adapter: life\n  nomad:\n    adapter: nomad\n  meso-feedback:\n    adapter: meso-feedback\n'
     client.put('/api/v1/documents/sources', json={'text': document}).raise_for_status()
 
@@ -363,5 +122,5 @@ def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store,
     assert 'Portland' in [row['label'] for row in upcoming['rows']] + [row['text'] for row in upcoming['rows']]
     assert 'life' in (upcoming['reason'] or ''), 'the due list says which source it could not ask'
 
-    listed = CliRunner().invoke(sources_commands.app, ['list', '--json'])
-    assert {row['id']: row['failure'] for row in json.loads(listed.output)} == {'life': 'failed', 'nomad': None, 'meso-feedback': None}
+    answers = client.get('/api/v1/sources').json()['answers']
+    assert {row['id']: row['failure'] for row in answers} == {'life': 'failed', 'nomad': None, 'meso-feedback': None}

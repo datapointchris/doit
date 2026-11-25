@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "pursuit": "study-computer-science",
+      "kind": "undeclared",
+      "text": "no backend — logged by hand",
+      "at": null
+    },
+    {
+      "pursuit": "read-library",
+      "kind": "undeclared",
+      "text": "no backend — logged by hand",
+      "at": null
+    },
+    {
+      "pursuit": "chores",
+      "kind": "undeclared",
+      "text": "no backend — logged by hand",
+      "at": null
+    },
+    {
+      "pursuit": "practice-piano",
+      "kind": "failed",
+      "text": "learning is not configured on the service: DOIT_API_LEARNING_URL, DOIT_API_LEARNING_CLIENT_SECRET unset",
+      "at": null
+    },
+    {
+      "pursuit": "errands",
+      "kind": "unseen",
+      "text": "asked, nothing recorded yet",
+      "at": null
+    },
+    {
+      "pursuit": "stretch",
+      "kind": "undeclared",
+      "text": "no backend — logged by hand",
+      "at": null
+    },
+    {
+      "pursuit": "sketch",
+      "kind": "undeclared",
+      "text": "no backend — logged by hand",
+      "at": null
+    }
+  ]
+}

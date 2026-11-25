@@ -391,7 +391,6 @@ wheels = [
 name = "doit"
 source = { editable = "." }
 dependencies = [
-    { name = "httpx2" },
     { name = "pyclilogin" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -411,7 +410,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx2", specifier = ">=2.9.1" },
     { name = "pyclilogin", specifier = ">=0.2.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=13.0.0" },

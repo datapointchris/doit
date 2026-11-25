@@ -18,7 +18,6 @@ from typer._click.exceptions import NoSuchOption
 from typer.core import TyperCommand
 from typer.core import TyperGroup
 from typer.main import get_command
-from typer.models import CommandInfo
 from typer.testing import CliRunner
 
 import doit
@@ -28,16 +27,10 @@ from doit.cli import ROOT_ORDER
 from doit.cli import accepted_placements
 from doit.cli import app
 from doit.cli import list_go_commands
-from doit.service_commands import pursuits as pursuit_commands
+from doit.shell import app as shell_app
 
 runner = CliRunner()
 SCHEMAS = Path(__file__).resolve().parents[1] / 'schemas'
-
-
-def command_name(command: CommandInfo) -> str:
-    """The name typer shows for a registered command: its own, or its function's."""
-    assert command.callback is not None
-    return command.name or command.callback.__name__
 
 
 @pytest.mark.parametrize('flag', ['-V', '--version'])
@@ -48,28 +41,13 @@ def test_version_flag_prints_one_line(flag):
     assert result.output.strip() == f'doit {__version__}'
 
 
-@pytest.mark.parametrize('argv', [[], ['review']])
+@pytest.mark.parametrize('argv', [[], ['shell']])
 def test_every_node_shows_help_bare(argv):
     """cli-design.md: a node with no bare default shows help."""
     result = runner.invoke(app, argv)
 
     assert 'Usage:' in result.output
     assert 'Options' in result.output
-
-
-def test_the_pursuits_help_lists_every_verb_registered_under_it():
-    """Derived from the tree rather than listed, so a verb added next month is
-    covered by construction and one that never reaches the help is a failure.
-
-    A hidden command is deliberately absent from the help, so the population is
-    the visible ones — `pursuits names` feeds the shell completion and would be
-    noise on a screen a person reads.
-    """
-    registered = {command_name(command) for command in pursuit_commands.app.registered_commands if not command.hidden}
-    result = runner.invoke(app, ['pursuits', '--help'])
-
-    assert registered
-    assert not [name for name in registered if name not in result.output]
 
 
 def visible_nodes(command, path=()):
@@ -114,7 +92,7 @@ def test_every_screen_carries_examples_that_parse(monkeypatch):
     monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
     list_go_commands({GO_COMMANDS_VARIABLE: HANDED_GO_TREE.read_text()})
 
-    assert runner.invoke(app, ['review', 'done', 'x', '--onn', 'y', '--help']).exit_code == 2, 'a bad flag must fail through --help'
+    assert runner.invoke(app, ['config', 'show', '--jsn', '--help']).exit_code == 2, 'a bad flag must fail through --help'
     for example in runnable:
         result = runner.invoke(app, [*shlex.split(example)[1:], '--help'])
         assert result.exit_code == 0, f'{example}: {result.output}'
@@ -202,7 +180,7 @@ def test_config_show_answers_on_a_machine_with_no_config_and_names_the_login(tmp
     assert 'doit auth login' in result.output
 
 
-@pytest.mark.parametrize('argv', [['nonsense'], ['review', 'nonsense']])
+@pytest.mark.parametrize('argv', [['nonsense'], ['shell', 'nonsense']])
 def test_unknown_command_exits_2(argv):
     """A caller has to tell "you typed it wrong" from "it ran and failed"."""
     result = runner.invoke(app, argv)
@@ -211,29 +189,29 @@ def test_unknown_command_exits_2(argv):
 
 
 def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
-    """`doit sources list --no-input` is refused by `list`; the root is where it goes."""
+    """`doit config show --no-input` is refused by `show`; the root is where it goes."""
     with pytest.raises(NoSuchOption) as refused:
-        get_command(app).main(['sources', 'list', '--no-input'], prog_name='doit', standalone_mode=False)
+        get_command(app).main(['config', 'show', '--no-input'], prog_name='doit', standalone_mode=False)
 
-    assert accepted_placements(refused.value) == ['doit --no-input sources list']
+    assert accepted_placements(refused.value) == ['doit --no-input config show']
 
 
 def test_a_command_the_go_doit_hands_on_is_listed_under_its_parent_and_runs_nothing(monkeypatch):
     """The Go doit hands its tree on with each line it passes, and Python has no copy of those verbs to run."""
     monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
-    monkeypatch.setattr(pursuit_commands.app, 'registered_commands', list(pursuit_commands.app.registered_commands))
+    monkeypatch.setattr(shell_app, 'registered_commands', list(shell_app.registered_commands))
     handed = [
         {'path': ['update'], 'summary': 'Update doit', 'group': 'This machine'},
-        {'path': ['pursuits', 'board'], 'summary': 'Open the pursuits board'},
+        {'path': ['shell', 'board'], 'summary': 'Open the shell board'},
     ]
     list_go_commands({GO_COMMANDS_VARIABLE: json.dumps(handed)})
 
     tree = get_command(app)
     assert isinstance(tree, TyperGroup)
-    pursuits = tree.commands['pursuits']
-    assert isinstance(pursuits, TyperGroup)
+    shell = tree.commands['shell']
+    assert isinstance(shell, TyperGroup)
     assert 'update' in tree.commands
-    assert 'board' in pursuits.commands
+    assert 'board' in shell.commands
     result = runner.invoke(app, ['update', '--chek'])
     assert result.exit_code == 2
     assert 'doit update --help' in result.output

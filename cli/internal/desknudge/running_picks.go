@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/datapointchris/doit/cli/internal/programs"
 )
 
 // rememberedEndedPicks caps the refused and skipped picks kept for the panel, newest first.
@@ -239,7 +241,7 @@ func (d *Desk) committed(ctx context.Context, pick RunningPick, resumed bool) co
 		if resumed {
 			return completion{
 				summary: "doit: " + pick.Text + " may not have changed", exitCode: PickFailed,
-				body: "the watch stopped while `" + shellJoin(changes.argv) + "` ran, so whether it landed is not known, and it is not run again",
+				body: "the watch stopped while `" + programs.ShellJoin(changes.Argv) + "` ran, so whether it landed is not known, and it is not run again",
 			}
 		}
 		if pick.Action == ActionUntick {

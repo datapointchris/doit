@@ -64,6 +64,160 @@
   },
   {
     "path": [
+      "pursuits"
+    ],
+    "summary": "What `doit next` draws from: each pursuit, its goal and its weight",
+    "group": "What you declared"
+  },
+  {
+    "path": [
+      "pursuits",
+      "list"
+    ],
+    "summary": "Every pursuit, its weight, goal and when it is next due"
+  },
+  {
+    "path": [
+      "pursuits",
+      "log"
+    ],
+    "summary": "Record having done one, writing through to the app that owns it"
+  },
+  {
+    "path": [
+      "pursuits",
+      "skip"
+    ],
+    "summary": "Pass on one — out of the draw until it expires, owing nothing meanwhile"
+  },
+  {
+    "path": [
+      "pursuits",
+      "resume"
+    ],
+    "summary": "End a standing skip, so the pursuit returns to the next draw"
+  },
+  {
+    "path": [
+      "pursuits",
+      "reset"
+    ],
+    "summary": "Start a balance again from now; the journal keeps its history"
+  },
+  {
+    "path": [
+      "pursuits",
+      "drift"
+    ],
+    "summary": "What each goal asked for against what you did"
+  },
+  {
+    "path": [
+      "pursuits",
+      "dormant"
+    ],
+    "summary": "Pursuits gone quiet for more than three of their own intervals"
+  },
+  {
+    "path": [
+      "pursuits",
+      "evidence"
+    ],
+    "summary": "What each app says you last did, asked now rather than on the timer"
+  },
+  {
+    "path": [
+      "pursuits",
+      "edit"
+    ],
+    "summary": "Edit the pursuits in your editor, starting from an annotated template where none are written"
+  },
+  {
+    "path": [
+      "review"
+    ],
+    "summary": "What's due to revisit, on a cadence",
+    "group": "What you declared"
+  },
+  {
+    "path": [
+      "review",
+      "due"
+    ],
+    "summary": "What's due now, most overdue first"
+  },
+  {
+    "path": [
+      "review",
+      "list"
+    ],
+    "summary": "Every registered item and its status"
+  },
+  {
+    "path": [
+      "review",
+      "done"
+    ],
+    "summary": "Mark an item done, advancing its due date"
+  },
+  {
+    "path": [
+      "review",
+      "undo"
+    ],
+    "summary": "Take back an item's newest completion, so it reads as it did before"
+  },
+  {
+    "path": [
+      "review",
+      "edit"
+    ],
+    "summary": "Edit the register in your editor, the document listing every review item"
+  },
+  {
+    "path": [
+      "review",
+      "nudge-every"
+    ],
+    "summary": "Set how often the startup nudge may fire"
+  },
+  {
+    "path": [
+      "sources"
+    ],
+    "summary": "Which apps doit asks, and what it asks them",
+    "group": "What you declared"
+  },
+  {
+    "path": [
+      "sources",
+      "list"
+    ],
+    "summary": "Every configured source, and whether the service's read of it answers"
+  },
+  {
+    "path": [
+      "sources",
+      "example"
+    ],
+    "summary": "Print the annotated example of the sources, writing nothing"
+  },
+  {
+    "path": [
+      "sources",
+      "edit"
+    ],
+    "summary": "Edit the sources in your editor, starting from the example where none are written"
+  },
+  {
+    "path": [
+      "sources",
+      "contract"
+    ],
+    "summary": "The lane document every source becomes, as an annotated example"
+  },
+  {
+    "path": [
       "auth"
     ],
     "summary": "Log this machine in to doit's service, and out",

@@ -66,6 +66,7 @@ func newRootCommand() *cobra.Command {
 	root.Flags().BoolP("version", "V", false, "Show the installed version and exit")
 	root.AddCommand(
 		newNextCommand(), newTodayCommand(), newDashboardCommand(), newHappenedCommand(), newForecastCommand(),
+		newPursuitsCommand(), newReviewCommand(), newSourcesCommand(),
 		newAuthCommand(), newUpdateCommand(), newDeskNudgeCommand(),
 	)
 	return root

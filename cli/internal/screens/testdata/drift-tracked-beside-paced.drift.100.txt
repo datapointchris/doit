@@ -1,0 +1,12 @@
+Drift · 27 Aug 2026 02:57 to now ───────────────────────────────────────────────────────────────────
+pursuit                       goal   since  asked     done        due  offered  passed
+study-computer-science    every 2d  23 Nov      1        0  due today        1       1
+read-library            45m a week  18 Nov    45m      30m  due in 5d        1       0
+chores                    every 7d  18 Nov      1        0  due today        1       0
+practice-piano            every 2d  23 Nov      1        0  due today        1       0
+errands                   every 3d  22 Nov      1        0  due today        1       0
+stretch                   every 1d  24 Nov      1        0  due today        1       0
+sketch                     tracked  27 Aug      —  1 · 50m          —        0       0
+
+chores  A house that stays standing needs a weekly sweep, and the longer it waits the longer the
+        list grows.

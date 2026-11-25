@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/datapointchris/doit/cli/internal/deskfiles"
+	"github.com/datapointchris/doit/cli/internal/pursuits"
 )
 
 // Paths are the files the desk nudge keeps on this desk.
@@ -30,6 +31,8 @@ type Paths struct {
 	Panel string
 	// Socket is where the watch answers the CLI.
 	Socket string
+	// HeldLogs holds each pursuit log not yet seen stored, which `doit pursuits log` sends too.
+	HeldLogs string
 }
 
 // DeskPaths are this desk's, under $XDG_STATE_HOME, $XDG_CACHE_HOME and the runtime directory.
@@ -42,6 +45,7 @@ func DeskPaths() Paths {
 		Records:   filepath.Join(state, "desk-nudge-events.jsonl"),
 		Panel:     filepath.Join(deskfiles.CacheDir(), "desk-nudge-panel.json"),
 		Socket:    filepath.Join(runtimeDir(state), "watch.sock"),
+		HeldLogs:  pursuits.DeskHeldLogs().Dir,
 	}
 }
 

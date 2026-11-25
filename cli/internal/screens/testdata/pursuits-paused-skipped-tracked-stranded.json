@@ -1,0 +1,148 @@
+{
+  "list": {
+    "pursuits": {
+      "chores": {
+        "description": "The maintenance list"
+      },
+      "read-library": {
+        "description": "Read what is on the shelf"
+      },
+      "study-computer-science": {
+        "description": "Work the CS track"
+      },
+      "paused-thing": {
+        "description": "Kept in the file, out of the draw"
+      },
+      "sketch": {
+        "description": "Drawing, logged whenever it happens"
+      },
+      "stretch": {
+        "description": "Five minutes on the mat"
+      },
+      "practice-piano": {
+        "description": "Twenty minutes at the keys"
+      },
+      "errands": {
+        "description": "Whatever the task list says is next"
+      }
+    },
+    "rows": [
+      {
+        "name": "paused-thing",
+        "paced": true,
+        "weight": "50",
+        "goal": "every 3d",
+        "last": "never",
+        "due": "—",
+        "late": false,
+        "standing": "paused",
+        "reason": ""
+      },
+      {
+        "name": "study-computer-science",
+        "paced": true,
+        "weight": "35",
+        "goal": "every 2d",
+        "last": "never",
+        "due": "due today",
+        "late": false,
+        "standing": "skipped",
+        "reason": ""
+      },
+      {
+        "name": "read-library",
+        "paced": true,
+        "weight": "30",
+        "goal": "45m a week",
+        "last": "2d ago",
+        "due": "due in 5d",
+        "late": false,
+        "standing": "",
+        "reason": ""
+      },
+      {
+        "name": "chores",
+        "paced": true,
+        "weight": "25",
+        "goal": "every 7d",
+        "last": "9d ago",
+        "due": "due today",
+        "late": false,
+        "standing": "",
+        "reason": "A house that stays standing needs a weekly sweep, and the longer it waits the longer the list grows."
+      },
+      {
+        "name": "practice-piano",
+        "paced": true,
+        "weight": "15",
+        "goal": "every 2d",
+        "last": "never",
+        "due": "due today",
+        "late": false,
+        "standing": "",
+        "reason": ""
+      },
+      {
+        "name": "errands",
+        "paced": true,
+        "weight": "12",
+        "goal": "every 3d",
+        "last": "never",
+        "due": "due today",
+        "late": false,
+        "standing": "",
+        "reason": ""
+      },
+      {
+        "name": "stretch",
+        "paced": true,
+        "weight": "10",
+        "goal": "every 1d",
+        "last": "4w ago",
+        "due": "due today",
+        "late": false,
+        "standing": "",
+        "reason": ""
+      },
+      {
+        "name": "sketch",
+        "paced": false,
+        "weight": "",
+        "goal": "tracked",
+        "last": "4d ago",
+        "due": "",
+        "late": false,
+        "standing": "",
+        "reason": ""
+      }
+    ]
+  },
+  "offers": {
+    "counts": {
+      "desk": {
+        "chores": 1,
+        "errands": 1,
+        "practice-piano": 1,
+        "read-library": 1,
+        "retired-habit": 1,
+        "stretch": 1,
+        "study-computer-science": 1
+      }
+    },
+    "recent": {
+      "desk": {
+        "chores": 1,
+        "errands": 1,
+        "practice-piano": 1,
+        "read-library": 1,
+        "retired-habit": 1,
+        "stretch": 1,
+        "study-computer-science": 1
+      }
+    },
+    "stranded": [
+      "retired-habit"
+    ],
+    "window": "90d"
+  }
+}

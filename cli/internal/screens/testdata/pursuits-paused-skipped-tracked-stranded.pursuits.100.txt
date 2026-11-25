@@ -1,0 +1,18 @@
+Pursuits ───────────────────────────────────────────────────────────────────────────────────────────
+  paused-thing             50  every 3d    last never   —  paused
+  study-computer-science   35  every 2d    last never   due today  skipped
+  read-library             30  45m a week  last 2d ago  due in 5d
+  chores                   25  every 7d    last 9d ago  due today
+    A house that stays standing needs a weekly sweep, and the longer it waits the longer the list
+    grows.
+  practice-piano           15  every 2d    last never   due today
+  errands                  12  every 3d    last never   due today
+  stretch                  10  every 1d    last 4w ago  due today
+  sketch                       tracked     last 4d ago
+
+  weight orders what is owed and draws the rest · tracked is logged and never due · doit pursuits
+edit
+
+  Offers over the last 90d with no pursuit:
+    retired-habit  1  desk
+  Renaming a pursuit strands its counts. Naming it back in the register picks them up again.

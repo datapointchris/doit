@@ -1,0 +1,13 @@
+Drift · 27 Aug 2026 02:57 to now ─────────────────
+pursu…  goal  since  ask…  done   due  off…  pass…
+study…  eve…  23 N…     1     0  due…     1      1
+read-…  45m…  18 N…   45m   30m  due…     1      0
+chores  eve…  18 N…     1     0  due…     1      0
+pract…  eve…  23 N…     1     0  due…     1      0
+erran…  eve…  22 N…     1     0  due…     1      0
+stret…  eve…  24 N…     1     0  due…     1      0
+sketch  tra…  27 A…     —  1 ·…     —     0      0
+
+chores  A house that stays standing needs a weekly
+        sweep, and the longer it waits the longer
+        the list grows.

@@ -1,0 +1,13 @@
+Review — what's due ────────────────────────────────────────────────────────────────────────────────
+  never-done            never done  ·  every 1w
+      Has never been marked done
+
+  prune-images          never done  ·  every 2w
+      Remove container images nothing runs any more
+      ↳ echo prune the images that no container references
+
+Practice — what's due ──────────────────────────────────────────────────────────────────────────────
+  scales                overdue 2d  ·  every 3d · last 2026-11-20
+      Ten minutes of scales before anything else
+
+Mark one done:  doit review done <id>

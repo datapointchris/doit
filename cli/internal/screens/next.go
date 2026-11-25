@@ -222,7 +222,11 @@ func Explain(w io.Writer, answer service.Next, widths Widths, p gotermstyle.Pale
 	for _, drawn := range table.Lines(p) {
 		pr.write(drawn)
 	}
-	reasons(pr, answer.ExplainRows)
+	named := make([][2]string, 0, len(answer.ExplainRows))
+	for _, row := range answer.ExplainRows {
+		named = append(named, [2]string{row.Name, row.Reason})
+	}
+	reasons(pr, named)
 	pr.blank()
 	pr.wrap(line{}.add(fmt.Sprintf("  every owed row is shown, heaviest first · the rest is drawn by weight to fill %d rows", answer.DrawSize), ""))
 	pr.wrap(line{}.add("  pick is the chance of being drawn ", "").add("first", gotermstyle.CodeBold).
@@ -232,14 +236,15 @@ func Explain(w io.Writer, answer service.Next, widths Widths, p gotermstyle.Pale
 	return pr.written
 }
 
-// reasons prints each pursuit's reason under the table, whose columns have no
-// room for a sentence. A reason wraps beside its name.
-func reasons(pr *printer, rows []service.ExplainRow) {
+// reasons prints each pursuit's reason under a table, whose columns have no
+// room for a sentence. A reason wraps beside its name. named holds each
+// pursuit's name and reason, and a pursuit with no reason prints nothing.
+func reasons(pr *printer, named [][2]string) {
 	nameWidth, reasonWidth := 0, 0
-	for _, row := range rows {
-		if row.Reason != "" {
-			nameWidth = max(nameWidth, runes(row.Name))
-			reasonWidth = max(reasonWidth, cells(row.Reason))
+	for _, row := range named {
+		if row[1] != "" {
+			nameWidth = max(nameWidth, runes(row[0]))
+			reasonWidth = max(reasonWidth, cells(row[1]))
 		}
 	}
 	if nameWidth == 0 {
@@ -247,14 +252,14 @@ func reasons(pr *printer, rows []service.ExplainRow) {
 	}
 	reasonWidth = max(1, min(reasonWidth, pr.widths.Console-nameWidth-2))
 	pr.blank()
-	for _, row := range rows {
-		if row.Reason == "" {
+	for _, row := range named {
+		if row[1] == "" {
 			continue
 		}
-		for index, piece := range (line{}.add(row.Reason, "")).wrapped(reasonWidth) {
+		for index, piece := range (line{}.add(row[1], "")).wrapped(reasonWidth) {
 			name := strings.Repeat(" ", nameWidth)
 			if index == 0 {
-				name = fitted(row.Name, nameWidth, true)
+				name = fitted(row[0], nameWidth, true)
 			}
 			pr.write(name + "  " + piece.paint(pr.p))
 		}

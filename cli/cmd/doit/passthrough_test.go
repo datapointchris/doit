@@ -94,7 +94,7 @@ func TestAnUnportedVerbExecsDoitPythonWithTheSameArgvAndExitCodeAndAMissingOneIs
 	fake, argvFile := fakePython(t)
 
 	for _, args := range [][]string{
-		{"pursuits", "log", "read", "--minutes", "40", "a note with spaces"},
+		{"config", "show", "--json", "a word with spaces"},
 		{"auth", "status", "--bogus"},
 		{"--no-input", "auth", "bogus"},
 		{},
@@ -145,8 +145,8 @@ func TestAnUnportedVerbExecsDoitPythonWithTheSameArgvAndExitCodeAndAMissingOneIs
 		exit int
 		verb string
 	}{
-		{[]string{"pursuits", "list"}, 1, "pursuits"},
-		{[]string{"--no-input", "pursuits", "list"}, 1, "pursuits"},
+		{[]string{"shell", "init"}, 1, "shell"},
+		{[]string{"--no-input", "shell", "init"}, 1, "shell"},
 		{[]string{"--help"}, 0, ""},
 		{[]string{"auth", "bogus"}, 2, ""},
 	} {

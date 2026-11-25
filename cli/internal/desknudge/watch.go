@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/datapointchris/doit/cli/internal/service"
 )
 
 const (
@@ -169,7 +171,7 @@ func (w *Watch) Tick(ctx context.Context) {
 	_ = w.desk.Paths.change(func(state *State) error {
 		change = state.tick(moment, live)
 		if change.Fire {
-			nudge := state.beginFiring(moment, newID(moment))
+			nudge := state.beginFiring(moment, service.NewWriteID(moment))
 			firing = &nudge
 		}
 		queued = len(state.QueuedAnswers) > 0

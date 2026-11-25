@@ -10,10 +10,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-from typer.testing import CliRunner
 
 from doit import review
-from doit.service_commands import review as review_commands
 
 FIXTURE = Path(__file__).resolve().parent / 'fixtures' / 'review' / 'register.yml'
 TODAY = dt.date(2026, 8, 4)
@@ -68,11 +66,3 @@ def test_parse_duration_minutes():
     assert review.parse_duration_minutes(' 30m ') == 30
     assert review.parse_duration_minutes('soon') is None
     assert review.parse_duration_minutes('') is None
-
-
-def test_nudge_every_rejects_an_unparsable_duration():
-    """A bad value is a usage error, which typer.BadParameter is what earns."""
-    result = CliRunner().invoke(review_commands.app, ['nudge-every', 'soon'])
-
-    assert result.exit_code == 2
-    assert 'expected a duration' in result.output

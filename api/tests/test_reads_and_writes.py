@@ -1,7 +1,5 @@
 import datetime as dt
 import logging
-import subprocess
-import sys
 
 import httpx2
 import pytest
@@ -294,18 +292,6 @@ def test_every_adapter_doit_registers_has_a_read():
     readers = Readers({}, GitHub(GitHubSettings()), ClickHouseSettings())
 
     assert set(sources.ADAPTERS) == set(readers.adapter_reads)
-
-
-def test_the_service_never_loads_the_client_that_calls_it():
-    """The rule modules the service runs keep no command, so a change to the CLI's client never reaches the service."""
-    loaded = subprocess.run(
-        [sys.executable, '-c', 'import sys, doit_api.main; print(sorted(m for m in sys.modules if m.startswith("doit.service")))'],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-
-    assert loaded == '[]'
 
 
 def test_the_desk_check_lane_names_only_the_machines_with_a_failing_check():

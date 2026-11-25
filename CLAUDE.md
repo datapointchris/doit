@@ -35,10 +35,16 @@ in the same change, so no verb has two implementations.
 - **`cli/internal/login` holds pyclilogin's identifiers for the product `doit`**: the config file,
   the keychain service `doit-cli`, and `$XDG_STATE_HOME/doit` for the fallback token file and the
   refresh lock. Changing any one logs every desk out of one side.
-- **`cli/internal/deskfiles` writes `next-names.txt` as `write_names_cache` in `pursuits.py`
-  does**: at `$XDG_CACHE_HOME/doit/next-names.txt`, one `name<TAB>description` line per pursuit,
-  sorted by name. The zsh completion that `doit shell completion zsh` prints reads that path. The
-  contract test runs the Go `next` and fails where the completion reads any other file.
+- **`cli/internal/deskfiles` writes two files in `$XDG_CACHE_HOME/doit/`, and the shell reads each
+  with no process started.**
+  - `next-names.txt` holds one `name<TAB>description` line per pursuit, sorted by name. Each command
+    that fetches the pursuits rewrites it, through `saveCompletionNames`. The zsh completion that
+    `doit shell completion zsh` prints reads it.
+  - `nudge-interval-minutes` holds the shell nudge's interval in whole minutes. Each command that
+    reads the interval rewrites it, through `keepNudgeInterval`. The gate that
+    `doit shell init zsh` prints reads it.
+
+  The contract test fails where either reader looks at another path.
 - **`cli/internal/service` is the Go client of the service.** A route's call is a method that names
   the path and the Go type of its answer. Each field that type declares without `omitempty` is one
   the verb needs, and an answer lacking it is refused with the service's version, never drawn empty.
@@ -114,14 +120,12 @@ The release builds the page and fails where the build wrote no script under `dis
 
 ## The service runs no command, and the CLI's own code starts the processes below
 
-- **`$EDITOR`**, for every `edit` verb, in `editor.open_in_editor`, with no timeout.
+doit-python starts these:
+
 - **`doit-tui`**, in `tui.tui_command`, which replaces the process with it. `doit-tui` is the Go
   program in `cli/`. It starts `doit desk-nudge panel show --json` on a timer and `panel pick <key>
   --json` for each pick, each in a session of its own, so every rule about a row stays in
   `cli/internal/desknudge`.
-- **A pursuit's `on_log`**, in `pursuits.run_on_log`, after asking, with no timeout.
-- **A review item's `show`**, in `review.run_show`, inside the nudge, stopped after 10
-  seconds.
 
 A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit
 learns from another program arrives over HTTP through the wrappers below.
@@ -130,6 +134,15 @@ The Go binary starts these:
 
 - **`doit-python`**, in `passthrough.Exec`, which replaces the process with it for every command line
   that `owns` turns down.
+- **The editor**, by `openInEditor` in `cli/cmd/doit/document_edit.go`, for every `edit` verb, with
+  no bound, because it waits as long as the person edits. gotermboard's `EditorCommand` names it:
+  `$VISUAL`, then `$EDITOR`, then `vi`, split on whitespace.
+- **A pursuit's `on_log`**, by `pursuits.Log` in `cli/internal/pursuits/log.go`, at
+  `doit pursuits log`, stopped after 30 seconds by `OnLogBound`. It runs after the log's check has
+  named the item and before the log is posted, so the journal records how it ended. It asks first
+  unless `--yes` is passed, and runs nothing where nobody can answer.
+- **A review item's `show`**, as `sh -c <show>`, by `ranShow` in `cli/cmd/doit/review.go`, inside
+  `doit review nudge`, stopped after 10 seconds by `showBound`.
 - **The browser**, through goclilogin's `OpenBrowser`, which runs pkg/browser's `xdg-open` or `open`,
   at `doit auth login`.
 - **`webviewrs -n doit-panel -t "doit panel" --dark --close-on-blur <url>`**, by `panelWindowArgv` in
@@ -153,12 +166,12 @@ The Go binary starts these:
     pick on a habit commits, because life accepts a second completion of a habit already done.
   - `life habits tick <item> --date <day>` and `untick`, by `tickProgram` and `untickProgram`, at a
     pick on a checklist item.
-  - A pursuit's `on_log`, by `onLogProgram`, at a pick on that pursuit, unasked, because the pick
-    is the asking. The template is split into words before the item's fields fill it, so no field
-    can add an argument.
+  - A pursuit's `on_log`, by `pursuits.OnLogProgram`, at a pick on that pursuit, unasked, because
+    the pick is the asking. The template is split into words before the item's fields fill it, so
+    no field can add an argument.
 
-  Each program's bound is declared beside its argv in `programs.go`, and each runs outside the
-  state file's lock. `TestEachProgramTheWatchStartsHasItsArgvAndBound` is the table of every argv
+  Each program's bound is declared beside its argv, in `programs.go` or, for `on_log`, in
+  `cli/internal/pursuits/on_log.go`. Each runs outside the state file's lock. `TestEachProgramTheWatchStartsHasItsArgvAndBound` is the table of every argv
   and bound.
 
 The libraries start processes of their own. pyclilogin and goclilogin each run a login's configured
@@ -168,16 +181,19 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
 ## Documents and records are the service's, and a machine keeps its login, its caches and its desk nudge
 
 - **Documents** — the pursuits, the review register and the sources. The service stores each as its
-  text, so comments and layout survive, and `service.edit_document` round-trips it through
-  `$EDITOR`. Never in the repo: it is personal, and the repo is public.
+  text, so comments and layout survive, and `editDocument` in `cli/cmd/doit/document_edit.go`
+  round-trips it through the editor. Never in the repo: it is personal, and the repo is public.
 - **Records** — the journal, review completions, offered counts, forecast readings and the nudge's
-  last showing, in the service's store. A command reaches them only through `doit.service`, the
-  one module that makes a request.
+  last showing, in the service's store. A Go verb reaches them only through `cli/internal/service`.
 - **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer and the
   machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no Python and no request,
   each file rewritten by the command that fetches it, and the desk nudge panel's rows, which the
   watch rewrites and `panel show` reads. `doit config show` prints each of these with
   where it came from, and a value doit newly resolves gets a row there.
+- **Held logs** — `$XDG_STATE_HOME/doit/held-logs/` keeps each pursuit log from just before its
+  post until the service answers it, one file per entry, named by its id. Where the answer is lost,
+  the next `doit pursuits log` or pursuit pick sends it again under its id. The service then stores
+  it once, and on_log never runs twice. `HeldLogs` in `cli/internal/pursuits/held.go` is the store.
 - **The desk nudge's clock** — the time a desk counts is a fact of that desk, so `$XDG_STATE_HOME/doit/`
   holds the nudge's state file and its record file, which a log shipper reads. Only its answers
   go to the service, so the interval follows the login to any desk. The watch serves its picks on
@@ -214,15 +230,13 @@ and nothing computes it twice. A change that has `api/` compute a balance, a due
 itself is the drift this arrangement exists to prevent: add a seam to the view module instead, one
 that takes its data rather than reading it.
 
-So a module the service imports holds rules and renderers, and never a command. The commands that
-ask the service live in `doit.service_commands`, one module beside each rule module, so the service
-never loads the client that calls it. A new command that asks the service goes there.
-`test_the_service_never_loads_the_client_that_calls_it` fails when a rule module imports
-`doit.service`.
+So a module the service imports holds rules and renderers, and never a command. Every verb that
+asks the service is a Go command, and Python holds no client of the service.
 
-The CLI and the service are tested together in `api/tests/test_cli_against_service.py`, which
-forwards each command's requests into the app in process. A shape changed on one side and not the
-other fails there.
+`cli/internal/contract` runs this commit's Go doit against this commit's service, started from
+`api/tests/serve_on_a_temporary_store.py` on a temporary store. A shape changed on one side and not
+the other fails there. `api/tests/test_cli_against_service.py` pins what the service answers on its
+own.
 
 Every external effect the service has goes through one wrapper:
 

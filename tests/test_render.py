@@ -11,51 +11,6 @@ Color is rich's concern and is not asserted here.
 from doit import render
 
 
-def test_nudge_width_sizes_from_the_longest_name():
-    assert render.nudge_width(['a', 'abc', 'ab']) == 5, 'longest name plus a two-column gutter'
-    assert render.nudge_width([]) == 2, 'an empty roster is the gutter alone, not a max() error'
-
-
-def test_a_nudge_row_drops_its_status_rather_than_clip_its_command(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '80')
-    command = 'python ~/.config/hooks/a-report-with-a-long-name'
-    render.nudge_row('an-item', 'never done', command, render.nudge_width(['an-item', 'a-much-longer-item']))
-
-    out = capsys.readouterr().out.rstrip('\n')
-    assert len(out) <= 80
-    assert out.startswith('  an-item'), "the name is the row's identity and is never clipped"
-    assert out.endswith(f'↳ {command}')
-    assert 'never done' not in out
-
-
-def test_a_nudge_command_too_wide_for_the_line_is_left_off_rather_than_clipped(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '50')
-    render.nudge_row('an-item', 'never done', 'x' * 200, render.nudge_width(['an-item']))
-
-    assert capsys.readouterr().out.rstrip('\n') == '  an-item  never done'
-
-
-def test_nudge_row_columns_line_up_across_rows(monkeypatch, capsys):
-    """A short name and a long one put their status in the same column."""
-    monkeypatch.setenv('COLUMNS', '200')
-    width = render.nudge_width(['short', 'a-much-longer-name'])
-    render.nudge_row('short', 'never done', 'cmd', width)
-    render.nudge_row('a-much-longer-name', 'overdue 3d', 'cmd', width)
-
-    first, second = capsys.readouterr().out.splitlines()
-    assert first.index('never done') == second.index('overdue 3d')
-    assert first.index('↳') == second.index('↳')
-
-
-def test_nudge_row_without_a_command(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '80')
-    render.nudge_row('an-item', 'never done', '', render.nudge_width(['an-item']))
-
-    out = capsys.readouterr().out.rstrip('\n')
-    assert out == '  an-item  never done'
-    assert '↳' not in out
-
-
 def test_join_context_drops_blanks_and_repeats():
     assert render.join_context(['syncer', 'syncer']) == 'syncer', 'a repo whose project shares its name is placed once'
     assert render.join_context([None, 'A Project']) == 'A Project', 'a missing fact leaves no dangling separator'
@@ -83,14 +38,6 @@ def test_first_sentence_does_not_break_on_a_period_inside_a_word():
 
 def test_first_sentence_collapses_the_wrapping_a_stored_note_arrives_with():
     assert render.first_sentence('one\n\ttwo   three') == 'one two three'
-
-
-def test_nudge_header_is_one_line(capsys):
-    render.nudge_header('Review', 6)
-
-    lines = capsys.readouterr().out.splitlines()
-    assert len(lines) == 1, 'the boxed three-line header belongs to the browse views'
-    assert lines[0] == 'Review · 6 due'
 
 
 def test_a_span_is_reported_in_the_coarsest_unit_that_still_says_something():

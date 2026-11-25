@@ -62,16 +62,16 @@ doit auth login https://doit.example.com   # once per machine: names the service
 doit config show             # what this machine resolved, and where each value came from
 
 doit sources example         # an annotated sources document, printed, writing nothing
-doit sources edit            # the sources in $EDITOR, starting from that example where none are written
+doit sources edit            # the sources in your editor, starting from that example where none are written
 doit sources list            # every configured source, and whether the service's read of it answers
 doit dashboard               # every lane, each ordered by the app that owns it
 
-doit pursuits edit           # the pursuits in $EDITOR, starting from an annotated template where none are written
+doit pursuits edit           # the pursuits in your editor, starting from an annotated template where none are written
 doit pursuits list           # proves the register parsed: each pursuit, its weight, its goal, when it is due
 doit next                    # everything owed, then the rest of the screen drawn by weight
 doit pursuits log            # record one; whatever you leave out is asked for
 
-doit review edit             # the review register in $EDITOR, starting from a one-item template
+doit review edit             # the review register in your editor, starting from a one-item template
 doit review due              # what is due to revisit, most overdue first
 
 eval "$(doit shell init zsh)"         # in .zshrc: a nudge about due items, gated by doit review nudge-every

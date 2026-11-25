@@ -19,19 +19,13 @@ you work through on a schedule. howto carries the Labs. When you practice one is
 yours, so its schedule is kept here.
 """
 
-import contextlib
 import datetime as dt
 import re
-import subprocess
-import sys
-
-from rich.text import Text
 
 from doit.cadence import is_due
 from doit.cadence import overdue_days
 from doit.cadence import parse_cadence
 from doit.cadence import status_label
-from doit.render import console
 
 TEMPLATE = """\
 # Terminal-native review / cadence register, read by `doit review`.
@@ -153,26 +147,6 @@ def statuses_of(register: dict[str, dict], state: dict[str, str], today: dt.date
     return rows
 
 
-def render_item(row: dict) -> None:
-    meta = f'every {row["cadence"]}'
-    if row['last']:
-        meta += f' · last {row["last"]}'
-    line = Text('  ')
-    line.append(f'{row["id"]:<20}', style='yellow')
-    line.append(f'  {status_label(row["overdue"])}  ·  {meta}')
-    console.print(line)
-    console.print(Text(f'      {row["desc"]}'))
-    if row['command']:
-        command = Text('      ')
-        command.append(f'↳ {row["command"]}', style='cyan')
-        console.print(command)
-    console.print()
-
-
-def warn_empty() -> None:
-    console.print('The review register has no items yet. Add some with [cyan]doit review edit[/].')
-
-
 # Each block's heading in the browse views. Practice prints after maintenance,
 # because a deck of never-practiced Labs would otherwise push it off the screen.
 BLOCK_TITLES = {'items': 'Review', 'practice': 'Practice'}
@@ -186,51 +160,6 @@ def with_status(row: dict) -> dict:
 def block_titles() -> list[dict]:
     """Each block with its heading, maintenance first, as the browse views print them."""
     return [{'name': block, 'title': BLOCK_TITLES[block]} for block in BLOCKS]
-
-
-def render_stranded(stranded: list[str]) -> None:
-    """Name any recorded done dates whose item the register no longer holds.
-
-    Said in the one view that is about the register itself rather than about
-    what to do next. The nudge and `due` stay silent — a misfiled record is not
-    a task, and an interrupt that reports bookkeeping is the kind you stop
-    reading.
-    """
-    if not stranded:
-        return
-    console.print(Text(f'Recorded done dates with no register item: {", ".join(stranded)}', style='yellow'))
-    console.print('  Renaming an item strands its history. Naming it back in the register picks the history up again.')
-
-
-def run_show(row: dict) -> None:
-    """Run a due item's `show:` command and let its output print inline.
-
-    Only the nudge calls this, so the manual `list`/`due` views only ever read.
-    This is the one place a review item runs rather than being displayed, and it
-    is opt-in per item: `command:` is shown, `show:` is run. Stdout is inherited
-    so colored output survives, and a timeout keeps a slow command from wedging
-    shell startup.
-
-    A `show:` command must be a read. Anything it changes is a change nothing
-    asked for. A `show:` needing a side effect to be useful is an argument for a
-    read-only flag on that tool, not for relaxing this.
-
-    A `show:` command must emit at most a couple of lines — it runs inside a
-    nudge, so a command that prints its own full listing silently turns the nudge
-    back into a wall of text. Rendering stays the child's job; this never captures
-    or trims its output.
-    """
-    cmd = row.get('show')
-    if not cmd:
-        return
-    # Flush first: our print() output is buffered, but the subprocess writes to
-    # the inherited fd immediately, so without this its card jumps ahead of the
-    # header and item list we just printed.
-    sys.stdout.flush()
-    with contextlib.suppress(subprocess.TimeoutExpired):
-        # shell=True is the feature, not an oversight: a register entry is hand-
-        # authored config and may hold a pipeline, so it has to reach a shell.
-        subprocess.run(cmd, shell=True, timeout=10, check=False)  # nosec B602
 
 
 def nudge_due(held: dict, now: dt.datetime) -> bool:

@@ -20,9 +20,9 @@ import (
 var update = flag.Bool("update", false, "rewrite each recorded screen in testdata from what this package prints")
 
 // Each testdata/<answer>.<screen>.<width>.txt is what the screen prints for
-// testdata/<answer>.json at that terminal width. A recording holds the layout
-// rich printed for that answer, except the forecast tables, which printedtable
-// measures where rich padded a fixed width. The answers hold invented rows in
+// testdata/<answer>.json at that terminal width. A recording is the layout the
+// screen prints for that answer. A table cell that does not fit is cut, as
+// printedtable cuts it. The answers hold invented rows in
 // the shape the service answers. A screen replays when it prints the same
 // text, with its escapes, each line's trailing spaces and the blank lines that
 // end it stripped, because the end-of-file hook strips those from a recording.
@@ -78,6 +78,41 @@ func TestEachScreenPrintsWhatItsRecordingHolds(t *testing.T) {
 				var answer service.Trend
 				readAnswer(t, answerName, &answer)
 				err = Trend(&out, answer, widths, palette)
+			case "pursuits":
+				var answer struct {
+					List   service.PursuitList `json:"list"`
+					Offers service.Offers      `json:"offers"`
+				}
+				readAnswer(t, answerName, &answer)
+				err = PursuitList(&out, answer.List, answer.Offers, widths, palette)
+			case "drift":
+				var answer service.Drift
+				readAnswer(t, answerName, &answer)
+				err = Drift(&out, answer, true, widths, palette)
+			case "dormant":
+				var answer service.Dormant
+				readAnswer(t, answerName, &answer)
+				err = Dormant(&out, answer, widths, palette)
+			case "evidence":
+				var answer service.Evidence
+				readAnswer(t, answerName, &answer)
+				err = Evidence(&out, answer, widths, palette)
+			case "review-list", "review-due":
+				var answer service.Review
+				readAnswer(t, answerName, &answer)
+				if screen == "review-list" {
+					err = ReviewList(&out, answer, widths, palette)
+				} else {
+					err = ReviewDue(&out, answer, widths, palette)
+				}
+			case "nudge":
+				var answer service.Nudge
+				readAnswer(t, answerName, &answer)
+				err = ReviewNudge(&out, answer, widths, palette)
+			case "sources":
+				var answer service.Sources
+				readAnswer(t, answerName, &answer)
+				err = SourcesList(&out, answer, widths, palette)
 			default:
 				t.Fatalf("%s names no screen this package draws", path)
 			}

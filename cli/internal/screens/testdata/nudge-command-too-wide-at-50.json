@@ -1,0 +1,29 @@
+{
+  "interval_minutes": 240,
+  "show": true,
+  "due": [
+    {
+      "id": "never-done",
+      "block": "items",
+      "cadence": "1w",
+      "desc": "Has never been marked done",
+      "command": "",
+      "show": "",
+      "last": null,
+      "due": true,
+      "status": "never done"
+    },
+    {
+      "id": "prune-images",
+      "block": "items",
+      "cadence": "2w",
+      "desc": "Remove container images nothing runs any more",
+      "command": "echo prune the images that no container references",
+      "show": "",
+      "last": null,
+      "due": true,
+      "status": "never done"
+    }
+  ],
+  "due_total": 2
+}
