@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/datapointchris/gotermboard/terminalcontrol"
 	"github.com/datapointchris/gotermstyle"
 	"github.com/spf13/cobra"
 
@@ -59,6 +60,6 @@ func newTodayCommand() *cobra.Command {
 // sourceProblems prints each problem in the sources document on stderr, so stdout stays the answer.
 func sourceProblems(w io.Writer, problems []string) {
 	for _, problem := range problems {
-		_, _ = fmt.Fprintln(w, "sources:", problem)
+		_, _ = fmt.Fprintln(w, "sources:", terminalcontrol.Strip(problem))
 	}
 }

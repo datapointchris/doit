@@ -1,23 +1,22 @@
 // Package screens draws each of doit's screens from the service's answer.
 //
-// The screens doit-python still runs print through rich, so these print as
-// they do and the two binaries read as one tool. The helpers here reproduce
-// rich's printing: a line cut at the terminal with an ellipsis, a sentence
-// wrapped at its words, and a rule under a title. Layout
-// is computed on the plain text, and color goes on after, so a cut can never
-// land inside an escape sequence.
+// The helpers here print as rich does: a line cut at the terminal with an
+// ellipsis, a sentence wrapped at its words, and a rule under a title. Each
+// measures in terminal cells, as rich does, where gotermstyle.Clip counts
+// runes. Text from the service is stripped of terminal controls before it is
+// measured, as printedtable strips its cells, so stored text cannot drive the
+// terminal. Layout is computed on the plain text, and color goes on after, so
+// a cut can never land inside an escape sequence.
 package screens
 
 import (
 	"io"
-	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/charmbracelet/x/term"
+	"github.com/datapointchris/gotermboard/terminalcontrol"
 	"github.com/datapointchris/gotermstyle"
 )
 
@@ -39,26 +38,10 @@ type Widths struct {
 	Layout int
 }
 
-// TerminalWidths are this process's widths. $COLUMNS answers both. Without
-// it, the console is the first standard stream that is a terminal, and the
-// layout is standard output alone, as rich and Python's shutil read them.
+// TerminalWidths are this process's widths, both read from gotermstyle.Columns.
 func TerminalWidths() Widths {
-	console := 0
-	if declared, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && declared > 0 {
-		console = declared
-	}
-	for _, file := range []*os.File{os.Stdin, os.Stdout, os.Stderr} {
-		if console > 0 {
-			break
-		}
-		if columns, _, err := term.GetSize(file.Fd()); err == nil && columns > 0 {
-			console = columns
-		}
-	}
-	if console <= 0 {
-		console = gotermstyle.DefaultColumns
-	}
-	return Widths{Console: console, Layout: min(gotermstyle.Columns(), maxLayoutWidth)}
+	columns := gotermstyle.Columns()
+	return Widths{Console: columns, Layout: min(columns, maxLayoutWidth)}
 }
 
 // segment is a run of text in one color.
@@ -78,8 +61,10 @@ func (l line) plain() string {
 	return b.String()
 }
 
-// add appends text in code.
-func (l line) add(text, code string) line { return append(l, segment{text, code}) }
+// add appends text in code, stripped of terminal controls.
+func (l line) add(text, code string) line {
+	return append(l, segment{terminalcontrol.Strip(text), code})
+}
 
 // cutTo keeps the first n bytes of the line's plain text.
 func (l line) cutTo(n int) line {
@@ -225,11 +210,11 @@ func chopped(word string, width int) []string {
 	return append(pieces, piece.String())
 }
 
-// cells is the printed width of plain text.
-func cells(plain string) int { return ansi.StringWidth(plain) }
+// cells is the printed width of plain text, once its controls are stripped.
+func cells(plain string) int { return ansi.StringWidth(terminalcontrol.Strip(plain)) }
 
-// runes is Python's len(): how many code points plain holds.
-func runes(plain string) int { return utf8.RuneCountInString(plain) }
+// runes is Python's len(): how many code points plain holds, once its controls are stripped.
+func runes(plain string) int { return utf8.RuneCountInString(terminalcontrol.Strip(plain)) }
 
 // fitted is text no wider than width, cut with an ellipsis, and padded to
 // width where pad asks. A column granted no width draws nothing.
@@ -237,6 +222,7 @@ func fitted(text string, width int, pad bool) string {
 	if width <= 0 {
 		return ""
 	}
+	text = terminalcontrol.Strip(text)
 	if cells(text) > width {
 		text = ansi.Truncate(text, width-1, "") + ellipsis
 	}
