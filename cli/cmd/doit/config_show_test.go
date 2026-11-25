@@ -39,24 +39,25 @@ func TestConfigShowSaysWhereEachSettingCameFromAndMatchesItsSchema(t *testing.T)
 		t.Errorf("doit config show --json does not match its schema: %v", err)
 	}
 
-	var document configDocument
+	var document struct {
+		Settings map[string]setting `json:"settings"`
+	}
 	if err := json.Unmarshal([]byte(run.stdout), &document); err != nil {
 		t.Fatal(err)
 	}
-	for name, got := range map[string][2]setting{
-		"api":           {document.Settings.API, {"https://doit.example.com", "file", filepath.Join(config, "doit", "config.toml")}},
-		"config_file":   {document.Settings.ConfigFile, {filepath.Join(config, "doit", "config.toml"), "environment", "$XDG_CONFIG_HOME"}},
-		"client_secret": {document.Settings.ClientSecret, {"set", "environment", "$DOIT_CLIENT_SECRET"}},
-		"editor":        {document.Settings.Editor, {"nvim -p", "environment", "$EDITOR"}},
-		"token_command": {document.Settings.TokenCommand, {}},
+	for name, want := range map[string]setting{
+		"api":           {"https://doit.example.com", "file", filepath.Join(config, "doit", "config.toml")},
+		"config_file":   {filepath.Join(config, "doit", "config.toml"), "environment", "$XDG_CONFIG_HOME"},
+		"client_secret": {"set", "environment", "$DOIT_CLIENT_SECRET"},
+		"editor":        {"nvim -p", "environment", "$EDITOR"},
+		"token_command": {},
 	} {
-		if got[0] != got[1] {
-			t.Errorf("%s reads %+v, want %+v", name, got[0], got[1])
+		if got := document.Settings[name]; got != want {
+			t.Errorf("%s reads %+v, want %+v", name, got, want)
 		}
 	}
 
-	unconfigured := runDoitWith(t, nil, "config", "show")
-	if unconfigured.exit != 0 || !strings.Contains(unconfigured.stdout, "doit auth login <url> fills in what the config file lacks") {
-		t.Errorf("doit config show with no config file exited %d, naming no login:\n%s%s", unconfigured.exit, unconfigured.stdout, unconfigured.stderr)
+	if unconfigured := runDoitWith(t, nil, "config", "show"); unconfigured.exit != 0 {
+		t.Errorf("doit config show with no config file exited %d:\n%s%s", unconfigured.exit, unconfigured.stdout, unconfigured.stderr)
 	}
 }

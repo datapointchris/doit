@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +24,7 @@ import (
 // configShowVersion is the schema_version of schemas/config-show.schema.json.
 const configShowVersion = 1
 
-// codeDimmed is the faint text rich's "dim" prints, which gotermstyle leaves out.
+// codeDimmed is SGR 2, the faint text gotermstyle has no code for.
 const codeDimmed = "\033[2m"
 
 func newConfigCommand() *cobra.Command {
@@ -79,41 +81,63 @@ type configDocument struct {
 	Settings      configSettings `json:"settings"`
 }
 
-// configSettings is every value doit resolves on this machine, in the order the screen lists them.
-type configSettings struct {
-	API          setting `json:"api"`
-	Issuer       setting `json:"issuer"`
-	ClientID     setting `json:"client_id"`
-	TokenCommand setting `json:"token_command"`
-	ClientSecret setting `json:"client_secret"`
-	ConfigFile   setting `json:"config_file"`
-	CacheDir     setting `json:"cache_dir"`
-	StateDir     setting `json:"state_dir"`
-	Editor       setting `json:"editor"`
-	Machine      setting `json:"machine"`
-	Actor        setting `json:"actor"`
+// namedSetting is one setting under the name both the screen and --json give it.
+type namedSetting struct {
+	name string
+	setting
+}
+
+// configSettings is every value doit resolves on this machine, in the order the
+// screen lists them and --json writes them.
+type configSettings []namedSetting
+
+// MarshalJSON writes the settings as one object keyed by name, in their order.
+func (settings configSettings) MarshalJSON() ([]byte, error) {
+	var object bytes.Buffer
+	object.WriteByte('{')
+	for i, each := range settings {
+		if i > 0 {
+			object.WriteByte(',')
+		}
+		name, err := json.Marshal(each.name)
+		if err != nil {
+			return nil, err
+		}
+		value, err := json.Marshal(each.setting)
+		if err != nil {
+			return nil, err
+		}
+		object.Write(name)
+		object.WriteByte(':')
+		object.Write(value)
+	}
+	object.WriteByte('}')
+	return object.Bytes(), nil
 }
 
 func resolvedSettings(d goclilogin.Deployment) configSettings {
-	resolved := configSettings{
-		API:        fromLogin(d.API),
-		Issuer:     fromLogin(d.Issuer),
-		ClientID:   fromLogin(d.ClientID),
-		ConfigFile: fromVariable(login.Path(), "XDG_CONFIG_HOME"),
-		CacheDir:   fromVariable(deskfiles.CacheDir(), "XDG_CACHE_HOME"),
-		StateDir:   fromVariable(deskfiles.StateDir(), "XDG_STATE_HOME"),
-		Editor:     editorSetting(),
-		Machine:    setting{Value: actor.MachineName(), Source: string(goclilogin.SourceHostname)},
-		Actor:      setting{Value: actor.Identity(), Source: string(goclilogin.SourceEnvironment), From: actor.IdentitySource()},
-	}
+	var tokenCommand, clientSecret setting
 	if d.HandsTokens() {
-		resolved.TokenCommand = setting{Value: d.TokenCommand.String(), Source: string(goclilogin.SourceFile), From: d.Path}
+		tokenCommand = setting{Value: d.TokenCommand.String(), Source: string(goclilogin.SourceFile), From: d.Path}
 	}
 	// Whether it is set, and never what it is.
 	if os.Getenv(login.ClientSecretVariable) != "" {
-		resolved.ClientSecret = setting{Value: "set", Source: string(goclilogin.SourceEnvironment), From: "$" + login.ClientSecretVariable}
+		clientSecret = setting{Value: "set", Source: string(goclilogin.SourceEnvironment), From: "$" + login.ClientSecretVariable}
 	}
-	return resolved
+	identity, identitySource := actor.IdentityAndSource()
+	return configSettings{
+		{"api", fromLogin(d.API)},
+		{"issuer", fromLogin(d.Issuer)},
+		{"client_id", fromLogin(d.ClientID)},
+		{"token_command", tokenCommand},
+		{"client_secret", clientSecret},
+		{"config_file", fromVariable(login.Path(), "XDG_CONFIG_HOME")},
+		{"cache_dir", fromVariable(deskfiles.CacheDir(), "XDG_CACHE_HOME")},
+		{"state_dir", fromVariable(deskfiles.StateDir(), "XDG_STATE_HOME")},
+		{"editor", editorSetting()},
+		{"machine", setting{Value: actor.MachineName(), Source: string(goclilogin.SourceHostname)}},
+		{"actor", setting{Value: identity, Source: string(goclilogin.SourceEnvironment), From: identitySource}},
+	}
 }
 
 func fromLogin(s goclilogin.Setting) setting {
@@ -157,30 +181,15 @@ func (s setting) reads() string {
 func printSettings(out io.Writer, resolved configSettings, unconfigured bool) error {
 	palette := gotermstyle.PaletteFor(out)
 	table := printedtable.Table{}
-	for _, row := range []struct {
-		name string
-		set  setting
-	}{
-		{"api", resolved.API},
-		{"issuer", resolved.Issuer},
-		{"client_id", resolved.ClientID},
-		{"token_command", resolved.TokenCommand},
-		{"client_secret", resolved.ClientSecret},
-		{"config_file", resolved.ConfigFile},
-		{"cache_dir", resolved.CacheDir},
-		{"state_dir", resolved.StateDir},
-		{"editor", resolved.Editor},
-		{"machine", resolved.Machine},
-		{"actor", resolved.Actor},
-	} {
-		value := row.set.Value
+	for _, row := range resolved {
+		value := row.Value
 		if value == "" {
 			value = "-"
 		}
 		table.Rows = append(table.Rows, []printedtable.Cell{
 			printedtable.C(row.name, gotermstyle.CodeWhite),
 			printedtable.C(value, ""),
-			printedtable.C(row.set.reads(), codeDimmed),
+			printedtable.C(row.reads(), codeDimmed),
 		})
 	}
 	var screen strings.Builder
