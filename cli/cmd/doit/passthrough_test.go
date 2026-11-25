@@ -2,12 +2,10 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -16,8 +14,6 @@ import (
 // runAsDoit makes this test binary run main, so a test runs doit as a process
 // with the os.Args, PATH and stdin that it chooses.
 const runAsDoit = "DOIT_TEST_RUN_AS_DOIT"
-
-const handedTreeFile = "testdata/tree-handed-to-doit-python.json"
 
 func TestMain(m *testing.M) {
 	if os.Getenv(runAsDoit) == "1" {
@@ -28,15 +24,14 @@ func TestMain(m *testing.M) {
 }
 
 // fakePython writes a doit-python that records its argv one NUL-ended word at
-// a time and the Go tree it was handed, echoes stdin, and exits 7. Only shell
-// builtins run, so PATH needs nothing beyond the fake.
+// a time, echoes stdin, and exits 7. Only shell builtins run, so PATH needs
+// nothing beyond the fake.
 func fakePython(t *testing.T) (dir, argvFile string) {
 	t.Helper()
 	dir = t.TempDir()
 	argvFile = filepath.Join(t.TempDir(), "argv")
 	script := "#!/bin/sh\n" +
 		": >\"$FAKE_ARGV\"\n" +
-		"printf '%s' \"$DOIT_GO_COMMANDS\" >\"$FAKE_ARGV.commands\"\n" +
 		"for word in \"$@\"; do printf '%s\\0' \"$word\" >>\"$FAKE_ARGV\"; done\n" +
 		"while IFS= read -r line; do printf 'python read %s\\n' \"$line\"; done\n" +
 		"exit 7\n"
@@ -100,25 +95,6 @@ func TestDoitTuiExecsDoitPythonWithItsArgumentsAndEveryOtherLineStaysInGo(t *tes
 	}
 	if run.exit != 7 || run.stdout != "python read one line\n" {
 		t.Errorf("doit tui: exit %d, stdout %q; want doit-python's exit 7 and its read of stdin", run.exit, run.stdout)
-	}
-
-	// doit-python's own tests list the Go commands from this file, so it holds
-	// what the Go doit hands on. A summary is help prose, so only each command's
-	// path and group are compared.
-	var handed, committed []treeCommand
-	if data, err := os.ReadFile(argvFile + ".commands"); err != nil || json.Unmarshal(data, &handed) != nil {
-		t.Fatalf("doit-python was handed no readable Go tree: %v %q", err, data)
-	}
-	if data, err := os.ReadFile(handedTreeFile); err != nil || json.Unmarshal(data, &committed) != nil {
-		t.Fatalf("reading %s: %v", handedTreeFile, err)
-	}
-	for _, tree := range [][]treeCommand{handed, committed} {
-		for i := range tree {
-			tree[i].Summary = ""
-		}
-	}
-	if !reflect.DeepEqual(handed, committed) {
-		t.Errorf("doit-python was handed %+v, and %s holds %+v; write the first there", handed, handedTreeFile, committed)
 	}
 
 	for _, line := range []struct {

@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"slices"
 
 	"github.com/datapointchris/goclikit"
 	"github.com/datapointchris/goselfupdate/autoupdate"
@@ -83,43 +81,6 @@ func newRootCommand() *cobra.Command {
 		newAuthCommand(), newConfigCommand(), newShellCommand(), newUpdateCommand(), newDeskNudgeCommand(),
 	)
 	return root
-}
-
-// treeCommand is one command of this tree, as doit-python reads
-// passthrough.CommandsVariable.
-type treeCommand struct {
-	Path    []string `json:"path"`
-	Summary string   `json:"summary"`
-	Group   string   `json:"group,omitempty"`
-}
-
-// treeCommands lists each available command of root's tree by its path below
-// doit, with its summary and its group's title.
-func treeCommands(root *cobra.Command) string {
-	commands := []treeCommand{}
-	var walk func(*cobra.Command, []string)
-	walk = func(parent *cobra.Command, above []string) {
-		for _, child := range parent.Commands() {
-			if !child.IsAvailableCommand() {
-				continue
-			}
-			path := append(slices.Clone(above), child.Name())
-			command := treeCommand{Path: path, Summary: child.Short}
-			for _, group := range parent.Groups() {
-				if group.ID == child.GroupID {
-					command.Group = group.Title
-				}
-			}
-			commands = append(commands, command)
-			walk(child, path)
-		}
-	}
-	walk(root, nil)
-	encoded, err := json.Marshal(commands)
-	if err != nil {
-		return "[]"
-	}
-	return string(encoded)
 }
 
 // exitCode lets a command choose its exit status without an error line, such

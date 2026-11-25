@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/datapointchris/goclikit"
@@ -11,31 +12,39 @@ import (
 	"github.com/datapointchris/doit/cli/internal/passthrough"
 )
 
-// newTUICommand is `doit tui`, the one verb doit-python still runs. It is in
-// this tree so the help lists it and a Tab completes it. Its arguments reach
-// doit-python as they were typed. The exec ends this process, so it starts no
-// update check.
+// newTUICommand is `doit tui`, which execs doit-python. It is in this tree so
+// the help lists it and a Tab completes it. Its arguments reach doit-python
+// unparsed, so `doit tui --help` is doit-python's help, and `doit help tui`
+// execs the same. The exec ends this process, so it starts no update check.
 func newTUICommand() *cobra.Command {
-	return goclikit.StartsNoUpdateCheck(&cobra.Command{
-		Use:   "tui",
-		Short: "The screens where a click or a key completes a row",
-		Long: "Open doit's screens, where a click or a key completes a row.\n\n" +
-			"`--tab <name>` opens on that tab, and `--once` prints the screen it opens on at\n" +
-			"COLUMNS by LINES, then exits. doit-python runs it, and hands the terminal to doit-tui.",
-		Example: "  doit tui                              open doit's screens\n" +
-			"  doit tui --tab now                    open on what can be completed now\n" +
-			"  COLUMNS=120 LINES=30 doit tui --once  print the screen it opens on, then exit",
+	cmd := goclikit.StartsNoUpdateCheck(&cobra.Command{
+		Use:                "tui",
+		Short:              "The screens where a click or a key completes a row",
 		GroupID:            whatToDoNow,
 		DisableFlagParsing: true,
 		ValidArgsFunction:  cobra.NoFileCompletions,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			err := passthrough.Exec(pythonTUIArgv(args), treeCommands(cmd.Root()))
-			if errors.Is(err, passthrough.ErrNotInstalled) {
-				return fmt.Errorf("%w, and it runs `doit tui`", err)
-			}
-			return err
+		RunE: func(_ *cobra.Command, args []string) error {
+			return execPythonTUI(pythonTUIArgv(args))
 		},
 	})
+	// A help function returns no error, and `help` starts no update check that
+	// an exit here could cut off.
+	cmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
+		if err := execPythonTUI([]string{"tui", "--help"}); err != nil {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "doit:", err)
+			os.Exit(1)
+		}
+	})
+	return cmd
+}
+
+// execPythonTUI replaces this process with doit-python run on argv.
+func execPythonTUI(argv []string) error {
+	err := passthrough.Exec(argv)
+	if errors.Is(err, passthrough.ErrNotInstalled) {
+		return fmt.Errorf("%w, and it runs `doit tui`", err)
+	}
+	return err
 }
 
 // pythonTUIArgv is doit-python's command line for `doit tui` given args. cobra

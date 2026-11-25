@@ -17,25 +17,23 @@ entry's `command` is text in the review document, which doit shows and never run
 
 ## `doit` is the Go binary, and doit-python runs only `doit tui`
 
-The CLI moved to Go one verb at a time, as a strangler fig. `cli/cmd/doit` builds `doit`, which runs
-every command line itself, bare `doit` and `doit --help` among them. `tui` is the one verb left in
-Python. It is a cobra command that parses no flags and execs `doit-python tui` with its arguments,
-so the help lists it and a Tab completes it.
+`cli/cmd/doit` builds `doit`, which runs every command line itself, bare `doit` and `doit --help`
+among them. `tui` is the one verb doit-python runs. It is a cobra command that parses no flags and
+execs `doit-python tui` with its arguments, so the help lists it and a Tab completes it.
+`doit tui --help` and `doit help tui` both print doit-python's help for it.
 
-- **The cobra tree is the one list of verbs.** `tui`'s exec hands it to `doit-python` in
-  `DOIT_GO_COMMANDS`, and `list_go_commands` in `cli.py` adds an entry that runs nothing for each
-  command the Python tree lacks. Nothing in Python lists a Go verb by hand.
-  `cli/cmd/doit/testdata/tree-handed-to-doit-python.json` is that list as Go hands it, which the Go
-  scenario test checks and the Python tests read.
+- **The cobra tree is the one list of verbs.** doit-python's tree holds `tui` alone.
+  `TestEveryCommandTheRepoPrintsIsInTheCommandTree` in `cli/cmd/doit` walks each `doit` command
+  that the README and the Python source print through the cobra tree.
 - **A Tab runs `doit __complete`, and starts no Python and asks no service.** The zsh script is
   cobra's, printed by `doit shell completion zsh`. A pursuit's name after `pursuits log` or `skip` is
-  read from `next-names.txt` by `completePursuitNames` in `cli/cmd/doit/pursuits.go`.
-  `startsUpdateCheck` in `root.go` keeps the self-update check off a Tab, off `tui`, and off
-  `shell`, because goclikit knows cobra's completion request only once cobra has added it.
+  read from `next-names.txt` by `completePursuitNames` in `cli/cmd/doit/pursuits.go`. goclikit
+  starts no self-update check on a Tab. `tui` and `shell` carry goclikit's `StartsNoUpdateCheck`
+  mark: `tui`'s exec would cut a check off, and a shell's startup runs `shell`.
 
 - **`cli/internal/login` holds pyclilogin's identifiers for the product `doit`**: the config file,
   the keychain service `doit-cli`, and `$XDG_STATE_HOME/doit` for the fallback token file and the
-  refresh lock. Changing any one logs every desk out of one side.
+  refresh lock. Changing any one logs every desk out.
 - **`cli/internal/deskfiles` writes two files in `$XDG_CACHE_HOME/doit/` that a Tab or a new shell
   reads without asking the service.**
   - `next-names.txt` holds one `name<TAB>description` line per pursuit, sorted by name. Each command
