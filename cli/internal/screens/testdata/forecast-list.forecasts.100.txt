@@ -1,6 +1,6 @@
 Forecasts ──────────────────────────────────────────────────────────────────────────────────────────
-  2026-10-20 09:15  desk        120m/day  3 measured · 2 default
+  2026-10-20 09:15  desk                     120m/day  3 measured · 2 default
   2026-10-27 21:40  a-very-long-laptop-name   45m/day  3 measured · 2 default
-  2026-11-02 12:00  desk        120m/day  3 measured · 2 default
+  2026-11-02 12:00  desk                     120m/day  3 measured · 2 default
 
   3 readings · doit forecast trend grades the matured ones
