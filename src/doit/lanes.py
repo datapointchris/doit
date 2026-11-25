@@ -28,6 +28,8 @@ from dataclasses import field
 from enum import StrEnum
 from typing import TypeGuard
 
+from doit import actor
+
 # Bump only for a breaking reshape. Additive fields are free, because every
 # reader below treats an absent field as its empty value.
 SCHEMA_VERSION = 1
@@ -277,6 +279,7 @@ def lane_to_dict(lane: Lane) -> dict:
                 'done_at': cell.done_at,
                 'done_on': cell.done_on,
                 'actor': cell.actor,
+                'actor_kind': actor.kind(cell.actor),
             }
             for cell in lane.grid
         ],

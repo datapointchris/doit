@@ -505,14 +505,14 @@ class Views:
         return today.assemble(registry, results, built, kept, bounds, now), results, kept
 
     def today(self) -> dict:
-        """`doit today --json`: what today still wants, and what it has had."""
+        """`doit today --json`: what today still wants, with how many rows of each group the screen lists, and what it has had."""
         config, now = self.config(), self.now()
         day, _, _ = self.day(config, now)
         return {
             'schema_version': lanes.SCHEMA_VERSION,
             'generated_at': lanes.timestamp(now),
             'done': [lanes.lane_to_dict(lane) for lane in day.done],
-            'due': [lanes.lane_to_dict(lane) for lane in day.due],
+            'due': [{**lanes.lane_to_dict(lane), 'row_cap': today.due_row_cap(lane.name)} for lane in day.due],
             'quota': None if day.figures is None else quota.to_dict(day.figures),
             'problems': config.registry.problems,
         }
