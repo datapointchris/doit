@@ -46,10 +46,12 @@ whichever app owns that domain, exactly as the dashboard delegates its lanes.
 
 import datetime as dt
 import math
+import os
 import random
 import re
 import shlex
 import subprocess
+import tempfile
 from collections.abc import Callable
 from collections.abc import Iterable
 from typing import NamedTuple
@@ -1273,15 +1275,27 @@ def without_logged(selection: dict) -> dict:
 
 
 def write_names_cache(pursuits: dict) -> None:
-    """Rewrite the name<TAB>description file the shell completion reads.
+    """Replace the name<TAB>description file the shell completion reads.
 
     Completion has to be instant and starting this process is not, so every run
     leaves behind a flat file the completion function can read with no subprocess
-    at all.
+    at all. `WriteCompletionNames` in cli/internal/deskfiles writes the same
+    lines from the Go doit, so a change to the format changes both. A
+    description that is not a string is written as nothing.
     """
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    lines = [f'{name}\t{config.get("description", "")}' for name, config in sorted(pursuits.items())]
-    NAMES_CACHE.write_text('\n'.join(lines) + '\n' if lines else '')
+    lines = []
+    for name, config in sorted(pursuits.items()):
+        said = config.get('description')
+        lines.append(f'{name}\t{said if isinstance(said, str) else ""}\n')
+    NAMES_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=NAMES_CACHE.parent, prefix=f'.{NAMES_CACHE.name}-')
+    try:
+        with os.fdopen(handle, 'w') as written:
+            written.write(''.join(lines))
+        os.replace(temporary, NAMES_CACHE)
+    except OSError:
+        os.unlink(temporary)
+        raise
 
 
 def dig(document, path: str):

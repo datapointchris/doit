@@ -2,16 +2,13 @@ package main
 
 import (
 	"fmt"
-	"maps"
 	"os"
-	"path/filepath"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/datapointchris/gotermstyle"
 	"github.com/spf13/cobra"
 
+	"github.com/datapointchris/doit/cli/internal/deskfiles"
 	"github.com/datapointchris/doit/cli/internal/screens"
 	"github.com/datapointchris/doit/cli/internal/service"
 )
@@ -50,7 +47,11 @@ func newNextCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := writeNamesCache(answer.Pursuits); err != nil {
+			descriptions := make(map[string]any, len(answer.Pursuits))
+			for name, entry := range answer.Pursuits {
+				descriptions[name] = entry.Description
+			}
+			if err := deskfiles.WriteCompletionNames(descriptions); err != nil {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "doit: the names the shell completes were not saved:", err)
 			}
 			widths, palette := screens.TerminalWidths(), gotermstyle.PaletteFor(os.Stdout)
@@ -64,32 +65,4 @@ func newNextCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&reroll, "reroll", false, "Force a fresh draw before the standing one expires")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output as JSON to stdout")
 	return cmd
-}
-
-// namesCachePath is next-names.txt, the name<TAB>description file that the zsh
-// completion reads with no process started.
-func namesCachePath() string {
-	cache := os.Getenv("XDG_CACHE_HOME")
-	if cache == "" {
-		home, _ := os.UserHomeDir()
-		cache = filepath.Join(home, ".cache")
-	}
-	return filepath.Join(cache, "doit", "next-names.txt")
-}
-
-// writeNamesCache rewrites next-names.txt from the register, a pursuit a line, sorted by name.
-func writeNamesCache(register map[string]service.RegisterEntry) error {
-	path := namesCachePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	var b strings.Builder
-	for _, name := range slices.Sorted(maps.Keys(register)) {
-		description := ""
-		if said := register[name].Description; said != nil {
-			description = fmt.Sprint(said)
-		}
-		b.WriteString(name + "\t" + description + "\n")
-	}
-	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
