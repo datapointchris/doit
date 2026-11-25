@@ -513,6 +513,16 @@ def fold(registry: sources.Registry, results: dict[str, sources.Result], kept: K
     return groups
 
 
+def groups_with_an_actor(groups: list[Lane]) -> list[str]:
+    """Each group whose record wrote an actor on any entry, in the fold's order."""
+    return [lane.name for lane in groups if any(cell.actor for cell in lane.grid)]
+
+
+def unknown_actors(groups: list[Lane]) -> int:
+    """How many entries name an actor whose spelling `doit.actor` does not recognize."""
+    return sum(actor.kind(cell.actor) == actor.UNKNOWN for lane in groups for cell in lane.grid)
+
+
 # --- the screen ----------------------------------------------------------------
 
 

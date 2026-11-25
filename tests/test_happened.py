@@ -293,6 +293,19 @@ def test_a_runner_prefix_doit_has_never_seen_reads_unknown_rather_than_by_hand()
     assert happened.verdict_lines([lane], 80)[1].plain.endswith('· 1 by an actor of unknown kind')
 
 
+def test_the_verdict_names_each_group_that_recorded_an_actor_and_counts_the_unknown_kinds():
+    groups = [
+        happened.done_lane(
+            'issues', 'ISSUES', [GridCell('x', True, actor='ada@laptop'), GridCell('y', True, actor='runner/nightly/abc')], ''
+        ),
+        happened.done_lane('tasks', 'TASKS', [GridCell('z', True)], ''),
+        lanes.unavailable('learning', 'LEARNING', 'not logged in'),
+    ]
+
+    assert happened.groups_with_an_actor(groups) == ['issues']
+    assert happened.unknown_actors(groups) == 1
+
+
 # --- the screen ----------------------------------------------------------------
 
 

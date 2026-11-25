@@ -608,6 +608,8 @@ class Views:
             'asked': [lane.name for lane in groups],
             'unavailable': [lane.name for lane in groups if not lane.available],
             'partial': [lane.name for lane in groups if lane.available and lane.reason],
+            'recorded_by': happened.groups_with_an_actor(groups),
+            'unknown_actors': happened.unknown_actors(groups),
             'groups': [lanes.lane_to_dict(lane) for lane in groups],
             'problems': config.registry.problems,
         }
