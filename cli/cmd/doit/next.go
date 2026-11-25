@@ -36,16 +36,12 @@ func newNextCommand() *cobra.Command {
 			}
 			// The service reads a desk's name from its hostname's first label.
 			machine, _ := os.Hostname()
-			if asJSON {
-				raw, err := client.Raw(cmd.Context(), "/next", service.NextQuery(machine, reroll))
-				if err != nil {
-					return err
-				}
-				return printJSON(cmd.OutOrStdout(), raw)
-			}
-			answer, err := client.Next(cmd.Context(), machine, reroll)
+			raw, answer, err := client.Next(cmd.Context(), machine, reroll)
 			if err != nil {
 				return err
+			}
+			if asJSON {
+				return printJSON(cmd.OutOrStdout(), raw)
 			}
 			descriptions := make(map[string]any, len(answer.Pursuits))
 			for name, entry := range answer.Pursuits {

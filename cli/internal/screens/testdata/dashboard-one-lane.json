@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T12:00:00-05:00",
+  "lanes": [
+    {
+      "name": "tasks",
+      "title": "TASKS",
+      "meta": "12 open",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "#1",
+          "text": "Return the hoodies to the shop on the high street",
+          "note": "due today",
+          "urgency": "due",
+          "handle": "life tasks complete 501"
+        },
+        {
+          "label": "#2",
+          "text": "Book the boiler service",
+          "note": "3d overdue",
+          "urgency": "overdue",
+          "handle": "life tasks complete 502"
+        },
+        {
+          "label": "#3",
+          "text": "Call the bank about the card",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 503"
+        },
+        {
+          "label": "#4",
+          "text": "Sharpen the kitchen knives",
+          "note": "in 2d",
+          "urgency": "none",
+          "handle": "life tasks complete 504"
+        },
+        {
+          "label": "#5",
+          "text": "Order more printer paper",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 505"
+        },
+        {
+          "label": "#6",
+          "text": "Fix the squeaky hinge",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 506"
+        },
+        {
+          "label": "#7",
+          "text": "Plan the allotment beds",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 507"
+        },
+        {
+          "label": "#8",
+          "text": "Clean the gutters",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 508"
+        },
+        {
+          "label": "#9",
+          "text": "Renew the parking permit",
+          "note": "in 9d",
+          "urgency": "none",
+          "handle": "life tasks complete 509"
+        },
+        {
+          "label": "#10",
+          "text": "Patch the bike tyre",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 510"
+        },
+        {
+          "label": "#11",
+          "text": "Wash the windows",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 511"
+        },
+        {
+          "label": "#12",
+          "text": "Sort the recycling",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 512"
+        }
+      ],
+      "grid": [],
+      "total": 12,
+      "in_flight": 0,
+      "hints": [
+        "life tasks list"
+      ],
+      "row_cap": 10,
+      "quiet": false
+    }
+  ],
+  "lane_names": [
+    "problems",
+    "drift",
+    "tasks",
+    "habits",
+    "books",
+    "upcoming",
+    "meso - feedback",
+    "learning",
+    "prs",
+    "dotfiles",
+    "maintenance"
+  ],
+  "problems": [],
+  "configured": 6,
+  "pursuit_standing": {
+    "text": "pursuits unavailable — the pursuits register would not load: line 3 is not a mapping",
+    "unavailable": true
+  }
+}

@@ -129,7 +129,9 @@ func (n *NoAnswer) Error() string { return n.Message }
 
 // MissingField is an answer that lacks a field which the verb needs.
 type MissingField struct {
-	Where   string
+	Where string
+	// Method is the request's, GET where it is "".
+	Method  string
 	Route   string
 	Field   string
 	Version string
@@ -142,8 +144,12 @@ func (m *MissingField) Error() string {
 	if m.VersionUnread != nil {
 		version = "its version unread: " + m.VersionUnread.Error()
 	}
-	return fmt.Sprintf("%s (%s) answered GET %s without %s, which this doit needs. A release of the service that serves it fixes this.",
-		m.Where, version, m.Route, m.Field)
+	method := m.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	return fmt.Sprintf("%s (%s) answered %s %s without %s, which this doit needs. A release of the service that serves it fixes this.",
+		m.Where, version, method, m.Route, m.Field)
 }
 
 // NoAnswerExit is what a command exits with where no answer came, the one
@@ -160,41 +166,37 @@ func ExitCode(err error) int {
 }
 
 // Get reads the route at path into answer, refusing an answer that lacks a
-// field answer's type declares without omitempty.
-func (c *Client) Get(ctx context.Context, path string, query url.Values, answer any) error {
-	route := Prefix + path
-	body, err := c.read(ctx, route, query, budget)
-	if err != nil {
-		return err
-	}
-	var parsed any
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return &Refused{Message: fmt.Sprintf("%s answered GET %s with a body that is not JSON", c.where, route)}
-	}
-	if field := missingFieldOf(answer, parsed); field != "" {
-		refusal := &MissingField{Where: c.where, Route: route, Field: field}
-		refusal.Version, refusal.VersionUnread = c.Version(ctx)
-		return refusal
-	}
-	if err := json.Unmarshal(body, answer); err != nil {
-		return &Refused{Message: fmt.Sprintf("%s answered GET %s in a shape this doit does not read: %v", c.where, route, err)}
-	}
-	return nil
-}
-
-// Raw is the route's answer at path as it came, for a --json that prints it
-// whole. It refuses only an answer that is not JSON, because a field this doit
-// does not read is the reader's own.
-func (c *Client) Raw(ctx context.Context, path string, query url.Values) (json.RawMessage, error) {
+// field answer's type declares without omitempty. It also answers the body as
+// it came, for a --json that prints it whole, fields this doit does not read
+// included.
+func (c *Client) Get(ctx context.Context, path string, query url.Values, answer any) (json.RawMessage, error) {
 	route := Prefix + path
 	body, err := c.read(ctx, route, query, budget)
 	if err != nil {
 		return nil, err
 	}
-	if !json.Valid(body) {
-		return nil, &Refused{Message: fmt.Sprintf("%s answered GET %s with a body that is not JSON", c.where, route)}
+	if err := c.decode(ctx, http.MethodGet, route, body, answer); err != nil {
+		return nil, err
 	}
 	return body, nil
+}
+
+// decode reads the body that method on route answered into answer, refusing
+// one that lacks a field answer's type declares without omitempty.
+func (c *Client) decode(ctx context.Context, method, route string, body []byte, answer any) error {
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return &Refused{Message: fmt.Sprintf("%s answered %s %s with a body that is not JSON", c.where, method, route)}
+	}
+	if field := missingFieldOf(answer, parsed); field != "" {
+		refusal := &MissingField{Where: c.where, Method: method, Route: route, Field: field}
+		refusal.Version, refusal.VersionUnread = c.Version(ctx)
+		return refusal
+	}
+	if err := json.Unmarshal(body, answer); err != nil {
+		return &Refused{Message: fmt.Sprintf("%s answered %s %s in a shape this doit does not read: %v", c.where, method, route, err)}
+	}
+	return nil
 }
 
 // Post sends body to the route at path and reads the answer into answer, which
@@ -243,11 +245,16 @@ func (c *Client) Post(ctx context.Context, path string, body any, repeatable boo
 
 // LaterSendCanStore is whether the same write sent later could be stored: no
 // answer came, the login was refused, or the service broke. A refusal of the
-// write itself is refused again however often it is sent.
+// write itself is refused again however often it is sent, and an answer
+// lacking a field came after the write was stored.
 func LaterSendCanStore(err error) bool {
 	var none *NoAnswer
 	if errors.As(err, &none) || errors.Is(err, login.ErrNeedsLogin) || errors.Is(err, goclilogin.ErrNotConfigured) {
 		return true
+	}
+	var missing *MissingField
+	if errors.As(err, &missing) {
+		return false
 	}
 	var refused *Refused
 	if errors.As(err, &refused) {

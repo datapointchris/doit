@@ -1,0 +1,11 @@
+Trend · 7-day predictions against the journal ────
+  pursuit                     said  did  error
+  stretch                      6.4  4.0   -2.4
+  piano                        2.2  3.0   +0.8
+  novel-reading-on-the-train   1.4  1.5   +0.1
+  letters                      1.0  1.0   +0.0
+
+  averaged over 4 readings whose 7-day window has
+closed
+  error is what the journal recorded minus what
+the forecast predicted

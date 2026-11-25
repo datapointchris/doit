@@ -1,4 +1,4 @@
-"""The human single pane of glass. Invoked as `doit dashboard`.
+"""The lanes `doit dashboard` shows, built by the service from each source's answer.
 
 Answers "what is outstanding across everything?" in one glance: open tasks,
 habits still due, what you're learning, what you're reading, maintenance due, the
@@ -19,13 +19,13 @@ Every row names a thing you could act on. A lane that can only report structure
 (a track's current unit, a maintenance entry's slug) states it as context or
 resolves it to the underlying resource instead of spending a row on it.
 
-This is a renderer, nothing more. Every backend owns its own domain rules (which
-book is next, which habit is due today, when a review item is overdue); the
-dashboard only lays out what they return. That is why it knows no app's
+This shapes lanes and ranks nothing. Every backend owns its own domain rules
+(which book is next, which habit is due today, when a review item is overdue);
+this module only shapes what they return. That is why it knows no app's
 semantics. doit's service runs the functions here over each app's answer and
 over its own review register, whose rows are the ones `doit review list --json`
 prints, so the backend still owns due-ness and nothing here re-derives a
-schedule. The command renders the lanes the service sends.
+schedule.
 
 `is_due_row` below therefore mirrors `doit.cadence.is_due` rather than importing
 it. Inside one package that reads as removable duplication. It is not: backends
@@ -37,13 +37,10 @@ a coding session. Same plumbing, different audience.
 """
 
 import datetime as dt
-import math
 from dataclasses import dataclass
 from dataclasses import field
 from itertools import chain
 from urllib.parse import urlsplit
-
-from rich.text import Text
 
 from doit import lanes as lanemodel
 from doit import pursuits
@@ -53,16 +50,8 @@ from doit.lanes import Lane as LaneView
 from doit.lanes import Row
 from doit.lanes import Urgency
 from doit.lanes import unavailable
-from doit.render import column_width
-from doit.render import console
 from doit.render import first_sentence
-from doit.render import fitted
-from doit.render import handle_column
 from doit.render import join_context
-from doit.render import print_handle_below
-from doit.render import terminal_width
-
-NOTE_STYLES = {Urgency.NONE: None, Urgency.DUE: 'yellow', Urgency.OVERDUE: 'red'}
 
 # The dashboard is a glance: three rows a lane, or ten when you asked for that
 # one lane specifically. Grids are exempt — see LaneView.
@@ -90,32 +79,6 @@ UPCOMING = 'upcoming'
 
 # One feedback lane per app, named for the app, and never one combined across apps.
 MESO_FEEDBACK = 'meso - feedback'
-
-LABEL_WIDTH = 8
-
-# A row's text and note are sized by share of the line rather than by a fixed
-# count, which would be too tight to name a repo and a project on a wide terminal
-# and would crowd out the thing itself on a narrow one.
-#
-# The text keeps 30% of the line, and never fewer than 20 columns. The note grows
-# to 40%, or to 22 columns where 40% is less, and only ever as wide as its widest
-# value. Beside an inline handle it keeps at least 12 columns. A handle that would
-# take the text or the note below those floors goes on the line under its row.
-NOTE_WIDTH_SHARE = 0.4
-NOTE_WIDTH_MIN = 22
-NOTE_WIDTH_FLOOR = 12
-TEXT_WIDTH_SHARE = 0.3
-TEXT_WIDTH_MIN = 20
-
-# Marks the handle as something to type rather than something to read. The same
-# arrow the nudge and `doit review due` use for the same field.
-HANDLE_MARK = '↳'
-
-# Two columns of habits, because a dozen single-name rows would swamp every
-# other lane while a single run-on line hides which ones are left.
-GRID_COLUMNS = 2
-GRID_GUTTER = 3
-GRID_MIN_COLUMN_WIDTH = 24
 
 # How many of a queue to list; the rest of the pile is a count in the heading.
 QUEUE_ROWS = 3
@@ -951,8 +914,6 @@ LIFE_LANES = (
     (UPCOMING, build_upcoming_lane),
 )
 
-LOCAL_LANES = ('maintenance',)
-
 
 def life_adapter(result: sources.Result) -> list[LaneView]:
     """life's overview model, as lanes. Unregistered the day life emits them."""
@@ -1046,12 +1007,6 @@ SHIPPED_ADAPTERS = (
 for adapter_id, adapter_fn, _ in SHIPPED_ADAPTERS:
     sources.register_adapter(adapter_id, adapter_fn)
 
-# Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
-# conforming source contributes lanes doit has never heard of, and a sources
-# document that omits one of these offers fewer. `--lane` is checked against
-# what actually came back rather than against this.
-LANE_NAMES = [*dict.fromkeys(chain.from_iterable(declared for _, _, declared in SHIPPED_ADAPTERS)), *LOCAL_LANES]
-
 
 def source_lanes(registry: sources.Registry, results: dict[str, sources.Result]) -> list[LaneView]:
     """The lanes the configured sources answered with, in the order the sources document lists them.
@@ -1104,143 +1059,3 @@ def quiet_lane(lane: LaneView) -> bool:
     asking what doit knows wants the empty answer as much as the full one.
     """
     return (lane.alert or lane.omit_when_empty) and lane.available and not lane.rows and not lane.grid and not lane.in_flight
-
-
-def render_lanes(lanes: list[LaneView], today: dt.date, row_cap: int) -> None:
-    width = terminal_width()
-    console.rule(f'[cyan]Dashboard[/] · {today.strftime("%a %d %b")}', align='left')
-
-    for lane in (lane for lane in lanes if lane.available and not quiet_lane(lane)):
-        render_lane(lane, width, cap_for(lane.name, row_cap))
-
-    degraded = [lane for lane in lanes if not lane.available]
-    if degraded:
-        console.print()
-        for lane in degraded:
-            line = Text('  ')
-            line.append(lane.name.ljust(12), style='yellow')
-            line.append(f'unavailable — {lane.reason}')
-            console.print(line)
-
-
-def render_lane(lane: LaneView, width: int, row_cap: int) -> None:
-    console.print()
-    heading = Text()
-    heading.append(lane.title, style='bold red' if lane.alert else 'cyan')
-    if lane.meta:
-        heading.append(f'  {lane.meta}')
-    console.print(heading)
-
-    if lane.grid:
-        render_grid(lane.grid, width)
-    elif lane.rows:
-        render_rows(lane.rows[:row_cap], width)
-    else:
-        console.print('  —')
-
-    render_trailer(lane)
-    if lane.reason:
-        console.print(Text(f'  partial — {lane.reason}', style='yellow'))
-
-
-def handle_text(row: Row) -> str:
-    return f'{HANDLE_MARK} {row.handle}' if row.handle else ''
-
-
-def render_rows(rows: list[Row], width: int) -> None:
-    """A lane's rows, as label, text, note and handle columns.
-
-    The text and the note keep their floors first. A handle sits inline when it
-    fits whole beside both, and under its row when it does not. Past the floors,
-    the note takes what is left. The gutter is as wide as the lane's widest
-    label, because a source's label is its own word, and a fixed gutter would
-    push a long one's row past the edge.
-
-    Every row in a lane shares one set of columns, so its notes line up. A row
-    whose handle went below keeps them too.
-    """
-    label_width = max([LABEL_WIDTH, *(len(row.label) for row in rows)])
-    lead = 2 + label_width + 1
-    text_floor = max(TEXT_WIDTH_MIN, int(width * TEXT_WIDTH_SHARE))
-    note_cap = column_width(width, [row.note for row in rows], NOTE_WIDTH_SHARE, NOTE_WIDTH_MIN)
-    note_floor = min(note_cap, NOTE_WIDTH_FLOOR)
-    handles = [handle_text(row) for row in rows]
-    handle_width = handle_column(handles, width - lead - text_floor - (note_floor + 1 if note_floor else 0) - 1)
-    room = width - lead - (handle_width + 1 if handle_width else 0)
-    note_width = min(note_cap, max(0, room - text_floor - 1))
-    text_width = max(TEXT_WIDTH_MIN, room - (note_width + 1 if note_width else 0))
-    for row, handle in zip(rows, handles, strict=True):
-        line = Text('  ')
-        line.append(row.label.ljust(label_width), style='yellow')
-        line.append(' ')
-        line.append(fitted(row.text, text_width, pad=True))
-        # Note before handle, so a row reads what it is, how urgent it is, then
-        # what to type — the order `nudge_row` and `doit review due` already use.
-        # Between the two, the command split every title from its own qualifier.
-        if note_width:
-            line.append(' ')
-            # Styled on the Text itself: rich refuses a style argument when what
-            # is being appended is already a Text, and only a due or overdue note
-            # carries one — so this raised for exactly the rows that matter most.
-            note = fitted(row.note, note_width, pad=True)
-            style = NOTE_STYLES[row.urgency]
-            if style:
-                note.stylize(style)
-            line.append(note)
-        inline = bool(handle) and len(handle) <= handle_width
-        if inline:
-            line.append(' ')
-            line.append(handle, style='cyan')
-        # Padded up to the last column that has anything in it, then trimmed, so
-        # a line ends where its content does rather than in trailing spaces.
-        line.rstrip()
-        console.print(line, no_wrap=True, overflow='ellipsis')
-        if handle and not inline:
-            print_handle_below(handle, lead, width, style='cyan')
-
-
-def render_grid(cells: list[GridCell], width: int) -> None:
-    available = width - 2
-    columns = GRID_COLUMNS if available >= GRID_COLUMNS * GRID_MIN_COLUMN_WIDTH else 1
-    column_width = (available - (columns - 1) * GRID_GUTTER) // columns
-    handle_width = max((len(cell.handle) for cell in cells), default=0)
-    text_width = column_width - 2 - (handle_width + 1 if handle_width else 0)
-    # Column-major, so the set still reads top-to-bottom in its sorted order.
-    per_column = math.ceil(len(cells) / columns)
-    for offset in range(per_column):
-        line = Text('  ')
-        for column in range(columns):
-            index = column * per_column + offset
-            if index >= len(cells):
-                continue
-            if column:
-                line.append(' ' * GRID_GUTTER)
-            cell = cells[index]
-            line.append('✓' if cell.done else '○', style='green' if cell.done else 'yellow')
-            line.append(' ')
-            if handle_width:
-                line.append(cell.handle.rjust(handle_width), style='yellow')
-                line.append(' ')
-            line.append(fitted(cell.text, text_width, pad=True))
-        line.rstrip()
-        console.print(line, no_wrap=True, overflow='ellipsis')
-
-
-def render_trailer(lane: LaneView) -> None:
-    """Where to go for the rest, and nothing else.
-
-    A remainder count told you a lane was truncated without telling you anything
-    you could act on — the heading already states the lane's size, and the hint
-    is what you would run to see the rest.
-
-    Soft-wrapped, so a pane too narrow for the line wraps it without putting a
-    newline inside a command.
-    """
-    if not lane.hints:
-        return
-    line = Text('  ')
-    for index, hint in enumerate(lane.hints):
-        if index:
-            line.append('   ')
-        line.append(f'→ {hint}', style='blue')
-    console.print(line, soft_wrap=True)

@@ -1,20 +1,13 @@
-"""doit's shared console, its column arithmetic, and its startup-nudge renderers.
+"""doit's shared console, its text helpers, and its startup-nudge renderers.
 
 A nudge is an interrupt you did not ask for, so it trades every browse-time field
 (description, tags, cadence, last-done) for one line per item. A wrapped row is
 two rows, which is how the nudge grew the first time, so every nudge line stays
 within the terminal.
 
-Two layers do the clipping. A view that wants columns sizes them here, against
-the terminal width, and `fitted` truncates each value to the width it was given.
-`console.print` then clips the assembled line with `no_wrap` and
-`overflow='ellipsis'` as the backstop. Rich measures printable width at both
-layers, so styling cannot shift a later column.
-
-A handle, the command a row says to type, is the one value never clipped. In a
-view with columns, `handle_column` keeps it whole, and one that does not fit
-goes under its row. A nudge row drops its status to fit one, and leaves off a
-command that still does not fit.
+A handle, the command a row says to type, is the one value never clipped. A
+nudge row drops its status to fit one, and leaves off a command that still does
+not fit.
 
 Lines carrying content from a register, a Lab or a command are built as `Text`
 rather than markup strings — `Text.append` does not parse `[...]`, so a bracket
@@ -22,7 +15,6 @@ in a description cannot be swallowed as a style tag.
 """
 
 import re
-import shutil
 import sys
 
 from rich.console import Console
@@ -103,75 +95,6 @@ def first_sentence(text: str | None) -> str:
     collapsed = ' '.join((text or '').split())
     ended = SENTENCE_END.search(collapsed)
     return collapsed[: ended.end()] if ended else collapsed
-
-
-# A cap on how wide a row may grow, not a target. It stops a trailing column
-# flying off to the right of an ultrawide terminal, where the eye has to track
-# back across the whole line to reach the next row.
-MAX_WIDTH = 140
-
-
-def terminal_width() -> int:
-    """How much width a multi-column view may spend."""
-    return min(shutil.get_terminal_size(fallback=(80, 24)).columns, MAX_WIDTH)
-
-
-def fitted(text: str, width: int, *, pad: bool = False, style: str = '') -> Text:
-    """`text` as a Text no wider than `width`, ellipsized and optionally padded.
-
-    A column's width is arithmetic the layout owns, so this truncates to a
-    computed width rather than to the terminal's — `console.print` still clips
-    the assembled line as a backstop.
-
-    The style is carried here rather than passed to `Text.append`, which refuses
-    one alongside a Text instance.
-
-    `style` becomes the Text's base style, which every later `append` inherits.
-    So a styled call is safe as a column appended into a line, and colors the
-    whole row when it is the line other columns are appended to. Build a line
-    from an unstyled Text, or from a column whose style the rest should carry.
-
-    A column granted no width renders nothing. `Text.truncate(0)` treats zero as
-    no limit and hands back the whole value, so a layout that computed its way
-    down to an empty column would emit its widest row there.
-    """
-    if width <= 0:
-        return Text('')
-    fitted_text = Text(text, style=style)
-    fitted_text.truncate(width, overflow='ellipsis', pad=pad)
-    return fitted_text
-
-
-def column_width(width: int, values: list[str], share: float, minimum: int) -> int:
-    """How wide a column gets: what it needs, bounded by its share of the line.
-
-    Sized to the values actually on screen first, so a column whose rows are all
-    empty reserves nothing and a column of short values stops stealing width from
-    the titles beside it.
-    """
-    needed = max((len(value) for value in values), default=0)
-    return min(needed, max(minimum, int(width * share)))
-
-
-def handle_column(handles: list[str], room: int) -> int:
-    """How wide a column of handles is: the widest one that fits whole in `room`.
-
-    A handle is a command, and a clipped one fails when it is typed. So a handle
-    is never fitted to a column. One wider than the room sits alone on the line
-    under its row, and the column is sized to the handles that stay inline.
-    """
-    return max((len(handle) for handle in handles if len(handle) <= room), default=0)
-
-
-def print_handle_below(handle: str, indent: int, width: int, style: str = '') -> None:
-    """A handle too wide for its row, on a line of its own under the row's text.
-
-    It moves left of the text column when that keeps it on one line. One wider
-    than the terminal is soft-wrapped, so it still copies as one line.
-    """
-    line = Text(' ' * max(0, min(indent, width - len(handle))))
-    line.append(handle, style=style)
-    console.print(line, soft_wrap=True)
 
 
 def span_text(days: float) -> str:

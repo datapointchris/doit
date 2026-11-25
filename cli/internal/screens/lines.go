@@ -232,6 +232,11 @@ func fitted(text string, width int, pad bool) string {
 	return text
 }
 
+// padded is text padded with spaces to width code points, or whole where it is longer.
+func padded(text string, width int) string {
+	return text + strings.Repeat(" ", max(0, width-runes(text)))
+}
+
 // printer writes a screen's lines.
 type printer struct {
 	w       io.Writer
@@ -271,4 +276,21 @@ func (pr *printer) rule(title line) {
 	title = title.clipped(width - 2)
 	rest := width - cells(title.plain()) - 1
 	pr.whole(title.add(" ", "").add(strings.Repeat("─", max(rest, 0)), gotermstyle.CodeGreen))
+}
+
+// gapAfter is a column's width with the space after it, or nothing for a column with no width.
+func gapAfter(width int) int {
+	if width == 0 {
+		return 0
+	}
+	return width + 1
+}
+
+// columnWidth is what a column needs, bounded by its share of the line.
+func columnWidth(width int, values []string, share float64, minimum int) int {
+	needed := 0
+	for _, value := range values {
+		needed = max(needed, runes(value))
+	}
+	return min(needed, max(minimum, int(float64(width)*share)))
 }

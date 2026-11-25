@@ -20,12 +20,14 @@ import (
 var update = flag.Bool("update", false, "rewrite each recorded screen in testdata from what this package prints")
 
 // Each testdata/<answer>.<screen>.<width>.txt is what the screen prints for
-// testdata/<answer>.json at that terminal width. Each recording is the text
-// rich printed for that answer, so a replay holds the Go screen to rich's
-// layout. The answers hold invented rows in the shape the service answers. A
-// screen replays when it prints the same text, with its escapes and each
-// line's trailing spaces stripped. A change meant to alter a screen rewrites
-// them with `go test ./internal/screens -update`.
+// testdata/<answer>.json at that terminal width. A recording holds the layout
+// rich printed for that answer, except the forecast tables, which printedtable
+// measures where rich padded a fixed width. The answers hold invented rows in
+// the shape the service answers. A screen replays when it prints the same
+// text, with its escapes, each line's trailing spaces and the blank lines that
+// end it stripped, because the end-of-file hook strips those from a recording.
+// A change meant to alter a screen rewrites them with
+// `go test ./internal/screens -update`, which writes them stripped the same way.
 func TestEachScreenPrintsWhatItsRecordingHolds(t *testing.T) {
 	printed, err := filepath.Glob("testdata/*.*.*.txt")
 	if err != nil || len(printed) == 0 {
@@ -41,20 +43,41 @@ func TestEachScreenPrintsWhatItsRecordingHolds(t *testing.T) {
 		}
 		t.Run(filepath.Base(path), func(t *testing.T) {
 			widths := Widths{Console: width, Layout: min(width, maxLayoutWidth)}
+			palette := gotermstyle.NewPalette(true)
 			var out bytes.Buffer
 			switch screen {
 			case "today":
 				var answer service.Today
 				readAnswer(t, answerName, &answer)
-				err = Today(&out, answer, widths, gotermstyle.NewPalette(true))
+				err = Today(&out, answer, widths, palette)
 			case "next":
 				var answer service.Next
 				readAnswer(t, answerName, &answer)
-				err = Next(&out, answer, drawnAt, widths, gotermstyle.NewPalette(true))
+				err = Next(&out, answer, drawnAt, widths, palette)
 			case "explain":
 				var answer service.Next
 				readAnswer(t, answerName, &answer)
-				err = Explain(&out, answer, widths, gotermstyle.NewPalette(true))
+				err = Explain(&out, answer, widths, palette)
+			case "happened", "happened-until":
+				var answer service.Happened
+				readAnswer(t, answerName, &answer)
+				err = Happened(&out, answer, screen == "happened", widths, palette)
+			case "dashboard":
+				var answer service.Dashboard
+				readAnswer(t, answerName, &answer)
+				err = Dashboard(&out, answer, widths, palette)
+			case "forecast":
+				var answer service.Reading
+				readAnswer(t, answerName, &answer)
+				err = Forecast(&out, answer, widths, palette)
+			case "forecasts":
+				var answer []service.Reading
+				readAnswer(t, answerName, &answer)
+				err = Forecasts(&out, answer, widths, palette)
+			case "trend":
+				var answer service.Trend
+				readAnswer(t, answerName, &answer)
+				err = Trend(&out, answer, widths, palette)
 			default:
 				t.Fatalf("%s names no screen this package draws", path)
 			}
@@ -62,7 +85,7 @@ func TestEachScreenPrintsWhatItsRecordingHolds(t *testing.T) {
 				t.Fatal(err)
 			}
 			if *update {
-				if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
+				if err := os.WriteFile(path, []byte(plainText(out.String())+"\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
 				return
@@ -89,11 +112,11 @@ func readAnswer(t *testing.T, name string, answer any) {
 	}
 }
 
-// plainText is printed text with its escapes and each line's trailing spaces stripped.
+// plainText is printed text with its escapes, each line's trailing spaces and its closing blank lines stripped.
 func plainText(printed string) string {
 	lines := strings.Split(ansi.Strip(printed), "\n")
 	for index, line := range lines {
 		lines[index] = strings.TrimRight(line, " ")
 	}
-	return strings.Join(lines, "\n")
+	return strings.TrimRight(strings.Join(lines, "\n"), "\n")
 }

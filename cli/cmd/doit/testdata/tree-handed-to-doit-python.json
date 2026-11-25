@@ -15,6 +15,55 @@
   },
   {
     "path": [
+      "dashboard"
+    ],
+    "summary": "Every lane: what is outstanding across your apps",
+    "group": "What to do now"
+  },
+  {
+    "path": [
+      "happened"
+    ],
+    "summary": "What happened over a span of time, from every app and log, and who did it",
+    "group": "What came of it"
+  },
+  {
+    "path": [
+      "forecast"
+    ],
+    "summary": "Your pursuits run forward, to show whether their paces fit your days",
+    "group": "What came of it"
+  },
+  {
+    "path": [
+      "forecast",
+      "run"
+    ],
+    "summary": "Take a forecast from the register as it stands, and store it"
+  },
+  {
+    "path": [
+      "forecast",
+      "show"
+    ],
+    "summary": "Read a stored forecast back"
+  },
+  {
+    "path": [
+      "forecast",
+      "list"
+    ],
+    "summary": "Every forecast taken, oldest first"
+  },
+  {
+    "path": [
+      "forecast",
+      "trend"
+    ],
+    "summary": "Grade the forecasts whose window has closed against the journal"
+  },
+  {
+    "path": [
       "auth"
     ],
     "summary": "Log this machine in to doit's service, and out",

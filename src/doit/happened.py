@@ -1,7 +1,7 @@
 """What happened over a window, read once from every record that keeps it.
 
-The fold for one question, "what happened". `doit happened` renders it over the
-window asked, and `doit today` renders it over the day, so the two cannot
+The fold for one question, "what happened". `doit happened` prints it over the
+window asked, and `doit today` prints it over the day, so the two cannot
 disagree about what a day held. `doit today` leaves one source out of its fold,
 the closed issues, as `doit.today` says.
 
@@ -26,23 +26,16 @@ order they happened, with the hour wherever the record kept one. A record
 keeping only the day lists that day's entries after its timed ones, never at a
 guessed midnight.
 
-**The verdict line names every record asked.** A group that answered with
-nothing prints nothing, so the verdict is what says it was asked. A group that
-could not be read always prints, because a missing group reads as nothing done.
-
 The review register keeps one date per item, the latest. An item done twice in
 a window is listed once, on the later day.
 """
 
 import datetime as dt
 import shlex
-import textwrap
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
 from typing import NamedTuple
-
-from rich.text import Text
 
 from doit import actor
 from doit import journal
@@ -52,25 +45,11 @@ from doit import sources
 from doit import window
 from doit.lanes import GridCell
 from doit.lanes import Lane
-from doit.render import console
-from doit.render import fitted
-from doit.render import terminal_width
 from doit.window import Bounds
 
 DEFAULT_SINCE = '7d'
 # Where `--until` alone starts, asked of every backend as an instant.
 EARLIEST = dt.datetime(1970, 1, 1, tzinfo=dt.UTC)
-
-GROUP_STYLE = 'bold blue'
-HOUR_STYLE = 'green'
-
-GROUP_INDENT = '  '
-ITEM_INDENT = '    '
-CLOCK_WIDTH = len('00:00')
-DATE_FORMAT = '%a %d %b'
-DATE_WIDTH = len('Mon 26 Oct')
-ACTOR_WIDTH = max(len(actor.UNATTENDED), len('unrecorded'))
-COLUMN_GAP = 2
 
 
 # --- reading a record's date ---------------------------------------------------
@@ -521,124 +500,3 @@ def groups_with_an_actor(groups: list[Lane]) -> list[str]:
 def unknown_actors(groups: list[Lane]) -> int:
     """How many entries name an actor whose spelling `doit.actor` does not recognize."""
     return sum(actor.kind(cell.actor) == actor.UNKNOWN for lane in groups for cell in lane.grid)
-
-
-# --- the screen ----------------------------------------------------------------
-
-
-def has_something(lane: Lane) -> bool:
-    return not lane.available or bool(lane.reason or lane.grid or lane.rows)
-
-
-def group_heading(lane: Lane) -> Text:
-    return Text(f'{GROUP_INDENT}{lane.name}', style=GROUP_STYLE)
-
-
-def render_unavailable(lane: Lane) -> None:
-    line = Text(ITEM_INDENT)
-    line.append(f'unavailable — {lane.reason}', style='red')
-    console.print(line, no_wrap=True, overflow='ellipsis')
-
-
-def render_partial(lane: Lane) -> None:
-    line = Text(ITEM_INDENT)
-    line.append(f'partial — {lane.reason}', style='yellow')
-    console.print(line, no_wrap=True, overflow='ellipsis')
-
-
-def clock(done_at: str) -> str:
-    return dt.datetime.fromisoformat(done_at).strftime('%H:%M') if done_at else ''
-
-
-def day_text(cell: GridCell) -> str:
-    day = cell.done_on or cell.done_at[:10]
-    return dt.date.fromisoformat(day).strftime(DATE_FORMAT) if day else ''
-
-
-def done_line(cell: GridCell, text_width: int, date_width: int = 0, actor_width: int = 0) -> Text:
-    """One thing done: its day where the window spans several, its hour, who did it where its group records that, then what it was.
-
-    An entry whose record kept only the day leaves the hour blank rather than
-    printing a guess, so its text still lines up with the timed ones.
-    """
-    line = Text(ITEM_INDENT)
-    if date_width:
-        line.append(day_text(cell).ljust(date_width + COLUMN_GAP))
-    hour = clock(cell.done_at)
-    line.append(hour, style=HOUR_STYLE)
-    line.append(' ' * (CLOCK_WIDTH - len(hour) + COLUMN_GAP))
-    if actor_width:
-        who = actor.kind(cell.actor)
-        line.append(fitted(who or 'unrecorded', actor_width, pad=True, style='' if who else 'dim'))
-        line.append(' ' * COLUMN_GAP)
-    line.append(fitted(cell.text, text_width))
-    return line
-
-
-def render_groups(groups: list[Lane], width: int, *, dated: bool = False) -> None:
-    """Each group under its name, one line per thing done.
-
-    The actor column appears in a group only where one of its entries has an
-    actor, so a group whose record keeps none spends no width on it.
-    """
-    date_width = DATE_WIDTH if dated else 0
-    for lane in groups:
-        console.print(group_heading(lane))
-        if not lane.available:
-            render_unavailable(lane)
-            continue
-        if lane.reason:
-            render_partial(lane)
-        actor_width = ACTOR_WIDTH if any(cell.actor for cell in lane.grid) else 0
-        used = len(ITEM_INDENT) + CLOCK_WIDTH + COLUMN_GAP
-        used += date_width + COLUMN_GAP if date_width else 0
-        used += actor_width + COLUMN_GAP if actor_width else 0
-        for cell in lane.grid:
-            console.print(done_line(cell, max(10, width - used), date_width, actor_width), no_wrap=True, overflow='ellipsis')
-
-
-def verdict_lines(groups: list[Lane], width: int) -> list[Text]:
-    """Which records were asked, how many answered and which only in part, and who did what.
-
-    The names wrap under their own indent rather than being cut, because
-    naming every record asked is the line's only job.
-    """
-    asked = [lane.name for lane in groups]
-    failed = [lane.name for lane in groups if not lane.available]
-    cut = [lane.name for lane in groups if lane.available and lane.reason]
-    recording = [lane.name for lane in groups if any(cell.actor for cell in lane.grid)]
-    unknown = 0
-    for lane in groups:
-        unknown += sum(actor.kind(cell.actor) == actor.UNKNOWN for cell in lane.grid)
-    lead = f'{GROUP_INDENT}asked '
-    wrapped = textwrap.fill(
-        ', '.join(asked), width, initial_indent=lead, subsequent_indent=' ' * len(lead), break_long_words=False, break_on_hyphens=False
-    )
-    names = Text(wrapped if asked else f'{GROUP_INDENT}no record to ask')
-    answered = Text(GROUP_INDENT)
-    if failed:
-        answered.append(f'{len(asked) - len(failed)} of {len(asked)} answered', style='red')
-    else:
-        answered.append(f'all {len(asked)} answered')
-    if cut:
-        answered.append(f' · {", ".join(cut)} partial', style='yellow')
-    answered.append(f' · actor recorded by {", ".join(recording)}' if recording else ' · no actor recorded')
-    if unknown:
-        answered.append(f' · {unknown} by an actor of unknown kind', style='yellow')
-    return [names, answered]
-
-
-def window_title(bounds: Bounds, open_ended: bool) -> str:
-    start = 'the earliest record' if bounds.start == EARLIEST else f'{bounds.start:%a %d %b %H:%M}'
-    stop = 'now' if open_ended else f'{bounds.stop:%a %d %b %H:%M}'
-    return f'{start} to {stop}'
-
-
-def render(groups: list[Lane], bounds: Bounds, open_ended: bool) -> None:
-    console.rule(f'[cyan]Happened[/] · {window_title(bounds, open_ended)}', align='left')
-    for line in verdict_lines(groups, terminal_width()):
-        console.print(line, no_wrap=True, overflow='ellipsis')
-    shown = [lane for lane in groups if has_something(lane)]
-    if shown:
-        console.print()
-        render_groups(shown, terminal_width(), dated=bounds.days() > 1)

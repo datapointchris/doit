@@ -195,26 +195,21 @@ def test_a_goal_is_met_in_its_own_unit():
     assert forecast.goal_met({'asked': 200.0, 'occasions': 9.0, 'minutes': 100.0, 'unit': 'minutes'}) == 50.0
 
 
-def test_a_reading_taken_before_goals_were_recorded_still_renders(capsys):
+def test_a_reading_taken_before_goals_were_recorded_still_has_its_rows():
     old = reading(NOW, {'30': {'chores': {'occasions': 2.0, 'minutes': 50.0}}, '7': {}})
     old = forecast.Reading(**{**old.__dict__, 'goals': {}})
 
-    assert forecast.goal_met(old.horizons['30']['chores']) is None
-    forecast.emit(old)
-
-    row = [line for line in capsys.readouterr().out.splitlines() if 'chores' in line]
-    assert row and '—' in row[0]
+    [row] = forecast.reading_rows(old)
+    assert (row['goal'], row['of_goal'], row['short_of_goal']) == (None, '—', False)
 
 
-def test_an_estimate_names_its_source_in_full(capsys):
+def test_an_estimate_names_its_source_in_full():
     """Cut to four letters, `default` printed as `defa`."""
     taken = reading(NOW, {'30': {'chores': {'occasions': 2.0, 'minutes': 50.0}}, '7': {}})
     taken = forecast.Reading(**{**taken.__dict__, 'durations': {'chores': {'minutes': 45.0, 'source': 'default', 'samples': 0}}})
 
-    forecast.emit(taken)
-
-    row = next(line for line in capsys.readouterr().out.splitlines() if 'chores' in line)
-    assert row.split()[-2:] == ['45m', 'default']
+    [row] = forecast.reading_rows(taken)
+    assert row['estimate'] == '45m default'
 
 
 def test_select_takes_the_newest_when_no_handle_is_given():

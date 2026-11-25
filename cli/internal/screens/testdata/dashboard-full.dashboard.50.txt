@@ -1,0 +1,68 @@
+Dashboard · Mon 02 Nov ───────────────────────────
+
+PROBLEMS  2 open
+  5d       The nightly backup did not f… archlinux
+           ↳ fleet problems show 12
+  2d       The NAS disk is 91% full      nas
+  → fleet problems list
+
+TASKS  7 open
+  #1       Return the hoodies to the s… due today
+           ↳ life tasks complete 501
+  #2       Book the boiler service      3d overdue
+           ↳ life tasks complete 502
+  #3       Call the bank about the card
+           ↳ life tasks complete 503
+  #4       Sharpen the kitchen knives   in 2d
+           ↳ life tasks complete 504
+  #5       Order more printer paper
+           ↳ life tasks complete 505
+  → life tasks list
+
+HABITS  3 of 7 done today
+  ✓     Make the bed       ○   9 Walk around the…
+  ✓     Vitamins           ○ 102 Water the plants
+  ○  14 Floss              ✓     Journal
+  ○  15 Read twenty pag…
+  → life habits complete <id>
+
+BOOKS  1 reading · 3 queued
+  reading  The Long Way to a Small, Angry Pla… 62%
+  next     A Memory Called Empire
+           ↳ life books start 77
+  next     Piranesi
+           ↳ life books start 78
+  → life books list
+  partial — articles: life answered 503 to GET
+/articles: restarting
+
+UPCOMING  3 ahead
+  Mon 02   Dentist on Elm Street       today 15:30
+           ↳ life events show 88
+  Thu 05   Pick up the parcel          in 3d
+  Apr      Portland                    7mo owed
+           ↳ nomad trips show trip-1
+
+MESO - FEEDBACK  1 open
+           The rest timer is too small to rea… 13d
+
+LEARNING
+  —
+
+PRS  2 open
+  a-long-repo-name feat(list): add a sec… 0d ↳ prs
+  short            feat(cli): point a sc… 4d ↳ prs
+
+MAINTENANCE  3 due
+  review   Swap the offsite backup dr… 12d overdue
+↳ doit review done rotate-the-offsite-backup-drives
+  practice Search code with ripgrep    never run
+↳ doit review done practice-searching-code-with-ripgrep
+  review   Press the test button       due today
+           ↳ doit review done check-smoke-alarms
+  → doit review due   → doit review list
+
+  dotfiles    unavailable — dotfiles: ClickHouse
+answered 401, so the desk checks could not be read
+this round
+  behind · piano · garden · letters  ·  doit pursuits list

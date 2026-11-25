@@ -75,7 +75,7 @@ def contract_command() -> None:
     """The lane document every source becomes, as an annotated example.
 
     This is the interface between a source and every view: each adapter's read
-    is shaped into it, and `doit dashboard --json` prints it.
+    is shaped into it.
     """
     example = lanes.to_document(
         [

@@ -231,7 +231,7 @@ days cannot be read off the page.
 ```bash
 doit dashboard                 # every lane, three rows deep
 doit dashboard --lane tasks    # one lane, ten rows deep
-doit dashboard --json          # the lane model, for a script
+doit dashboard --json          # the dashboard's answer, for a script
 doit sources list              # which apps it asks, and whether each answers
 doit sources contract          # the lane document a source may print, so it needs no adapter
 ```

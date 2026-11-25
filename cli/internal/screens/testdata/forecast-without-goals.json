@@ -1,0 +1,49 @@
+{
+  "generated": "2026-09-14T20:00:00-04:00",
+  "machine": "desk",
+  "budget_minutes": 90,
+  "replicates": 300,
+  "weights": {
+    "chores": 25.0,
+    "walk": 5.0
+  },
+  "goals": {},
+  "durations": {},
+  "horizons": {
+    "30": {
+      "chores": {
+        "occasions": 2.0,
+        "minutes": 50.0
+      },
+      "walk": {
+        "occasions": 11.5,
+        "minutes": 172.5
+      }
+    },
+    "7": {}
+  },
+  "unspent_minutes_per_day": 61.5,
+  "rows": [
+    {
+      "name": "walk",
+      "week": "0.0",
+      "month": "11.5",
+      "hours": "2.9",
+      "goal": null,
+      "of_goal": "—",
+      "short_of_goal": false,
+      "estimate": "0m "
+    },
+    {
+      "name": "chores",
+      "week": "0.0",
+      "month": "2.0",
+      "hours": "0.8",
+      "goal": null,
+      "of_goal": "—",
+      "short_of_goal": false,
+      "estimate": "0m "
+    }
+  ],
+  "estimates": ""
+}

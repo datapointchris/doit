@@ -1,0 +1,229 @@
+{
+  "generated": "2026-11-02T12:00:00.482113-05:00",
+  "machine": "desk",
+  "budget_minutes": 120,
+  "replicates": 300,
+  "weights": {
+    "piano": 30.0,
+    "garden": 20.0,
+    "stretch": 15.0,
+    "letters": 10.0,
+    "novel-reading-on-the-train": 5.0
+  },
+  "goals": {
+    "piano": "90m a week",
+    "garden": "every 3d",
+    "stretch": "every 1d",
+    "letters": "every 7d",
+    "novel-reading-on-the-train": "60m a week"
+  },
+  "durations": {
+    "piano": {
+      "minutes": 30.0,
+      "source": "measured",
+      "samples": 6
+    },
+    "garden": {
+      "minutes": 45.0,
+      "source": "default",
+      "samples": 1
+    },
+    "stretch": {
+      "minutes": 12.5,
+      "source": "measured",
+      "samples": 9
+    },
+    "letters": {
+      "minutes": 45.0,
+      "source": "default",
+      "samples": 0
+    },
+    "novel-reading-on-the-train": {
+      "minutes": 40.0,
+      "source": "measured",
+      "samples": 4
+    }
+  },
+  "horizons": {
+    "7": {
+      "piano": {
+        "occasions": 2.2,
+        "minutes": 66.0,
+        "occasions_low": 0.20000000000000018,
+        "occasions_high": 4.2,
+        "asked": 90.0,
+        "unit": "minutes"
+      },
+      "garden": {
+        "occasions": 2.0,
+        "minutes": 90.0,
+        "occasions_low": 0.0,
+        "occasions_high": 4.0,
+        "asked": 2.3,
+        "unit": "checkoffs"
+      },
+      "stretch": {
+        "occasions": 6.4,
+        "minutes": 80.0,
+        "occasions_low": 4.4,
+        "occasions_high": 8.4,
+        "asked": 7.0,
+        "unit": "checkoffs"
+      },
+      "letters": {
+        "occasions": 1.0,
+        "minutes": 45.0,
+        "occasions_low": 0.0,
+        "occasions_high": 3.0,
+        "asked": 1.0,
+        "unit": "checkoffs"
+      },
+      "novel-reading-on-the-train": {
+        "occasions": 1.4,
+        "minutes": 56.0,
+        "occasions_low": 0.0,
+        "occasions_high": 3.4,
+        "asked": 60.0,
+        "unit": "minutes"
+      }
+    },
+    "14": {
+      "piano": {
+        "occasions": 4.4,
+        "minutes": 132.0,
+        "occasions_low": 2.4000000000000004,
+        "occasions_high": 6.4,
+        "asked": 180.0,
+        "unit": "minutes"
+      },
+      "garden": {
+        "occasions": 4.0,
+        "minutes": 180.0,
+        "occasions_low": 2.0,
+        "occasions_high": 6.0,
+        "asked": 4.6,
+        "unit": "checkoffs"
+      },
+      "stretch": {
+        "occasions": 12.8,
+        "minutes": 160.0,
+        "occasions_low": 10.8,
+        "occasions_high": 14.8,
+        "asked": 14.0,
+        "unit": "checkoffs"
+      },
+      "letters": {
+        "occasions": 2.0,
+        "minutes": 90.0,
+        "occasions_low": 0.0,
+        "occasions_high": 4.0,
+        "asked": 2.0,
+        "unit": "checkoffs"
+      },
+      "novel-reading-on-the-train": {
+        "occasions": 2.8,
+        "minutes": 112.0,
+        "occasions_low": 0.7999999999999998,
+        "occasions_high": 4.8,
+        "asked": 120.0,
+        "unit": "minutes"
+      }
+    },
+    "30": {
+      "piano": {
+        "occasions": 9.4,
+        "minutes": 282.0,
+        "occasions_low": 7.4,
+        "occasions_high": 11.4,
+        "asked": 385.7,
+        "unit": "minutes"
+      },
+      "garden": {
+        "occasions": 8.1,
+        "minutes": 364.5,
+        "occasions_low": 6.1,
+        "occasions_high": 10.1,
+        "asked": 10.0,
+        "unit": "checkoffs"
+      },
+      "stretch": {
+        "occasions": 27.3,
+        "minutes": 341.3,
+        "occasions_low": 25.3,
+        "occasions_high": 29.3,
+        "asked": 30.0,
+        "unit": "checkoffs"
+      },
+      "letters": {
+        "occasions": 4.4,
+        "minutes": 198.0,
+        "occasions_low": 2.4000000000000004,
+        "occasions_high": 6.4,
+        "asked": 4.3,
+        "unit": "checkoffs"
+      },
+      "novel-reading-on-the-train": {
+        "occasions": 6.0,
+        "minutes": 240.0,
+        "occasions_low": 4.0,
+        "occasions_high": 8.0,
+        "asked": 257.1,
+        "unit": "minutes"
+      }
+    }
+  },
+  "unspent_minutes_per_day": 12.4,
+  "rows": [
+    {
+      "name": "stretch",
+      "week": "6.4",
+      "month": "27.3",
+      "hours": "5.7",
+      "goal": "every 1d",
+      "of_goal": "91%",
+      "short_of_goal": false,
+      "estimate": "12m measured"
+    },
+    {
+      "name": "piano",
+      "week": "2.2",
+      "month": "9.4",
+      "hours": "4.7",
+      "goal": "90m a week",
+      "of_goal": "73%",
+      "short_of_goal": true,
+      "estimate": "30m measured"
+    },
+    {
+      "name": "garden",
+      "week": "2.0",
+      "month": "8.1",
+      "hours": "6.1",
+      "goal": "every 3d",
+      "of_goal": "81%",
+      "short_of_goal": true,
+      "estimate": "45m default"
+    },
+    {
+      "name": "novel-reading-on-the-train",
+      "week": "1.4",
+      "month": "6.0",
+      "hours": "4.0",
+      "goal": "60m a week",
+      "of_goal": "93%",
+      "short_of_goal": false,
+      "estimate": "40m measured"
+    },
+    {
+      "name": "letters",
+      "week": "1.0",
+      "month": "4.4",
+      "hours": "3.3",
+      "goal": "every 7d",
+      "of_goal": "102%",
+      "short_of_goal": false,
+      "estimate": "45m default"
+    }
+  ],
+  "estimates": "3 measured · 2 default"
+}

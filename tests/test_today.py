@@ -321,6 +321,6 @@ def test_both_lists_carry_each_lane_in_the_contract_shape(frozen):
 
     day = assembled(kept_with(state))
 
-    [_, moved, *_] = lanes.from_document(json.loads(lanes.dumps(day.done, NOW)))
+    [_, moved, *_] = lanes.from_document(json.loads(json.dumps(lanes.to_document(day.done, NOW))))
     assert [(cell.text, cell.actor, cell.done_on) for cell in moved.grid] == [('chore', 'ada@laptop', TODAY.isoformat())]
     assert dt.datetime.fromisoformat(moved.grid[0].done_at) == NOW

@@ -1,0 +1,15 @@
+Dashboard · Mon 02 Nov ─────────────────────────────────────────────────────────────────────────────
+
+TASKS  12 open
+  #1       Return the hoodies to the shop on the high street    due today  ↳ life tasks complete 501
+  #2       Book the boiler service                              3d overdue ↳ life tasks complete 502
+  #3       Call the bank about the card                                    ↳ life tasks complete 503
+  #4       Sharpen the kitchen knives                           in 2d      ↳ life tasks complete 504
+  #5       Order more printer paper                                        ↳ life tasks complete 505
+  #6       Fix the squeaky hinge                                           ↳ life tasks complete 506
+  #7       Plan the allotment beds                                         ↳ life tasks complete 507
+  #8       Clean the gutters                                               ↳ life tasks complete 508
+  #9       Renew the parking permit                             in 9d      ↳ life tasks complete 509
+  #10      Patch the bike tyre                                             ↳ life tasks complete 510
+  → life tasks list
+  pursuits unavailable — the pursuits register would not load: line 3 is not a mapping
