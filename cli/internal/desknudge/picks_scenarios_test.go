@@ -167,7 +167,7 @@ func TestTicksAndUnticksRunInClickOrder(t *testing.T) {
 	if row.Kind != KindTick || *row.Ticks != 2 || *row.Target != 5 || *row.UntickKey != "untick:1" || len(row.Picks) != 2 {
 		t.Errorf("the squat row reads %+v, want a tick row at 2 of 5 sets carrying its tick and its untick", row)
 	}
-	// doit-tui draws a row's text alone, so the sets ride in it.
+	// doit tui draws a row's text alone, so the sets ride in it.
 	if !strings.HasSuffix(row.Text, "2 of 5 sets") {
 		t.Errorf("the squat row's text reads %q, want it to end on its sets", row.Text)
 	}
@@ -336,9 +336,9 @@ func TestEachKeyKindCommitsThroughItsCommandAndAnOnLogLabelStaysOneArgument(t *t
 			if reviewed := slices.Clone(f.reviews); row.reviewed != "" != (len(reviewed) == 1) || row.reviewed != "" && reviewed[0] != row.reviewed {
 				t.Errorf("the service marked done %v, want %q", reviewed, row.reviewed)
 			}
-			// doit-tui draws panel show's rows and never their picks, so a row whose key the pick holds leaves them.
+			// doit tui draws panel show's rows and never their picks, so a row whose key the pick holds leaves them.
 			if row.held && slices.ContainsFunc(f.desk.Show().Rows, func(listed Row) bool { return listed.Key != nil && *listed.Key == row.key }) {
-				t.Errorf("panel show still lists %s, which doit-tui would draw as a row to pick", row.key)
+				t.Errorf("panel show still lists %s, which doit tui would draw as a row to pick", row.key)
 			}
 		})
 	}

@@ -56,9 +56,8 @@ jobs:
   # The Go doit's stream, tagged cli/vX.Y.Z from the conventional commits under
   # cli/. Its release carries doit_<version>_<os>_<arch>.tar.gz for each desk,
   # with the binary at the archive's root, and checksums.txt. `doit update` and
-  # a machine's package manager install from those. `go install
-  # .../cli/cmd/doit-tui@latest` resolves these tags through the module proxy. The release is not marked latest, so the Python package's own
-  # stays the one GitHub shows.
+  # a machine's package manager install from those. The release is not marked
+  # latest, so the Python package's own stays the one GitHub shows.
   #
   # The tag is not pushed here. It lands with the release, so a failed build
   # leaves no tag, and the next run cuts the same version again.
@@ -158,8 +157,8 @@ jobs:
           retention-days: 1
 
   # Before the Python package reaches the index, which waits on this. This
-  # binary runs every verb but `tui`, so it works beside any earlier
-  # doit-python on a desk.
+  # binary runs every verb and starts no doit-python, so it works beside any
+  # earlier doit-python on a desk.
   cli-publish:
     name: Publish the Go doit's release
     needs: [release, cli-version, cli-build]

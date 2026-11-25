@@ -1,7 +1,6 @@
-"""doit-python's command tree, which runs `doit tui`.
+"""doit-python's command tree, which holds no verb.
 
-The Go doit runs every other command line, and execs `doit-python tui` with the
-arguments typed after it. A usage error exits 2, from typer.
+The Go doit runs every command line. A usage error exits 2, from typer.
 """
 
 import os
@@ -11,7 +10,6 @@ import typer
 from pyclilogin import LoginError
 
 from doit import __version__
-from doit import tui
 from doit.render import error_console
 from doit.render import set_no_input
 
@@ -20,12 +18,9 @@ app = typer.Typer(
     name='doit',
     no_args_is_help=True,
     add_completion=False,
-    help='Runs `doit tui`. The Go doit runs every other command line, and `doit --help` lists them.',
+    help='Holds no verb. The Go doit runs every command line, and `doit --help` lists them.',
     rich_markup_mode='markdown',
 )
-
-
-app.command('tui', epilog=tui.TUI_EXAMPLES)(tui.tui_command)
 
 
 def version_callback(asked: bool) -> None:

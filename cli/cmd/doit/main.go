@@ -1,5 +1,4 @@
-// doit is what to attend to now. The Go binary runs every command line, and
-// `doit tui` hands its arguments to doit-python unchanged.
+// doit is what to attend to now.
 package main
 
 import "os"

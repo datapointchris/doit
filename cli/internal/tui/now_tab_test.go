@@ -1,4 +1,4 @@
-package main
+package tui
 
 import (
 	"context"
@@ -10,43 +10,47 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/datapointchris/gotermboard"
 	"github.com/datapointchris/gotermstyle"
+
+	"github.com/datapointchris/doit/cli/internal/desknudge"
 )
 
 func ref[T any](v T) *T { return &v }
 
-// fakePanel answers as doit's panel does, from steps written as `panel show` and `panel pick` print them.
+// fakePanel answers as the desk's panel does, from steps written as `panel show` and `panel pick` print them.
 type fakePanel struct {
-	today  panelStep
-	picks  map[string]panelStep
+	today  desknudge.Panel
+	picks  map[string]desknudge.Panel
 	picked []string
 }
 
-func (f *fakePanel) show(context.Context) (panelStep, error) { return f.today, nil }
+func (f *fakePanel) Show() desknudge.Panel { return f.today }
 
-func (f *fakePanel) pick(_ context.Context, k string) (panelStep, error) {
+func (f *fakePanel) Pick(_ context.Context, k string) (desknudge.Panel, error) {
 	f.picked = append(f.picked, k)
 	return f.picks[k], nil
 }
 
-// minutesStep is read's minutes step at log minutes, as doit prints it: the log row, then the rows above and below.
-func minutesStep(log, up, down int) panelStep {
-	row := func(kind string, n int, suggested bool) panelRow {
-		return panelRow{Key: ref(kind + ":" + strconv.Itoa(n) + ":pursuit:read"), Kind: kind, Text: kind, Minutes: ref(n), Suggested: suggested}
+// minutesStep is read's minutes step at log minutes, as the panel lists it: the log row, then the rows above and below.
+func minutesStep(log, up, down int) desknudge.Panel {
+	row := func(kind string, n int, suggested bool) desknudge.Row {
+		return desknudge.Row{Key: ref(kind + ":" + strconv.Itoa(n) + ":pursuit:read"), Kind: kind, Text: kind, Minutes: ref(n), Suggested: suggested}
 	}
-	return panelStep{Step: "minutes", Rows: []panelRow{row(kindLog, log, true), row(kindAdjust, up, false), row(kindAdjust, down, false)}}
+	return desknudge.Panel{Step: "minutes", Rows: []desknudge.Row{
+		row(desknudge.KindLogMinutes, log, true), row(desknudge.KindAdjustMinutes, up, false), row(desknudge.KindAdjustMinutes, down, false),
+	}}
 }
 
 func TestTheNowTabDrawsDoitsGroupsAndActsOnlyOnTheRowItShows(t *testing.T) {
 	open, more := minutesStep(45, 50, 40), minutesStep(50, 55, 45)
 	fake := &fakePanel{
-		today: panelStep{Step: "today", Rows: []panelRow{
+		today: desknudge.Panel{Step: "today", Rows: []desknudge.Row{
 			{Kind: "note", Text: "rows from 14:05 — doit unreachable"},
 			{Key: ref("pursuit:read"), Kind: "pursuit", Text: "read · A Neutral Book", Group: ref("pursuits"), Suggested: true},
 			{Key: ref("answer:too_soon:n1"), Kind: "answer", Text: "too soon"},
 			{Key: ref("habit:17"), Kind: "habit", Text: "Stretch", Group: ref("habits")},
 			{Key: ref("tick:1"), Kind: "tick", Text: "Exercise · Squat · 2 of 5 sets", Group: ref("habits"), UntickKey: ref("untick:1")},
 		}},
-		picks: map[string]panelStep{
+		picks: map[string]desknudge.Panel{
 			"pursuit:read":       open,
 			*open.Rows[1].Key:    more,
 			*more.Rows[0].Key:    {Step: "done", Message: ref("logged 50 min of read")},
@@ -55,7 +59,7 @@ func TestTheNowTabDrawsDoitsGroupsAndActsOnlyOnTheRowItShows(t *testing.T) {
 			"untick:1":           {Step: "done", Message: ref("set taken back")},
 		},
 	}
-	board := newNowBoard(fake)
+	board := NewNowBoard(fake)
 	gotermboard.RefreshAll(context.Background(), board.Sources()...)
 	m := gotermboard.NewModel(board, gotermstyle.NewPalette(false))
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 20})

@@ -2,62 +2,82 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/term"
 	"github.com/datapointchris/goclikit"
+	"github.com/datapointchris/gotermboard"
+	"github.com/datapointchris/gotermstyle"
 	"github.com/spf13/cobra"
 
-	"github.com/datapointchris/doit/cli/internal/passthrough"
+	"github.com/datapointchris/doit/cli/internal/desknudge"
+	"github.com/datapointchris/doit/cli/internal/tui"
 )
 
-// newTUICommand is `doit tui`, which execs doit-python. It is in this tree so
-// the help lists it and a Tab completes it. Its arguments reach doit-python
-// unparsed, so `doit tui --help` is doit-python's help, and `doit help tui`
-// execs the same. The exec ends this process, so it starts no update check.
+// The frame --once draws where COLUMNS and LINES are unset and stdout is no terminal.
+const (
+	onceFallbackWidth  = 120
+	onceFallbackHeight = 40
+)
+
 func newTUICommand() *cobra.Command {
-	cmd := goclikit.StartsNoUpdateCheck(&cobra.Command{
-		Use:                "tui",
-		Short:              "The screens where a click or a key completes a row",
-		GroupID:            whatToDoNow,
-		DisableFlagParsing: true,
-		ValidArgsFunction:  cobra.NoFileCompletions,
-		RunE: func(_ *cobra.Command, args []string) error {
-			return execPythonTUI(pythonTUIArgv(args))
+	var view string
+	var once, asJSON bool
+	cmd := &cobra.Command{
+		Use:     "tui",
+		Short:   "The screens where a click or a key completes a row",
+		GroupID: whatToDoNow,
+		Long: "The screens where a click or a key completes a row, in one program with a tab per view.\n\n" +
+			"The now tab holds the suggestion, the answers while a desk nudge is ready, and every row\n" +
+			"of today that something completes, grouped as the desk nudge panel groups them. Click a\n" +
+			"row, then click it again or press enter, to complete it. A timed pursuit opens its\n" +
+			"minutes under its row: + and - change them, and enter logs them. A click on a footer hint\n" +
+			"does what its key does. It reads the rows as `doit desk-nudge panel show` does, from the\n" +
+			"files the desk nudge watch writes, and hands each pick to the watch as `doit desk-nudge\n" +
+			"panel pick` does.\n\n" +
+			"--once prints one frame of the tab at COLUMNS by LINES, and --json the panel document it\n" +
+			"is drawn from, so an agent reads what a person reads. With no terminal and neither flag\n" +
+			"it refuses, and exits 2.",
+		Example: "  doit tui                                   open on the now tab\n" +
+			"  doit tui --view now                        open on the now tab by name\n" +
+			"  COLUMNS=120 LINES=30 doit tui --once       print the now tab's frame, then exit\n" +
+			"  doit tui --view now --json | jq '.rows[]'  the rows the now tab draws, as data",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := gotermboard.RefuseUnknownView(view, tui.TabNames()); err != nil {
+				return goclikit.UsageError(err)
+			}
+			if once && asJSON {
+				return goclikit.UsageError(errors.New("--once prints a frame and --json a snapshot, so give one of them"))
+			}
+			printing := once || asJSON
+			if !printing && !onTerminal() {
+				return goclikit.UsageError(errors.New("doit tui needs a terminal; --once prints one frame and --json the snapshot"))
+			}
+			now := tui.NewNowBoard(tui.DeskPanel{Desk: desknudge.ThisDesk(version)})
+			pal := gotermstyle.PaletteFor(os.Stdout)
+			if printing {
+				gotermboard.RefreshAll(cmd.Context(), now.Sources()...)
+				return gotermboard.PrintTab(cmd.OutOrStdout(), asJSON, now, pal, onceFallbackWidth, onceFallbackHeight)
+			}
+			tabs, err := gotermboard.NewTabs([]gotermboard.Tab{{Name: tui.NowTab, Board: now}}, pal, view)
+			if err != nil {
+				return err
+			}
+			_, err = tea.NewProgram(tabs).Run()
+			return err
 		},
-	})
-	// A help function returns no error, and `help` starts no update check that
-	// an exit here could cut off.
-	cmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
-		if err := execPythonTUI([]string{"tui", "--help"}); err != nil {
-			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "doit:", err)
-			os.Exit(1)
-		}
-	})
+	}
+	cmd.Flags().StringVar(&view, "view", "", "Open on this tab: "+strings.Join(tui.TabNames(), ", "))
+	_ = cmd.RegisterFlagCompletionFunc("view", cobra.FixedCompletions(tui.TabNames(), cobra.ShellCompDirectiveNoFileComp))
+	cmd.Flags().BoolVar(&once, "once", false, "Print one frame of the tab at COLUMNS by LINES, then exit")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the tab's snapshot as JSON to stdout")
 	return cmd
 }
 
-// execPythonTUI replaces this process with doit-python run on argv.
-func execPythonTUI(argv []string) error {
-	err := passthrough.Exec(argv)
-	if errors.Is(err, passthrough.ErrNotInstalled) {
-		return fmt.Errorf("%w, and it runs `doit tui`", err)
-	}
-	return err
-}
-
-// pythonTUIArgv is doit-python's command line for `doit tui` given args. cobra
-// hands a command that parses no flags the root's --no-input with the rest,
-// and doit-python takes that option only before the verb.
-func pythonTUIArgv(args []string) []string {
-	var options, rest []string
-	for _, word := range args {
-		if word == "--no-input" || strings.HasPrefix(word, "--no-input=") {
-			options = append(options, word)
-		} else {
-			rest = append(rest, word)
-		}
-	}
-	return append(append(options, "tui"), rest...)
+// onTerminal is whether a person holds the keyboard and sees the screen.
+func onTerminal() bool {
+	return term.IsTerminal(os.Stdin.Fd()) && term.IsTerminal(os.Stdout.Fd())
 }
