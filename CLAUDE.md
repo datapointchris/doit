@@ -223,8 +223,9 @@ itself is the drift this arrangement exists to prevent: add a seam to the view m
 that takes its data rather than reading it.
 
 So the root package holds the rules and writes each view's rows, and never holds a command or a
-client of the service. A refused argument raises a `ValueError` subclass of the rule's module,
-such as `pursuits.SkipSpanRefused`, which `computed_views` maps to `BadRequest` and a 422.
+client of the service. A rule refuses a bad argument with a `ValueError`, and `computed_views`
+turns it into `BadRequest`. `window` owns the span grammar and its refusal, `window.Refused`, so
+every field that takes a span or a window is refused in that module's words.
 
 `cli/internal/contract` runs this commit's Go doit against this commit's service, started from
 `api/tests/serve_on_a_temporary_store.py` on a temporary store. A shape changed on one side and not

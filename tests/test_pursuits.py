@@ -1148,7 +1148,7 @@ def test_a_bare_skip_covers_one_interval_and_a_day_where_there_is_none():
 
 @pytest.mark.parametrize('duration', ['1mo', '1y', '3', '12h', '0d'])
 def test_skip_for_takes_whole_days_or_weeks_only(duration):
-    with pytest.raises(pursuits.SkipSpanRefused):
+    with pytest.raises(window.Refused):
         pursuits.skip_span(duration, 3.0)
 
 

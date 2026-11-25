@@ -3,6 +3,7 @@ import time
 
 import pytest
 
+from doit.window import Refused
 from doit.window import window
 
 EDT = dt.timezone(dt.timedelta(hours=-4))
@@ -35,16 +36,17 @@ def new_york(monkeypatch):
             '2026-10-01T19:00:00Z',
             (dt.datetime(2026, 10, 1, 14, tzinfo=EDT), dt.datetime(2026, 10, 1, 19, tzinfo=dt.UTC)),
         ),
-        ('6mo', None, ValueError),
-        ('1y', None, ValueError),
-        ('7', None, ValueError),
-        ('2026-10-01T14:00:00', None, ValueError),
-        ('1d', '2d', ValueError),
+        ('6mo', None, Refused),
+        ('1y', None, Refused),
+        ('7', None, Refused),
+        ('2026-13-45', None, Refused),
+        ('2026-10-01T14:00:00', None, Refused),
+        ('1d', '2d', Refused),
     ],
 )
 def test_each_form_resolves_to_an_instant_and_a_month_is_refused(new_york, since, until, expected):
-    if expected is ValueError:
-        with pytest.raises(ValueError):
+    if expected is Refused:
+        with pytest.raises(Refused):
             window(since, until, NOW)
     else:
         assert window(since, until, NOW) == expected
