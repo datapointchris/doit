@@ -168,10 +168,9 @@ func newPanelCommand() *cobra.Command {
 		Short: "The desk nudge's panel, which completes any of today's rows in one pick",
 		Long: "The desk nudge's panel, which completes any of today's rows in one pick.\n\n" +
 			"The watch reads the service's desk panel view and keeps it on this desk. `panel open`\n" +
-			"shows it as a page in a window, where a click completes a row a few seconds later\n" +
-			"unless a second click takes it back. `panel show` prints it with the key that picks\n" +
-			"each row, and `panel pick` hands a key to the watch, which completes the row it names\n" +
-			"at once and prints the next step.",
+			"shows it as a page in a window, where a click completes a row at once. `panel show`\n" +
+			"prints it with the key that picks each row, and `panel pick` hands a key to the watch,\n" +
+			"which completes the row it names at once and prints the next step.",
 		Example: "  doit desk-nudge panel open           today's rows as a page in a window\n" +
 			"  doit desk-nudge panel show           today's rows with the key that picks each\n" +
 			"  doit desk-nudge panel pick habit:17  complete habit 17 through life",
@@ -198,10 +197,9 @@ func newPanelOpenCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "open",
 		Short: "Show today's rows as a page in a window, where a click completes a row",
-		Long: "Show today's rows as a page in a window, where a click completes a row a few seconds\n" +
-			"later unless a second click takes it back. The watch serves the page, and webviewrs\n" +
-			"draws the window, which closes on Esc or once it loses focus. A second open raises the\n" +
-			"window that is already open.\n\n" +
+		Long: "Show today's rows as a page in a window, where a click completes a row at once. The\n" +
+			"watch serves the page, and webviewrs draws the window, which closes on Esc or once it\n" +
+			"loses focus. A second open raises the window that is already open.\n\n" +
 			"Replaces itself with webviewrs once the watch gives the page's address. Exits 4 where no\n" +
 			"watch answers. Exits 1 where the watch answers and serves no page, or webviewrs is not\n" +
 			"installed. A failure at the watch also shows a notification, because a pill or a key\n" +

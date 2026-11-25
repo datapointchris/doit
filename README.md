@@ -462,9 +462,9 @@ and `panel show` still prints the cache. Where a watch holds the desk and answer
 an older doit's, `panel pick` exits 4 and says that restarting the service starts this doit's
 watch.
 
-A pick is taken once. Its row leaves the panel, and the same key is refused until the watch reads
-the rows again after the completion ended. A completion that its owner refused frees the row at
-once, so it can be picked again. A pick that completes a row while a nudge is ready ends the nudge,
+A pick is taken once. Its row stays, showing how the pick stands, and the same key is refused until
+the watch reads the rows again after the completion ended. A completion that its owner refused frees
+the row at once, so it can be picked again. A pick that completes a row while a nudge is ready ends the nudge,
 as an answer does, and restarts the clock. Opening a minutes step ends nothing, and neither does a
 completion that failed. A pick at any other time leaves the clock alone. Each completing pick
 appends a `picked` line, and a notification confirms it or names what failed. An answer row is
@@ -502,7 +502,7 @@ The watch serves the page on `127.0.0.1`, on a port it picks at each start:
   for it. The socket's `POST /page-codes` mints the code, which expires after `CodeLifetime` in
   `cli/internal/panelpage/page.go`. Only a process that can open the socket gets one.
 - **The page reaches the socket's routes under `/api/`**, so `GET /api/panel` and
-  `POST /api/pending-picks` answer as `GET /panel` and the routes below do.
+  `POST /api/picks` answer as `GET /panel` and `POST /picks` do.
 - **It assumes one person per desk.** The code travels in webviewrs's argv, which any local user
   can read from `/proc`, and redeem in the moments before the window does.
 
@@ -511,10 +511,8 @@ restart can reach nothing, and says so: Esc closes it, and the next `panel open`
 
 The page draws the suggestion first. Its Log button starts from the pursuit's usual minutes, and
 chips offer a few fixed amounts. Beside it are today's figures, the habits with a circle per set,
-the pursuits owed, and each lane. A click is a pending pick, and a row ticked done stays in its
-place for the rest of the day. When the panel stops listing a pick that the page saw under way,
-the page asks `GET /pending-picks/{id}` how it ended, rather than taking it as done. A lane that
-failed draws its reason, and rows read before the service stopped answering are marked stale. A
+the pursuits owed, and each lane. A click commits at once, and a row ticked done stays in its
+place for the rest of the day. A lane that failed draws its reason, and rows read before the service stopped answering are marked stale. A
 watch that has not read the view yet shows why, such as a desk with no login, and the page asks
 again every few seconds. The page reads the panel again whenever its window shows, and starts
 afresh when the desk's day changes. Every control takes Tab and Space.
@@ -525,59 +523,52 @@ there, so a binary from `go build` alone serves a page saying how to build it. T
 the page first, and fails where the build wrote no script under `dist/assets`. `.nvmrc` names the
 Node version.
 
-### A click on the panel page commits a few seconds later, and a second click takes it back
+### A click on the panel page commits at once, as `panel pick` does
 
-`panel pick` commits at once. A click on the panel page is a pending pick instead, which the watch
-holds for `pendingFor` in `cli/internal/desknudge/pending.go` before it commits, as an email
-client's undo send holds a message. The watch keeps the timer and the state file keeps the pick, so
-closing the page keeps the click. The socket takes and gives back pending picks:
+A click on the panel page posts its key to `POST /api/picks`, the route that `panel pick` uses, and
+the answer says how the pick ended. The watch runs the pick under a context that the request cannot
+cancel, so a window that closes on blur mid-pick still lets the pick finish. A misclicked habit or
+pursuit log stays recorded, because life cannot delete a completion. A set is taken back by its
+untick.
 
 ```text
-POST   /pending-picks       {"key": "habit:17", "minutes": null}
-                            201 the pick, pending until its commit_at
-                            200 the pick that key had waiting, taken back instead
-GET    /pending-picks/{id}  200 the pick: pending, committing, or how it ended, for endedAnsweredFor
-                            after the panel stops listing it, 404 this desk holds no pick by that id now
-DELETE /pending-picks/{id}  200 the pick, taken back, and again on a resend
-                            404 this desk holds no pick by that id now, 409 it is committing or ended
+POST   /picks   {"key": "habit:17", "minutes": null}
+                200 the step it leads to: done, or a timed pursuit's minutes
+                409 refused or skipped, 502 the completion failed, 504 no answer came
 ```
 
-A second POST of a key is a second click, which takes the first back, so a client never resends
-one. The watch handles the two in order, so a second click that arrives before the first one's
-answer still takes it back. A DELETE is safe to resend. A refusal answers
-`{"exit_code": 2, "message": "..."}` with 409, as `POST /picks` does. An answer to the nudge and a
-minutes step's adjustment act at once, so they go through `POST /picks`.
+A POST of a key whose pick still runs is refused, so a double click is one pick. A POST after the
+pick ended is a second pick, so a client never resends one. A pick that went through on the page
+sends no notification, because its row shows it.
 
-Every pick lands on the desk's day when it was clicked, so one that commits past midnight, or after
-a restart the next day, still counts for the day it was clicked.
+Every pick lands on the desk's day when it was picked, so one that a restart takes up the next day
+still counts for the day it was picked.
 
 - **A habit** is read again from `life habits completed` for its day as it commits. One already
   done that day is skipped. Otherwise `life habits complete` runs.
-- **A habit's ticks and unticks** run one at a time, in the order clicked.
-- **A pursuit and a review entry** commit as `panel pick` commits them. The journal keeps a
-  pursuit's entry under the pick's id, so the service stores a resent entry once.
+- **A habit's ticks and unticks** run one at a time, in the order picked.
+- **A pursuit and a review entry** commit through the service. The journal keeps a pursuit's entry
+  under the pick's id, so the service stores a resent entry once.
 
-Each row carries its `picks`, and the panel's `picks` lists them all, each `pending`,
-`committing`, or how it ended:
+Each row carries its `picks`, and the panel's `picks` lists them all, each `committing` while its
+command runs, or how it ended:
 
 - **`done`** went through. Its row stays in place until the view is read again.
-- **`refused`** recorded nothing, so its row can be clicked again. It says why.
+- **`refused`** recorded nothing, so its row can be picked again. It says why.
 - **`uncertain`** may have landed, as a call that ran out of time may. Its row is held until
   the view is read again.
 - **`skipped`** found the habit already done on its day.
 
 A refused or skipped pick shows until its key is picked again, or the view is read on a later day.
-A pick taken back is `canceled` in the socket's answer, and no row shows it. A pick that did not go
-through also sends a notification. `status --json` lists the picks still waiting in
-`pending_picks`. Each pending pick commits on a timer of its own, off the watch's `tickEvery`.
+A pick that did not go through also sends a notification.
 
-When the watch exits, it commits every pending pick at once and waits up to `drainWithin` in
-`cli/internal/desknudge/watch.go` for them.
-A pick still committing then stays marked started in the state file, and the next watch reads the
-mark. A habit is read again, so one already done is skipped. A pursuit's entry is sent again
-under its id. A review entry is marked done again on the day it was picked, which the service
-stores once. A tick or an untick is recorded `uncertain` and never run again, because
-`life habits tick` carries no key that would stop a second set.
+A pick is marked started in the state file's `running_picks` before its command runs. When the
+watch exits, it waits up to `drainWithin` in `cli/internal/desknudge/watch.go` for the picks under
+way. A pick still running then stays marked started, and the next watch reads the mark. A habit is
+read again, so one already done is skipped. A pursuit's entry is sent again under its id. A review
+entry is marked done again on the day it was picked, which the service stores once. A tick or an
+untick is recorded `uncertain` and never run again, because `life habits tick` carries no key that
+would stop a second set.
 
 ### `doit tui` draws the panel as a page that a click drives
 

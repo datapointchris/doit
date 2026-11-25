@@ -70,8 +70,8 @@ func habitProgram(habitID, day string) program {
 }
 
 // habitsCompletedProgram is life's list of the habits completed on day, which
-// a pending habit pick reads again at its commit, because life accepts a
-// second completion.
+// a habit pick reads again as it commits, because life accepts a second
+// completion.
 func habitsCompletedProgram(day string) program {
 	return program{[]string{"life", "habits", "completed", "--since", day, "--until", day, "--json"}, habitBound}
 }

@@ -325,7 +325,7 @@ button:disabled {
   filter: brightness(1.08);
 }
 
-.btn-primary.pending {
+.btn-primary.committing {
   background: var(--done);
 }
 
@@ -515,7 +515,6 @@ button:disabled {
   text-overflow: ellipsis;
 }
 
-.tick.pending .box,
 .tick.committing .box,
 .tick.done .box {
   background: var(--done);
@@ -523,7 +522,6 @@ button:disabled {
   color: var(--page);
 }
 
-.tick.pending .box::after,
 .tick.committing .box::after,
 .tick.done .box::after {
   content: '✓';
@@ -535,7 +533,6 @@ button:disabled {
   text-decoration-color: var(--text-faint);
 }
 
-.tick.pending,
 .tick.committing {
   background: var(--done-wash);
 }
@@ -554,34 +551,6 @@ button:disabled {
 .grid2 .tick .label {
   white-space: normal;
   line-height: 1.2;
-}
-
-/* The delayed commit: the shrinking line is the time left to take the click back. */
-.drain {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  height: 3px;
-  width: 100%;
-  background: var(--done);
-  transform-origin: left;
-  animation-name: drain;
-  animation-timing-function: linear;
-  animation-fill-mode: forwards;
-}
-
-.btn-primary .drain {
-  background: var(--up-next-ink);
-  opacity: 0.5;
-}
-
-@keyframes drain {
-  from {
-    transform: scaleX(1);
-  }
-  to {
-    transform: scaleX(0);
-  }
 }
 
 /* ---------- checklist sets ---------- */
@@ -652,18 +621,14 @@ button:disabled {
   border-color: var(--done);
 }
 
-.circle.pending {
+.circle.committing {
   background: var(--done-wash);
   border-color: var(--done);
 }
 
-.circle.filled.pending {
+.circle.filled.committing {
   background: var(--done-wash);
   border-style: dashed;
-}
-
-.circle .drain {
-  height: 2px;
 }
 
 /* ---------- pursuit rows ---------- */
@@ -767,7 +732,6 @@ button:disabled {
   color: var(--done);
 }
 
-.mini.pending,
 .mini.committing {
   border-color: var(--done);
   color: var(--done);
@@ -831,10 +795,6 @@ button:disabled {
   padding: 0.55rem 1rem;
   font-size: 0.9rem;
   max-width: 80%;
-}
-
-.tick .note.undo {
-  color: var(--done);
 }
 
 .habits-bar {

@@ -74,10 +74,10 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 	_ = json.Unmarshal(must(os.ReadFile(f.desk.Paths.Panel)), &cached)
 	matches(t, compiler, panelSchema, "the panel the watch keeps", cached)
 	matches(t, compiler, panelSchema, "panel show under a ready nudge", f.desk.Show())
-	matches(t, compiler, "urn:doit:desk-nudge-status:v3", "status under a ready nudge", f.desk.Status())
+	matches(t, compiler, "urn:doit:desk-nudge-status:v4", "status under a ready nudge", f.desk.Status())
 
 	ctx := context.Background()
-	minutes, err := watch.Pick(ctx, "pursuit:read", nil)
+	minutes, err := watch.Pick(ctx, "pursuit:read", nil, true)
 	if err != nil || minutes.Step != StepMinutes || minutes.Minutes == nil ||
 		!slices.ContainsFunc(minutes.Rows, func(row Row) bool {
 			return row.Key != nil && *row.Key == "log_minutes:45:pursuit:read" && row.Suggested
@@ -86,45 +86,28 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 	}
 	matches(t, compiler, panelSchema, "a timed pursuit's minutes step", minutes)
 	for _, key := range []string{"log_minutes:45:pursuit:read", "pursuit:tasks:532", "habit:1"} {
-		done, err := watch.Pick(ctx, key, nil)
+		done, err := watch.Pick(ctx, key, nil, true)
 		if err != nil || done.Step != StepDone {
 			t.Fatalf("picking %s answered %+v, %v; want a done step", key, done, err)
 		}
 		matches(t, compiler, panelSchema, "the done step of "+key, done)
 	}
-	if ticked := f.ran("tick-task"); len(ticked) != 1 || !slices.Equal(ticked[0], []string{"tick-task", "532", `File the "receipts" now`}) {
-		t.Errorf("on_log ran %q, want the task's id and its label, quote and spaces kept, as one argument", ticked)
-	}
-	if completed := f.ran("life"); len(completed) != 1 || !slices.Equal(completed[0], habitProgram("1", f.clockNow().Format(dayLayout)).argv) {
-		t.Errorf("life ran %q, want habit 1 completed", completed)
-	}
 	if _, logs := f.posted(); len(logs) != 2 || logs[0]["duration_minutes"] != 45.0 || logs[1]["item"].(map[string]any)["label"] != `File the "receipts" now` {
 		t.Errorf("the journal took %v, want read logged at 45 minutes, then the task naming its item", logs)
 	}
 
-	const shownPick = panelSchema + "#/definitions/shown_pick"
-	for _, key := range []string{"tick:1", "habit:3"} {
-		made, err := watch.CreatePending(key, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		matches(t, compiler, shownPick, "the socket's answer to a click on "+key, made)
-	}
-	matches(t, compiler, "urn:doit:desk-nudge-status:v3", "status with picks pending", f.desk.Status())
-	matches(t, compiler, panelSchema, "panel show with picks pending", f.desk.Show())
-	canceled, err := watch.CreatePending("habit:3", nil)
-	if err != nil || canceled.State != OutcomeCanceled {
-		t.Fatalf("a second click on habit:3 answered %+v, %v; want its pick canceled", canceled, err)
-	}
-	matches(t, compiler, shownPick, "the socket's answer to a second click", canceled)
-	f.advance(pendingFor)
-	f.fireDue(watch)
+	f.lifeHolds("tick")
+	go func() { _, _ = watch.Pick(ctx, "tick:1", nil, false) }()
+	f.waitFor("the tick running", func() bool { return f.running("tick:1") })
+	matches(t, compiler, panelSchema, "panel show with a pick running", f.desk.Show())
+	f.releaseLife()
+	watch.Wait()
 	matches(t, compiler, panelSchema, "panel show with a tick done", f.desk.Show())
 
 	if _, err := f.desk.Pause(); err != nil {
 		t.Fatal(err)
 	}
-	matches(t, compiler, "urn:doit:desk-nudge-status:v3", "status while paused", f.desk.Status())
+	matches(t, compiler, "urn:doit:desk-nudge-status:v4", "status while paused", f.desk.Status())
 	if _, err := f.desk.Resume(); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +124,7 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 			t.Fatalf("an events line is not JSON: %q", line)
 		}
 		events = append(events, record.(map[string]any)["event"].(string))
-		matches(t, compiler, "urn:doit:desk-nudge-record:v4", "the events line "+line, record)
+		matches(t, compiler, "urn:doit:desk-nudge-record:v5", "the events line "+line, record)
 	}
 	for _, event := range []string{eventStarted, eventFired, eventPicked, eventPaused, eventResumed, eventAnswered} {
 		if !slices.Contains(events, event) {

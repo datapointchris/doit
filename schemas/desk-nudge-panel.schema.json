@@ -24,7 +24,7 @@
     "shown_pick": {
       "type": "object",
       "additionalProperties": false,
-      "description": "A click on the panel page, which the watch commits a few seconds after it, unless a second click on its key or a DELETE of its id takes it back first. The panel's picks show it, and the socket answers it.",
+      "description": "A pick of a row, from the panel page or a terminal, which the watch commits at once. The panel shows it while it runs, and how it ended.",
       "required": [
         "id",
         "key",
@@ -32,7 +32,6 @@
         "action",
         "state",
         "minutes",
-        "commit_at",
         "message",
         "ended_at"
       ],
@@ -40,15 +39,15 @@
         "id": {
           "type": "string",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "description": "The pick's UUIDv7, which DELETE /pending-picks/{id} takes back, its picked line names, and a pursuit's journal entry is kept under."
+          "description": "The pick's UUIDv7, which a pursuit's journal entry is kept under."
         },
         "key": {
           "type": "string",
-          "description": "The key that was clicked."
+          "description": "The key that was picked."
         },
         "text": {
           "type": "string",
-          "description": "The row's text when it was clicked."
+          "description": "The row's text when it was picked."
         },
         "action": {
           "enum": [
@@ -60,15 +59,13 @@
         },
         "state": {
           "enum": [
-            "pending",
             "committing",
             "done",
             "skipped",
             "refused",
-            "uncertain",
-            "canceled"
+            "uncertain"
           ],
-          "description": "pending until commit_at, committing while its command runs, then how it ended. done went through. skipped found the habit already done on the day it was clicked, so nothing ran. refused recorded nothing, so its row can be picked again. uncertain may have landed, as a timeout may, so its row is held until the view is read again. canceled was taken back before its commit, which only the socket's answers carry, because it changed nothing for a row to show."
+          "description": "committing while its command runs, then how it ended. done went through. skipped found the habit already done on the day it was picked, so nothing ran. refused recorded nothing, so its row can be picked again. uncertain may have landed, as a timeout may, so its row is held until the view is read again."
         },
         "minutes": {
           "type": [
@@ -76,11 +73,6 @@
             "null"
           ],
           "description": "The minutes it logs for a timed pursuit."
-        },
-        "commit_at": {
-          "type": "string",
-          "format": "date-time",
-          "description": "When it commits, a fixed few seconds after the click."
         },
         "message": {
           "type": [
@@ -184,7 +176,7 @@
     },
     "rows": {
       "type": "array",
-      "description": "What the step draws, in order. Today lists the notes, the suggestion, the answers while a nudge is ready, then each row that a pick completes. A row picked from a terminal leaves until the view is read again, and a row with a pending pick stays, showing how the pick stands. A minutes step lists its amounts, and a done step lists none.",
+      "description": "What the step draws, in order. Today lists the notes, the suggestion, the answers while a nudge is ready, then each row that a pick completes. A picked row stays, showing how its pick stands. A minutes step lists its amounts, and a done step lists none.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -272,7 +264,7 @@
           },
           "picks": {
             "type": "array",
-            "description": "The pending picks of the row's key and untick_key, then how each one that ended came out, in click order.",
+            "description": "The running picks of the row's key and untick_key, then how each one that ended came out, in the order picked.",
             "items": {
               "$ref": "#/definitions/shown_pick"
             }
@@ -345,7 +337,7 @@
     },
     "picks": {
       "type": "array",
-      "description": "Every pending pick, then each one that ended while the panel still shows it, in click order. A done or uncertain pick shows until a view read begins after it ended. A refused or skipped one shows until its key is picked again, or a view read begins on a later day. A canceled one is never shown.",
+      "description": "Every running pick, then each one that ended while the panel still shows it, in the order picked. A done or uncertain pick shows until a view read begins after it ended. A refused or skipped one shows until its key is picked again, or a view read begins on a later day.",
       "items": {
         "$ref": "#/definitions/shown_pick"
       }

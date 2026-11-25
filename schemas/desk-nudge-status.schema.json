@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:doit:desk-nudge-status:v3",
+  "$id": "urn:doit:desk-nudge-status:v4",
   "title": "doit desk-nudge status",
   "description": "Where the desk nudge's clock stands, read from this desk's state file with no request. Its pill is the state file's own pill object, which a status bar reads from the file. This file is the source of the shape, and a Go test validates what `doit desk-nudge status --json` prints against it.",
   "type": "object",
@@ -18,12 +18,11 @@
     "suggestion",
     "answer_counts",
     "queued_answer_count",
-    "pill",
-    "pending_picks"
+    "pill"
   ],
   "properties": {
     "schema_version": {
-      "const": 3
+      "const": 4
     },
     "phase": {
       "enum": [
@@ -210,13 +209,6 @@
           "format": "date-time",
           "description": "Past this, the pill reads `nudge stopped`."
         }
-      }
-    },
-    "pending_picks": {
-      "type": "array",
-      "description": "The panel page's clicks still waiting for their commit_at, or committing, in click order. Each one's state is pending or committing.",
-      "items": {
-        "$ref": "urn:doit:desk-nudge-panel:v3#/definitions/shown_pick"
       }
     }
   }

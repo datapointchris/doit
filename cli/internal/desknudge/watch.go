@@ -42,29 +42,17 @@ type Watch struct {
 	panelRead    time.Time
 	started      binaryID
 
-	// after starts a pending pick's timer, and answers what stops it.
-	after func(time.Duration, func()) func() bool
 	// drainFor is how long an exit waits, drainWithin outside a test.
 	drainFor time.Duration
-	// commitCtx outlives the asker's request and the watch's stop, because a commit under way runs to its end.
+	// commitCtx outlives the watch's stop, because a pick taken up at its start runs to its end.
 	commitCtx context.Context
-	// pending guards the pending picks' timers and which commits run.
-	pending    sync.Mutex
-	timers     map[string]func() bool
-	fired      map[string]bool
-	taken      map[string]bool
-	committing map[string]bool
-	draining   bool
+	turns     pickTurns
 }
 
 // NewWatch is a watch over desk.
 func NewWatch(desk *Desk) *Watch {
 	executable, _ := os.Executable()
-	return &Watch{
-		desk: desk, Executable: executable, drainFor: drainWithin, commitCtx: context.Background(),
-		after:  func(delay time.Duration, run func()) func() bool { return time.AfterFunc(delay, run).Stop },
-		timers: map[string]func() bool{}, fired: map[string]bool{}, taken: map[string]bool{}, committing: map[string]bool{},
-	}
+	return &Watch{desk: desk, Executable: executable, drainFor: drainWithin, commitCtx: context.Background()}
 }
 
 // ErrAnotherWatch is a watch already running on this desk.
@@ -106,14 +94,13 @@ func (w *Watch) Run(ctx context.Context) error {
 	}
 }
 
-// drain stops the socket, commits each pending pick now, and waits for what is
-// under way, within drainFor. A pick still committing at the deadline stays
+// drain stops the socket and the page, and waits for each pick and request
+// under way, within drainFor. A pick still running at the deadline stays
 // marked started, and the next watch follows the restart rules for it.
 func (w *Watch) drain(serving *server) error {
 	ctx, cancel := context.WithTimeout(context.Background(), w.drainFor)
 	defer cancel()
 	serving.stop(ctx)
-	w.drainPending()
 	done := make(chan struct{})
 	go func() { w.work.Wait(); close(done) }()
 	select {
@@ -140,7 +127,7 @@ func (w *Watch) background(busy *atomic.Bool, run func()) {
 func (w *Watch) Wait() { w.work.Wait() }
 
 // Start writes started, then finishes a nudge that a stopped watch left firing,
-// and takes up the pending picks it left. A ready nudge stays on the pill, unchimed.
+// and takes up the picks it left running. A ready nudge stays on the pill, unchimed.
 func (w *Watch) Start(ctx context.Context) {
 	w.commitCtx = context.WithoutCancel(ctx)
 	moment := w.desk.Now()
@@ -167,7 +154,7 @@ func (w *Watch) Start(ctx context.Context) {
 	if left != nil {
 		w.background(&w.firing, func() { w.fire(ctx, *left) })
 	}
-	w.resumePending()
+	w.resumeRunning()
 	w.refreshIntervalWhenDue(ctx)
 	w.readPanelWhenDue(ctx)
 }
@@ -331,14 +318,16 @@ func suggestionFrom(view *View, err error) *Suggestion {
 	return &Suggestion{Pursuit: drawn.Pursuit, ItemID: drawn.ItemID, Label: drawn.Label}
 }
 
-// Pick runs one pick for the socket, and asks for the parts to be read again once it went through.
-func (w *Watch) Pick(ctx context.Context, key string, minutes *int) (Panel, error) {
+// Pick runs one pick for the socket or the page, and asks for the parts to be
+// read again once it ran. notifyDone is whether a pick that went through is
+// notified, which the page's own row says already.
+func (w *Watch) Pick(ctx context.Context, key string, minutes *int, notifyDone bool) (Panel, error) {
 	var answered Panel
 	var err error
 	done := make(chan struct{})
 	w.work.Go(func() {
 		defer close(done)
-		answered, err = w.desk.Pick(ctx, key, minutes, func() { w.readWanted.Store(true) })
+		answered, err = w.pick(ctx, key, minutes, notifyDone)
 		w.readPanelWhenDue(ctx)
 	})
 	<-done

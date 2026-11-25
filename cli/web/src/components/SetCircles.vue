@@ -9,16 +9,11 @@
         :key="circle.index"
         type="button"
         class="circle"
-        :class="{ filled: circle.filled, pending: circle.pick !== null }"
+        :class="{ filled: circle.filled, committing: circle.pick !== null }"
         :data-key="circle.key"
         :disabled="circle.key === null || committing"
         :aria-label="circle.label"
-        @click="circle.key && emit('pick', circle.key)">
-        <PickDrain
-          v-if="circle.pick?.state === 'pending'"
-          :key="circle.pick.id"
-          :commit-at="circle.pick.commit_at" />
-      </button>
+        @click="circle.key && emit('pick', circle.key)"></button>
     </span>
     <span class="count">{{ sets }}/{{ item.target }}</span>
   </div>
@@ -27,23 +22,22 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { pickOf, setsCounted, underWay, type ChecklistItem, type ShownPick } from '../panel'
-import PickDrain from './PickDrain.vue'
 
 const props = defineProps<{ item: ChecklistItem; picks: ShownPick[] }>()
 const emit = defineEmits<{ pick: [key: string] }>()
 
 const sets = computed(() => setsCounted(props.item, props.picks))
-const waiting = (key: string | null) => {
+const running = (key: string | null) => {
   const pick = pickOf(props.picks, key)
   return pick && underWay(pick) ? pick : null
 }
-const tick = computed(() => waiting(props.item.key))
-const untick = computed(() => waiting(props.item.untick_key))
-const committing = computed(() => tick.value?.state === 'committing' || untick.value?.state === 'committing')
+const tick = computed(() => running(props.item.key))
+const untick = computed(() => running(props.item.untick_key))
+const committing = computed(() => tick.value !== null || untick.value !== null)
 
 // Each circle is one set: a filled one takes the latest set back, and an empty
-// one adds a set. A tick waiting shows on the first empty circle, and an
-// untick waiting on the last filled one.
+// one adds a set. A tick running shows on the first empty circle, and an
+// untick running on the last filled one.
 const circles = computed(() => {
   const count = Math.max(props.item.target, sets.value + (tick.value ? 1 : 0))
   return Array.from({ length: count }, (_, index) => {

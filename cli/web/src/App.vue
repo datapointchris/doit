@@ -60,7 +60,7 @@
     </div>
     <footer class="foot full">
       <span>
-        A click completes a row in a few seconds, and a second click takes it back.
+        A click completes a row at once.
         <span
           v-if="view.problems.length"
           class="problems">

@@ -4,7 +4,7 @@ import * as watch from './watch'
 
 /** How often a page that stays visible checks whether the desk's day changed. */
 export const ROLLOVER_POLL_MS = 60_000
-/** How often a committing pick is read again. A pending one is read just after its commit_at. */
+/** How often a pick that runs from elsewhere, such as a terminal, is read again. */
 const COMMITTING_POLL_MS = 1_000
 /** How often an ended pick is read again, until the watch's next read of the view takes it in. */
 const SETTLING_POLL_MS = 3_000
@@ -48,8 +48,11 @@ export function createPanelStore(now: () => Date = () => new Date()) {
   })
   // Each section's rows by identity, ordered as the page first drew them.
   const placed = new Map<string, Map<string, unknown>>()
-  // The picks seen under way here by id, so that each one's end is told once.
-  const seenUnderWay = new Map<string, ShownPick>()
+  // The picks the watch listed at the latest read.
+  let listed: ShownPick[] = []
+  // This page's clicks still waiting for the watch's answer, by key, each drawn committing.
+  const clicks = new Map<string, ShownPick>()
+  let clicked = 0
   let reading: Promise<void> | null = null
   let timer: ReturnType<typeof setTimeout> | undefined
   let noticeTimer: ReturnType<typeof setTimeout> | undefined
@@ -69,39 +72,24 @@ export function createPanelStore(now: () => Date = () => new Date()) {
     if (!state.done.includes(key)) state.done.push(key)
   }
 
-  async function apply(panel: Panel) {
-    const listed = new Set(panel.picks.map((pick) => pick.id))
-    for (const pick of panel.picks) {
-      if (underWay(pick)) {
-        seenUnderWay.set(pick.id, pick)
-        continue
-      }
-      if (pick.state === 'done' || pick.state === 'skipped') markDone(pick.key)
-      if (seenUnderWay.delete(pick.id)) tell(endedText(pick))
-    }
-    // The watch's next read of the view drops a done, uncertain or canceled
-    // pick from the list, and that read may begin before this page's next one.
-    // So the page asks the watch how each pick it saw under way ended, before it
-    // draws the panel, so a row whose pick went through keeps its place.
-    const left = [...seenUnderWay.values()].filter((pick) => !listed.has(pick.id))
-    await Promise.all(left.map(settle))
+  /** The watch's picks, then each of this page's clicks that the watch does not list running. */
+  function withClicks(picks: ShownPick[]): ShownPick[] {
+    const running = (key: string) => picks.some((pick) => pick.key === key && underWay(pick))
+    return [...picks, ...[...clicks.values()].filter((click) => !running(click.key))]
+  }
+
+  function redraw() {
+    if (state.panel) state.panel.picks = withClicks(listed)
+  }
+
+  function apply(panel: Panel) {
+    for (const pick of panel.picks) if (pick.state === 'done' || pick.state === 'skipped') markDone(pick.key)
     for (const held of panel.picked) markDone(held.key)
+    listed = panel.picks
+    panel.picks = withClicks(listed)
     state.panel = panel
     state.unanswered = null
     state.cutOff = false
-  }
-
-  async function settle(pick: ShownPick) {
-    const answered = await watch.readPick(pick.id)
-    if (answered.ok && underWay(answered.body)) return
-    if (answered.ok) {
-      seenUnderWay.delete(pick.id)
-      if (answered.body.state === 'done' || answered.body.state === 'skipped') markDone(answered.body.key)
-      tell(endedText(answered.body))
-    } else if (answered.status === 404) {
-      seenUnderWay.delete(pick.id)
-      tell(`${pick.text}: the watch no longer says how it ended, so its row shows what the latest read found.`)
-    }
   }
 
   function schedule() {
@@ -116,9 +104,10 @@ export function createPanelStore(now: () => Date = () => new Date()) {
     const readAt = panel.read_at ? Date.parse(panel.read_at) : 0
     const waits: number[] = []
     for (const pick of panel.picks) {
-      if (pick.state === 'pending') waits.push(Math.max(Date.parse(pick.commit_at) - moment + 250, 250))
-      else if (pick.state === 'committing') waits.push(COMMITTING_POLL_MS)
-      else if (pick.ended_at && Date.parse(pick.ended_at) >= readAt && moment - Date.parse(pick.ended_at) < SETTLING_FOR_MS)
+      // A click's own answer reads the panel again, so only a pick from elsewhere is polled while it runs.
+      if (pick.state === 'committing') {
+        if (!clicks.has(pick.key)) waits.push(COMMITTING_POLL_MS)
+      } else if (pick.ended_at && Date.parse(pick.ended_at) >= readAt && moment - Date.parse(pick.ended_at) < SETTLING_FOR_MS)
         waits.push(SETTLING_POLL_MS)
     }
     if (waits.length) timer = setTimeout(() => void load(), Math.min(...waits))
@@ -128,7 +117,7 @@ export function createPanelStore(now: () => Date = () => new Date()) {
   function load(): Promise<void> {
     reading ??= (async () => {
       const answered = await watch.readPanel()
-      if (answered.ok) await apply(answered.body)
+      if (answered.ok) apply(answered.body)
       else {
         state.unanswered = answered.message
         state.cutOff = answered.status === 0 || answered.status === 403
@@ -150,61 +139,38 @@ export function createPanelStore(now: () => Date = () => new Date()) {
     await load()
   }
 
-  function upsert(pick: ShownPick) {
-    const panel = state.panel
-    if (!panel) return
-    panel.picks = [...panel.picks.filter((shown) => shown.id !== pick.id), pick]
-    if (underWay(pick)) seenUnderWay.set(pick.id, pick)
-  }
-
-  function drop(id: string) {
-    const panel = state.panel
-    if (panel) panel.picks = panel.picks.filter((shown) => shown.id !== id)
-    seenUnderWay.delete(id)
-  }
-
-  async function takeBack(pick: ShownPick) {
-    const answered = await watch.takeBack(pick.id)
-    if (answered.ok) {
-      drop(pick.id)
-      tell(`Took back ${pick.text}. Nothing was written.`)
-    } else {
-      tell(answered.message)
-      await load()
-    }
-    schedule()
-  }
-
   /**
-   * One click on a row of key. A click on a row whose pick waits takes it back,
-   * and any other starts a pick that the watch commits a few seconds later.
+   * One click on a row of key, which the watch commits in the request. A click
+   * on a row whose pick still runs does nothing, so a double click is one pick.
+   * No answer leaves whether it landed unknown, so the page reads the panel and
+   * never sends the click again.
    */
   async function click(key: string, minutes: number | null = null) {
-    const shown = pickOf(picks(), key)
-    if (shown?.state === 'pending') return takeBack(shown)
-    if (shown?.state === 'committing') {
-      tell(`${shown.text} is committing, so it can no longer be taken back.`)
-      return
-    }
-    const answered = await watch.click(key, minutes)
-    if (!answered.ok) {
-      tell(answered.message)
-      // No answer leaves whether it landed unknown, and a second POST would be a second click.
-      if (answered.status === 0) await load()
-      return
-    }
-    if (answered.body.state === 'canceled') {
-      drop(answered.body.id)
-      tell(`Took back ${answered.body.text}. Nothing was written.`)
-    } else {
-      upsert(answered.body)
-    }
-    schedule()
+    if (clicks.has(key) || pickOf(picks(), key)?.state === 'committing') return
+    clicks.set(key, {
+      id: `click-${++clicked}`,
+      key,
+      text: key,
+      action: 'complete',
+      state: 'committing',
+      minutes,
+      message: null,
+      ended_at: null,
+    })
+    redraw()
+    const answered = await watch.pick(key, minutes)
+    clicks.delete(key)
+    redraw()
+    if (answered.ok) markDone(key)
+    await load()
+    const ended = pickOf(picks(), key)
+    if (ended && !underWay(ended)) tell(endedText(ended))
+    else tell(answered.ok ? `Done: ${answered.body.message ?? key}.` : answered.message)
   }
 
   /** An answer to the nudge, which acts at once. */
   async function answer(key: string, label: string) {
-    const answered = await watch.pickNow(key)
+    const answered = await watch.pick(key, null)
     tell(answered.ok ? `Answered the nudge: ${label}.` : answered.message)
     await load()
   }
@@ -258,8 +224,6 @@ function endedText(pick: ShownPick): string {
       return `${pick.text}: done.`
     case 'skipped':
       return `${pick.text}: ${pick.message ?? 'already done'}.`
-    case 'canceled':
-      return `${pick.text} was taken back. Nothing was written.`
     default:
       return pick.message ? `${pick.text}: ${pick.message}` : `${pick.text}: ${pick.state}.`
   }
