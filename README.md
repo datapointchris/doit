@@ -580,10 +580,10 @@ would stop a second set.
 ### `doit tui` draws the panel in the terminal, where a click or a key completes a row
 
 ```bash
-doit tui                                  # open doit's screens
-doit tui --view now                       # open on the panel by name
-COLUMNS=120 LINES=30 doit tui --once      # print the now tab's frame, then exit
-doit tui --view now --json                # print the panel document the now tab draws
+doit tui                                  # open on the tab last moved to
+doit tui --view now                       # open on the now tab
+COLUMNS=120 LINES=30 doit tui --once      # print the opening tab's frame, then exit
+doit tui --view now --json                # print the now tab's snapshot
 ```
 
 `doit tui` is one program on Bubble Tea with a tab per view. Its `now` tab draws the suggestion
@@ -594,13 +594,17 @@ another row closes those minutes first and completes nothing. While a nudge is r
 sits on a number key and a footer hint that a click also runs. A note, such as why the rows are
 old, draws above the table.
 
-The tab reads the rows every 15 seconds with the same code as `doit desk-nudge panel show`, from
+The tab reads the rows again on a timer, with the same code as `doit desk-nudge panel show`, from
 the files the watch writes. It hands each pick to the watch over its socket, as `panel pick` does.
 So the board parses no key, and doit keeps every rule about what a row is and what a pick does.
 
-`--once` prints one frame at `COLUMNS` by `LINES`. `--json` prints the tab's panel document, whose
-shape `schemas/desk-nudge-panel.schema.json` defines. With no terminal and neither flag, `doit tui`
-refuses with exit 2 and names both.
+The next run opens on the tab last moved to, unless `--view` names one. Each tab keeps its panel,
+its summaries, and the groups folded and rows opened, in `$XDG_STATE_HOME/doit/tui-display.json`.
+
+`--once` prints one frame at `COLUMNS` by `LINES`, and `--json` the tab's snapshot, so an agent
+reads what a person reads. A snapshot follows what its tab draws. A program that reads the panel's
+rows reads `doit desk-nudge panel show --json`, whose shape `schemas/desk-nudge-panel.schema.json`
+defines. With no terminal and neither flag, `doit tui` refuses with exit 2 and names both.
 
 ## The service — one store, and every view computed behind it
 

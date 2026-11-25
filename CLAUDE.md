@@ -179,7 +179,8 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
 - **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer and the
   machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no Python and no request,
   each file rewritten by the command that fetches it, and the desk nudge panel's rows, which the
-  watch rewrites and `panel show` reads. `doit config show` prints each of these with
+  watch rewrites and `panel show` reads. `$XDG_STATE_HOME/doit/tui-display.json` keeps the tab
+  and display that `doit tui` was left on. `doit config show` prints each of these with
   where it came from, and a value doit newly resolves gets a row there.
 - **Held logs** — `$XDG_STATE_HOME/doit/held-logs/` keeps each pursuit log from just before its
   post until the service answers it, one file per entry, named by its id. Where the answer is lost,

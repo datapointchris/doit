@@ -16,10 +16,8 @@ import (
 // NowTab is the tab of today's rows on the desk nudge panel.
 const NowTab = "now"
 
-// TabNames is every tab, in the order Tab cycles them.
-func TabNames() []string { return []string{NowTab} }
-
-// panelReadEvery is how often the now tab reads the panel again. A read opens two files on this desk.
+// panelReadEvery is how often the now tab reads the panel again. A read opens only local files, so
+// it is cheap to repeat.
 const panelReadEvery = 15 * time.Second
 
 // Panel is how the now tab reaches the desk nudge panel, which holds every rule about what a row
@@ -35,8 +33,7 @@ type DeskPanel struct{ Desk *desknudge.Desk }
 
 func (p DeskPanel) Show() desknudge.Panel { return p.Desk.Show() }
 
-// Pick needs no bound of its own. The watch bounds each request and program of a pick, and
-// AskPick sets a bound well past those.
+// Pick sets no bound of its own, and takes the one AskPick sets.
 func (p DeskPanel) Pick(ctx context.Context, key string) (desknudge.Panel, error) {
 	step, err := p.Desk.Paths.AskPick(ctx, key, nil)
 	if said, _, ok := desknudge.PickFailure(err); ok {

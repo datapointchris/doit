@@ -156,9 +156,10 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Before the Python package reaches the index, which waits on this. This
-  # binary runs every verb and starts no doit-python, so it works beside any
-  # earlier doit-python on a desk.
+  # Before the Python package reaches the index, which waits on this. An
+  # earlier Go doit hands `doit tui` to `doit-python tui`, and the package
+  # published after this carries no `tui`. Publishing this release first lets
+  # `doit update` fix that desk.
   cli-publish:
     name: Publish the Go doit's release
     needs: [release, cli-version, cli-build]

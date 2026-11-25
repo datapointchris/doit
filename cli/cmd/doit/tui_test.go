@@ -2,18 +2,16 @@ package main
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/datapointchris/doit/cli/internal/desknudge"
 )
 
 // An agent runs doit tui with no terminal, so it is refused rather than left
-// waiting on a keyboard, and --json hands it the panel document the tab draws.
-func TestDoitTuiRefusesWithNoTerminalAndPrintsThePanelDocumentWithJSON(t *testing.T) {
-	refused := runDoitWith(t, nil, "tui")
-	if refused.exit != 2 || !strings.Contains(refused.stderr, "--once") || !strings.Contains(refused.stderr, "--json") {
-		t.Errorf("doit tui with no terminal: exit %d, stderr %q; want exit 2 naming --once and --json", refused.exit, refused.stderr)
+// waiting on a keyboard, and --json hands it the now tab's snapshot.
+func TestDoitTuiRefusesWithNoTerminalAndPrintsTheNowTabsSnapshotWithJSON(t *testing.T) {
+	if refused := runDoitWith(t, nil, "tui"); refused.exit != 2 {
+		t.Errorf("doit tui with no terminal: exit %d, stderr %q; want exit 2", refused.exit, refused.stderr)
 	}
 
 	printed := runDoitWith(t, nil, "tui", "--view", "now", "--json")

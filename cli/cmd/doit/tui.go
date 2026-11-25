@@ -16,12 +16,6 @@ import (
 	"github.com/datapointchris/doit/cli/internal/tui"
 )
 
-// The frame --once draws where COLUMNS and LINES are unset and stdout is no terminal.
-const (
-	onceFallbackWidth  = 120
-	onceFallbackHeight = 40
-)
-
 func newTUICommand() *cobra.Command {
 	var view string
 	var once, asJSON bool
@@ -37,13 +31,17 @@ func newTUICommand() *cobra.Command {
 			"does what its key does. It reads the rows as `doit desk-nudge panel show` does, from the\n" +
 			"files the desk nudge watch writes, and hands each pick to the watch as `doit desk-nudge\n" +
 			"panel pick` does.\n\n" +
-			"--once prints one frame of the tab at COLUMNS by LINES, and --json the panel document it\n" +
-			"is drawn from, so an agent reads what a person reads. With no terminal and neither flag\n" +
-			"it refuses, and exits 2.",
-		Example: "  doit tui                                   open on the now tab\n" +
-			"  doit tui --view now                        open on the now tab by name\n" +
-			"  COLUMNS=120 LINES=30 doit tui --once       print the now tab's frame, then exit\n" +
-			"  doit tui --view now --json | jq '.rows[]'  the rows the now tab draws, as data",
+			"The next run opens on the tab last moved to, unless --view names one. Each tab keeps its\n" +
+			"panel, its summaries, and the groups folded and rows opened, in\n" +
+			"$XDG_STATE_HOME/doit/tui-display.json.\n\n" +
+			"--once prints one frame of the tab at COLUMNS by LINES, and --json the snapshot it is\n" +
+			"drawn from, so an agent reads what a person reads. A program that reads the panel's rows\n" +
+			"reads `doit desk-nudge panel show --json`. With no terminal and neither flag it refuses,\n" +
+			"and exits 2.",
+		Example: "  doit tui                                open on the tab last moved to\n" +
+			"  doit tui --view now                     open on the now tab\n" +
+			"  COLUMNS=120 LINES=30 doit tui --once    print the opening tab's frame, then exit\n" +
+			"  doit tui --view now --json              print the now tab's snapshot",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := gotermboard.RefuseUnknownView(view, tui.TabNames()); err != nil {
@@ -56,17 +54,16 @@ func newTUICommand() *cobra.Command {
 			if !printing && !onTerminal() {
 				return goclikit.UsageError(errors.New("doit tui needs a terminal; --once prints one frame and --json the snapshot"))
 			}
-			now := tui.NewNowBoard(tui.DeskPanel{Desk: desknudge.ThisDesk(version)})
+			in := tui.Inputs{Panel: tui.DeskPanel{Desk: desknudge.ThisDesk(version)}}
 			pal := gotermstyle.PaletteFor(os.Stdout)
 			if printing {
-				gotermboard.RefreshAll(cmd.Context(), now.Sources()...)
-				return gotermboard.PrintTab(cmd.OutOrStdout(), asJSON, now, pal, onceFallbackWidth, onceFallbackHeight)
+				return tui.Print(cmd.Context(), cmd.OutOrStdout(), in, view, asJSON, pal)
 			}
-			tabs, err := gotermboard.NewTabs([]gotermboard.Tab{{Name: tui.NowTab, Board: now}}, pal, view)
+			program, err := tui.Program(in, pal, view)
 			if err != nil {
 				return err
 			}
-			_, err = tea.NewProgram(tabs).Run()
+			_, err = tea.NewProgram(program).Run()
 			return err
 		},
 	}
