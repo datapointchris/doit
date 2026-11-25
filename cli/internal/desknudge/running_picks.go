@@ -201,60 +201,74 @@ func (w *Watch) resumeRunning() {
 		w.work.Go(func() {
 			defer leave()
 			<-before
-			seen := takeSnapshot(w.commitCtx)
-			d.endRunning(w.commitCtx, pick, d.committed(w.commitCtx, pick, true), seen, false, d.Now())
-			w.readWanted.Store(true)
+			w.commitRunning(w.commitCtx, pick, true, false, d.Now())
 		})
 	}
 }
 
+// commitRunning commits a pick that the state file marks running, in its
+// turn, and ends it with how it came out, writing its picked line at at. The
+// watch then reads the view again, because the pick may have changed it.
+func (w *Watch) commitRunning(ctx context.Context, pick RunningPick, resumed, notifyDone bool, at time.Time) completion {
+	d := w.desk
+	seen := takeSnapshot(ctx)
+	outcome := d.endRunning(ctx, pick, d.committed(ctx, pick, resumed), seen, notifyDone, at)
+	w.readWanted.Store(true)
+	return outcome
+}
+
 // committed runs a running pick through its owner, on the desk's day when it
-// was picked, which a restart past midnight keeps. A habit is read again first,
-// because life accepts a second completion. On a restart, a pick that was
-// running follows these rules:
+// was picked, which a restart past midnight keeps. Each key kind runs one
+// thing, and resumed is a restart taking up a pick that was running:
 //
-//	habit             read again, which skips a habit already done that day
-//	pursuit           its saved entry sent again under the pick's id, which the service stores once; with none saved, nothing ran, so it runs whole
-//	review, practice  marked done again on the day it was picked, which the service stores once
-//	tick, untick      recorded uncertain and never run again, because life habits tick carries no key
+//	habit:<id>               life habits complete <id> --date <day>, once a read of the day's completions finds it not done; resumed, the same
+//	tick:<item>              life habits tick <item> --date <day>; resumed, recorded uncertain and never run again, because life habits tick carries no key
+//	untick:<item>            life habits untick <item> --date <day>; resumed, as a tick
+//	pursuit:<name>[:<item>]  its on_log, then POST /journal/done; resumed, its saved entry sent again under the pick's id, which the service stores once, or with none saved it runs whole
+//	<kind>:<entry>           POST /review/<entry>/completions, for review, practice and every register; resumed, the same, which the service stores once a day
+//
+// Where no case names the kind, the row is a review register's entry, so a
+// new register's rows complete with no change here.
 func (d *Desk) committed(ctx context.Context, pick RunningPick, resumed bool) completion {
 	found := entry{key: pick.Key, completes: pick.Completes, action: pick.Action, text: pick.Text}
 	picked, _ := instant(&pick.PickedAt)
 	day := picked.Format(dayLayout)
-	switch {
-	case resumed && setAction(pick.Action):
-		return completion{
-			summary: "doit: " + pick.Text + " may not have changed", exitCode: PickFailed,
-			body: "the watch stopped while `" + shellJoin(setProgram(pick.Action, *pick.Completes.ItemID, day).argv) + "` ran, so whether it landed is not known, and it is not run again",
-		}
-	case pick.Action == ActionComplete && pick.Completes.Kind == KindHabit:
-		done, err := habitDoneOn(ctx, pick.Completes.Ref, day)
-		if err != nil {
+	switch pick.Action {
+	case ActionTick, ActionUntick:
+		changes := setProgram(pick.Action, *pick.Completes.ItemID, day)
+		if resumed {
 			return completion{
-				summary: "doit: habit not completed", exitCode: PickFailed, recordedNothing: true,
-				body: "life's completions could not be read again, so " + pick.Text + " was not completed: " + err.Error(),
+				summary: "doit: " + pick.Text + " may not have changed", exitCode: PickFailed,
+				body: "the watch stopped while `" + shellJoin(changes.argv) + "` ran, so whether it landed is not known, and it is not run again",
 			}
 		}
-		if done {
-			said := "already done on " + day
-			if day == d.Now().Format(dayLayout) {
-				said = "already done today"
-			}
-			return completion{summary: "doit: " + pick.Text + " not completed", body: said, exitCode: PickRefused, skipped: true}
+		if pick.Action == ActionUntick {
+			return setChanged(ctx, found, changes, "set taken back", "set not taken back")
 		}
-	case pick.Completes.Kind == KindPursuit && resumed && pick.Log != nil:
-		return resentLog(d.postedLog(ctx, pick.Log), pick.Log)
-	case pick.Completes.Kind == KindPursuit:
-		return d.loggedPursuit(ctx, pick.Completes, pick.Minutes, logWrite{id: pick.ID, save: func(body map[string]any) error {
-			return d.Paths.change(func(state *State) error {
-				if saved := state.runningPick(pick.ID); saved != nil {
-					saved.Log = body
-				}
-				return nil
-			})
-		}})
+		return setChanged(ctx, found, changes, "set ticked", "set not ticked")
+	case ActionComplete:
+		switch pick.Completes.Kind {
+		case KindHabit:
+			return d.completedHabit(ctx, found, day)
+		case KindPursuit:
+			if resumed && pick.Log != nil {
+				return resentLog(d.postedLog(ctx, pick.Log), pick.Log)
+			}
+			return d.loggedPursuit(ctx, pick.Completes, pick.Minutes, logWrite{id: pick.ID, save: func(body map[string]any) error {
+				return d.Paths.change(func(state *State) error {
+					if saved := state.runningPick(pick.ID); saved != nil {
+						saved.Log = body
+					}
+					return nil
+				})
+			}})
+		}
+		return d.markedReviewDone(ctx, pick.Completes.Ref, day)
 	}
-	return d.completed(ctx, found, pick.Minutes, logWrite{id: pick.ID}, picked)
+	return completion{
+		summary: "doit: not picked", exitCode: PickRefused, recordedNothing: true,
+		body: fmt.Sprintf("%s names action %q, which the watch does not run", pick.Text, pick.Action),
+	}
 }
 
 // resentLog is a resent entry's outcome. One saved as its on_log began says

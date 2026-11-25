@@ -225,9 +225,7 @@ func (w *Watch) complete(ctx context.Context, found entry, minutes *int, notifyD
 	if !took {
 		return d.refuse(ctx, refused("%s is picked already, and is taken again once the watch reads the rows again", found.text))
 	}
-	seen := takeSnapshot(ctx)
-	outcome := d.endRunning(ctx, pick, d.committed(ctx, pick, false), seen, notifyDone, moment)
-	w.readWanted.Store(true)
+	outcome := w.commitRunning(ctx, pick, false, notifyDone, moment)
 	if !outcome.ok {
 		return Panel{}, &PickError{ExitCode: outcome.exitCode, Message: strings.TrimPrefix(outcome.summary, "doit: ") + ": " + outcome.body}
 	}
@@ -297,41 +295,6 @@ func (c completion) fields(target Completes, action string, minutes *int) picked
 	}
 }
 
-// completed acts on one row through its owner, with what doit builds from the
-// row's completes. picked is when the person picked it: a habit, a set and a
-// review entry each land on that day. Where no case below names the kind, the
-// row is a review register's entry, so a new register's rows complete with no
-// change here.
-//
-// Each key kind and what it runs:
-//
-//	habit:<id>               life habits complete <id> --date <day>
-//	tick:<item>              life habits tick <item> --date <day>
-//	untick:<item>            life habits untick <item> --date <day>
-//	pursuit:<name>[:<item>]  its on_log, then POST /journal/done
-//	<kind>:<entry>           POST /review/<entry>/completions, for review, practice and every register
-func (d *Desk) completed(ctx context.Context, found entry, minutes *int, journal logWrite, picked time.Time) completion {
-	day := picked.Format(dayLayout)
-	switch found.actionOf() {
-	case ActionTick:
-		return setChanged(ctx, found, tickProgram(*found.completes.ItemID, day), "set ticked", "set not ticked")
-	case ActionUntick:
-		return setChanged(ctx, found, untickProgram(*found.completes.ItemID, day), "set taken back", "set not taken back")
-	case ActionComplete:
-		switch found.completes.Kind {
-		case KindPursuit:
-			return d.loggedPursuit(ctx, found.completes, minutes, journal)
-		case KindHabit:
-			return completedHabit(ctx, found, day)
-		}
-		return d.markedReviewDone(ctx, found.completes.Ref, day)
-	}
-	return completion{
-		summary: "doit: not picked", exitCode: PickRefused, recordedNothing: true,
-		body: fmt.Sprintf("%s names action %q, which the watch does not run", found.text, found.actionOf()),
-	}
-}
-
 // lifeFailed is how a life habits call that failed ends. One that ran out of
 // time may have landed, so it holds the row. Any other failure recorded nothing.
 func lifeFailed(err error, summary string) completion {
@@ -340,8 +303,24 @@ func lifeFailed(err error, summary string) completion {
 	return completion{summary: "doit: " + summary, body: err.Error(), exitCode: PickFailed, recordedNothing: !timedOut}
 }
 
-// completedHabit runs life habits complete on day.
-func completedHabit(ctx context.Context, found entry, day string) completion {
+// completedHabit runs life habits complete on day, once a read of day's
+// completions finds the habit not done there, because life accepts a second
+// completion of a habit.
+func (d *Desk) completedHabit(ctx context.Context, found entry, day string) completion {
+	done, err := habitDoneOn(ctx, found.completes.Ref, day)
+	if err != nil {
+		return completion{
+			summary: "doit: habit not completed", exitCode: PickFailed, recordedNothing: true,
+			body: "life's completions could not be read again, so " + found.text + " was not completed: " + err.Error(),
+		}
+	}
+	if done {
+		said := "already done on " + day
+		if day == d.Now().Format(dayLayout) {
+			said = "already done today"
+		}
+		return completion{summary: "doit: " + found.text + " not completed", body: said, exitCode: PickRefused, skipped: true}
+	}
 	if _, err := habitProgram(found.completes.Ref, day).run(ctx); err != nil {
 		return lifeFailed(err, "habit not completed")
 	}
