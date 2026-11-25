@@ -1,15 +1,11 @@
-"""Who did a thing: the identity a record is stamped with, and which kind of actor it names.
+"""Who did a thing and where: which kind of actor a recorded identity names, and how a machine is named.
 
-The identity is spelled the way a slate issue's `closed_by` is, so a journal
-entry and an issue close read alike and one `kind` sorts both.
+The Go doit stamps each write with its identity, in the grammar that
+`cli/internal/actor` documents. `kind` reads that grammar back.
 """
 
-import os
 import re
 import socket
-
-# Set by the scheduler on every job it runs, as `<job>@<machine>`.
-SCHEDULED_JOB_ENV = 'SLATE_ACTOR'
 
 BY_HAND = 'by hand'
 SESSION = 'session'
@@ -17,30 +13,6 @@ UNATTENDED = 'unattended'
 UNKNOWN = 'unknown'
 
 USER_AT_HOST = re.compile(r'[^/@\s]+@[^/@\s]+|[^/@\s]+')
-
-
-def identity() -> str:
-    """This process's actor: a Claude session, a scheduled job, or the user at this host."""
-    job = os.environ.get(SCHEDULED_JOB_ENV, '')
-    session = os.environ.get('CLAUDE_CODE_SESSION_ID', '')
-    if session:
-        if job:
-            return f'claude-code-unattended/{job}/{session}'
-        if os.environ.get('CLAUDE_CODE_SESSION_ATTENDED') == '0':
-            return f'claude-code-unattended/{session}'
-        return f'claude-code/{session}'
-    if job:
-        return f'worker/{job}'
-    user = os.environ.get('USER') or 'unknown'
-    host = socket.gethostname()
-    return f'{user}@{host}' if host else user
-
-
-def identity_source() -> str:
-    """The variable that decided `identity`, as a person reads it."""
-    if os.environ.get('CLAUDE_CODE_SESSION_ID'):
-        return '$CLAUDE_CODE_SESSION_ID'
-    return f'${SCHEDULED_JOB_ENV}' if os.environ.get(SCHEDULED_JOB_ENV) else '$USER and the hostname'
 
 
 def kind(recorded: str) -> str:
@@ -57,3 +29,17 @@ def kind(recorded: str) -> str:
     if recorded.startswith('claude-code/'):
         return SESSION
     return BY_HAND if USER_AT_HOST.fullmatch(recorded) else UNKNOWN
+
+
+def machine_name() -> str:
+    """This machine's identity: the bare lowercased hostname, no platform prefix.
+
+    A platform prefix would split one machine into several, so the bare name is
+    what gets recorded.
+    """
+    return canonical_machine(socket.gethostname())
+
+
+def canonical_machine(name: str) -> str:
+    """A hostname as a machine identity: its first label, stripped and lowercased."""
+    return name.split('.')[0].strip().lower()

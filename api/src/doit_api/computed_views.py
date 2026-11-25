@@ -19,6 +19,7 @@ from collections.abc import Callable
 
 import typer
 
+from doit import actor
 from doit import dashboard
 from doit import desk_nudge
 from doit import desk_panel
@@ -27,7 +28,6 @@ from doit import forecast
 from doit import happened
 from doit import journal
 from doit import lanes
-from doit import paths
 from doit import pursuits
 from doit import quota
 from doit import review
@@ -222,7 +222,7 @@ class Views:
             selection = pursuits.compute_draw(state)
             selection['resolved'] = self.readers.resolve_all(selection['offered'], config.pursuits)
             self.store.save_draw(selection)
-            self.store.bump_offers(paths.canonical_machine(machine or MACHINE), selection['offered'], now.date())
+            self.store.bump_offers(actor.canonical_machine(machine or MACHINE), selection['offered'], now.date())
             return selection
         return standing
 
@@ -360,7 +360,7 @@ class Views:
     @staticmethod
     def author(body: dict, recorded_by: str) -> dict:
         """The machine and actor a write is recorded as: the client's, its machine spelled as a desk spells its own."""
-        return {'machine': paths.canonical_machine(str(body.get('machine') or MACHINE)), 'identity': str(body.get('actor') or recorded_by)}
+        return {'machine': actor.canonical_machine(str(body.get('machine') or MACHINE)), 'identity': str(body.get('actor') or recorded_by)}
 
     @staticmethod
     def keyed(body: dict) -> str:
@@ -506,7 +506,7 @@ class Views:
             'answer': str(body['answer']),
             'fired_at': body['fired_at'],
             'answered_at': body.get('answered_at') or now.isoformat(),
-            'machine': paths.canonical_machine(str(body.get('machine') or MACHINE)),
+            'machine': actor.canonical_machine(str(body.get('machine') or MACHINE)),
             'recorded_by': recorded_by,
             'stored_at': stamp(now),
         }

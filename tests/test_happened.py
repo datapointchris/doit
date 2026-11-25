@@ -269,20 +269,6 @@ def test_a_pursuits_register_that_will_not_load_costs_its_group_and_nothing_else
     assert [(lane.name, lane.available) for lane in groups] == [('pursuits', False), ('review', True), ('practice', True)]
 
 
-def test_the_actor_identity_written_is_one_its_kind_reads_back(monkeypatch):
-    """The journal writes the identity and the screen sorts it, so the two must agree on every form."""
-    for name in ('CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_SESSION_ATTENDED', actor.SCHEDULED_JOB_ENV):
-        monkeypatch.delenv(name, raising=False)
-    assert actor.kind(actor.identity()) == actor.BY_HAND
-    monkeypatch.setenv(actor.SCHEDULED_JOB_ENV, 'nightly')
-    assert actor.kind(actor.identity()) == actor.UNATTENDED
-    monkeypatch.setenv('CLAUDE_CODE_SESSION_ID', 'abc')
-    assert actor.kind(actor.identity()) == actor.UNATTENDED
-    monkeypatch.delenv(actor.SCHEDULED_JOB_ENV)
-    assert actor.identity() == 'claude-code/abc'
-    assert actor.kind(actor.identity()) == actor.SESSION
-
-
 def test_a_runner_prefix_doit_has_never_seen_reads_unknown_rather_than_by_hand():
     """A new kind of runner is counted apart, never shown as the reader's own work."""
     assert actor.kind('runner/nightly/abc') == actor.UNKNOWN
