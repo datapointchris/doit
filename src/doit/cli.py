@@ -31,7 +31,6 @@ from doit.service_commands import happened
 from doit.service_commands import pursuits
 from doit.service_commands import review
 from doit.service_commands import sources
-from doit.service_commands import today
 
 # A command list answers "what is there" and the reader arrives with "what do I
 # do now". Routing lives on this screen and on a hub that owns several children,
@@ -91,8 +90,8 @@ ROOT_ORDER = (
 class RootGroup(TyperGroup):
     """The root group, which lists its commands by panel and says where an option a command refused is accepted.
 
-    `--no-input` belongs to the root, so `doit next --no-input` is refused by
-    `next`. click's "No such option" alone sends the reader to `--help` to find
+    `--no-input` belongs to the root, so `doit dashboard --no-input` is refused by
+    `dashboard`. click's "No such option" alone sends the reader to `--help` to find
     where the option goes, so the refusal names the placement that works.
     """
 
@@ -152,10 +151,6 @@ app = typer.Typer(
 )
 
 
-# The draw sits at the root because it is typed most. Logging and skipping live
-# under `pursuits`, beside the file they write to.
-app.command('next', rich_help_panel=WHAT_TO_DO_NOW, epilog=pursuits.NEXT_EXAMPLES)(pursuits.next_command)
-app.command('today', rich_help_panel=WHAT_TO_DO_NOW, epilog=today.TODAY_EXAMPLES)(today.today_command)
 app.command('dashboard', rich_help_panel=WHAT_TO_DO_NOW, epilog=dashboard.DASHBOARD_EXAMPLES)(dashboard.dashboard_command)
 app.command('tui', rich_help_panel=WHAT_TO_DO_NOW, epilog=tui.TUI_EXAMPLES)(tui.tui_command)
 app.command('happened', rich_help_panel=WHAT_CAME_OF_IT, epilog=happened.HAPPENED_EXAMPLES)(happened.happened_command)

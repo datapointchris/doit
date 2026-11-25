@@ -63,7 +63,7 @@ func newRootCommand() *cobra.Command {
 	// -V as the Python doit spells it, which leaves -v free for a --verbose.
 	// Declared before cobra's own, which then stands aside.
 	root.Flags().BoolP("version", "V", false, "Show the installed version and exit")
-	root.AddCommand(newAuthCommand(), newUpdateCommand(), newDeskNudgeCommand())
+	root.AddCommand(newNextCommand(), newTodayCommand(), newAuthCommand(), newUpdateCommand(), newDeskNudgeCommand())
 	return root
 }
 

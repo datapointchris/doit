@@ -125,6 +125,9 @@ check-filenames = true
 check-hidden = true
 builtin = "clear,rare"
 uri-ignore-words-list = "*"
+# A recorded screen cuts words at the terminal's edge, and the replay compares
+# the cut as printed, so a respelled fragment fails the test it records.
+skip = "cli/internal/screens/testdata/*.txt"
 
 [tool.pytest.ini_options]
 minversion = "8.0"

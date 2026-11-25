@@ -23,7 +23,6 @@ from doit import sources
 from doit import today
 from doit import window
 from doit.lanes import GridCell
-from doit.lanes import Lane
 from doit.lanes import Row
 from doit.lanes import Urgency
 
@@ -240,100 +239,12 @@ def test_an_empty_register_contributes_nothing_and_is_not_an_error():
     assert today.pursuit_lanes(happened.Kept(), DAY) == []
 
 
-# --- the screen --------------------------------------------------------------
-
-
-def test_a_group_past_three_shows_three_then_how_many_more_and_where():
-    lane = Lane(name='practice', title='PRACTICE', rows=[Row(str(n), '') for n in range(5)], total=5, hints=['doit review due'])
-
-    rows = today.visible_rows(lane)
-
-    assert [row.label for row in rows] == ['0', '1', '2', '2 more']
-    assert rows[-1].handle == 'doit review due'
+# --- the row cap the screen draws to ------------------------------------------
 
 
 @pytest.mark.parametrize('name', today.ROUTINE_GROUPS)
-def test_a_routine_group_shows_ten_before_its_more_row(name):
-    lane = Lane(name=name, title=name.upper(), rows=[Row(str(n), '') for n in range(12)], total=12, hints=['h'])
-
-    assert [row.label for row in today.visible_rows(lane)] == [*map(str, range(10)), '2 more']
-
-
-def test_still_due_prints_above_done(capsys):
-    day = today.Day(
-        done=[happened.done_lane('tasks', 'TASKS', [done('Pumice Stone')], '')],
-        due=[Lane(name='practice', title='PRACTICE', rows=[Row('a-lab', 'Work through it')], total=1)],
-    )
-
-    today.render(day, TODAY)
-    lines = capsys.readouterr().out.splitlines()
-
-    assert lines.index('STILL DUE') < lines.index('DONE')
-
-
-def test_a_handle_too_wide_for_its_row_is_printed_whole_beneath_it(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '80')
-    wide = 'python ~/.config/hooks/a-report-with-a-long-name --since 7d'
-    lane = Lane(
-        name='review',
-        title='REVIEW',
-        rows=[
-            Row('a-review', 'Read the report', 'never run', Urgency.OVERDUE, wide),
-            Row('practice', 'Work through a Lab', 'never run', handle='howto labs choose'),
-        ],
-        total=2,
-    )
-
-    today.render_due([lane], 80)
-
-    lines = capsys.readouterr().out.splitlines()
-    assert lines[1].rstrip().endswith('never run'), 'the row keeps its own line'
-    assert lines[2].strip() == f'↳ {wide}'
-    assert lines[3].endswith('↳ howto labs choose'), 'a handle that fits stays inline'
-
-
-def test_a_long_label_leaves_the_text_its_floor_beside_an_inline_handle(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '80')
-    text = 'Work through a Lab you are due on'
-    lane = Lane(
-        name='practice',
-        title='PRACTICE',
-        rows=[Row('x' * today.DUE_LABEL_MAX, text, 'never run', Urgency.OVERDUE, 'howto labs show a-lab')],
-        total=1,
-    )
-
-    today.render_due([lane], 80)
-
-    assert text[: today.DUE_TEXT_MIN - 1] in capsys.readouterr().out
-
-
-def test_a_group_that_answered_with_nothing_prints_nothing_while_one_that_failed_does(capsys):
-    day = today.Day(
-        done=[Lane(name='articles', title='ARTICLES'), happened.done_lane('tasks', 'TASKS', [done('Pumice Stone')], '')],
-        due=[Lane(name='practice', title='PRACTICE'), lanes.unavailable('habits', 'HABITS', 'life: not logged in')],
-    )
-
-    today.render(day, TODAY)
-    out = capsys.readouterr().out
-
-    assert 'articles' not in out
-    assert 'practice' not in out
-    assert 'Pumice Stone' in out
-    assert 'unavailable — life: not logged in' in out
-
-
-def test_one_group_follows_another_with_no_blank_line_between(capsys):
-    day = today.Day(
-        done=[
-            happened.done_lane('habits', 'HABITS', [done('Floss', NOW.isoformat())], ''),
-            happened.done_lane('tasks', 'TASKS', [done('Pumice Stone', NOW.isoformat())], ''),
-        ],
-        due=[],
-    )
-
-    today.render(day, TODAY)
-
-    assert '' not in capsys.readouterr().out.splitlines()
+def test_a_routine_group_shows_ten_rows_where_a_backlog_shows_three(name):
+    assert (today.due_row_cap(name), today.due_row_cap('practice')) == (10, 3)
 
 
 # --- the whole document, composed ---------------------------------------------

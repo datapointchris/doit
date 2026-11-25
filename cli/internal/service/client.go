@@ -182,6 +182,21 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values, answer 
 	return nil
 }
 
+// Raw is the route's answer at path as it came, for a --json that prints it
+// whole. It refuses only an answer that is not JSON, because a field this doit
+// does not read is the reader's own.
+func (c *Client) Raw(ctx context.Context, path string, query url.Values) (json.RawMessage, error) {
+	route := Prefix + path
+	body, err := c.read(ctx, route, query, budget)
+	if err != nil {
+		return nil, err
+	}
+	if !json.Valid(body) {
+		return nil, &Refused{Message: fmt.Sprintf("%s answered GET %s with a body that is not JSON", c.where, route)}
+	}
+	return body, nil
+}
+
 // Post sends body to the route at path and reads the answer into answer, which
 // may be nil. The service stores a repeatable write once by the key in its
 // body, so it is sent again after a timeout, a reset or a busy answer.

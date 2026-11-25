@@ -1,0 +1,51 @@
+Today · Mon 02 Nov ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  52m of 45m across 2 pursuits · 1 of 3 checkoffs
+  habits 2 of 5 · review 1 of 6 · practice unavailable
+  1h 35m and 2 checkoffs behind
+  14m and 1 checkoff more a day catches up in 1 week
+  7m and 1 checkoff more a day catches up in 2 weeks
+STILL DUE
+  upcoming
+    Dentist on Elm Street                                                                today 15:30 ↳ life events show 88
+    Return the library books before the branch closes for the holiday                    2d late
+    partial — nomad is not configured
+  pursuits
+    garden  Weed and water the raised beds                                               3d overdue  ↳ doit pursuits log garden
+    sketch  Draw something from life                                                     1w overdue  ↳ doit pursuits log sketch
+    errands Clear the errand list                                                        due today   ↳ doit pursuits log errands
+    letters Answer one letter from the pile on the hall table, oldest first              2d overdue  ↳ doit pursuits log letters
+    stretch Ten minutes of stretching                                                    due today   ↳ doit pursuits log stretch
+    piano   Practise scales and one piece                                                5d overdue  ↳ doit pursuits log piano
+    novel   Read the novel on the nightstand                                             due today   ↳ doit pursuits log novel
+    bike    Ride the long loop                                                           2w overdue  ↳ doit pursuits log bike
+    soup    Cook a pot of soup for the week                                              due today   ↳ doit pursuits log soup
+    budget  Reconcile the household budget                                               4d overdue  ↳ doit pursuits log budget
+    2 more                                                                                           ↳ doit next --explain
+  review
+    rotate-backup-drives Swap the offsite drive                                          12d overdue ↳ doit review done rotate-backup-drives
+    check-smoke-alarms   Press the test button on each alarm                             due today   ↳ doit review done check-smoke-alarms
+    renew-library-card   Renew before it lapses                                          3d overdue  ↳ doit review done renew-library-card
+    2 more                                                                                           ↳ doit review list
+  practice
+    unavailable — the practice register would not load: line 4 is not a mapping
+  habits
+    Floss                                                                                            ↳ life habits complete 41
+    Water the ferns                                                                                  ↳ life habits complete 42
+    Ten pushups                                                                                      ↳ life habits complete 1043
+
+DONE
+  habits
+    07:05  by hand     Make the bed
+    08:30  unrecorded  Vitamins
+  pursuits
+    09:15  by hand     stretch · twelve minutes on the mat
+    10:40  session     errands · posted the parcel
+    11:02  unattended  novel
+    11:30  unknown     soup
+  review
+           water-heater-flush · Drain a bucket from the valve
+  books
+    partial — only the first page of finished books was read
+    06:45  Finished a long book whose title runs well past the width of a narrow pane
+  meso
+    unavailable — meso answered 502 on /review

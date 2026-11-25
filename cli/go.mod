@@ -23,6 +23,7 @@ require (
 )
 
 require (
+	charm.land/lipgloss/v2 v2.0.6 // indirect
 	github.com/BurntSushi/toml v1.6.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect

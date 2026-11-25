@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T12:00:00-05:00",
+  "done": [
+    {
+      "name": "habits",
+      "title": "HABITS",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Make the bed",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T07:05:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "sam@desk",
+          "actor_kind": "by hand"
+        },
+        {
+          "text": "Vitamins",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T08:30:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 2,
+      "in_flight": 0,
+      "hints": [
+        "life habits list"
+      ]
+    }
+  ],
+  "due": [
+    {
+      "name": "pursuits",
+      "title": "PURSUITS",
+      "meta": "",
+      "status": "unavailable",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "the pursuits register would not load",
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": [],
+      "row_cap": 10
+    }
+  ],
+  "quota": {
+    "minutes": null,
+    "checkoffs": null,
+    "pursuits": [],
+    "catch_up": [],
+    "checklists": [
+      {
+        "name": "habits",
+        "done": 5,
+        "total": 5,
+        "unavailable": ""
+      }
+    ],
+    "unavailable": "the pursuits register would not load"
+  },
+  "problems": []
+}
