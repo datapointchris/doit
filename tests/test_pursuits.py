@@ -470,6 +470,11 @@ def test_on_log_substitutes_the_offered_items_id(tmp_path):
     assert marker.read_text() == '422'
 
 
+def test_a_registers_on_log_keeps_a_label_with_a_space_and_a_quote_as_one_argument_as_the_desk_nudge_pick_does():
+    fill = {'id': '532', 'label': 'File the "receipts" now', 'note': '', 'minutes': '', 'pursuit': 'tasks'}
+    assert pursuits.on_log_argv('tick-task {id} {label}', fill) == ['tick-task', '532', 'File the "receipts" now']
+
+
 def test_on_log_is_not_run_when_there_is_nobody_to_confirm_with(tmp_path):
     """The prompt would block on a stdin that never closes, so an unconfirmed
     on_log is skipped rather than asked about. -y is what runs it unattended."""
