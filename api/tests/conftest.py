@@ -69,7 +69,7 @@ def unconfigured(name: str) -> App:
 
 def unconfigured_apps() -> dict[str, App]:
     """Every app the service reads, each with no address, so a read of one fails as unconfigured."""
-    return {name: unconfigured(name) for name in ('life', 'learning', 'meso', 'nomad', 'slate')}
+    return {name: unconfigured(name) for name in ('life', 'learning', 'meso', 'nomad', 'slate', 'ingestion')}
 
 
 @pytest.fixture

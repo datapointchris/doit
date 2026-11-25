@@ -40,6 +40,10 @@ from . import documents
 from .errors import BadRequest
 from .errors import Conflict
 from .errors import NotFound
+from .errors import RequestFailed
+from .errors import Unavailable
+from .readers import ingestion
+from .readers.apps import AppFailed
 from .readers.apps import ReadFailed
 from .readers.declared_reads import Readers
 from .readers.declared_reads import source_failed
@@ -95,6 +99,26 @@ def completion_day(text: str) -> dt.date:
         return dt.date.fromisoformat(text)
     except ValueError:
         raise BadRequest(f'day={text!r} is not a date (YYYY-MM-DD)') from None
+
+
+def refusal_of(error: AppFailed) -> RequestFailed:
+    """How the service answers the caller when an app refuses or misses a write passed on for them.
+
+    The app's 404 for an item it does not hold stays a 404, and its refusal of a
+    value is a 422, so the caller reads either as their own mistake. An app down,
+    slow or broken is a 503, which the CLI sends again. An app unconfigured or
+    refusing the service's credential is a 409, because a person has to act.
+    """
+    reason = error.reason
+    if error.outcome_unknown:
+        reason += '. It may have been recorded, so send the same request again before deciding it another way'
+    if error.status == 404:
+        return NotFound(reason)
+    if error.status in (400, 422):
+        return BadRequest(reason)
+    if error.transient:
+        return Unavailable(reason)
+    return Conflict(reason)
 
 
 def registered_entry(config: documents.Config, entry: str) -> bool:
@@ -681,6 +705,16 @@ class Views:
             ],
             'problems': config.registry.problems,
         }
+
+    # --- ingestion ------------------------------------------------------------
+
+    def decide_ingestion_item(self, verb: str, key: str, body: dict, login: str) -> object:
+        """Pass a person's placement or drop of an item on to ingestion, which records it as theirs, and answer the decisions it made."""
+        sent = {name: value for name, value in body.items() if value is not None}
+        try:
+            return ingestion.decide(self.readers.app('ingestion'), verb, key, {**sent, 'login': login})
+        except AppFailed as error:
+            raise refusal_of(error) from error
 
     # --- forecasts ------------------------------------------------------------
 

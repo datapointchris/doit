@@ -29,8 +29,9 @@ type service struct {
 	stderr *bytes.Buffer
 }
 
-// startService serves this commit's service on a temporary store until the test ends.
-func startService(t *testing.T, root string) service {
+// startService serves this commit's service on a temporary store until the
+// test ends, with env added to the environment it starts in.
+func startService(t *testing.T, root string, env ...string) service {
 	t.Helper()
 	uv, err := exec.LookPath("uv")
 	if err != nil {
@@ -39,6 +40,7 @@ func startService(t *testing.T, root string) service {
 	cmd := exec.CommandContext(t.Context(), uv, "run", "--quiet", "--project", filepath.Join(root, "api"), "python",
 		filepath.Join(root, "api", "tests", "serve_on_a_temporary_store.py"), filepath.Join(t.TempDir(), "doit.db"))
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), env...)
 	// uv starts python as its child, so the whole group is stopped at the end.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }

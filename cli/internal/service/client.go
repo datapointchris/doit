@@ -230,8 +230,7 @@ func (c *Client) Post(ctx context.Context, path string, body any, repeatable boo
 	case err != nil:
 		return &NoAnswer{Message: fmt.Sprintf("%s did not answer POST %s (%v). It may have been recorded, so check before sending it again.", c.where, route, err)}
 	case slices.Contains(retriedStatuses, response.StatusCode):
-		_ = response.Body.Close()
-		return &NoAnswer{Message: fmt.Sprintf("no answer from %s: HTTP %d", c.where, response.StatusCode)}
+		return c.unanswered(response, "")
 	}
 	return c.decoded(ctx, http.MethodPost, route, response, answer)
 }
@@ -280,10 +279,23 @@ func (c *Client) send(ctx context.Context, method, path string, body, answer any
 	case err != nil:
 		return &NoAnswer{Message: fmt.Sprintf("no answer from %s: %v", c.where, err)}
 	case slices.Contains(retriedStatuses, response.StatusCode):
-		_ = response.Body.Close()
-		return &NoAnswer{Message: fmt.Sprintf("no answer from %s: HTTP %d", c.where, response.StatusCode)}
+		return c.unanswered(response, "")
 	}
 	return c.decoded(ctx, method, route, response, answer)
+}
+
+// unanswered is the error for a busy status after the last retry, carrying
+// the service's own sentence where its body has one.
+func (c *Client) unanswered(response *http.Response, attempts string) *NoAnswer {
+	defer func() { _ = response.Body.Close() }()
+	message := fmt.Sprintf("no answer from %s: HTTP %d%s", c.where, response.StatusCode, attempts)
+	var said struct {
+		Message string `json:"message"`
+	}
+	if body, err := io.ReadAll(response.Body); err == nil && json.Unmarshal(body, &said) == nil && said.Message != "" {
+		message += ": " + said.Message
+	}
+	return &NoAnswer{Message: message}
 }
 
 // decoded reads the answer to method on route into answer, where answer is not nil.
@@ -354,8 +366,7 @@ func (c *Client) read(ctx context.Context, route string, query url.Values, limit
 	case err != nil:
 		return nil, &NoAnswer{Message: fmt.Sprintf("no answer from %s: %v", c.where, err)}
 	case slices.Contains(retriedStatuses, response.StatusCode):
-		_ = response.Body.Close()
-		return nil, &NoAnswer{Message: fmt.Sprintf("no answer from %s: HTTP %d on each of %d attempts", c.where, response.StatusCode, requestAttempts)}
+		return nil, c.unanswered(response, fmt.Sprintf(" on each of %d attempts", requestAttempts))
 	}
 	return c.answered(response, "GET "+route)
 }
