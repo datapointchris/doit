@@ -4,10 +4,10 @@ A lane is a titled, independently-ordered list of things you could act on. This
 module defines it, parses it, and serializes it, and it is deliberately the only
 place that knows what a lane is.
 
-**The contract is symmetric, and that is the point.** What `doit dashboard --json`
-emits is exactly what a source may emit, so a tool that wants a lane on the
-dashboard has one thing to read: doit's own output. Conform to it and doit needs
-no code to render you — no mapping, no adapter, no release. That is the whole
+**The contract is symmetric, and that is the point.** What a source emits is the
+document doit builds from every adapter, which `doit sources contract` prints, so a
+tool that wants a lane on the dashboard has one shape to copy. Conform to it and doit
+needs no code to render you — no mapping, no adapter, no release. That is the whole
 interface.
 
 An app that has not conformed yet gets an adapter, which is ordinary Python and
@@ -22,7 +22,6 @@ forever rather than on the producer once.
 """
 
 import datetime as dt
-import json
 from dataclasses import dataclass
 from dataclasses import field
 from enum import StrEnum
@@ -241,7 +240,7 @@ def to_document(lanes: list[Lane], generated_at: dt.datetime) -> dict:
     """The contract, as doit emits it.
 
     This is also the worked example: a source wanting a lane here can run
-    `doit dashboard --json` and copy the shape.
+    `doit sources contract` and copy the shape.
     """
     return {
         'schema_version': SCHEMA_VERSION,
@@ -301,7 +300,3 @@ def row_to_dict(row: Row) -> dict:
     if row.completes is not None:
         shaped['completes'] = {'kind': str(row.completes.kind), 'ref': row.completes.ref}
     return shaped
-
-
-def dumps(lanes: list[Lane], generated_at: dt.datetime) -> str:
-    return json.dumps(to_document(lanes, generated_at), indent=2)

@@ -263,7 +263,7 @@ def test_what_doit_emits_is_what_doit_reads():
         )
     ]
 
-    round_tripped = lanes.from_document(json.loads(lanes.dumps(original, NOW)))
+    round_tripped = lanes.from_document(json.loads(json.dumps(lanes.to_document(original, NOW))))
 
     assert round_tripped == original
 
@@ -276,6 +276,6 @@ def test_the_document_stamp_always_carries_an_offset(stamp):
     emitting this document do not all hold an aware datetime and this file is
     what anyone building a source copies.
     """
-    document = json.loads(lanes.dumps([], stamp))
+    document = json.loads(json.dumps(lanes.to_document([], stamp)))
 
     assert dt.datetime.fromisoformat(document['generated_at']).utcoffset() is not None

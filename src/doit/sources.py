@@ -58,8 +58,7 @@ TEMPLATE = """\
 #             service runs no command, so it shows the source as failed
 #   lanes     optional; restricts which of a source's lanes are shown
 #
-# `doit sources contract` prints the lane document every source becomes, and
-# `doit dashboard --json` a worked example.
+# `doit sources contract` prints the lane document every source becomes.
 
 # What is outstanding. Read by `doit dashboard`.
 sources:

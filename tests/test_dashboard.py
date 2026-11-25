@@ -58,7 +58,7 @@ def lanes_by_name(results: dict) -> dict:
 def test_every_lane_builds_from_fixtures():
     lanes = lanes_by_name(all_results())
 
-    covered = {name for name, _ in dashboard.LIFE_LANES} | {'projects', 'learning', *dashboard.LOCAL_LANES}
+    covered = {name for name, _ in dashboard.LIFE_LANES} | {'projects', 'learning', 'maintenance'}
 
     assert set(lanes) == covered
     assert all(lane.available for lane in lanes.values())
@@ -106,23 +106,6 @@ def test_every_shipped_adapter_names_the_lanes_it_declares():
             assert [lane.name for lane in built] == list(declared), f'{adapter_id} builds {[x.name for x in built]}'
             for lane in built:
                 assert lane.title == lane.name.upper(), f'{lane.title} is headed differently from `--lane {lane.name}`'
-
-
-def test_the_lane_enum_covers_every_adapter_doit_ships():
-    """A lane nobody can discover is a lane that does not exist for the reader.
-
-    Containment rather than equality. `doit.happened` registers completion
-    adapters into the same global registry, and whether they are present here
-    depends on whether anything has imported that module yet — so an equality
-    check passes or fails on test ordering rather than on the invariant. What
-    `--lane` needs is that every dashboard adapter is reachable, and
-    `test_the_two_adapter_tables_do_not_overlap` holds the other half.
-    """
-    registered = set(sources.ADAPTERS)
-    tabled = {adapter_id for adapter_id, *_ in dashboard.SHIPPED_ADAPTERS}
-
-    assert tabled <= registered, 'a tabled adapter that never registered is one `--lane` cannot reach'
-    assert set(dashboard.LOCAL_LANES) <= set(dashboard.LANE_NAMES)
 
 
 def test_the_two_adapter_tables_do_not_overlap():
@@ -770,7 +753,9 @@ def test_the_screen_leaves_out_an_alert_lane_with_nothing_open() -> None:
 
 def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
     """A source emitting doit's own lane document can declare it without an adapter."""
-    document = json.loads(dashboard.lanemodel.dumps([alert_lane(), dashboard.LaneView(name='t', title='T')], dt.datetime.now()))
+    document = json.loads(
+        json.dumps(dashboard.lanemodel.to_document([alert_lane(), dashboard.LaneView(name='t', title='T')], dt.datetime.now()))
+    )
 
     read_back = dashboard.lanemodel.from_document(document)
 
@@ -780,7 +765,7 @@ def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
 def test_work_in_flight_survives_a_round_trip_through_the_contract() -> None:
     """A source with nothing to list but work under way stays drawn without an adapter."""
     held = dashboard.LaneView(name='problems', title='PROBLEMS', in_flight=2, alert=True)
-    document = json.loads(dashboard.lanemodel.dumps([held], dt.datetime.now()))
+    document = json.loads(json.dumps(dashboard.lanemodel.to_document([held], dt.datetime.now())))
 
     read_back = dashboard.lanemodel.from_document(document)[0]
 
@@ -897,7 +882,7 @@ def test_open_feedback_lists_each_body_and_says_where_it_was_raised() -> None:
 
 def test_feedback_with_none_open_is_left_out_and_a_failed_read_says_why() -> None:
     [nothing_open] = dashboard.meso_feedback_adapter(answered('meso-feedback', []))
-    document = json.loads(dashboard.lanemodel.dumps([nothing_open], dt.datetime.now()))
+    document = json.loads(json.dumps(dashboard.lanemodel.to_document([nothing_open], dt.datetime.now())))
 
     [read_back] = dashboard.lanemodel.from_document(document)
     assert dashboard.quiet_lane(read_back)
@@ -909,7 +894,7 @@ def test_feedback_with_none_open_is_left_out_and_a_failed_read_says_why() -> Non
 
 def test_when_a_cell_was_done_survives_a_round_trip_through_the_contract() -> None:
     lane = dashboard.LaneView(name='t', title='T', grid=[GridCell('a', True, done_at='2026-07-24T12:00:00Z'), GridCell('b', False, '4')])
-    document = json.loads(dashboard.lanemodel.dumps([lane], dt.datetime.now()))
+    document = json.loads(json.dumps(dashboard.lanemodel.to_document([lane], dt.datetime.now())))
 
     [read_back] = dashboard.lanemodel.from_document(document)
 

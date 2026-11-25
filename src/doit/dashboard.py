@@ -1,4 +1,4 @@
-"""The human single pane of glass. Invoked as `doit dashboard`.
+"""The lanes `doit dashboard` shows, built by the service from each source's answer.
 
 Answers "what is outstanding across everything?" in one glance: open tasks,
 habits still due, what you're learning, what you're reading, maintenance due, the
@@ -19,13 +19,13 @@ Every row names a thing you could act on. A lane that can only report structure
 (a track's current unit, a maintenance entry's slug) states it as context or
 resolves it to the underlying resource instead of spending a row on it.
 
-This is a renderer, nothing more. Every backend owns its own domain rules (which
-book is next, which habit is due today, when a review item is overdue); the
-dashboard only lays out what they return. That is why it knows no app's
+This shapes lanes and ranks nothing. Every backend owns its own domain rules
+(which book is next, which habit is due today, when a review item is overdue);
+this module only shapes what they return. That is why it knows no app's
 semantics. doit's service runs the functions here over each app's answer and
 over its own review register, whose rows are the ones `doit review list --json`
 prints, so the backend still owns due-ness and nothing here re-derives a
-schedule. The command renders the lanes the service sends.
+schedule.
 
 `is_due_row` below therefore mirrors `doit.cadence.is_due` rather than importing
 it. Inside one package that reads as removable duplication. It is not: backends
@@ -914,8 +914,6 @@ LIFE_LANES = (
     (UPCOMING, build_upcoming_lane),
 )
 
-LOCAL_LANES = ('maintenance',)
-
 
 def life_adapter(result: sources.Result) -> list[LaneView]:
     """life's overview model, as lanes. Unregistered the day life emits them."""
@@ -1008,12 +1006,6 @@ SHIPPED_ADAPTERS = (
 
 for adapter_id, adapter_fn, _ in SHIPPED_ADAPTERS:
     sources.register_adapter(adapter_id, adapter_fn)
-
-# Every lane doit itself can name, for `--lane` to suggest. Not a closed set: a
-# conforming source contributes lanes doit has never heard of, and a sources
-# document that omits one of these offers fewer. `--lane` is checked against
-# what actually came back rather than against this.
-LANE_NAMES = [*dict.fromkeys(chain.from_iterable(declared for _, _, declared in SHIPPED_ADAPTERS)), *LOCAL_LANES]
 
 
 def source_lanes(registry: sources.Registry, results: dict[str, sources.Result]) -> list[LaneView]:
