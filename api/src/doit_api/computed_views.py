@@ -165,7 +165,7 @@ class Views:
             self.store.save_draw({**standing, 'retired': True})
 
     def next(self, machine: str | None, reroll: bool) -> dict:
-        """`doit next --json`: what to do now, the state behind the draw, and today's events above it."""
+        """`doit next --json`: what to do now, the state behind the draw, each row the screen prints, and today's events above it."""
         config, now = self.registered(), self.now()
         state = self.state(config, now)
         if not state['active']:
@@ -175,6 +175,8 @@ class Views:
         return {
             **selection,
             'state': pursuits.explain_payload(state),
+            'offer_rows': pursuits.offer_rows(state, selection),
+            'explain_rows': pursuits.explain_rows(state, selection),
             'context': context,
             'context_error': context_error,
             'pursuits': config.pursuits,

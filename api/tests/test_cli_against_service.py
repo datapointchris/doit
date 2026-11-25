@@ -111,6 +111,9 @@ def test_next_gives_every_active_pursuit_a_row_from_the_register_the_service_hol
     shown = capsys.readouterr().out
     assert drawn['offered'] and set(drawn['offered']) <= set(drawn['state']['weights'])
     assert all(name in shown for name in drawn['state']['weights']), 'a pursuit missing from the screen reads as one with nothing to say'
+    offered_rows = [row['name'] for row in drawn['offer_rows'] if row['offered']]
+    assert offered_rows == drawn['offered'] == [row['name'] for row in drawn['offer_rows']][: len(offered_rows)]
+    assert {row['name'] for row in drawn['offer_rows']} == {row['name'] for row in drawn['explain_rows']} == set(drawn['state']['active'])
     assert 'paused-thing' not in drawn['offered']
     assert 'chores\t' in pursuits.NAMES_CACHE.read_text()
 

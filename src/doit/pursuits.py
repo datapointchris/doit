@@ -1625,6 +1625,56 @@ def unoffered(name: str, state: dict) -> Offer:
     return row
 
 
+def offer_row(row: Offer, offered: bool) -> dict:
+    """One row of the `offer_rows` field, each cell the text `doit next` prints."""
+    return {
+        'name': row.name,
+        'offered': offered,
+        'weight': row.weight,
+        'goal': row.goal,
+        'tally': row.tally,
+        'due': row.due,
+        'late': bool(row.due_style),
+        'choices': row.choices,
+        'failed': row.failed,
+    }
+
+
+def offer_rows(state: dict, selection: dict) -> list[dict]:
+    """Every row `doit next` prints: the offered pursuits in the draw's order, then each other active one, owed first.
+
+    The service answers these beside the state, so a client draws the screen
+    without ordering or pricing a pursuit itself.
+    """
+    offered = selection['offered']
+    resolved = selection.get('resolved') or {}
+    rest = offered_order(state, [name for name in state['active'] if name not in offered])
+    return [
+        *(offer_row(offer(name, state, resolved), True) for name in offered),
+        *(offer_row(unoffered(name, state), False) for name in rest),
+    ]
+
+
+def explain_rows(state: dict, selection: dict) -> list[dict]:
+    """Every row `doit next --explain` prints, owed first, with the reason the register gives each."""
+    passed = set(state['suppressed'])
+    pins = set(selection.get('pinned') or [])
+    return [
+        {
+            'name': name,
+            'offered': name in selection['offered'],
+            'skipped': name in passed,
+            'weight': f'{state["weights"][name]:g}',
+            'goal': goal_text(state['active'][name]),
+            'last': format_elapsed(state['days_since'][name]),
+            'due': format_due(due_in_days(state, name)),
+            'pick': 'owed' if name in pins else f'{state["probability"][name] * 100:.1f}%',
+            'reason': state['active'][name].get('reason') or '',
+        }
+        for name in offered_order(state, state['active'])
+    ]
+
+
 # Each column of `doit next` before the item, as (heading, Offer field).
 OFFER_COLUMNS = (
     ('pursuit', 'name'),
