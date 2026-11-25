@@ -29,9 +29,9 @@ from doit.paths import cache_dir
 from doit.render import examples
 
 # The gate's files, read with no process started. The interval is the service's,
-# as plain minutes, which `doit review nudge` writes. The marker's mtime is when
-# this machine last asked. The showing is what the last nudge printed, waiting
-# for the next shell.
+# in whole minutes. The Go doit writes it through `deskfiles.WriteNudgeInterval`.
+# The marker's mtime is when this machine last asked. The showing is what the
+# last nudge printed, waiting for the next shell.
 NUDGE_INTERVAL = cache_dir() / 'nudge-interval-minutes'
 NUDGE_MARKER = cache_dir() / 'nudge'
 NUDGE_SHOWING = cache_dir() / 'nudge-showing.txt'

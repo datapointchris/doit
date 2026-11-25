@@ -1,4 +1,8 @@
 // Package actor names who a write is recorded as: this machine, and who is at it.
+//
+// slate owns the identity's grammar, in actorIdentity in its
+// cli/internal/cli/actor_identity.go, and Identity follows it, so a journal
+// entry and an issue close read alike. A change to the grammar starts there.
 package actor
 
 import (

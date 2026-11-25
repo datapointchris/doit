@@ -12,7 +12,7 @@ import (
 )
 
 // OnLogBound is how long a pursuit's on_log may take. It completes one item in
-// another app, as a habit's completion does in life.
+// another app, which may wait on that app's network.
 const OnLogBound = 30 * time.Second
 
 // OnLog is a pursuit's on_log filled in for one choice, ready to run.

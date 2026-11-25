@@ -20,10 +20,9 @@ import (
 var update = flag.Bool("update", false, "rewrite each recorded screen in testdata from what this package prints")
 
 // Each testdata/<answer>.<screen>.<width>.txt is what the screen prints for
-// testdata/<answer>.json at that terminal width. A recording holds the layout
-// rich printed for that answer, with two exceptions. printedtable measures the
-// forecast tables where rich padded a fixed width. It cuts a drift cell that
-// does not fit, where rich wrapped the cell onto more lines. The answers hold invented rows in
+// testdata/<answer>.json at that terminal width. A recording is the layout the
+// screen prints for that answer. A table cell that does not fit is cut, as
+// printedtable cuts it. The answers hold invented rows in
 // the shape the service answers. A screen replays when it prints the same
 // text, with its escapes, each line's trailing spaces and the blank lines that
 // end it stripped, because the end-of-file hook strips those from a recording.

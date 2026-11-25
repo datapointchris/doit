@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	// statusWidth is wide enough for `overdue 999d`, the longest status, and a space.
+	// statusWidth fits a status up to `overdue 999d` and a space. A longer one runs into the handle.
 	statusWidth = 13
 	// reviewIDWidth is the column a review entry's id fills on a browse view.
 	reviewIDWidth = 20
