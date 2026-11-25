@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:doit:desk-nudge-record:v3",
   "title": "doit.desk_nudge",
-  "description": "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, appended and never rotated, for a log shipper to read. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
+  "description": "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, appended and never rotated, for a log shipper to read. This file is the source of the shape, and a Go test validates each line the watch writes against it.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -229,13 +229,7 @@
       ],
       "properties": {
         "kind": {
-          "enum": [
-            "pursuit",
-            "habit",
-            "review",
-            "practice"
-          ],
-          "description": "Which owner completes it."
+          "$ref": "urn:doit:desk-panel-view:v1#/definitions/completion_kind"
         },
         "ref": {
           "type": "string",

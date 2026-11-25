@@ -239,8 +239,9 @@ def build_tasks_lane(results: dict[str, sources.Result], today: dt.date) -> Lane
 def habit_completion_argv(habit_id: str) -> list[str]:
     """The command that completes one habit in life, as an argv.
 
-    The habits lane's hint is built from it, and so is the desk nudge panel's
-    habit completion, so the command a row shows and the one a pick runs agree.
+    The habits lane's hint is built from it. The desk nudge's `habitProgram`, in
+    `cli/internal/desknudge`, builds the same argv for a pick in Go, so a change
+    here is made there too.
     """
     return ['life', 'habits', 'complete', habit_id]
 

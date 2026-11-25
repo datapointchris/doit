@@ -1945,6 +1945,19 @@ def prompt_for_minutes() -> int:
         error_console.print('  A whole number of minutes.')
 
 
+ON_LOG_FIELD = re.compile(r'\{(id|label|note|minutes|pursuit)\}')
+
+
+def on_log_argv(template: str, fill: dict[str, str]) -> list[str]:
+    """A pursuit's `on_log` as an argv: split into arguments first, then each placeholder filled in one pass.
+
+    A label holding a space or a quote therefore stays one argument. The desk
+    nudge's Go pick builds the same argv in `onLogProgram`. Raises ValueError
+    where the template leaves a quote open.
+    """
+    return [ON_LOG_FIELD.sub(lambda found: fill[found.group(1)], word) for word in shlex.split(template)]
+
+
 def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_yes: bool) -> dict | None:
     """Run the pursuit's write-through command against the item that was offered.
 
@@ -1958,13 +1971,19 @@ def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_
         return None
     if '{id}' in template and not item.get('id'):
         return None
-    command = template.format(
-        id=item.get('id', ''),
-        label=item.get('label', ''),
-        note=note or '',
-        minutes='' if minutes is None else minutes,
-        pursuit=item.get('pursuit', ''),
-    )
+    fill = {
+        'id': str(item.get('id', '')),
+        'label': item.get('label', ''),
+        'note': note or '',
+        'minutes': '' if minutes is None else str(minutes),
+        'pursuit': item.get('pursuit', ''),
+    }
+    try:
+        argv = on_log_argv(template, fill)
+    except ValueError as error:
+        error_console.print(f'  on_log {template!r} cannot be split into arguments: {error}', style='yellow')
+        return None
+    command = shlex.join(argv)
     if not assume_yes:
         if not can_prompt():
             return None
@@ -1973,7 +1992,7 @@ def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_
         prompt.append('  run it? [y/N] ')
         if console.input(prompt).strip().lower() not in ('y', 'yes'):
             return {'command': command, 'ran': False, 'exit_code': None}
-    result = subprocess.run(shlex.split(command), capture_output=True, text=True, check=False)
+    result = subprocess.run(argv, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         failure = Text('  ')
         failure.append(f'{command} exited {result.returncode}', style='yellow')

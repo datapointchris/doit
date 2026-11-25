@@ -28,7 +28,6 @@ from doit.cli import ROOT_ORDER
 from doit.cli import accepted_placements
 from doit.cli import app
 from doit.cli import list_go_commands
-from doit.service_commands import desk_nudge as desk_nudge_commands
 from doit.service_commands import pursuits as pursuit_commands
 
 runner = CliRunner()
@@ -118,9 +117,8 @@ PRINTED_IN_SOURCE = re.compile(rf"(?:\]|`|')doit{WORDS}")
 SHELL_FENCE = re.compile(r'^```(?:bash|sh)\n(.*?)^```', re.MULTILINE | re.DOTALL)
 PRINTED_IN_FENCE = re.compile(rf'^doit{WORDS}', re.MULTILINE)
 HANDED_GO_TREE = REPO / 'cli' / 'cmd' / 'doit' / 'testdata' / 'tree-handed-to-doit-python.json'
-# Text that a screen shows and nobody runs: the zsh completion's heading over the
-# verb list, and the desk nudge panel's banner over rows that could not be read again.
-NOT_A_COMMAND = {('shell.py', ' command'), ('desk_nudge.py', ' unreachable')}
+# Text that a screen shows and nobody runs: the zsh completion's heading over the verb list.
+NOT_A_COMMAND = {('shell.py', ' command')}
 
 
 def printed_commands():
@@ -211,19 +209,19 @@ def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
 def test_a_command_the_go_doit_hands_on_is_listed_under_its_parent_and_runs_nothing(monkeypatch):
     """The Go doit hands its tree on with each line it passes, and Python has no copy of those verbs to run."""
     monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
-    monkeypatch.setattr(desk_nudge_commands.app, 'registered_commands', list(desk_nudge_commands.app.registered_commands))
+    monkeypatch.setattr(pursuit_commands.app, 'registered_commands', list(pursuit_commands.app.registered_commands))
     handed = [
         {'path': ['update'], 'summary': 'Update doit', 'group': 'This machine'},
-        {'path': ['desk-nudge', 'window'], 'summary': 'Open the panel window'},
+        {'path': ['pursuits', 'board'], 'summary': 'Open the pursuits board'},
     ]
     list_go_commands({GO_COMMANDS_VARIABLE: json.dumps(handed)})
 
     tree = get_command(app)
     assert isinstance(tree, TyperGroup)
-    nudge = tree.commands['desk-nudge']
-    assert isinstance(nudge, TyperGroup)
+    pursuits = tree.commands['pursuits']
+    assert isinstance(pursuits, TyperGroup)
     assert 'update' in tree.commands
-    assert 'window' in nudge.commands
+    assert 'board' in pursuits.commands
     result = runner.invoke(app, ['update', '--chek'])
     assert result.exit_code == 2
     assert 'doit update --help' in result.output

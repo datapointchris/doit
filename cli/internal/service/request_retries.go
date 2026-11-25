@@ -36,7 +36,7 @@ func (t retryingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 				resp = nil
 			}
 		}
-		if attempt == requestAttempts || !worthRetrying(req.Method, resp, err) {
+		if attempt == requestAttempts || !worthRetrying(req, resp, err) {
 			return resp, err
 		}
 		pause := t.pause(attempt, resp)
@@ -75,8 +75,12 @@ func readWhole(resp *http.Response) error {
 	return nil
 }
 
-func worthRetrying(method string, resp *http.Response, err error) bool {
-	read := method == http.MethodGet
+// repeatableWrite marks a request's context as a write the service stores
+// once, which Post sets, so it is retried as a read is.
+type repeatableWrite struct{}
+
+func worthRetrying(req *http.Request, resp *http.Response, err error) bool {
+	read := req.Method == http.MethodGet || req.Context().Value(repeatableWrite{}) != nil
 	if err != nil {
 		var cut answerCutShort
 		return neverSent(err) || (read && (unreachable(err) || errors.As(err, &cut)))

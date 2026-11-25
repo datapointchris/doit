@@ -9,6 +9,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -181,6 +182,65 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values, answer 
 	return nil
 }
 
+// Post sends body to the route at path and reads the answer into answer, which
+// may be nil. The service stores a repeatable write once by the key in its
+// body, so it is sent again after a timeout, a reset or a busy answer.
+// Any other write is sent again only where it never reached the service.
+func (c *Client) Post(ctx context.Context, path string, body any, repeatable bool, answer any) error {
+	route := Prefix + path
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	if repeatable {
+		ctx = context.WithValue(ctx, repeatableWrite{}, true)
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+route, bytes.NewReader(encoded))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.http.Do(request)
+	switch {
+	case err != nil && goclilogin.IsSessionRejected(err):
+		return &Refused{Message: fmt.Sprintf("the identity provider no longer honors this machine's login. %s", c.repair)}
+	case err != nil && repeatable:
+		return &NoAnswer{Message: fmt.Sprintf("no answer from %s: %v", c.where, err)}
+	case err != nil:
+		return &NoAnswer{Message: fmt.Sprintf("%s did not answer POST %s (%v). It may have been recorded, so check before sending it again.", c.where, route, err)}
+	case slices.Contains(retriedStatuses, response.StatusCode):
+		_ = response.Body.Close()
+		return &NoAnswer{Message: fmt.Sprintf("no answer from %s: HTTP %d", c.where, response.StatusCode)}
+	}
+	answered, err := c.answered(response, "POST "+route)
+	if err != nil || answer == nil {
+		return err
+	}
+	if err := json.Unmarshal(answered, answer); err != nil {
+		return &Refused{Message: fmt.Sprintf("%s answered POST %s in a shape this doit does not read: %v", c.where, route, err)}
+	}
+	return nil
+}
+
+// LaterSendCanStore is whether the same write sent later could be stored: no
+// answer came, the login was refused, or the service broke. A refusal of the
+// write itself is refused again however often it is sent.
+func LaterSendCanStore(err error) bool {
+	var none *NoAnswer
+	if errors.As(err, &none) || errors.Is(err, login.ErrNeedsLogin) || errors.Is(err, goclilogin.ErrNotConfigured) {
+		return true
+	}
+	var refused *Refused
+	if errors.As(err, &refused) {
+		return refused.Status == 0 || refused.Status == http.StatusUnauthorized || refused.Status >= 500
+	}
+	return true
+}
+
 // Version is the service's own, from its OpenAPI document's info.version.
 func (c *Client) Version(ctx context.Context) (string, error) {
 	body, err := c.read(ctx, Prefix+"/openapi.json", nil, versionWait)
@@ -223,15 +283,15 @@ func (c *Client) read(ctx context.Context, route string, query url.Values, limit
 		_ = response.Body.Close()
 		return nil, &NoAnswer{Message: fmt.Sprintf("no answer from %s: HTTP %d on each of %d attempts", c.where, response.StatusCode, requestAttempts)}
 	}
-	return c.answered(response, route)
+	return c.answered(response, "GET "+route)
 }
 
 // answered is the body of an answer, or the service's refusal.
-func (c *Client) answered(response *http.Response, route string) ([]byte, error) {
+func (c *Client) answered(response *http.Response, request string) ([]byte, error) {
 	defer func() { _ = response.Body.Close() }()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, &NoAnswer{Message: fmt.Sprintf("%s broke off its answer to GET %s: %v", c.where, route, err)}
+		return nil, &NoAnswer{Message: fmt.Sprintf("%s broke off its answer to %s: %v", c.where, request, err)}
 	}
 	status := response.StatusCode
 	if status == http.StatusUnauthorized {
@@ -242,7 +302,7 @@ func (c *Client) answered(response *http.Response, route string) ([]byte, error)
 			Message string `json:"message"`
 		}
 		if json.Unmarshal(body, &said) != nil || said.Message == "" {
-			said.Message = fmt.Sprintf("%s answered GET %s with HTTP %d", c.where, route, status)
+			said.Message = fmt.Sprintf("%s answered %s with HTTP %d", c.where, request, status)
 		}
 		return nil, &Refused{Status: status, Message: said.Message}
 	}

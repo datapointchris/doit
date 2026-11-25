@@ -1,0 +1,562 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T12:00:00-05:00",
+  "suggestion": {
+    "draw_id": "01a19d34-1a80-74f8-88af-3d9aa670122d",
+    "pursuit": "tasks",
+    "item_id": null,
+    "label": "File the receipts · Paperwork\nReturn the library books · Errands\nDescale the kettle · Home",
+    "description": "The top of the task list",
+    "unit": "checkoffs",
+    "writes_through": true,
+    "usual_minutes": null,
+    "need": 1.0,
+    "done": 0.0,
+    "behind": 10.0,
+    "key": null,
+    "completes": null,
+    "choices": [
+      {
+        "id": "532",
+        "title": "File the receipts",
+        "by": "Paperwork",
+        "key": "pursuit:tasks:532",
+        "completes": {
+          "kind": "pursuit",
+          "ref": "tasks",
+          "item_id": "532"
+        }
+      },
+      {
+        "id": "533",
+        "title": "Return the library books",
+        "by": "Errands",
+        "key": "pursuit:tasks:533",
+        "completes": {
+          "kind": "pursuit",
+          "ref": "tasks",
+          "item_id": "533"
+        }
+      },
+      {
+        "id": "534",
+        "title": "Descale the kettle",
+        "by": "Home",
+        "key": "pursuit:tasks:534",
+        "completes": {
+          "kind": "pursuit",
+          "ref": "tasks",
+          "item_id": "534"
+        }
+      }
+    ],
+    "choices_error": null
+  },
+  "suggestion_reason": null,
+  "answers": [
+    {
+      "answer": "good_timing",
+      "label": "good timing"
+    },
+    {
+      "answer": "too_soon",
+      "label": "too soon"
+    },
+    {
+      "answer": "too_late",
+      "label": "too late"
+    },
+    {
+      "answer": "bothered",
+      "label": "bothered me"
+    }
+  ],
+  "totals": {
+    "minutes": {
+      "pace": 25.7,
+      "need": 25.7,
+      "done": 0.0,
+      "behind": 424.3,
+      "asked_of": 1
+    },
+    "checkoffs": {
+      "pace": 1.0,
+      "need": 1.0,
+      "done": 0.0,
+      "behind": 10.0,
+      "asked_of": 1
+    },
+    "pursuits": [
+      {
+        "name": "tasks",
+        "unit": "checkoffs",
+        "pace": 1.0,
+        "need": 1.0,
+        "done": 0.0,
+        "behind": 10.0
+      },
+      {
+        "name": "read",
+        "unit": "minutes",
+        "pace": 25.71,
+        "need": 25.7,
+        "done": 0.0,
+        "behind": 424.3
+      }
+    ],
+    "catch_up": [
+      {
+        "days": 3,
+        "label": "3 days",
+        "minutes_per_day": 141.4,
+        "checkoffs_per_day": 4,
+        "shown": false
+      },
+      {
+        "days": 7,
+        "label": "1 week",
+        "minutes_per_day": 60.6,
+        "checkoffs_per_day": 2,
+        "shown": false
+      },
+      {
+        "days": 14,
+        "label": "2 weeks",
+        "minutes_per_day": 30.3,
+        "checkoffs_per_day": 1,
+        "shown": true
+      },
+      {
+        "days": 30,
+        "label": "1 month",
+        "minutes_per_day": 14.1,
+        "checkoffs_per_day": 1,
+        "shown": true
+      },
+      {
+        "days": 90,
+        "label": "3 months",
+        "minutes_per_day": 4.7,
+        "checkoffs_per_day": 1,
+        "shown": true
+      }
+    ],
+    "checklists": [
+      {
+        "name": "habits",
+        "done": 2,
+        "total": 14,
+        "unavailable": ""
+      },
+      {
+        "name": "review",
+        "done": 0,
+        "total": 4,
+        "unavailable": ""
+      },
+      {
+        "name": "practice",
+        "done": 0,
+        "total": 1,
+        "unavailable": ""
+      }
+    ],
+    "unavailable": ""
+  },
+  "pursuits": {
+    "status": "ok",
+    "reason": null,
+    "rows": [
+      {
+        "name": "tasks",
+        "description": "The top of the task list",
+        "unit": "checkoffs",
+        "owed": true,
+        "note": "10d overdue",
+        "need": 1.0,
+        "done": 0.0,
+        "behind": 10.0,
+        "writes_through": true,
+        "usual_minutes": null,
+        "key": null,
+        "completes": null,
+        "items": [
+          {
+            "id": "532",
+            "title": "File the receipts",
+            "by": "Paperwork",
+            "key": "pursuit:tasks:532",
+            "completes": {
+              "kind": "pursuit",
+              "ref": "tasks",
+              "item_id": "532"
+            }
+          },
+          {
+            "id": "533",
+            "title": "Return the library books",
+            "by": "Errands",
+            "key": "pursuit:tasks:533",
+            "completes": {
+              "kind": "pursuit",
+              "ref": "tasks",
+              "item_id": "533"
+            }
+          },
+          {
+            "id": "534",
+            "title": "Descale the kettle",
+            "by": "Home",
+            "key": "pursuit:tasks:534",
+            "completes": {
+              "kind": "pursuit",
+              "ref": "tasks",
+              "item_id": "534"
+            }
+          }
+        ],
+        "items_error": null
+      },
+      {
+        "name": "read",
+        "description": "A book already on the shelf",
+        "unit": "minutes",
+        "owed": true,
+        "note": "10d overdue",
+        "need": 25.7,
+        "done": 0.0,
+        "behind": 424.3,
+        "writes_through": false,
+        "usual_minutes": 45.0,
+        "key": "pursuit:read",
+        "completes": {
+          "kind": "pursuit",
+          "ref": "read",
+          "item_id": null
+        },
+        "items": [],
+        "items_error": null
+      }
+    ]
+  },
+  "habits": {
+    "status": "ok",
+    "reason": null,
+    "rows": [
+      {
+        "id": 1,
+        "name": "Brush teeth",
+        "category": "Health",
+        "done": false,
+        "key": "habit:1",
+        "completes": {
+          "kind": "habit",
+          "ref": "1",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 2,
+        "name": "Floss",
+        "category": "Health",
+        "done": true,
+        "key": null,
+        "completes": null,
+        "items": []
+      },
+      {
+        "id": 3,
+        "name": "Drink water",
+        "category": "Health",
+        "done": false,
+        "key": "habit:3",
+        "completes": {
+          "kind": "habit",
+          "ref": "3",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 4,
+        "name": "Take vitamins",
+        "category": "Health",
+        "done": false,
+        "key": "habit:4",
+        "completes": {
+          "kind": "habit",
+          "ref": "4",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 5,
+        "name": "Make the bed",
+        "category": "Home",
+        "done": true,
+        "key": null,
+        "completes": null,
+        "items": []
+      },
+      {
+        "id": 6,
+        "name": "Stretch",
+        "category": "Health",
+        "done": false,
+        "key": "habit:6",
+        "completes": {
+          "kind": "habit",
+          "ref": "6",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 7,
+        "name": "Exercise",
+        "category": "Health",
+        "done": false,
+        "key": "habit:7",
+        "completes": {
+          "kind": "habit",
+          "ref": "7",
+          "item_id": null
+        },
+        "items": [
+          {
+            "id": 1,
+            "name": "Squat",
+            "target": 5,
+            "ticks": 2,
+            "done": false
+          },
+          {
+            "id": 2,
+            "name": "Lunge",
+            "target": 5,
+            "ticks": 0,
+            "done": false
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "name": "Meditate",
+        "category": "Health",
+        "done": false,
+        "key": "habit:8",
+        "completes": {
+          "kind": "habit",
+          "ref": "8",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 9,
+        "name": "Tidy the desk",
+        "category": "Home",
+        "done": false,
+        "key": "habit:9",
+        "completes": {
+          "kind": "habit",
+          "ref": "9",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 10,
+        "name": "Water the plants",
+        "category": "Home",
+        "done": false,
+        "key": "habit:10",
+        "completes": {
+          "kind": "habit",
+          "ref": "10",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 11,
+        "name": "Plan tomorrow",
+        "category": "Home",
+        "done": false,
+        "key": "habit:11",
+        "completes": {
+          "kind": "habit",
+          "ref": "11",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 12,
+        "name": "Read before bed",
+        "category": "Health",
+        "done": false,
+        "key": "habit:12",
+        "completes": {
+          "kind": "habit",
+          "ref": "12",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 13,
+        "name": "Walk outside",
+        "category": "Health",
+        "done": false,
+        "key": "habit:13",
+        "completes": {
+          "kind": "habit",
+          "ref": "13",
+          "item_id": null
+        },
+        "items": []
+      },
+      {
+        "id": 14,
+        "name": "Journal",
+        "category": "Health",
+        "done": false,
+        "key": "habit:14",
+        "completes": {
+          "kind": "habit",
+          "ref": "14",
+          "item_id": null
+        },
+        "items": []
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "name": "upcoming",
+      "title": "UPCOMING",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "",
+          "text": "Concert — The hall",
+          "note": "22d ago",
+          "urgency": "overdue",
+          "handle": "life events show 1",
+          "key": null,
+          "completes": null
+        },
+        {
+          "label": "",
+          "text": "Dentist — The clinic",
+          "note": "4d ago",
+          "urgency": "overdue",
+          "handle": "life events show 2",
+          "key": null,
+          "completes": null
+        }
+      ],
+      "grid": [],
+      "total": 2,
+      "in_flight": 0,
+      "hints": [
+        "life countdowns list",
+        "life events list"
+      ]
+    },
+    {
+      "name": "review",
+      "title": "REVIEW",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "prune-images",
+          "text": "Prune the container images",
+          "note": "never run",
+          "urgency": "overdue",
+          "handle": "",
+          "completes": {
+            "kind": "review",
+            "ref": "prune-images",
+            "item_id": null
+          },
+          "key": "review:prune-images"
+        },
+        {
+          "label": "check-disks",
+          "text": "Check the disks' health",
+          "note": "never run",
+          "urgency": "overdue",
+          "handle": "",
+          "completes": {
+            "kind": "review",
+            "ref": "check-disks",
+            "item_id": null
+          },
+          "key": "review:check-disks"
+        },
+        {
+          "label": "rotate-keys",
+          "text": "Rotate the backup keys",
+          "note": "never run",
+          "urgency": "overdue",
+          "handle": "",
+          "completes": {
+            "kind": "review",
+            "ref": "rotate-keys",
+            "item_id": null
+          },
+          "key": "review:rotate-keys"
+        }
+      ],
+      "grid": [],
+      "total": 4,
+      "in_flight": 0,
+      "hints": [
+        "doit review due"
+      ]
+    },
+    {
+      "name": "practice",
+      "title": "PRACTICE",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "lab-regex",
+          "text": "Work through the regex Lab",
+          "note": "never run",
+          "urgency": "overdue",
+          "handle": "",
+          "completes": {
+            "kind": "practice",
+            "ref": "lab-regex",
+            "item_id": null
+          },
+          "key": "practice:lab-regex"
+        }
+      ],
+      "grid": [],
+      "total": 1,
+      "in_flight": 0,
+      "hints": [
+        "doit review due"
+      ]
+    }
+  ],
+  "problems": []
+}

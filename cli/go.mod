@@ -14,6 +14,7 @@ require (
 	github.com/datapointchris/gotermboard v0.61.1
 	github.com/datapointchris/gotermstyle v0.7.0
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.38.0
 )
@@ -45,4 +46,5 @@ require (
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/term v0.47.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 )

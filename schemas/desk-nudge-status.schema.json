@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "urn:doit:desk-nudge-status:v2",
   "title": "doit desk-nudge status",
-  "description": "Where the desk nudge's clock stands, read from this desk's state file with no request. Its pill is the state file's own pill object, which a status bar reads from the file. Written by doit.desk_nudge.write_schemas from the module, so edit the module rather than this file.",
+  "description": "Where the desk nudge's clock stands, read from this desk's state file with no request. Its pill is the state file's own pill object, which a status bar reads from the file. This file is the source of the shape, and a Go test validates what `doit desk-nudge status --json` prints against it.",
   "type": "object",
   "additionalProperties": false,
   "required": [

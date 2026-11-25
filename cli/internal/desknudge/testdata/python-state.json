@@ -1,0 +1,52 @@
+{
+  "version": 2,
+  "phase": "ready",
+  "counted_seconds": 2702.4,
+  "last_tick": "2026-11-24T18:19:45.120-05:00",
+  "interval_minutes": 45.0,
+  "answer_counts": {
+    "good_timing": 3,
+    "too_soon": 1,
+    "too_late": 0,
+    "bothered": 0
+  },
+  "nudge": {
+    "nudge_id": "019ab7c2-0001-7aaa-8bbb-000000000001",
+    "fired_at": "2026-11-24T18:15:02.004-05:00",
+    "counted_minutes": 45.04,
+    "interval_minutes": 45.0,
+    "suggestion": {
+      "pursuit": "tasks",
+      "item_id": "532",
+      "label": "File the receipts\nand the warranty cards"
+    },
+    "ready_until": "2026-11-24T18:25:02.411-05:00"
+  },
+  "queued_answers": [
+    {
+      "row": {
+        "nudge_id": "019ab7a0-0002-7aaa-8bbb-000000000002",
+        "answer": "too_soon",
+        "fired_at": "2026-11-24T17:20:00.000-05:00",
+        "answered_at": "2026-11-24T17:21:13.500-05:00",
+        "machine": "desk"
+      },
+      "late": false
+    }
+  ],
+  "recent_nudges": [
+    {
+      "nudge_id": "019ab7a0-0002-7aaa-8bbb-000000000002",
+      "fired_at": "2026-11-24T17:20:00.000-05:00"
+    }
+  ],
+  "panel": {
+    "picked": [],
+    "rebuild_wanted": true
+  },
+  "pill": {
+    "text": "ready · tasks",
+    "class": "ready",
+    "stale_after": "2026-11-24T18:20:45.120-05:00"
+  }
+}

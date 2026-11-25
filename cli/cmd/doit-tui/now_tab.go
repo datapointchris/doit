@@ -13,37 +13,27 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/datapointchris/gotermboard"
+
+	"github.com/datapointchris/doit/cli/internal/desknudge"
 )
 
-// panelSchemaVersion is the version of doit's panel step that this board reads. Any other is
-// refused, because doit and doit-tui are released and upgraded apart.
-const panelSchemaVersion = 2
-
-// panelStep is one step of `doit desk-nudge panel`, as doit's schemas/desk-nudge-panel.schema.json
-// gives it.
+// panelStep is one step of `doit desk-nudge panel` as the board draws it: the rows the desk nudge
+// lists for the step doit printed.
 type panelStep struct {
-	SchemaVersion int        `json:"schema_version"`
-	Step          string     `json:"step"`
-	Rows          []panelRow `json:"rows"`
-	Message       *string    `json:"message"`
+	Step    string
+	Rows    []panelRow
+	Message *string
 }
 
-type panelRow struct {
-	Key       *string `json:"key"`
-	Kind      string  `json:"kind"`
-	Text      string  `json:"text"`
-	Group     *string `json:"group"`
-	Minutes   *int    `json:"minutes"`
-	Suggested bool    `json:"suggested"`
-}
+type panelRow = desknudge.Row
 
 // The steps and row kinds the now tab acts on, as doit's panel names them.
 const (
-	stepMinutes    = "minutes"
-	stepDone       = "done"
-	kindAnswer     = "answer"
-	kindLog        = "log_minutes"
-	kindAdjust     = "adjust_minutes"
+	stepMinutes    = desknudge.StepMinutes
+	stepDone       = desknudge.StepDone
+	kindAnswer     = desknudge.KindAnswer
+	kindLog        = desknudge.KindLogMinutes
+	kindAdjust     = desknudge.KindAdjustMinutes
 	panelReadEvery = 15 * time.Second
 	// readWithin bounds one read of the rows, which doit takes from this desk's cache.
 	readWithin = 30 * time.Second
@@ -90,19 +80,20 @@ func runPanel(ctx context.Context, args ...string) (panelStep, error) {
 	if err != nil {
 		return panelStep{}, errors.New(gotermboard.LastLine(stderr.Bytes(), err))
 	}
-	var step panelStep
-	if err := json.Unmarshal(out, &step); err != nil {
+	var printed desknudge.Panel
+	if err := json.Unmarshal(out, &printed); err != nil {
 		return panelStep{}, errors.New("doit desk-nudge panel printed no step: " + err.Error())
 	}
-	if step.SchemaVersion != panelSchemaVersion {
+	// doit and doit-tui are released and upgraded apart, so a panel of another version is refused.
+	if printed.SchemaVersion != desknudge.PanelSchemaVersion {
 		older := "doit"
-		if step.SchemaVersion > panelSchemaVersion {
+		if printed.SchemaVersion > desknudge.PanelSchemaVersion {
 			older = "doit-tui"
 		}
 		return panelStep{}, fmt.Errorf("doit desk-nudge panel printed schema_version %d and this doit-tui reads %d, so upgrade %s",
-			step.SchemaVersion, panelSchemaVersion, older)
+			printed.SchemaVersion, desknudge.PanelSchemaVersion, older)
 	}
-	return step, nil
+	return panelStep{Step: printed.Step, Rows: printed.Rows, Message: printed.Message}, nil
 }
 
 // minutesOffer is a timed pursuit's minutes step: the amount enter logs, and the rows that reopen
