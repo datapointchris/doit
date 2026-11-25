@@ -592,6 +592,7 @@ class Views:
             'generated_at': lanes.timestamp(now),
             'since': bounds.start.isoformat(timespec='seconds'),
             'until': bounds.stop.isoformat(timespec='seconds'),
+            'days': bounds.days(),
             'asked': [lane.name for lane in groups],
             'unavailable': [lane.name for lane in groups if not lane.available],
             'partial': [lane.name for lane in groups if lane.available and lane.reason],
