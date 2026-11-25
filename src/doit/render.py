@@ -1,13 +1,4 @@
-"""doit's shared console, its text helpers, and its startup-nudge renderers.
-
-A nudge is an interrupt you did not ask for, so it trades every browse-time field
-(description, tags, cadence, last-done) for one line per item. A wrapped row is
-two rows, which is how the nudge grew the first time, so every nudge line stays
-within the terminal.
-
-A handle, the command a row says to type, is the one value never clipped. A
-nudge row drops its status to fit one, and leaves off a command that still does
-not fit.
+"""doit's shared console and its text helpers.
 
 Lines carrying content from a register, a Lab or a command are built as `Text`
 rather than markup strings — `Text.append` does not parse `[...]`, so a bracket
@@ -18,7 +9,6 @@ import re
 import sys
 
 from rich.console import Console
-from rich.text import Text
 
 # highlight=False: rich's automatic highlighter colors anything that looks like
 # a number, path or URL, which turns a register id into a surprise.
@@ -58,9 +48,6 @@ def can_prompt() -> bool:
     closes leaves the caller with no output and no exit code."""
     return not no_input and sys.stdin.isatty()
 
-
-# Wide enough for "overdue 999d", the longest status_label, plus a space.
-STATUS_WIDTH = 13
 
 # A sentence ends at punctuation the next character does not continue. Matching
 # the following space rather than the punctuation alone is what keeps `execute.go`
@@ -115,34 +102,3 @@ def span_text(days: float) -> str:
     if days < 90:
         return f'{max(round(days / 7), 1)}w'
     return f'{max(round(days / 30), 1)}mo'
-
-
-def nudge_header(title: str, count: int) -> None:
-    """Print a one-line nudge heading (``Review · 6 due``)."""
-    console.print(f'[cyan]{title} · {count} due[/]')
-
-
-def nudge_width(names: list[str]) -> int:
-    """The name-column width for a set of nudge rows."""
-    return max((len(name) for name in names), default=0) + 2
-
-
-def nudge_row(name: str, status: str, command: str, width: int) -> None:
-    """Print one due item as a single line, never wrapped.
-
-    A clipped command fails when typed, so the command is printed whole or not
-    at all. The status gives way to it first: a row whose line cannot hold all
-    three drops the status. A command too wide for the line even then is left
-    off, and the row keeps its name and status. The browse view prints it whole.
-    """
-    line = Text('  ')
-    line.append(name.ljust(width), style='yellow')
-    handle = f'↳ {command}' if command else ''
-    if handle and 2 + width + STATUS_WIDTH + len(handle) <= console.width:
-        line.append(status.ljust(STATUS_WIDTH))
-        line.append(handle, style='cyan')
-    elif handle and 2 + width + len(handle) <= console.width:
-        line.append(handle, style='cyan')
-    else:
-        line.append(status)
-    console.print(line, no_wrap=True, overflow='ellipsis')

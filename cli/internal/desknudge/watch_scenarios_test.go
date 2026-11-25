@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/datapointchris/doit/cli/internal/programs"
+	"github.com/datapointchris/doit/cli/internal/pursuits"
 	"github.com/datapointchris/doit/cli/internal/service"
 )
 
@@ -50,8 +52,8 @@ func TestTheNudgeFiresAtTheIntervalChimesOnceAsItTurnsReadyAndAPickNotifies(t *t
 	if suggested := f.state().Nudge.Suggestion; suggested == nil || suggested.Pursuit != "tasks" {
 		t.Errorf("the ready nudge suggests %+v, want the view's suggestion, tasks", suggested)
 	}
-	if chimes := f.ran("canberra-gtk-play"); len(chimes) != 1 || !slices.Equal(chimes[0], chimeProgram().argv) {
-		t.Errorf("the chime ran %q, want once as %q", chimes, chimeProgram().argv)
+	if chimes := f.ran("canberra-gtk-play"); len(chimes) != 1 || !slices.Equal(chimes[0], chimeProgram().Argv) {
+		t.Errorf("the chime ran %q, want once as %q", chimes, chimeProgram().Argv)
 	}
 	if draws := f.viewDraws(); !slices.Equal(draws, []bool{false, true}) {
 		t.Errorf("the view was read with draws %v, want the start's read without one, then the firing's with one", draws)
@@ -313,14 +315,14 @@ func TestStatusPauseResumeAndAnswerWorkWithNoWatchAndPanelShowReadsTheCache(t *t
 }
 
 func TestEachProgramTheWatchStartsHasItsArgvAndBound(t *testing.T) {
-	onLog, err := onLogProgram(`tick-task {id} {label} --minutes={minutes} --for {pursuit}`, map[string]string{
+	onLog, err := pursuits.OnLogProgram(`tick-task {id} {label} --minutes={minutes} --for {pursuit}`, map[string]string{
 		"id": "532", "label": `File the "receipts" now`, "note": "", "minutes": "30", "pursuit": "tasks",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, row := range []struct {
-		program program
+		program programs.Program
 		argv    []string
 		bound   time.Duration
 	}{
@@ -337,8 +339,8 @@ func TestEachProgramTheWatchStartsHasItsArgvAndBound(t *testing.T) {
 		{untickProgram("3", "2026-11-24"), []string{"life", "habits", "untick", "3", "--date", "2026-11-24"}, 30 * time.Second},
 		{onLog, []string{"tick-task", "532", `File the "receipts" now`, "--minutes=30", "--for", "tasks"}, 30 * time.Second},
 	} {
-		if !slices.Equal(row.program.argv, row.argv) || row.program.bound != row.bound {
-			t.Errorf("%s runs as %q within %s, want %q within %s", row.argv[0], row.program.argv, row.program.bound, row.argv, row.bound)
+		if !slices.Equal(row.program.Argv, row.argv) || row.program.Bound != row.bound {
+			t.Errorf("%s runs as %q within %s, want %q within %s", row.argv[0], row.program.Argv, row.program.Bound, row.argv, row.bound)
 		}
 	}
 }

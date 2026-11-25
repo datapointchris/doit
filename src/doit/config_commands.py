@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from pyclilogin import DEFAULT_SCOPES
 from pyclilogin import Deployment
 from pyclilogin import NotConfigured
+from pyclilogin import Product
 from pyclilogin import Setting
 from rich.text import Text
 
@@ -16,11 +18,21 @@ from doit import actor
 from doit import editor
 from doit import paths
 from doit import pursuits
-from doit import service
 from doit.render import console
 from doit.render import examples
 
 SCHEMA_VERSION = 1
+
+# The login `doit auth login` writes, which cli/internal/login reads with the
+# same identifiers. The keychain service is a deployed identifier: renaming it
+# orphans every stored token.
+LOGIN = Product(
+    name='doit',
+    keyring_service='doit-cli',
+    scopes=DEFAULT_SCOPES,
+    user_agent='doit-cli (+https://github.com/datapointchris/doit)',
+    product_keys=frozenset(),
+)
 
 app = typer.Typer(
     name='config',
@@ -62,21 +74,21 @@ def from_variable(value: Path | str, variable: str) -> Resolved:
 def loaded_login() -> Deployment:
     """What the config file says, including where it says too little for a command to run."""
     try:
-        return service.LOGIN.load()
+        return LOGIN.load()
     except NotConfigured as unconfigured:
         return unconfigured.deployment
 
 
 def resolved_settings(login: Deployment) -> dict[str, Resolved]:
     """Every value doit resolves on this machine."""
-    secret_variable = service.LOGIN.client_secret_variable
+    secret_variable = LOGIN.client_secret_variable
     return {
         'api': from_login(login.api),
         'issuer': from_login(login.issuer),
         'client_id': from_login(login.client_id),
         'token_command': Resolved(' '.join(login.token_command), 'file', str(login.path)) if login.hands_tokens() else Resolved(),
         # Whether it is set and never what it is.
-        'client_secret': Resolved('set', 'environment', f'${secret_variable}') if service.LOGIN.is_service() else Resolved(),
+        'client_secret': Resolved('set', 'environment', f'${secret_variable}') if LOGIN.is_service() else Resolved(),
         'config_file': from_variable(login.path, 'XDG_CONFIG_HOME'),
         'cache_dir': from_variable(pursuits.CACHE_DIR, 'XDG_CACHE_HOME'),
         'state_dir': from_variable(paths.state_dir(), 'XDG_STATE_HOME'),

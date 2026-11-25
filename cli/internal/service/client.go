@@ -35,9 +35,9 @@ const Prefix = "/api/v1"
 
 const userAgent = "doit-cli (+https://github.com/datapointchris/doit)"
 
-// The bounds of one attempt, as doit.service.TIMEOUT sets them for Python's
-// client. A view answers once each app it reads has answered or timed out, so a
-// source's timeout past answerTimeout is cut off here.
+// The bounds of one attempt. A view answers once each app it reads has
+// answered or timed out, so a source's timeout past answerTimeout is cut off
+// here.
 const (
 	answerTimeout  = 60 * time.Second
 	connectTimeout = 10 * time.Second
@@ -233,14 +233,66 @@ func (c *Client) Post(ctx context.Context, path string, body any, repeatable boo
 		_ = response.Body.Close()
 		return &NoAnswer{Message: fmt.Sprintf("no answer from %s: HTTP %d", c.where, response.StatusCode)}
 	}
-	answered, err := c.answered(response, "POST "+route)
+	return c.decoded(ctx, http.MethodPost, route, response, answer)
+}
+
+// Put replaces what the route at path holds with body and reads the answer
+// into answer, which may be nil. A put states the whole of what it sets, so
+// it is sent again after a timeout, a reset or a busy answer.
+func (c *Client) Put(ctx context.Context, path string, body, answer any) error {
+	return c.send(ctx, http.MethodPut, path, body, answer)
+}
+
+// Delete removes what the route at path names and reads the answer into
+// answer. A route that names what it removes removes nothing more when it is
+// sent again.
+func (c *Client) Delete(ctx context.Context, path string, answer any) error {
+	return c.send(ctx, http.MethodDelete, path, nil, answer)
+}
+
+// send is one repeatable write of method to the route at path.
+func (c *Client) send(ctx context.Context, method, path string, body, answer any) error {
+	route := Prefix + path
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	ctx = context.WithValue(ctx, repeatableWrite{}, true)
+	reader := io.Reader(http.NoBody)
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, c.base+route, reader)
+	if err != nil {
+		return err
+	}
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept", "application/json")
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := c.http.Do(request)
+	switch {
+	case err != nil && goclilogin.IsSessionRejected(err):
+		return &Refused{Message: fmt.Sprintf("the identity provider no longer honors this machine's login. %s", c.repair)}
+	case err != nil:
+		return &NoAnswer{Message: fmt.Sprintf("no answer from %s: %v", c.where, err)}
+	case slices.Contains(retriedStatuses, response.StatusCode):
+		_ = response.Body.Close()
+		return &NoAnswer{Message: fmt.Sprintf("no answer from %s: HTTP %d", c.where, response.StatusCode)}
+	}
+	return c.decoded(ctx, method, route, response, answer)
+}
+
+// decoded reads the answer to method on route into answer, where answer is not nil.
+func (c *Client) decoded(ctx context.Context, method, route string, response *http.Response, answer any) error {
+	body, err := c.answered(response, method+" "+route)
 	if err != nil || answer == nil {
 		return err
 	}
-	if err := json.Unmarshal(answered, answer); err != nil {
-		return &Refused{Message: fmt.Sprintf("%s answered POST %s in a shape this doit does not read: %v", c.where, route, err)}
-	}
-	return nil
+	return c.decode(ctx, method, route, body, answer)
 }
 
 // LaterSendCanStore is whether the same write sent later could be stored: no

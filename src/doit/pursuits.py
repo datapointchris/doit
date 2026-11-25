@@ -46,21 +46,14 @@ whichever app owns that domain, exactly as the dashboard delegates its lanes.
 
 import datetime as dt
 import math
-import os
 import random
 import re
-import shlex
-import subprocess
-import tempfile
 from collections.abc import Callable
 from collections.abc import Iterable
 from typing import NamedTuple
 
 import typer
 import yaml
-from rich.padding import Padding
-from rich.table import Table
-from rich.text import Text
 
 from doit import actor
 from doit import evidence
@@ -78,9 +71,6 @@ from doit.journal import latest_occurrence
 from doit.journal import new_id
 from doit.paths import cache_dir
 from doit.paths import machine_name
-from doit.render import can_prompt
-from doit.render import console
-from doit.render import error_console
 from doit.render import first_sentence
 from doit.render import join_context
 from doit.render import span_text
@@ -118,9 +108,6 @@ DAYS_CADENCE = re.compile(r'[1-9]\d*d')
 # How many of a resolve's rows a pursuit offers — enough to choose between, few
 # enough that five pursuits stay one screen.
 CANDIDATE_ROWS = 3
-
-# Two spaces between columns reads as one run of words on a wide terminal.
-GUTTER = 3
 
 # The window `pursuits drift` reads when given neither --since nor --until.
 DRIFT_SINCE = '90d'
@@ -1340,30 +1327,6 @@ def without_logged(selection: dict) -> dict:
     }
 
 
-def write_names_cache(pursuits: dict) -> None:
-    """Replace the name<TAB>description file the shell completion reads.
-
-    Completion has to be instant and starting this process is not, so every run
-    leaves behind a flat file the completion function can read with no subprocess
-    at all. `WriteCompletionNames` in cli/internal/deskfiles writes the same
-    lines from the Go doit, so a change to the format changes both. A
-    description that is not a string is written as nothing.
-    """
-    lines = []
-    for name, config in sorted(pursuits.items()):
-        said = config.get('description')
-        lines.append(f'{name}\t{said if isinstance(said, str) else ""}\n')
-    NAMES_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    handle, temporary = tempfile.mkstemp(dir=NAMES_CACHE.parent, prefix=f'.{NAMES_CACHE.name}-')
-    try:
-        with os.fdopen(handle, 'w') as written:
-            written.write(''.join(lines))
-        os.replace(temporary, NAMES_CACHE)
-    except OSError:
-        os.unlink(temporary)
-        raise
-
-
 def dig(document, path: str):
     """Follow a dotted path into a JSON document, returning None if it dead-ends.
 
@@ -1579,11 +1542,6 @@ def why_unpriced(state: dict, name: str) -> str:
 def late(days: float | None) -> bool:
     """Whether a pursuit is a day or more past its due date."""
     return days is not None and days <= -1
-
-
-def due_style(days: float | None) -> str:
-    """Yellow once something is genuinely late, and plain until then."""
-    return 'yellow' if late(days) else ''
 
 
 def standing_line(state: dict) -> str:
@@ -1817,25 +1775,6 @@ def standing_from(payload: dict, register: dict, now: dt.datetime) -> dict:
     }
 
 
-def print_reason(reason: str | None) -> None:
-    """A pursuit's reason on the lines under its row, wrapped because a row is one line and a reason is a sentence."""
-    if reason:
-        console.print(Padding(Text(reason), (0, 0, 0, 4), expand=False))
-
-
-def render_reasons(named: Iterable[tuple[str, str | None]]) -> None:
-    """The reasons under a table, whose columns have no room for a sentence."""
-    table = Table(box=None, pad_edge=False, show_header=False)
-    table.add_column('pursuit', no_wrap=True)
-    table.add_column('reason')
-    for name, reason in named:
-        if reason:
-            table.add_row(name, Text(reason))
-    if table.row_count:
-        console.print()
-        console.print(table)
-
-
 def pursuit_matches(needle: str, pursuits: dict) -> list[str]:
     """Each pursuit that ``needle`` could name: itself where it is one, else every name it begins, sorted."""
     if needle in pursuits:
@@ -1850,61 +1789,6 @@ def unmatched(needle: str, matches: list[str]) -> str:
     return f'no pursuit named {needle}'
 
 
-def match_pursuit(needle: str, pursuits: dict) -> str | None:
-    """Exact name, else an unambiguous prefix. Typing three letters is the point."""
-    if needle in pursuits:
-        return needle
-    matches = [name for name in pursuits if name.startswith(needle)]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        error_console.print(f'Ambiguous: {needle} matches {", ".join(sorted(matches))}')
-        return None
-    return None
-
-
-class Abandoned(Exception):
-    """The prompt was interrupted, so nothing should be written."""
-
-
-def ask(prompt: str) -> str:
-    """One line of input, treating an interrupt as abandoning rather than crashing.
-
-    Ctrl-C and Ctrl-D at a prompt both mean "forget it", and a traceback there
-    would print a stack over a half-answered question.
-    """
-    try:
-        return console.input(prompt).strip()
-    except (KeyboardInterrupt, EOFError) as interrupted:
-        raise Abandoned from interrupted
-
-
-def prompt_for_pursuit(pursuits: dict, offered: list[str]) -> str:
-    """Ask which pursuit, listing them with what each means.
-
-    The draw that is still on screen is marked, because the overwhelmingly common
-    path is reading five rows and then logging one of them — and a name typed from
-    memory is where a prefix collides with a pursuit that was never offered.
-    """
-    width = max(len(name) for name in pursuits)
-    console.print()
-    for name, config in sorted(pursuits.items(), key=lambda row: -row[1].get('weight', 0)):
-        row = Text('  ')
-        row.append('›' if name in offered else ' ', style='cyan')
-        row.append(f' {name.ljust(width)}  ', style='white' if name in offered else 'dim')
-        row.append(first_sentence(config.get('description', '')), style='dim')
-        console.print(row)
-    while True:
-        answer = ask('\n  pursuit: ')
-        if not answer:
-            raise Abandoned
-        matched = match_pursuit(answer, pursuits)
-        if matched:
-            return matched
-        if answer not in pursuits and not [name for name in pursuits if name.startswith(answer)]:
-            error_console.print(f'  No pursuit starts with {answer}.')
-
-
 def settled_choice(choices: list[dict]) -> dict | None:
     """The choice that a pursuit stands for with nobody asked: the only one offered, or None where there are several or none.
 
@@ -1912,23 +1796,6 @@ def settled_choice(choices: list[dict]) -> dict | None:
     answer, and guessing it is a wrong completion in another app's data.
     """
     return choices[0] if len(choices) == 1 else None
-
-
-def which_choice(choices: list[dict], writes_through: bool) -> int:
-    """The index of the choice a log is about, or -1 where it is about none of them.
-
-    Where `settled_choice` leaves it open, it is asked only where the answer does
-    something, because a write-through completes one specific item. Where nobody
-    is there to ask, the answer is none.
-    """
-    if not choices or settled_choice(choices) is not None:
-        return 0
-    if not writes_through or not can_prompt():
-        return -1
-    try:
-        return prompt_for_choice(choices)
-    except Abandoned:
-        return -1
 
 
 def choice_carrying(choices: list[dict], item_id: str) -> int:
@@ -1982,99 +1849,6 @@ def log_choices(name: str, config: dict, item: dict, item_id: str | None) -> dic
         'ask': ask,
         'names_chosen': item_id is not None or int(item.get('candidates') or 1) == 1,
     }
-
-
-def prompt_for_choice(choices: list[dict]) -> int:
-    """Which of the offered choices was done, as an index. -1 where none of them was.
-
-    Enter means none rather than the first. Defaulting to the top row would
-    complete whatever happened to sort first, in another app, on a keystroke that
-    reads as "skip this question".
-    """
-    console.print()
-    for number, choice in enumerate(choices, start=1):
-        row = Text(' ' * GUTTER)
-        row.append(f'{number}  ', style='cyan')
-        row.append(join_context([choice.get('label'), choice.get('context')]))
-        console.print(row, no_wrap=True, overflow='ellipsis')
-    answer = ask('\n  which one, or Enter for none: ')
-    if answer.isdigit() and 1 <= int(answer) <= len(choices):
-        return int(answer) - 1
-    return -1
-
-
-def prompt_for_minutes() -> int:
-    """Ask how long it took, refusing an empty answer.
-
-    Asked only of a pursuit measured in time, where the duration is the thing
-    being logged rather than an annotation on it. A checkoff there is a number of
-    minutes, so an entry without one says something happened and not how much.
-
-    Deliberately not defaulted to the register's checkoff size. Enter would write
-    that size into the journal as a measurement, and every later reading would be
-    quoting the register back at itself.
-    """
-    while True:
-        answer = ask('  minutes: ')
-        if answer.isdigit() and int(answer) > 0:
-            return int(answer)
-        error_console.print('  A whole number of minutes.')
-
-
-ON_LOG_FIELD = re.compile(r'\{(id|label|note|minutes|pursuit)\}')
-
-
-def on_log_argv(template: str, fill: dict[str, str]) -> list[str]:
-    """A pursuit's `on_log` as an argv: split into arguments first, then each placeholder filled in one pass.
-
-    A label holding a space or a quote therefore stays one argument. The desk
-    nudge's Go pick builds the same argv in `onLogProgram`. Raises ValueError
-    where the template leaves a quote open.
-    """
-    return [ON_LOG_FIELD.sub(lambda found: fill[found.group(1)], word) for word in shlex.split(template)]
-
-
-def run_on_log(config: dict, item: dict, note: str, minutes: int | None, assume_yes: bool) -> dict | None:
-    """Run the pursuit's write-through command against the item that was offered.
-
-    Prompts before running, and with no terminal to prompt in it runs nothing,
-    because the draw it takes the id from can be up to fifteen minutes old. A
-    wrong completion is a silent lie in another app's data. `assume_yes` skips
-    the prompt and runs the command whether or not a terminal is attached.
-    """
-    template = config.get('on_log')
-    if not template or not item:
-        return None
-    if '{id}' in template and not item.get('id'):
-        return None
-    fill = {
-        'id': str(item.get('id', '')),
-        'label': item.get('label', ''),
-        'note': note or '',
-        'minutes': '' if minutes is None else str(minutes),
-        'pursuit': item.get('pursuit', ''),
-    }
-    try:
-        argv = on_log_argv(template, fill)
-    except ValueError as error:
-        error_console.print(f'  on_log {template!r} cannot be split into arguments: {error}', style='yellow')
-        return None
-    command = shlex.join(argv)
-    if not assume_yes:
-        if not can_prompt():
-            return None
-        prompt = Text('  ')
-        prompt.append(command, style='cyan')
-        prompt.append('  run it? [y/N] ')
-        if console.input(prompt).strip().lower() not in ('y', 'yes'):
-            return {'command': command, 'ran': False, 'exit_code': None}
-    result = subprocess.run(argv, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        failure = Text('  ')
-        failure.append(f'{command} exited {result.returncode}', style='yellow')
-        failure.append(f': {(result.stderr or "").strip()}')
-        error_console.print(failure)
-    return {'command': command, 'ran': True, 'exit_code': result.returncode}
 
 
 def new_record(
@@ -2164,27 +1938,6 @@ def skip_span(duration: str | None, interval: float | None) -> int:
     if interval is None or math.isinf(interval):
         return 1
     return max(round(interval), 1)
-
-
-def render_stranded_counts(offers: dict) -> None:
-    """Name any recent offer counts whose pursuit the register no longer holds, in the one view about the register itself.
-
-    The counts are keyed by name, so retiring or renaming a pursuit strands them.
-    ``drift`` walks the register, so the row never appears there again and nothing
-    else would ever mention it. A line leaves once its last offer falls outside
-    the window, so a retired pursuit needs nothing to clear it. ``next`` and the
-    nudge stay silent, because a misfiled record is not a task, and an interrupt
-    that reports bookkeeping is the kind you stop reading.
-    """
-    stranded = offers.get('stranded') or []
-    if not stranded:
-        return
-    console.print(Text(f'\n  Offers over the last {DRIFT_SINCE} with no pursuit:', style='yellow'))
-    for name in stranded:
-        for machine, counts in sorted((offers.get('recent') or {}).items()):
-            if name in counts:
-                console.print(f'    [yellow]{name}[/]  {counts[name]}  {machine}')
-    console.print('  Renaming a pursuit strands its counts. Naming it back in the register picks them up again.')
 
 
 def offered_since(days: dict[dt.date, int], start: dt.datetime, now: dt.datetime) -> int:
@@ -2337,28 +2090,3 @@ def earliest(records: list[dict], evidence_days: dict[str, list[dt.date]]) -> dt
     for days in evidence_days.values():
         times += [first_instant(day) for day in days]
     return min(times, default=None)
-
-
-def render_drift(rows: list[dict]) -> None:
-    """One row per pursuit, asked and done side by side in the pursuit's own unit.
-
-    Each row is read against its own goal and never against another row, so
-    minutes and counts can share one table without a total that adds them.
-    """
-    table = Table(box=None, pad_edge=False)
-    table.add_column('pursuit')
-    for column in ('goal', 'since', 'asked', 'done', 'due', 'offered', 'passed'):
-        table.add_column(column, justify='right')
-    for row in rows:
-        table.add_row(
-            row['pursuit'],
-            row['goal'],
-            f'{dt.datetime.fromisoformat(row["since"]):%d %b}',
-            '—' if row['asked'] is None else quantity_text(row['asked'], row['unit']),
-            quantity_text(row['done'], row['unit']) + (f' · {minutes_text(row["minutes"])}' if row.get('minutes') else ''),
-            format_due(row['due_days']),
-            str(row['offered']),
-            str(row['skips']),
-        )
-    console.print(table)
-    render_reasons((row['pursuit'], row.get('reason')) for row in rows)

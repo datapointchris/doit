@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -90,15 +91,40 @@ func startService(t *testing.T, root string) service {
 	}
 }
 
-// write stores a document's text, as `doit pursuits edit` and its siblings do.
+// write stores the file at path as a document, as `doit pursuits edit` and its siblings do.
 func (s service) write(t *testing.T, name, path string) {
 	t.Helper()
 	text, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := json.Marshal(map[string]string{"text": string(text)})
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodPut, s.url+"/api/v1/documents/"+name, bytes.NewReader(body))
+	s.writeText(t, name, string(text))
+}
+
+// writeText stores text as a document.
+func (s service) writeText(t *testing.T, name, text string) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"text": text})
+	response := s.send(t, http.MethodPut, "/api/v1/documents/"+name, bytes.NewReader(body))
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("PUT %s answered %d: %s", name, response.StatusCode, s.stderr)
+	}
+}
+
+// read decodes what GET path answers into answer, to see what a verb wrote.
+func (s service) read(t *testing.T, path string, answer any) {
+	t.Helper()
+	response := s.send(t, http.MethodGet, path, http.NoBody)
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK || json.NewDecoder(response.Body).Decode(answer) != nil {
+		t.Fatalf("GET %s answered %d: %s", path, response.StatusCode, s.stderr)
+	}
+}
+
+func (s service) send(t *testing.T, method, path string, body io.Reader) *http.Response {
+	t.Helper()
+	request, err := http.NewRequestWithContext(t.Context(), method, s.url+path, body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,15 +134,13 @@ func (s service) write(t *testing.T, name, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("PUT %s answered %d: %s", name, response.StatusCode, s.stderr)
-	}
+	return response
 }
 
 // desk is a machine pointed at the service, with its own home and a token command for its login.
 type desk struct {
 	binary string
+	home   string
 	env    []string
 }
 
@@ -141,6 +165,7 @@ func newDesk(t *testing.T, url, root string) desk {
 	}
 	return desk{
 		binary: binary,
+		home:   home,
 		env: []string{
 			"HOME=" + home,
 			"PATH=" + filepath.Join(root, ".venv", "bin") + string(os.PathListSeparator) + os.Getenv("PATH"),

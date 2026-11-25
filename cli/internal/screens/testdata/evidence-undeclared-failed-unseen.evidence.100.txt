@@ -1,0 +1,11 @@
+Evidence ───────────────────────────────────────────────────────────────────────────────────────────
+  study-computer-science  no backend — logged by hand
+  read-library            no backend — logged by hand
+  chores                  no backend — logged by hand
+  practice-piano          learning is not configured on the service: DOIT_API_LEARNING_URL,
+DOIT_API_LEARNING_CLIENT_SECRET unset
+  errands                 asked, nothing recorded yet
+  stretch                 no backend — logged by hand
+  sketch                  no backend — logged by hand
+
+  The apps are asked on a timer; this asks them now.

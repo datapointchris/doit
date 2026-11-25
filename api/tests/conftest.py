@@ -10,9 +10,6 @@ from fastapi.testclient import TestClient
 from pyapiauth import Caller
 from pyapiauth import Rejected
 
-from doit import pursuits
-from doit import service
-from doit.service_commands import review as review_commands
 from doit_api.app import create_app
 from doit_api.computed_views import Views
 from doit_api.readers.apps import App
@@ -96,43 +93,7 @@ def client_for(
     return client
 
 
-Forward = Callable[[httpx2.Request], httpx2.Response]
-
-
-def connected(
-    store, monkeypatch, tmp_path, apps=None, around: Callable[[httpx2.Request, Forward], httpx2.Response] | None = None
-) -> TestClient:
-    """The service, with every CLI command in this test asking it and caching into the test's own directory.
-
-    ``around`` stands between the CLI and the service, to lose an answer or answer in its place.
-    """
-    client = client_for(store, apps, clock=None)
-
-    def forward(request: httpx2.Request) -> httpx2.Response:
-        answer = client.request(
-            request.method,
-            request.url.path,
-            params=dict(request.url.params),
-            content=request.content,
-            headers={key: value for key, value in request.headers.items() if key.lower() != 'host'},
-        )
-        return httpx2.Response(answer.status_code, headers=dict(answer.headers), content=answer.content)
-
-    def transport(request: httpx2.Request) -> httpx2.Response:
-        return forward(request) if around is None else around(request, forward)
-
-    tokens = SimpleNamespace(token=lambda: SimpleNamespace(access_token=TOKEN))
-    monkeypatch.setattr(
-        service,
-        'client',
-        lambda: service.Service('https://doit.test', tokens, transport=httpx2.MockTransport(transport), pause=lambda seconds: None),
-    )
-    monkeypatch.setattr(pursuits, 'CACHE_DIR', tmp_path / 'cache')
-    monkeypatch.setattr(pursuits, 'NAMES_CACHE', tmp_path / 'cache' / 'next-names.txt')
-    monkeypatch.setattr(review_commands, 'NUDGE_INTERVAL', tmp_path / 'cache' / 'nudge-interval-minutes')
-    return client
-
-
 @pytest.fixture
-def api(store, monkeypatch, tmp_path) -> TestClient:
-    return connected(store, monkeypatch, tmp_path)
+def api(store) -> TestClient:
+    """The service over the test's store, on the real clock, as a desk asks it."""
+    return client_for(store, clock=None)

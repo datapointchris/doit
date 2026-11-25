@@ -2,19 +2,16 @@ package desknudge
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/datapointchris/goclilogin"
 
+	"github.com/datapointchris/doit/cli/internal/actor"
 	"github.com/datapointchris/doit/cli/internal/login"
 	"github.com/datapointchris/doit/cli/internal/service"
 )
@@ -53,55 +50,10 @@ func ThisDesk(version string) *Desk {
 		Paths:   DeskPaths(),
 		Now:     time.Now,
 		Open:    service.Open,
-		Machine: machineName(),
-		Actor:   actorIdentity(),
+		Machine: actor.MachineName(),
+		Actor:   actor.Identity(),
 		Version: strings.TrimPrefix(version, "v"),
 	}
-}
-
-// machineName is this machine's identity: its hostname's first label, lowercased.
-func machineName() string {
-	host, _ := os.Hostname()
-	first, _, _ := strings.Cut(host, ".")
-	return strings.ToLower(strings.TrimSpace(first))
-}
-
-// actorIdentity is who a journal write names: a Claude session, a scheduled
-// job, or the user at this host, spelled as the Python doit spells it.
-func actorIdentity() string {
-	job, session := os.Getenv("SLATE_ACTOR"), os.Getenv("CLAUDE_CODE_SESSION_ID")
-	switch {
-	case session != "" && job != "":
-		return "claude-code-unattended/" + job + "/" + session
-	case session != "" && os.Getenv("CLAUDE_CODE_SESSION_ATTENDED") == "0":
-		return "claude-code-unattended/" + session
-	case session != "":
-		return "claude-code/" + session
-	case job != "":
-		return "worker/" + job
-	}
-	user := os.Getenv("USER")
-	if user == "" {
-		user = "unknown"
-	}
-	if host, _ := os.Hostname(); host != "" {
-		return user + "@" + host
-	}
-	return user
-}
-
-// newID is a UUIDv7: a 48-bit millisecond timestamp, then randomness, so ids
-// sort into the order things happened.
-func newID(now time.Time) string {
-	var id [16]byte
-	var millis [8]byte
-	binary.BigEndian.PutUint64(millis[:], uint64(now.UnixMilli()))
-	copy(id[0:6], millis[2:8])
-	_, _ = rand.Read(id[6:])
-	id[6] = 0x70 | id[6]&0x0f
-	id[8] = 0x80 | id[8]&0x3f
-	text := hex.EncodeToString(id[:])
-	return text[0:8] + "-" + text[8:12] + "-" + text[12:16] + "-" + text[16:20] + "-" + text[20:]
 }
 
 // failureKind is why a read of the service failed, in the words a suggestion
@@ -177,29 +129,6 @@ func (d *Desk) sendAnswer(ctx context.Context, row AnswerRow) (storedAnswer, err
 		err = client.Post(ctx, "/desk-nudge/answers", row, true, &answered)
 	}
 	return answered, err
-}
-
-// post writes body to the route at path, for a pick's completion.
-func (d *Desk) post(ctx context.Context, path string, body, answer any) error {
-	ctx, cancel := context.WithTimeout(ctx, writeBound)
-	defer cancel()
-	client, err := d.Open(ctx)
-	if err != nil {
-		return err
-	}
-	return client.Post(ctx, path, body, true, answer)
-}
-
-// get reads the route at path, for a pick's completion.
-func (d *Desk) get(ctx context.Context, path string, answer any) error {
-	ctx, cancel := context.WithTimeout(ctx, writeBound)
-	defer cancel()
-	client, err := d.Open(ctx)
-	if err != nil {
-		return err
-	}
-	_, err = client.Get(ctx, path, nil, answer)
-	return err
 }
 
 // interval reads as the status prints it, as Python's %g does.

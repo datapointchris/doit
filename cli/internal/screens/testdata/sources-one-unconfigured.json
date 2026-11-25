@@ -1,0 +1,21 @@
+{
+  "answers": [
+    {
+      "id": "life",
+      "block": "outstanding",
+      "answered": true,
+      "reason": null,
+      "lanes": 5,
+      "via": "adapter:life"
+    },
+    {
+      "id": "learning",
+      "block": "outstanding",
+      "answered": false,
+      "reason": "learning is not configured on the service: DOIT_API_LEARNING_URL, DOIT_API_LEARNING_CLIENT_SECRET unset",
+      "lanes": 0,
+      "via": null
+    }
+  ],
+  "problems": []
+}

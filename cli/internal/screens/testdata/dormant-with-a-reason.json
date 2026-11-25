@@ -1,0 +1,28 @@
+{
+  "dormant": [
+    {
+      "pursuit": "study-computer-science",
+      "goal": "every 2d",
+      "last": "never",
+      "reason": null
+    },
+    {
+      "pursuit": "practice-piano",
+      "goal": "every 2d",
+      "last": "never",
+      "reason": null
+    },
+    {
+      "pursuit": "errands",
+      "goal": "every 3d",
+      "last": "never",
+      "reason": null
+    },
+    {
+      "pursuit": "stretch",
+      "goal": "every 1d",
+      "last": "4w ago",
+      "reason": null
+    }
+  ]
+}

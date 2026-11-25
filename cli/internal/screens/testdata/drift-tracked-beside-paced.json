@@ -1,0 +1,106 @@
+{
+  "since": "2026-08-27T02:57:05.746398-04:00",
+  "until": "2026-11-25T01:57:05.746398-05:00",
+  "printed_rows": [
+    {
+      "pursuit": "study-computer-science",
+      "goal": "every 2d",
+      "since": "23 Nov",
+      "asked": "1",
+      "done": "0",
+      "due": "due today",
+      "offered": "1",
+      "passed": "1",
+      "reason": ""
+    },
+    {
+      "pursuit": "read-library",
+      "goal": "45m a week",
+      "since": "18 Nov",
+      "asked": "45m",
+      "done": "30m",
+      "due": "due in 5d",
+      "offered": "1",
+      "passed": "0",
+      "reason": ""
+    },
+    {
+      "pursuit": "chores",
+      "goal": "every 7d",
+      "since": "18 Nov",
+      "asked": "1",
+      "done": "0",
+      "due": "due today",
+      "offered": "1",
+      "passed": "0",
+      "reason": "A house that stays standing needs a weekly sweep, and the longer it waits the longer the list grows."
+    },
+    {
+      "pursuit": "practice-piano",
+      "goal": "every 2d",
+      "since": "23 Nov",
+      "asked": "1",
+      "done": "0",
+      "due": "due today",
+      "offered": "1",
+      "passed": "0",
+      "reason": ""
+    },
+    {
+      "pursuit": "errands",
+      "goal": "every 3d",
+      "since": "22 Nov",
+      "asked": "1",
+      "done": "0",
+      "due": "due today",
+      "offered": "1",
+      "passed": "0",
+      "reason": ""
+    },
+    {
+      "pursuit": "stretch",
+      "goal": "every 1d",
+      "since": "24 Nov",
+      "asked": "1",
+      "done": "0",
+      "due": "due today",
+      "offered": "1",
+      "passed": "0",
+      "reason": ""
+    },
+    {
+      "pursuit": "sketch",
+      "goal": "tracked",
+      "since": "27 Aug",
+      "asked": "—",
+      "done": "1 · 50m",
+      "due": "—",
+      "offered": "0",
+      "passed": "0",
+      "reason": ""
+    }
+  ],
+  "rows": [
+    {
+      "done": 0.0
+    },
+    {
+      "done": 30.0
+    },
+    {
+      "done": 0.0
+    },
+    {
+      "done": 0.0
+    },
+    {
+      "done": 0.0
+    },
+    {
+      "done": 0.0
+    },
+    {
+      "done": 1.0
+    }
+  ]
+}

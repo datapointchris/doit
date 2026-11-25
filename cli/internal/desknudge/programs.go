@@ -1,17 +1,16 @@
 package desknudge
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/datapointchris/doit/cli/internal/programs"
 )
 
 // The bounds on what the desk nudge starts. Each runs outside the state lock,
@@ -19,9 +18,6 @@ import (
 const (
 	// programBound is how long claude-sessions, hyprctl, loginctl, the chime and notify-send may each take.
 	programBound = 5 * time.Second
-	// onLogBound is how long a pursuit's on_log may take. It completes one item
-	// in another app, as a habit's completion does in life.
-	onLogBound = 30 * time.Second
 	// chimeSound is the XDG sound theme's event that a firing plays, named so the desk's own theme chooses the sound.
 	chimeSound = "message-new-instant"
 )
@@ -31,114 +27,62 @@ const (
 // timeout.
 var habitBound = 30 * time.Second
 
-// program is one argv the desk nudge starts, with its bound.
-type program struct {
-	argv  []string
-	bound time.Duration
-}
-
 // The programs the desk nudge starts. Each argv is built here from doit's own
 // values, never read from the panel's cache or a page.
-func claudeSessionsProgram() program {
-	return program{[]string{"claude-sessions", "--json"}, programBound}
+func claudeSessionsProgram() programs.Program {
+	return programs.Program{Argv: []string{"claude-sessions", "--json"}, Bound: programBound}
 }
 
-func hyprctlInstancesProgram() program {
-	return program{[]string{"hyprctl", "instances", "-j"}, programBound}
+func hyprctlInstancesProgram() programs.Program {
+	return programs.Program{Argv: []string{"hyprctl", "instances", "-j"}, Bound: programBound}
 }
 
-func hyprctlProgram(instance, query string) program {
-	return program{[]string{"hyprctl", "-i", instance, query, "-j"}, programBound}
+func hyprctlProgram(instance, query string) programs.Program {
+	return programs.Program{Argv: []string{"hyprctl", "-i", instance, query, "-j"}, Bound: programBound}
 }
 
-func chimeProgram() program {
-	return program{[]string{"canberra-gtk-play", "--id", chimeSound, "--description", "desk nudge"}, programBound}
+func chimeProgram() programs.Program {
+	return programs.Program{Argv: []string{"canberra-gtk-play", "--id", chimeSound, "--description", "desk nudge"}, Bound: programBound}
 }
 
-func notifyProgram(summary, body string) program {
-	return program{[]string{"notify-send", "-a", "doit", summary, body}, programBound}
+func notifyProgram(summary, body string) programs.Program {
+	return programs.Program{Argv: []string{"notify-send", "-a", "doit", summary, body}, Bound: programBound}
 }
 
-func idleHintProgram() program {
-	return program{[]string{"loginctl", "show-session", "auto", "-p", "IdleHint", "--value"}, programBound}
+func idleHintProgram() programs.Program {
+	return programs.Program{Argv: []string{"loginctl", "show-session", "auto", "-p", "IdleHint", "--value"}, Bound: programBound}
 }
 
 // habitProgram completes one habit in life on day, the desk's day when it was
 // picked. Its id is all digits, which the pick checks first.
-func habitProgram(habitID, day string) program {
-	return program{[]string{"life", "habits", "complete", habitID, "--date", day}, habitBound}
+func habitProgram(habitID, day string) programs.Program {
+	return programs.Program{Argv: []string{"life", "habits", "complete", habitID, "--date", day}, Bound: habitBound}
 }
 
 // habitsCompletedProgram is life's list of the habits completed on day, which
 // a habit pick reads again as it commits, because life accepts a second
 // completion.
-func habitsCompletedProgram(day string) program {
-	return program{[]string{"life", "habits", "completed", "--since", day, "--until", day, "--json"}, habitBound}
+func habitsCompletedProgram(day string) programs.Program {
+	return programs.Program{Argv: []string{"life", "habits", "completed", "--since", day, "--until", day, "--json"}, Bound: habitBound}
 }
 
 // tickProgram records one set of a checklist item on day, and untickProgram
 // takes that day's latest one back. The item's id is all digits, which the
 // pick checks first.
-func tickProgram(itemID, day string) program {
-	return program{[]string{"life", "habits", "tick", itemID, "--date", day}, habitBound}
+func tickProgram(itemID, day string) programs.Program {
+	return programs.Program{Argv: []string{"life", "habits", "tick", itemID, "--date", day}, Bound: habitBound}
 }
 
-func untickProgram(itemID, day string) program {
-	return program{[]string{"life", "habits", "untick", itemID, "--date", day}, habitBound}
+func untickProgram(itemID, day string) programs.Program {
+	return programs.Program{Argv: []string{"life", "habits", "untick", itemID, "--date", day}, Bound: habitBound}
 }
 
 // setProgram is the call that a tick or an untick of itemID runs on day.
-func setProgram(action, itemID, day string) program {
+func setProgram(action, itemID, day string) programs.Program {
 	if action == ActionUntick {
 		return untickProgram(itemID, day)
 	}
 	return tickProgram(itemID, day)
-}
-
-// programFailed is a program that was missing, timed out or exited non-zero.
-// One that timed out may have done its work.
-type programFailed struct {
-	message  string
-	timedOut bool
-	// exited is a program that ran and exited non-zero, with exitCode.
-	exited   bool
-	exitCode int
-}
-
-func (p *programFailed) Error() string { return p.message }
-
-// run is a program's stdout, or a programFailed naming what went wrong.
-func (p program) run(ctx context.Context) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, p.bound)
-	defer cancel()
-	command := exec.CommandContext(ctx, p.argv[0], p.argv[1:]...)
-	command.WaitDelay = time.Second
-	var stdout, stderr bytes.Buffer
-	command.Stdout, command.Stderr = &stdout, &stderr
-	err := command.Run()
-	switch {
-	case errors.Is(err, exec.ErrNotFound):
-		return "", &programFailed{message: p.argv[0] + " is not installed"}
-	case ctx.Err() != nil:
-		return "", &programFailed{message: fmt.Sprintf("%s gave no answer within %s", p.argv[0], p.bound), timedOut: true}
-	case err != nil:
-		var exited *exec.ExitError
-		if !errors.As(err, &exited) {
-			return "", &programFailed{message: fmt.Sprintf("%s could not start: %v", p.argv[0], err)}
-		}
-		said := lastLine(stderr.String())
-		message := fmt.Sprintf("%s exited %d", strings.Join(p.argv, " "), exited.ExitCode())
-		if said != "" {
-			message += ": " + said
-		}
-		return "", &programFailed{message: message, exited: true, exitCode: exited.ExitCode()}
-	}
-	return stdout.String(), nil
-}
-
-func lastLine(text string) string {
-	lines := strings.Split(strings.TrimSpace(text), "\n")
-	return strings.TrimSpace(lines[len(lines)-1])
 }
 
 // snapshot is what the desk showed at a moment: every Claude session, and the
@@ -166,7 +110,7 @@ func takeSnapshot(ctx context.Context) *snapshot {
 
 // claudeSessions is every row of claude-sessions --json, whole, or why it could not be read.
 func claudeSessions(ctx context.Context) any {
-	out, err := claudeSessionsProgram().run(ctx)
+	out, err := claudeSessionsProgram().Run(ctx)
 	if err != nil {
 		return failedRead{err.Error()}
 	}
@@ -181,7 +125,7 @@ func claudeSessions(ctx context.Context) any {
 // instance that hyprctl instances lists. A unit started at login never has
 // HYPRLAND_INSTANCE_SIGNATURE, so the instance is always named.
 func hyprctl(ctx context.Context, query string, answer any) error {
-	listed, err := hyprctlInstancesProgram().run(ctx)
+	listed, err := hyprctlInstancesProgram().Run(ctx)
 	if err != nil {
 		return err
 	}
@@ -208,7 +152,7 @@ func hyprctl(ctx context.Context, query string, answer any) error {
 	if chosen == "" {
 		return errors.New("hyprctl instances -j lists no Hyprland instance")
 	}
-	out, err := hyprctlProgram(chosen, query).run(ctx)
+	out, err := hyprctlProgram(chosen, query).Run(ctx)
 	if err != nil {
 		return err
 	}
@@ -266,7 +210,7 @@ func chime(ctx context.Context) {
 		logger.Info("every display is off, so the nudge fires without its chime")
 		return
 	}
-	if _, err := chimeProgram().run(ctx); err != nil {
+	if _, err := chimeProgram().Run(ctx); err != nil {
 		logger.Warn("could not play the chime, so only the pill shows the nudge: " + err.Error())
 	}
 }
@@ -277,7 +221,7 @@ func Notify(ctx context.Context, summary, body string) { notify(ctx, summary, bo
 
 // notify is a passing notification, for what the person should know now.
 func notify(ctx context.Context, summary, body string) {
-	if _, err := notifyProgram(summary, body).run(ctx); err != nil {
+	if _, err := notifyProgram(summary, body).Run(ctx); err != nil {
 		logger.Warn(fmt.Sprintf("could not notify %q: %v", summary, err))
 	}
 }
@@ -297,93 +241,10 @@ func hyprlandRunning() bool {
 // listener such as hypridle's sets. A failed read reads as active. It gates a
 // timed read of the panel's parts and never moves the clock.
 func sessionIdle(ctx context.Context) bool {
-	out, err := idleHintProgram().run(ctx)
+	out, err := idleHintProgram().Run(ctx)
 	if err != nil {
 		logger.Warn("could not read logind's idle hint, so the panel's parts are read as for a desk in use: " + err.Error())
 		return false
 	}
 	return strings.TrimSpace(out) == "yes"
-}
-
-// onLogProgram is a pursuit's on_log as an argv. The template is split into
-// arguments first, then each placeholder is filled in, so a label holding a
-// space or a quote stays one argument.
-func onLogProgram(template string, fill map[string]string) (program, error) {
-	words, err := splitWords(template)
-	if err != nil {
-		return program{}, fmt.Errorf("on_log %q cannot be split into arguments: %w", template, err)
-	}
-	if len(words) == 0 {
-		return program{}, fmt.Errorf("on_log %q names no command", template)
-	}
-	pairs := make([]string, 0, 2*len(fill))
-	for name, value := range fill {
-		pairs = append(pairs, "{"+name+"}", value)
-	}
-	replacer := strings.NewReplacer(pairs...)
-	argv := make([]string, len(words))
-	for i, word := range words {
-		argv[i] = replacer.Replace(word)
-	}
-	return program{argv, onLogBound}, nil
-}
-
-// splitWords splits text as a POSIX shell splits words, honoring single
-// quotes, double quotes and backslashes, as Python's shlex.split does.
-func splitWords(text string) ([]string, error) {
-	var words []string
-	var word strings.Builder
-	inWord := false
-	quote := rune(0)
-	escaped := false
-	for _, char := range text {
-		switch {
-		case escaped:
-			word.WriteRune(char)
-			escaped = false
-		case quote == '\'':
-			if char == '\'' {
-				quote = 0
-			} else {
-				word.WriteRune(char)
-			}
-		case quote == '"':
-			switch char {
-			case '"':
-				quote = 0
-			case '\\':
-				escaped = true
-			default:
-				word.WriteRune(char)
-			}
-		case char == '\\':
-			escaped, inWord = true, true
-		case char == '\'' || char == '"':
-			quote, inWord = char, true
-		case char == ' ' || char == '\t' || char == '\n':
-			if inWord {
-				words = append(words, word.String())
-				word.Reset()
-				inWord = false
-			}
-		default:
-			word.WriteRune(char)
-			inWord = true
-		}
-	}
-	if quote != 0 || escaped {
-		return nil, errors.New("a quote or a backslash is left open")
-	}
-	if inWord {
-		words = append(words, word.String())
-	}
-	return words, nil
-}
-
-// itoa is the text of minutes for an on_log's {minutes}, empty where none were logged.
-func itoa(minutes *int) string {
-	if minutes == nil {
-		return ""
-	}
-	return strconv.Itoa(*minutes)
 }

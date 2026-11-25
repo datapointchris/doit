@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -234,33 +235,48 @@ func (f *fakeDesk) routes() http.Handler {
 		f.service.Lock()
 		f.reviews = append(f.reviews, request.PathValue("entry")+" "+body.Day)
 		f.service.Unlock()
-		answer(response, map[string]any{"done_on": body.Day, "status": map[string]any{"cadence_days": 7}})
+		answer(response, map[string]any{"done_on": body.Day, "status": map[string]any{"cadence_days": 7, "last": body.Day, "status": "in 7d"}})
 	})
-	routes.HandleFunc("GET /api/v1/pursuits/register", func(response http.ResponseWriter, _ *http.Request) {
-		answer(response, map[string]any{
-			"pursuits": map[string]any{
-				"tasks": map[string]any{"resolve": map[string]any{"adapter": "life-tasks"}, "on_log": "tick-task {id} {label}"},
-				"read":  map[string]any{"unit": "minutes"},
-			},
-			"active": []string{"read", "tasks"}, "offered": []string{}, "draw_id": nil,
-		})
-	})
-	routes.HandleFunc("GET /api/v1/pursuits/tasks/item", func(response http.ResponseWriter, _ *http.Request) {
-		answer(response, map[string]any{"pursuit": "tasks", "draw_id": nil, "resolved": map[string]any{
-			"pursuit": "tasks", "backend": "life", "candidates": 3, "choices": []map[string]any{
-				{"id": "532", "label": `File the "receipts" now`},
-				{"id": "533", "label": "Return the library books"},
-				{"id": "534", "label": "Descale the kettle"},
-			},
-		}})
-	})
+	// The log route's check, as the service answers it for the two pursuits the
+	// desk's panel offers: tasks writes through to its app, and read does not.
+	tasks := []map[string]any{
+		{"id": "532", "label": `File the "receipts" now`},
+		{"id": "533", "label": "Return the library books"},
+		{"id": "534", "label": "Descale the kettle"},
+	}
+	checked := func(body map[string]any) map[string]any {
+		if body["pursuit"] != "tasks" {
+			return map[string]any{
+				"pursuit": body["pursuit"], "on_log": nil, "minutes_refusal": nil,
+				"choices": []any{}, "chosen": nil, "ask": false, "names_chosen": true,
+			}
+		}
+		var choices []map[string]any
+		var chosen map[string]any
+		for _, choice := range tasks {
+			item := map[string]any{"pursuit": "tasks", "backend": "life", "candidates": 3}
+			maps.Copy(item, choice)
+			choices = append(choices, map[string]any{"line": choice["label"], "item": item})
+			if body["item_id"] == choice["id"] {
+				chosen = item
+			}
+		}
+		return map[string]any{
+			"pursuit": "tasks", "on_log": "tick-task {id} {label}", "minutes_refusal": nil,
+			"choices": choices, "chosen": chosen, "ask": body["item_id"] == nil, "names_chosen": body["item_id"] != nil,
+		}
+	}
 	routes.HandleFunc("POST /api/v1/journal/done", func(response http.ResponseWriter, request *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(request.Body).Decode(&body)
+		if body["check"] == true {
+			answer(response, checked(body))
+			return
+		}
 		f.service.Lock()
 		f.logs = append(f.logs, body)
 		f.service.Unlock()
-		answer(response, map[string]any{"due_in_days": 2})
+		answer(response, map[string]any{"due_in_days": 2, "due": "due in 2d"})
 	})
 	return routes
 }

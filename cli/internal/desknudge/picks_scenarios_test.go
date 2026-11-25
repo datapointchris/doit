@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/datapointchris/doit/cli/internal/service"
 )
 
 // askSocket sends one request to the watch's socket, and decodes its answer into answered.
@@ -134,7 +136,7 @@ func TestAClickOnATickRowCommitsInItsOwnRequestAndASecondClickWhileItRunsCommits
 		t.Errorf("the click answered %d %+v, want 200 with a done step", code, step)
 	}
 	watch.Wait()
-	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{tickProgram("1", f.clockNow().Format(dayLayout)).argv}, slices.Equal) {
+	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{tickProgram("1", f.clockNow().Format(dayLayout)).Argv}, slices.Equal) {
 		t.Errorf("life ran %q, want one set ticked", ran)
 	}
 	if picks := f.rowOfKey("tick:1").Picks; len(picks) != 1 || picks[0].State != OutcomeDone {
@@ -157,7 +159,7 @@ func TestTicksAndUnticksRunInClickOrder(t *testing.T) {
 	watch.Wait()
 
 	day := f.clockNow().Format(dayLayout)
-	want := [][]string{tickProgram("1", day).argv, untickProgram("1", day).argv, tickProgram("2", day).argv}
+	want := [][]string{tickProgram("1", day).Argv, untickProgram("1", day).Argv, tickProgram("2", day).Argv}
 	if ran := f.ran("life"); !slices.EqualFunc(ran, want, slices.Equal) {
 		t.Errorf("life ran %q, want %q, in click order with no read of the day's completions", ran, want)
 	}
@@ -180,7 +182,7 @@ func TestAHabitDoneElsewhereBeforeItsPickIsSkippedAndItsRowSaysSo(t *testing.T) 
 		t.Errorf("picking a habit done elsewhere answered %v, want it refused", err)
 	}
 
-	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsCompletedProgram(f.clockNow().Format(dayLayout)).argv}, slices.Equal) {
+	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsCompletedProgram(f.clockNow().Format(dayLayout)).Argv}, slices.Equal) {
 		t.Errorf("life ran %q, want only the day's completions read again", ran)
 	}
 	if shown := f.shownPick("habit:1"); shown.State != OutcomeSkipped {
@@ -224,7 +226,7 @@ func TestALifeTimeoutKeepsTheRowUncertainAndARefusalFreesIt(t *testing.T) {
 	}
 	_ = f.picked(watch, "habit:3", nil)
 	day := f.clockNow().Format(dayLayout)
-	completions := slices.DeleteFunc(f.ran("life"), func(argv []string) bool { return !slices.Equal(argv, habitProgram("3", day).argv) })
+	completions := slices.DeleteFunc(f.ran("life"), func(argv []string) bool { return !slices.Equal(argv, habitProgram("3", day).Argv) })
 	if len(completions) != 2 {
 		t.Errorf("life completed habit 3 %d times, want twice, because a refusal frees its row", len(completions))
 	}
@@ -242,7 +244,7 @@ func TestAfterARestartAStartedTickIsRecordedUncertainAndNotRerun(t *testing.T) {
 		for _, key := range []string{"tick:1", "habit:1"} {
 			found, _ := panel.find(key)
 			state.RunningPicks = append(state.RunningPicks, RunningPick{
-				ID: newID(picked), Key: key, Text: found.text, Action: found.actionOf(), Completes: found.completes,
+				ID: service.NewWriteID(picked), Key: key, Text: found.text, Action: found.actionOf(), Completes: found.completes,
 				PickedAt: stamp(picked), StartedAt: stamp(picked),
 			})
 		}
@@ -253,7 +255,7 @@ func TestAfterARestartAStartedTickIsRecordedUncertainAndNotRerun(t *testing.T) {
 	f.advance(24 * time.Hour)
 	f.started()
 	day := picked.Format(dayLayout)
-	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsCompletedProgram(day).argv, habitProgram("1", day).argv}, slices.Equal) {
+	if ran := f.ran("life"); !slices.EqualFunc(ran, [][]string{habitsCompletedProgram(day).Argv, habitProgram("1", day).Argv}, slices.Equal) {
 		t.Errorf("life ran %q, want the started habit read again and completed on the day it was picked, and the tick never run again", ran)
 	}
 	outcomes := map[string]any{}
@@ -306,9 +308,9 @@ func TestEachKeyKindCommitsThroughItsCommandAndAnOnLogLabelStaysOneArgument(t *t
 		reviewed string
 		held     bool
 	}{
-		{key: "habit:1", held: true, programs: [][]string{habitsCompletedProgram(day).argv, habitProgram("1", day).argv}},
-		{key: "tick:1", programs: [][]string{tickProgram("1", day).argv}},
-		{key: "untick:2", programs: [][]string{untickProgram("2", day).argv}},
+		{key: "habit:1", held: true, programs: [][]string{habitsCompletedProgram(day).Argv, habitProgram("1", day).Argv}},
+		{key: "tick:1", programs: [][]string{tickProgram("1", day).Argv}},
+		{key: "untick:2", programs: [][]string{untickProgram("2", day).Argv}},
 		{key: "pursuit:tasks:532", programs: [][]string{{"tick-task", "532", `File the "receipts" now`}}, journal: true, held: true},
 		{key: "pursuit:read", minutes: &thirty, journal: true, held: true},
 		{key: "review:prune-images", reviewed: "prune-images 2026-11-24", held: true},

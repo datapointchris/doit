@@ -1,0 +1,9 @@
+Dormant ──────────────────────────────────────────
+  study-computer-science  never · goal every 2d
+  practice-piano          never · goal every 2d
+  errands                 never · goal every 3d
+  stretch                 4w ago · goal every 1d
+
+  Cold is the time since the last one.
+  doit pursuits list shows it beside what each
+owes.

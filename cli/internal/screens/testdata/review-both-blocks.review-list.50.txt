@@ -1,0 +1,19 @@
+Review — full register ───────────────────────────
+  never-done            never done  ·  every 1w
+      Has never been marked done
+
+  prune-images          never done  ·  every 2w
+      Remove container images nothing runs any
+more
+      ↳ echo prune the images that no container
+references
+
+  fresh-item            in 28d  ·  every 4w · last
+2026-11-25
+      Was done today, so it is not due again for a
+while
+
+Practice — full register ─────────────────────────
+  scales                overdue 2d  ·  every 3d ·
+last 2026-11-20
+      Ten minutes of scales before anything else

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +28,15 @@ func base(variable, fallback string) string {
 // CompletionNamesPath is next-names.txt, which the zsh completion that
 // `doit shell completion zsh` prints reads with no process started.
 func CompletionNamesPath() string { return filepath.Join(CacheDir(), "next-names.txt") }
+
+// NudgeIntervalPath holds the shell nudge's interval in whole minutes, which
+// the gate that `doit shell init` prints reads before it starts any process.
+func NudgeIntervalPath() string { return filepath.Join(CacheDir(), "nudge-interval-minutes") }
+
+// WriteNudgeInterval replaces the interval file with minutes.
+func WriteNudgeInterval(minutes int) error {
+	return Replace(NudgeIntervalPath(), []byte(strconv.Itoa(minutes)+"\n"))
+}
 
 // WriteCompletionNames replaces the names file with one name<TAB>description
 // line per pursuit, sorted by name. A description that is not a string is

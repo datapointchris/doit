@@ -34,7 +34,6 @@ dependencies = [
     "rich>=13.0.0",
     "pyyaml>=6.0.2",
     "pyclilogin>=0.2.0",
-    "httpx2>=2.9.1",
 ]
 
 # The Go binary built from cli/ is `doit`. It runs each verb it has ported and

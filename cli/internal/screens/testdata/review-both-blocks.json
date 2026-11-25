@@ -1,0 +1,59 @@
+{
+  "entries": [
+    {
+      "id": "never-done",
+      "block": "items",
+      "cadence": "1w",
+      "desc": "Has never been marked done",
+      "command": "",
+      "show": "",
+      "last": null,
+      "due": true,
+      "status": "never done"
+    },
+    {
+      "id": "prune-images",
+      "block": "items",
+      "cadence": "2w",
+      "desc": "Remove container images nothing runs any more",
+      "command": "echo prune the images that no container references",
+      "show": "",
+      "last": null,
+      "due": true,
+      "status": "never done"
+    },
+    {
+      "id": "scales",
+      "block": "practice",
+      "cadence": "3d",
+      "desc": "Ten minutes of scales before anything else",
+      "command": "",
+      "show": "",
+      "last": "2026-11-20",
+      "due": true,
+      "status": "overdue 2d"
+    },
+    {
+      "id": "fresh-item",
+      "block": "items",
+      "cadence": "4w",
+      "desc": "Was done today, so it is not due again for a while",
+      "command": "",
+      "show": "",
+      "last": "2026-11-25",
+      "due": false,
+      "status": "in 28d"
+    }
+  ],
+  "stranded": [],
+  "blocks": [
+    {
+      "name": "items",
+      "title": "Review"
+    },
+    {
+      "name": "practice",
+      "title": "Practice"
+    }
+  ]
+}

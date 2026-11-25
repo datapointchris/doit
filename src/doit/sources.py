@@ -41,10 +41,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from enum import StrEnum
 
-from rich.text import Text
-
 from doit import lanes
-from doit.render import console
 from doit.window import Bounds
 
 TEMPLATE = """\
@@ -275,24 +272,3 @@ def contract_example() -> dict:
         hints=['nomad trips list'],
     )
     return lanes.to_document([example], dt.datetime(2026, 8, 6, 12, 0, 0))
-
-
-def report_block(title: str, answers: list[dict[str, object]], width: int) -> None:
-    """One block's sources, each with whether it answered. Silent when empty.
-
-    An empty block is a question nobody configured, which is not a problem to
-    report — a heading over nothing would read as something missing.
-    """
-    if not answers:
-        return
-    console.print(Text(title, style='cyan'))
-    for row in answers:
-        line = Text('  ')
-        line.append(str(row['id']).ljust(width), style='yellow')
-        if not row['answered']:
-            line.append(f'  {row["reason"]}', style='red')
-        elif row['lanes']:
-            line.append(f'  {row["lanes"]} lanes via {row["via"]}')
-        else:
-            line.append('  answered, but offered no lanes', style='yellow')
-        console.print(line, no_wrap=True, overflow='ellipsis')

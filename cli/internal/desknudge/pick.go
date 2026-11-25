@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
-	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/datapointchris/doit/cli/internal/programs"
+	"github.com/datapointchris/doit/cli/internal/pursuits"
+	"github.com/datapointchris/doit/cli/internal/review"
 	"github.com/datapointchris/doit/cli/internal/service"
 )
 
@@ -206,7 +207,7 @@ func (w *Watch) complete(ctx context.Context, found entry, minutes *int, notifyD
 	<-before
 	moment := d.Now()
 	pick := RunningPick{
-		ID: newID(moment), Key: found.key, Text: found.text, Action: found.actionOf(), Completes: found.completes,
+		ID: service.NewWriteID(moment), Key: found.key, Text: found.text, Action: found.actionOf(), Completes: found.completes,
 		Minutes: minutes, PickedAt: stamp(picked), StartedAt: stamp(moment),
 	}
 	readAt := d.Paths.panelReadAt()
@@ -298,8 +299,8 @@ func (c completion) fields(target Completes, action string, minutes *int) picked
 // lifeFailed is how a life habits call that failed ends. One that ran out of
 // time may have landed, so it holds the row. Any other failure recorded nothing.
 func lifeFailed(err error, summary string) completion {
-	var failedRun *programFailed
-	timedOut := errors.As(err, &failedRun) && failedRun.timedOut
+	var failedRun *programs.Failed
+	timedOut := errors.As(err, &failedRun) && failedRun.TimedOut
 	return completion{summary: "doit: " + summary, body: err.Error(), exitCode: PickFailed, recordedNothing: !timedOut}
 }
 
@@ -321,15 +322,15 @@ func (d *Desk) completedHabit(ctx context.Context, found entry, day string) comp
 		}
 		return completion{summary: "doit: " + found.text + " not completed", body: said, exitCode: PickRefused, skipped: true}
 	}
-	if _, err := habitProgram(found.completes.Ref, day).run(ctx); err != nil {
+	if _, err := habitProgram(found.completes.Ref, day).Run(ctx); err != nil {
 		return lifeFailed(err, "habit not completed")
 	}
 	return completion{ok: true, summary: "doit: habit completed", body: found.text}
 }
 
 // setChanged runs life habits tick or untick on one checklist item.
-func setChanged(ctx context.Context, found entry, changes program, done, failed string) completion {
-	if _, err := changes.run(ctx); err != nil {
+func setChanged(ctx context.Context, found entry, changes programs.Program, done, failed string) completion {
+	if _, err := changes.Run(ctx); err != nil {
 		return lifeFailed(err, failed)
 	}
 	return completion{ok: true, summary: "doit: " + done, body: found.text}
@@ -337,7 +338,7 @@ func setChanged(ctx context.Context, found entry, changes program, done, failed 
 
 // habitDoneOn reads life's completions of day again, and answers whether one is of the habit.
 func habitDoneOn(ctx context.Context, habit, day string) (bool, error) {
-	out, err := habitsCompletedProgram(day).run(ctx)
+	out, err := habitsCompletedProgram(day).Run(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -360,30 +361,21 @@ func habitDoneOn(ctx context.Context, habit, day string) (bool, error) {
 // own day when it was picked. The service keeps one completion a day for an
 // entry, so a failure frees the row and a resend records nothing twice.
 func (d *Desk) markedReviewDone(ctx context.Context, ref, day string) completion {
-	var done struct {
-		DoneOn string `json:"done_on"`
-		Status *struct {
-			CadenceDays *float64 `json:"cadence_days"`
-		} `json:"status"`
+	ctx, cancel := context.WithTimeout(ctx, writeBound)
+	defer cancel()
+	client, err := d.Open(ctx)
+	var done review.Done
+	if err == nil {
+		done, err = review.MarkDone(ctx, client, ref, day)
 	}
-	if err := d.post(ctx, "/review/"+url.PathEscape(ref)+"/completions", map[string]string{"day": day}, &done); err != nil {
+	if err != nil {
 		return completion{summary: "doit: " + ref + " not marked done", body: err.Error(), exitCode: service.ExitCode(err), recordedNothing: true}
 	}
 	body := fmt.Sprintf("%s (%s)", ref, done.DoneOn)
-	if done.Status != nil && done.Status.CadenceDays != nil && *done.Status.CadenceDays != 0 {
-		body += " · due again in " + formatMinutes(*done.Status.CadenceDays) + "d"
+	if again := done.DueAgain(); again != "" {
+		body += " · due again in " + again
 	}
 	return completion{ok: true, summary: "doit: marked done", body: body}
-}
-
-// resolvedItem is a pursuit's resolve, as /pursuits/{name}/item answers it. It
-// is empty where nothing resolved, and an error entry carries no choices.
-type resolvedItem struct {
-	Pursuit    *string          `json:"pursuit,omitempty"`
-	Backend    any              `json:"backend,omitempty"`
-	Candidates *float64         `json:"candidates,omitempty"`
-	Choices    []map[string]any `json:"choices,omitempty"`
-	Error      any              `json:"error,omitempty"`
 }
 
 // logWrite is how one pursuit log is written. Its id names the journal entry,
@@ -408,63 +400,40 @@ func pursuitNotLogged(name string, err error) completion {
 // loggedPursuit logs a pursuit, naming the row's choice, after its on_log runs
 // unasked, because the pick is the asking.
 //
-// It follows `doit pursuits log`: the choice is the one the row names, or with
-// none named the only one the resolve offers. on_log runs against that choice,
-// then the log posts what on_log did. The log names the choice where the row
-// named it, the resolve counted one candidate, or on_log completed it.
+// It logs as `doit pursuits log` does, through the service's check: the
+// choice is the one the row names, or with none named the only one the
+// resolve offers. on_log runs against that choice, then the log posts what
+// on_log did.
 func (d *Desk) loggedPursuit(ctx context.Context, target Completes, minutes *int, journal logWrite) completion {
 	name := target.Ref
-	notLogged := func(err error) completion { return pursuitNotLogged(name, err) }
-	var register struct {
-		Pursuits map[string]struct {
-			Resolve any    `json:"resolve,omitempty"`
-			OnLog   string `json:"on_log,omitempty"`
-		} `json:"pursuits"`
+	checkCtx, cancel := context.WithTimeout(ctx, writeBound)
+	defer cancel()
+	client, err := d.Open(checkCtx)
+	var check pursuits.Check
+	if err == nil {
+		check, err = pursuits.Checked(checkCtx, client, name, minutes, target.ItemID)
 	}
-	if err := d.get(ctx, "/pursuits/register", &register); err != nil {
-		return notLogged(err)
+	if err != nil {
+		return pursuitNotLogged(name, err)
 	}
-	config, declared := register.Pursuits[name]
-	if !declared {
-		return notLogged(fmt.Errorf("no pursuit named %s", name))
+	onLog, err := pursuits.OnLogFor(check.OnLog, check.Chosen, "", minutes)
+	if err != nil {
+		return pursuitNotLogged(name, err)
 	}
-	var item resolvedItem
-	if config.Resolve != nil {
-		var answered struct {
-			Resolved resolvedItem `json:"resolved"`
+	entry := pursuits.Entry{ID: journal.id, Pursuit: check.Pursuit, Occurred: d.Now(), Minutes: minutes, Machine: d.Machine, Actor: d.Actor}
+	var downstream map[string]any
+	if onLog != nil {
+		if journal.save != nil {
+			started := map[string]any{"command": onLog.Command, "ran": nil, "exit_code": nil, "error": "the watch stopped while on_log ran"}
+			if err := journal.save(entry.Body(check.NamesChosen, check.Chosen, started)); err != nil {
+				return pursuitNotLogged(name, err)
+			}
 		}
-		if err := d.get(ctx, "/pursuits/"+url.PathEscape(name)+"/item", &answered); err != nil {
-			return notLogged(err)
-		}
-		item = answered.Resolved
-	}
-	chosen, refusal := chosenChoice(name, item, target.ItemID)
-	if refusal != nil {
-		return notLogged(refusal)
-	}
-	now := d.Now()
-	entryOf := func(downstream map[string]any) map[string]any {
-		acted := downstream != nil && downstream["ran"] == true
-		var named map[string]any
-		if chosen != nil && (target.ItemID != nil || item.Candidates == nil || *item.Candidates <= 1 || acted) {
-			named = chosen
-		}
-		return map[string]any{
-			"id": journal.id, "pursuit": name, "occurred_at": stamp(now), "note": nil, "duration_minutes": minutes,
-			"item": named, "downstream": downstream, "machine": d.Machine, "actor": d.Actor,
+		if downstream, err = onLog.Ran(ctx); err != nil {
+			return pursuitNotLogged(name, err)
 		}
 	}
-	var starts func(string) error
-	if journal.save != nil {
-		starts = func(command string) error {
-			return journal.save(entryOf(map[string]any{"command": command, "ran": nil, "exit_code": nil, "error": "the watch stopped while on_log ran"}))
-		}
-	}
-	downstream, ranErr := d.ranOnLog(ctx, config.OnLog, chosen, minutes, starts)
-	if ranErr != nil {
-		return notLogged(ranErr)
-	}
-	body := entryOf(downstream)
+	body := entry.Body(check.NamesChosen, check.Chosen, downstream)
 	if journal.save != nil && downstream != nil {
 		if err := journal.save(body); err != nil {
 			logger.Warn("could not save " + name + "'s entry before posting it, so a restart sends the one saved as on_log began: " + err.Error())
@@ -477,182 +446,35 @@ func (d *Desk) loggedPursuit(ctx context.Context, target Completes, minutes *int
 // of one entry is stored once, because the service keeps an entry by its id.
 func (d *Desk) postedLog(ctx context.Context, body map[string]any) completion {
 	name := fmt.Sprint(body["pursuit"])
-	minutes, _ := wholeNumber(body["duration_minutes"])
 	downstream, _ := body["downstream"].(map[string]any)
-	named, _ := body["item"].(map[string]any)
-	acted := downstream != nil && downstream["ran"] == true
-	var logged struct {
-		DueInDays *float64 `json:"due_in_days"`
+	ctx, cancel := context.WithTimeout(ctx, writeBound)
+	defer cancel()
+	client, err := d.Open(ctx)
+	var logged pursuits.Logged
+	if err == nil {
+		logged, err = pursuits.Posted(ctx, client, body)
 	}
-	if err := d.post(ctx, "/journal/done", body, &logged); err != nil {
-		if !acted {
+	if err != nil {
+		if !pursuits.Acted(downstream) {
 			return pursuitNotLogged(name, err)
 		}
-		repair := "doit pursuits log " + name + " --no-write"
-		if minutes != nil {
-			repair += " --minutes " + strconv.Itoa(*minutes)
+		return completion{
+			summary: "doit: " + name + " not recorded", exitCode: service.ExitCode(err),
+			body: strings.Join(append([]string{err.Error()}, pursuits.RepairLines(body)...), "\n"),
 		}
-		occurred, _ := body["occurred_at"].(string)
-		at, _ := instant(&occurred)
-		return completion{summary: "doit: " + name + " not recorded", exitCode: service.ExitCode(err), body: strings.Join([]string{
-			err.Error(),
-			"on_log already ran: " + fmt.Sprint(downstream["command"]),
-			"Record it without running on_log again, adding --ago for the time since " + at.Format("15:04") + ":  " + repair,
-		}, "\n")}
 	}
-	line := "Logged " + name
-	if label, _ := named["label"].(string); label != "" {
-		line += " — " + label
-	}
-	if logged.DueInDays != nil {
-		line += " · " + formatDue(*logged.DueInDays)
-	}
-	if !acted {
+	line := "Logged " + pursuits.Line(body, logged)
+	if !pursuits.Acted(downstream) {
 		return completion{ok: true, summary: "doit: logged", body: line}
 	}
 	command := fmt.Sprint(downstream["command"])
-	if code, exited := wholeNumber(downstream["exit_code"]); !exited || *code != 0 {
+	if failure := pursuits.Failure(downstream); failure != "" {
 		return completion{
 			summary: "doit: " + name + " logged, and its on_log failed", exitCode: PickFailed,
-			body: fmt.Sprintf("%s\n%s %s", line, command, onLogFailure(downstream)),
+			body: fmt.Sprintf("%s\n%s %s", line, command, failure),
 		}
 	}
 	return completion{ok: true, summary: "doit: logged", body: line + "\nRan " + command}
-}
-
-// wholeNumber reads a whole number from an entry, which holds an int as built
-// and a float64 once read back from the state file.
-func wholeNumber(value any) (*int, bool) {
-	switch number := value.(type) {
-	case int:
-		return &number, true
-	case *int:
-		return number, number != nil
-	case float64:
-		whole := int(number)
-		return &whole, true
-	}
-	return nil, false
-}
-
-func onLogFailure(downstream map[string]any) string {
-	if code, ok := wholeNumber(downstream["exit_code"]); ok {
-		return fmt.Sprintf("exited %d", *code)
-	}
-	return fmt.Sprint(downstream["error"])
-}
-
-// chosenChoice is the choice a log is about, flattened into the row a log
-// records: the one carrying itemID, or with none named the only one offered.
-// Nil where the log is about none of them.
-func chosenChoice(name string, item resolvedItem, itemID *string) (map[string]any, error) {
-	index := -1
-	switch {
-	case itemID != nil:
-		if item.Error != nil {
-			return nil, fmt.Errorf("%s could not be read, so item %s cannot be checked: %v", name, *itemID, item.Error)
-		}
-		var held []string
-		for i, choice := range item.Choices {
-			id := fmt.Sprint(choice["id"])
-			if choice["id"] != nil && id == *itemID {
-				index = i
-			}
-			if choice["id"] != nil {
-				held = append(held, fmt.Sprintf("%s (%v)", id, choice["label"]))
-			}
-		}
-		if index < 0 {
-			return nil, fmt.Errorf("%s holds no item %s now. Its items now: %s", name, *itemID, strings.Join(held, ", "))
-		}
-	case len(item.Choices) == 1:
-		index = 0
-	}
-	if index < 0 {
-		return nil, nil
-	}
-	chosen := map[string]any{"pursuit": item.Pursuit, "backend": item.Backend, "candidates": item.Candidates}
-	for field, value := range item.Choices[index] {
-		chosen[field] = value
-	}
-	return chosen, nil
-}
-
-// ranOnLog runs a pursuit's on_log against the chosen item, and answers what it did, or nil where nothing ran.
-// A program that could not start ran nothing, so the pick is refused before anything is logged.
-// starts, where given, saves the command before it runs.
-func (d *Desk) ranOnLog(ctx context.Context, template string, chosen map[string]any, minutes *int, starts func(string) error) (map[string]any, error) {
-	if template == "" || chosen == nil {
-		return nil, nil
-	}
-	text := func(field string) string {
-		if value, ok := chosen[field]; ok && value != nil {
-			return fmt.Sprint(value)
-		}
-		return ""
-	}
-	if strings.Contains(template, "{id}") && text("id") == "" {
-		return nil, nil
-	}
-	ran, err := onLogProgram(template, map[string]string{
-		"id": text("id"), "label": text("label"), "note": "", "minutes": itoa(minutes), "pursuit": text("pursuit"),
-	})
-	if err != nil {
-		return nil, err
-	}
-	command := shellJoin(ran.argv)
-	if starts != nil {
-		if err := starts(command); err != nil {
-			return nil, err
-		}
-	}
-	_, runErr := ran.run(ctx)
-	var failedRun *programFailed
-	switch {
-	case runErr == nil:
-		return map[string]any{"command": command, "ran": true, "exit_code": 0}, nil
-	case errors.As(runErr, &failedRun) && failedRun.timedOut:
-		return map[string]any{"command": command, "ran": true, "exit_code": nil, "error": runErr.Error()}, nil
-	case errors.As(runErr, &failedRun) && failedRun.exited:
-		return map[string]any{"command": command, "ran": true, "exit_code": failedRun.exitCode, "error": runErr.Error()}, nil
-	}
-	return nil, runErr
-}
-
-// shellJoin quotes each argument that a shell would split, so the command reads as it ran.
-func shellJoin(argv []string) string {
-	quoted := make([]string, len(argv))
-	for i, word := range argv {
-		if word != "" && !strings.ContainsAny(word, " \t\n'\"\\$`!*?[]{}()<>|&;#~") {
-			quoted[i] = word
-			continue
-		}
-		quoted[i] = "'" + strings.ReplaceAll(word, "'", `'"'"'`) + "'"
-	}
-	return strings.Join(quoted, " ")
-}
-
-// formatDue is when a pursuit is next due, in words that need no legend.
-func formatDue(days float64) string {
-	switch {
-	case days <= -1:
-		return spanText(days) + " overdue"
-	case days < 1:
-		return "due today"
-	}
-	return "due in " + spanText(days)
-}
-
-// spanText is a number of days in the coarsest unit that still says something.
-func spanText(days float64) string {
-	days = math.Abs(days)
-	switch {
-	case days < 14:
-		return fmt.Sprintf("%dd", max(int(math.RoundToEven(days)), 1))
-	case days < 90:
-		return fmt.Sprintf("%dw", max(int(math.RoundToEven(days/7)), 1))
-	}
-	return fmt.Sprintf("%dmo", max(int(math.RoundToEven(days/30)), 1))
 }
 
 // pickedAnswer answers through Answer, which notifies a failure, and fails as
