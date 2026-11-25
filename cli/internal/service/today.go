@@ -3,7 +3,7 @@ package service
 import "context"
 
 // Today is GET /today: what the day still owes, above what it has had, in the
-// lane contract's shape. It declares only the fields the screen reads.
+// lane contract's shape. The screens read every field it declares.
 type Today struct {
 	// GeneratedAt is when the service read the day, with its offset. The
 	// screen's date is the date there.
@@ -15,49 +15,10 @@ type Today struct {
 	Problems []string `json:"problems"`
 }
 
-// Lane is one group of a list: ranked rows, or a grid of finished cells.
-type Lane struct {
-	Name string `json:"name"`
-	// Status is "unavailable" where the group could not be read, and Reason says why.
-	Status string `json:"status"`
-	// Reason is null where the group read whole, and says what it could not
-	// read where it read in part.
-	Reason string     `json:"reason"`
-	Rows   []LaneRow  `json:"rows"`
-	Grid   []GridCell `json:"grid"`
-	// Total is how many rows the group holds before any cut.
-	Total int      `json:"total"`
-	Hints []string `json:"hints"`
-}
-
-// Available is whether the group was read.
-func (l Lane) Available() bool { return l.Status != "unavailable" }
-
 // DueLane is a group of the due list, with how many of its rows the screen lists.
 type DueLane struct {
 	Lane
 	RowCap int `json:"row_cap"`
-}
-
-// LaneRow is one thing to act on.
-type LaneRow struct {
-	Label string `json:"label"`
-	Text  string `json:"text"`
-	Note  string `json:"note"`
-	// Urgency is none, due or overdue, and colors the note.
-	Urgency string `json:"urgency"`
-	// Handle is the command that acts on the row.
-	Handle string `json:"handle"`
-}
-
-// GridCell is one thing done.
-type GridCell struct {
-	Text string `json:"text"`
-	// DoneAt is the instant it was done, or "" where its record kept only the day.
-	DoneAt string `json:"done_at"`
-	// ActorKind is the kind of actor the service names for the cell, as
-	// printed, or "" where its record names nobody.
-	ActorKind string `json:"actor_kind"`
 }
 
 // Quota is the figures above both lists.

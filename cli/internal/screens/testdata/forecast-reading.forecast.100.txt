@@ -1,0 +1,10 @@
+Forecast · 120 min a day ───────────────────────────────────────────────────────────────────────────
+  pursuit     /wk    /mo   h/mo  goal        of goal  est
+  stretch     6.4   27.3    5.7  every 1d        91%  12m measured
+  piano       2.2    9.4    4.7  90m a week      73%  30m measured
+  garden      2.0    8.1    6.1  every 3d        81%  45m default
+  novel-reading-on-the-train   1.4    6.0    4.0  60m a week      93%  40m measured
+  letters     1.0    4.4    3.3  every 7d       102%  45m default
+
+  12 min/day left unspent · 300 runs
+  estimates: 3 measured · 2 default · doit pursuits log --minutes measures them

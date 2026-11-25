@@ -22,17 +22,12 @@ from jsonschema import Draft7Validator
 from typer.testing import CliRunner
 
 from doit import cli
-from doit import happened
 from doit import journal
-from doit import lanes
 from doit import paths
 from doit import pursuits
 from doit import review
 from doit import service
 from doit.cli import app as cli_app
-from doit.service_commands import dashboard as dashboard_commands
-from doit.service_commands import forecast as forecast_commands
-from doit.service_commands import happened as happened_commands
 from doit.service_commands import pursuits as pursuit_commands
 from doit.service_commands import review as review_commands
 from doit.service_commands import sources as sources_commands
@@ -338,49 +333,7 @@ def test_a_completion_taken_back_leaves_the_entry_as_it_read_and_stays_in_histor
     assert last() is None
 
 
-def test_a_forecast_taken_is_read_back_and_not_graded_before_its_window_closes(api, capsys):
-    write(api, 'pursuits', 'pursuits/pursuits.yml')
-
-    assert forecast_commands.cmd_run(as_json=True, budget=45) == 0
-    assert json.loads(capsys.readouterr().out)['budget_minutes'] == 45
-    assert forecast_commands.cmd_show('', as_json=False) == 0
-    assert forecast_commands.cmd_list(as_json=False) == 0
-    assert 'chores' in capsys.readouterr().out
-
-    assert forecast_commands.cmd_trend(7, as_json=False) == 1
-    captured = capsys.readouterr()
-    assert captured.out == ''
-
-
-def test_happened_and_the_dashboard_render_without_any_source(api, capsys):
-    write(api, 'pursuits', 'pursuits/pursuits.yml')
-    write(api, 'review', 'review/register.yml')
-
-    assert happened_commands.cmd_happened(None, None, as_json=False) == 0
-    capsys.readouterr()
-
-    assert dashboard_commands.cmd_dashboard(['nonsense'], as_json=True) == 0
-    captured = capsys.readouterr()
-    assert json.loads(captured.out)['lanes'] == [], 'what the dashboard says about itself stays off the document'
-    assert 'No sources configured' in captured.err
-    assert 'No lane named nonsense' in captured.err
-
-    listed = CliRunner().invoke(sources_commands.app, ['list', '--json'])
-    assert listed.exit_code == 0
-    assert json.loads(listed.output) == []
-
-
-def test_happened_with_only_an_end_reads_from_the_earliest_record_through_that_whole_day(api, capsys):
-    assert happened_commands.cmd_happened(None, '2026-07-20', as_json=True) == 0
-    document = json.loads(capsys.readouterr().out)
-
-    assert dt.datetime.fromisoformat(document['since']) == happened.EARLIEST
-    assert document['until'][:10] == '2026-07-21'
-    assert document['asked'] == ['review', 'practice']
-    assert [lane.name for lane in lanes.from_document({'lanes': document['groups']})] == ['review', 'practice']
-
-
-def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store, monkeypatch, tmp_path, capsys):
+def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store, monkeypatch, tmp_path):
     overview = {
         'schema_version': 1,
         'as_of_month': '2026-07',
@@ -400,12 +353,11 @@ def test_trips_and_feedback_reach_their_lanes_and_a_failed_source_says_so(store,
     document = 'sources:\n  life:\n    adapter: life\n  nomad:\n    adapter: nomad\n  meso-feedback:\n    adapter: meso-feedback\n'
     client.put('/api/v1/documents/sources', json={'text': document}).raise_for_status()
 
-    assert dashboard_commands.cmd_dashboard(None, as_json=False) == 0
-    printed = capsys.readouterr().out
-    assert '3mo owed' in printed
-    assert 'partial — life is not configured' in printed, 'an life that cannot answer costs its rows, not the trips'
-    assert 'MESO - FEEDBACK  1 open' in printed
-    assert 'The rest timer' in printed
+    board = {lane['name']: lane for lane in client.get('/api/v1/dashboard').json()['lanes']}
+    assert '3mo owed' in [row['label'] for row in board['upcoming']['rows']]
+    assert 'life is not configured' in board['upcoming']['reason'], 'an life that cannot answer costs its rows, not the trips'
+    assert (board['meso - feedback']['title'], board['meso - feedback']['meta']) == ('MESO - FEEDBACK', '1 open')
+    assert board['meso - feedback']['rows'][0]['text'].startswith('The rest timer')
 
     upcoming = next(lane for lane in client.get('/api/v1/today').json()['due'] if lane['name'] == 'upcoming')
     assert 'Portland' in [row['label'] for row in upcoming['rows']] + [row['text'] for row in upcoming['rows']]

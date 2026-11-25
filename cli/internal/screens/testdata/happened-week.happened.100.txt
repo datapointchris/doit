@@ -1,0 +1,27 @@
+Happened · Mon 26 Oct 13:00 to now ─────────────────────────────────────────────────────────────────
+  asked pursuits, review, practice, habits, tasks, issues, learning, books, training
+  8 of 9 answered · learning partial · actor recorded by pursuits, issues · 1 by an actor of unknow…
+
+  pursuits
+    Tue 27 Oct  07:30  by hand     stretch · 12 min
+    Thu 29 Oct  19:05  session     piano · 30 min
+    Sat 31 Oct         unrecorded  garden
+    Mon 02 Nov  09:15  by hand     errands · posted the parcel at the corner office before it close…
+  review
+    Wed 28 Oct         Swap the offsite backup drive
+    Sun 01 Nov         Press the test button on each smoke alarm
+  habits
+    Sun 01 Nov  07:05  Make the bed
+    Mon 02 Nov  08:30  Vitamins
+  issues
+    Fri 30 Oct  14:00  unattended  Fix the flaky clock test
+    Sat 31 Oct  10:12  by hand     Rename the sources flag
+    Sun 01 Nov  16:40  unknown     Drop the legacy importer
+  learning
+    partial — 100 newest completed item(s), cut by --limit; older ones exist.
+    Thu 29 Oct  21:00  Structured concurrency in practice
+  books
+    unavailable — life-books: life is not configured on the service: DOIT_API_LIFE_URL unset
+  training
+    Tue 27 Oct         Session A — Loaded Lower
+    Wed 28 Oct         calm

@@ -129,7 +129,9 @@ func (n *NoAnswer) Error() string { return n.Message }
 
 // MissingField is an answer that lacks a field which the verb needs.
 type MissingField struct {
-	Where   string
+	Where string
+	// Method is the request's, GET where it is "".
+	Method  string
 	Route   string
 	Field   string
 	Version string
@@ -142,8 +144,12 @@ func (m *MissingField) Error() string {
 	if m.VersionUnread != nil {
 		version = "its version unread: " + m.VersionUnread.Error()
 	}
-	return fmt.Sprintf("%s (%s) answered GET %s without %s, which this doit needs. A release of the service that serves it fixes this.",
-		m.Where, version, m.Route, m.Field)
+	method := m.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	return fmt.Sprintf("%s (%s) answered %s %s without %s, which this doit needs. A release of the service that serves it fixes this.",
+		m.Where, version, method, m.Route, m.Field)
 }
 
 // NoAnswerExit is what a command exits with where no answer came, the one
@@ -167,17 +173,23 @@ func (c *Client) Get(ctx context.Context, path string, query url.Values, answer 
 	if err != nil {
 		return err
 	}
+	return c.decode(ctx, http.MethodGet, route, body, answer)
+}
+
+// decode reads the body that method on route answered into answer, refusing
+// one that lacks a field answer's type declares without omitempty.
+func (c *Client) decode(ctx context.Context, method, route string, body []byte, answer any) error {
 	var parsed any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return &Refused{Message: fmt.Sprintf("%s answered GET %s with a body that is not JSON", c.where, route)}
+		return &Refused{Message: fmt.Sprintf("%s answered %s %s with a body that is not JSON", c.where, method, route)}
 	}
 	if field := missingFieldOf(answer, parsed); field != "" {
-		refusal := &MissingField{Where: c.where, Route: route, Field: field}
+		refusal := &MissingField{Where: c.where, Method: method, Route: route, Field: field}
 		refusal.Version, refusal.VersionUnread = c.Version(ctx)
 		return refusal
 	}
 	if err := json.Unmarshal(body, answer); err != nil {
-		return &Refused{Message: fmt.Sprintf("%s answered GET %s in a shape this doit does not read: %v", c.where, route, err)}
+		return &Refused{Message: fmt.Sprintf("%s answered %s %s in a shape this doit does not read: %v", c.where, method, route, err)}
 	}
 	return nil
 }

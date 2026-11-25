@@ -16,11 +16,9 @@ from doit import actor
 from doit import evidence
 from doit import happened
 from doit import journal
-from doit import lanes
 from doit import sources
 from doit import window
 from doit.lanes import GridCell
-from doit.service_commands import happened as happened_commands
 from doit.window import Bounds
 
 FIXTURE_DIR = Path(__file__).resolve().parent / 'fixtures' / 'happened'
@@ -118,7 +116,6 @@ def test_a_window_holding_more_than_the_backend_returns_is_partial_rather_than_a
 
     assert (lane.available, lane.reason) == (True, notice)
     assert [cell.text for cell in lane.grid] == ['Structured concurrency in practice']
-    assert happened.verdict_lines([lane], 80)[1].plain.strip() == 'all 1 answered · learning partial · no actor recorded'
 
 
 def test_meso_folds_three_kinds_of_record_into_one_group_with_no_hours():
@@ -287,39 +284,4 @@ def test_the_actor_identity_written_is_one_its_kind_reads_back(monkeypatch):
 
 def test_a_runner_prefix_doit_has_never_seen_reads_unknown_rather_than_by_hand():
     """A new kind of runner is counted apart, never shown as the reader's own work."""
-    lane = happened.done_lane('issues', 'ISSUES', [GridCell('closed it', True, actor='runner/nightly/abc')], '')
-
     assert actor.kind('runner/nightly/abc') == actor.UNKNOWN
-    assert happened.verdict_lines([lane], 80)[1].plain.endswith('· 1 by an actor of unknown kind')
-
-
-# --- the screen ----------------------------------------------------------------
-
-
-def test_a_done_hour_is_green_while_the_text_stays_plain():
-    """A style set on a line's first Text is inherited by everything appended to it, which is how a whole row ends up one color."""
-    line = happened.done_line(done('Floss', NOW.isoformat()), 40)
-
-    assert str(line.style) == ''
-    assert [(line.plain[span.start : span.end], str(span.style)) for span in line.spans if str(span.style)] == [
-        (f'{NOW:%H:%M}', happened.HOUR_STYLE)
-    ]
-
-
-def test_the_verdict_names_every_record_asked_and_which_failed():
-    """In a split pane narrower than the list, every record asked still shows, wrapped rather than cut."""
-    groups = [
-        happened.done_lane('issues', 'ISSUES', [GridCell('x', True, actor='ada@laptop')], ''),
-        lanes.Lane(name='tasks', title='TASKS'),
-        lanes.unavailable('learning', 'LEARNING', 'not logged in'),
-    ]
-
-    names, answered = happened.verdict_lines(groups, 24)
-
-    assert all(len(line) <= 24 for line in names.plain.splitlines())
-    assert ' '.join(names.plain.split()) == 'asked issues, tasks, learning'
-    assert answered.plain.strip() == '2 of 3 answered · actor recorded by issues'
-
-
-def test_a_window_that_will_not_parse_is_refused_before_any_backend_is_asked():
-    assert happened_commands.cmd_happened('6mo', None, as_json=False) == 2

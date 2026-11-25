@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T12:00:00-05:00",
+  "since": "1970-01-01T00:00:00+00:00",
+  "until": "2026-10-01T00:00:00-04:00",
+  "days": 20728,
+  "asked": [
+    "review",
+    "practice",
+    "tasks"
+  ],
+  "unavailable": [],
+  "partial": [],
+  "groups": [
+    {
+      "name": "review",
+      "title": "REVIEW",
+      "meta": "2 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Swap the offsite backup drive",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-08-14",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Renew the library card",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-09-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 2,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "practice",
+      "title": "PRACTICE",
+      "meta": "1 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Find files fast",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-07-30",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 1,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "tasks",
+      "title": "TASKS",
+      "meta": "0 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": []
+    }
+  ],
+  "problems": []
+}

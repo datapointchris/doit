@@ -12,11 +12,8 @@ import datetime as dt
 import json
 from pathlib import Path
 
-import pytest
-
 from doit import dashboard
 from doit import happened
-from doit import render
 from doit import sources
 from doit.lanes import GridCell
 from doit.lanes import Lane
@@ -651,120 +648,6 @@ def test_describe_joins_a_title_to_the_gist_of_its_note():
     assert dashboard.describe('A Title', 'The gist. The reasoning behind it.') == 'A Title — The gist.'
 
 
-def test_a_due_note_renders_rather_than_raising(capsys):
-    """rich refuses a style argument when appending a Text.
-
-    Only a due or overdue note carries one, so this raised for exactly the rows
-    that matter most — and no lane in the fixtures happened to produce one until
-    a conforming source did.
-    """
-    rows = [dashboard.Row('now', 'Lights to evening scene', '18:40', dashboard.Urgency.OVERDUE)]
-
-    dashboard.render_rows(rows, 80)
-
-    assert '18:40' in capsys.readouterr().out
-
-
-def test_a_wide_terminal_spends_its_width_on_the_note(monkeypatch, capsys):
-    """The note is where a row says which repo and which project it belongs to.
-
-    Capped flat at 22 columns it arrived as "CLI machine contract …" no matter how
-    much room was going spare to the right of it.
-    """
-    monkeypatch.setenv('COLUMNS', '200')
-    note = 'goselfupdate · CLI machine contract conformance'
-    rows = [dashboard.Row('next', 'Give cobracmd a usage-error exit code of 2', note)]
-
-    dashboard.render_rows(rows, render.MAX_WIDTH)
-
-    assert note in capsys.readouterr().out
-
-
-def test_a_row_with_a_command_shows_what_to_type(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '200')
-    rows = [dashboard.Row('review', 'Re-index indy so search stays current', '25d overdue', handle='indy index')]
-
-    dashboard.render_rows(rows, render.MAX_WIDTH)
-
-    assert f'{dashboard.HANDLE_MARK} indy index' in capsys.readouterr().out
-
-
-@pytest.mark.parametrize('width', [80, render.MAX_WIDTH])
-def test_a_handle_is_printed_whole_at_any_width(monkeypatch, capsys, width):
-    monkeypatch.setenv('COLUMNS', str(width))
-    rows = [
-        dashboard.Row(
-            'ask',
-            'sessions keep re-reading the help of one tool or guessing its commands',
-            'recommends 1. Add a line to the agent instructions',
-            dashboard.Urgency.OVERDUE,
-            'inbox answer friction/precommit/a-hook-with-a-long-repo-scoped-name <n>',
-        ),
-        dashboard.Row('next', 'Tests read the workstation', 'a-repo · an initiative with a long name', handle='tracker show 837'),
-    ]
-
-    dashboard.render_rows(rows, width)
-
-    printed = capsys.readouterr().out
-    for row in rows:
-        assert f'{dashboard.HANDLE_MARK} {row.handle}' in printed
-    assert all(len(line) <= width for line in printed.splitlines())
-
-
-def test_a_label_wider_than_the_gutter_leaves_the_handle_on_the_line(monkeypatch, capsys):
-    """A PR row's label is its repo, which can be wider than the gutter. The
-    lane's gutter widens to it, so the handle stays on the line."""
-    monkeypatch.setenv('COLUMNS', '120')
-    rows = [
-        dashboard.Row('a-long-repo', 'feat(list): add a sectioned shopping list built for the phone, in a form', '0d', handle='prs'),
-        dashboard.Row('short', 'feat(cli): point a scan flag given at the root to the check verb', '0d', handle='prs'),
-    ]
-
-    dashboard.render_rows(rows, 120)
-
-    lines = capsys.readouterr().out.splitlines()
-    assert all(line.endswith(f'{dashboard.HANDLE_MARK} prs') for line in lines)
-    assert len({line.index('feat') for line in lines}) == 1, 'the lane shares one gutter'
-
-
-@pytest.mark.parametrize(('width', 'handle'), [(60, 'tracker labs show a-lab'), (80, 'tracker labs show a-lab-with-a-long-id')])
-def test_a_handle_never_takes_a_short_note_from_its_lane(monkeypatch, capsys, width, handle):
-    """A handle sizes the column for every row in its lane, so one sitting
-    inline at the note's expense would cut the note on all of them. Each handle
-    here fits beside the text alone and not beside the text and the note."""
-    monkeypatch.setenv('COLUMNS', str(width))
-    rows = [
-        dashboard.Row('lab', 'Find files fast', 'never run', handle=handle),
-        dashboard.Row('lab', 'Search code', 'never run', handle=handle),
-    ]
-
-    dashboard.render_rows(rows, width)
-
-    printed = capsys.readouterr().out
-    assert printed.count('never run') == 2
-    assert printed.count(f'{dashboard.HANDLE_MARK} {handle}') == 2
-
-
-def test_a_trailer_too_wide_for_the_pane_keeps_each_command_on_one_line(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '30')
-    hint = 'tracker items list --status open'
-
-    dashboard.render_trailer(dashboard.LaneView(name='items', title='ITEMS', hints=[hint, hint]))
-
-    assert capsys.readouterr().out.count(f'→ {hint}') == 2
-
-
-def test_a_narrow_terminal_spends_its_width_on_the_row_itself(monkeypatch, capsys):
-    monkeypatch.setenv('COLUMNS', '60')
-    rows = [dashboard.Row('next', 'Give cobracmd a usage-error exit code of 2', 'x' * 80)]
-
-    dashboard.render_rows(rows, 60)
-
-    printed = capsys.readouterr().out.rstrip('\n')
-    assert 'Give cobracmd' in printed
-    assert printed.count('x') <= int(60 * dashboard.NOTE_WIDTH_SHARE), 'the note never crowds out the thing itself'
-
-
 MESO_CYCLES = [
     {
         'name': 'Lower Body — Return to Running',
@@ -878,16 +761,11 @@ def test_an_alert_lane_draws_before_every_work_lane() -> None:
     assert [lane.name for lane in ordered] == ['problems', 'tasks', 'habits']
 
 
-def test_the_terminal_drops_an_alert_lane_with_nothing_open(capsys) -> None:
+def test_the_screen_leaves_out_an_alert_lane_with_nothing_open() -> None:
     """Seeing it every day while it is empty is what teaches you to stop reading
     the one place that says something is wrong."""
-    quiet = alert_lane(rows=0)
-
-    dashboard.render_lanes([quiet, dashboard.LaneView(name='tasks', title='TASKS')], dt.date.today(), 5)
-
-    printed = capsys.readouterr().out
-    assert 'PROBLEMS' not in printed
-    assert 'TASKS' in printed
+    assert dashboard.quiet_lane(alert_lane(rows=0))
+    assert not dashboard.quiet_lane(dashboard.LaneView(name='tasks', title='TASKS'))
 
 
 def test_the_alert_flag_survives_a_round_trip_through_the_contract() -> None:
@@ -1017,16 +895,16 @@ def test_open_feedback_lists_each_body_and_says_where_it_was_raised() -> None:
     ]
 
 
-def test_feedback_with_none_open_prints_nothing_and_a_failed_read_says_why(capsys) -> None:
+def test_feedback_with_none_open_is_left_out_and_a_failed_read_says_why() -> None:
     [nothing_open] = dashboard.meso_feedback_adapter(answered('meso-feedback', []))
     document = json.loads(dashboard.lanemodel.dumps([nothing_open], dt.datetime.now()))
 
-    dashboard.render_lanes(dashboard.lanemodel.from_document(document), dt.date.today(), 5)
-    assert 'FEEDBACK' not in capsys.readouterr().out
+    [read_back] = dashboard.lanemodel.from_document(document)
+    assert dashboard.quiet_lane(read_back)
 
-    broke = dashboard.meso_feedback_adapter(failed('meso-feedback', 'meso answered 403 to GET /feedback'))
-    dashboard.render_lanes(broke, dt.date.today(), 5)
-    assert 'meso answered 403 to GET /feedback' in capsys.readouterr().out
+    [broke] = dashboard.meso_feedback_adapter(failed('meso-feedback', 'meso answered 403 to GET /feedback'))
+    assert not broke.available
+    assert 'meso answered 403 to GET /feedback' in broke.reason
 
 
 def test_when_a_cell_was_done_survives_a_round_trip_through_the_contract() -> None:

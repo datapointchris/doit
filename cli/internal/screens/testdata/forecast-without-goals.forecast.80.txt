@@ -1,0 +1,7 @@
+Forecast · 90 min a day ────────────────────────────────────────────────────────
+  pursuit     /wk    /mo   h/mo  goal  of goal  est
+  walk        0.0   11.5    2.9  —           —  0m
+  chores      0.0    2.0    0.8  —           —  0m
+
+  62 min/day left unspent · 300 runs
+  estimates:  · doit pursuits log --minutes measures them

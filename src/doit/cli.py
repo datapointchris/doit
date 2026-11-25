@@ -25,9 +25,6 @@ from doit import tui
 from doit.render import error_console
 from doit.render import examples
 from doit.render import set_no_input
-from doit.service_commands import dashboard
-from doit.service_commands import forecast
-from doit.service_commands import happened
 from doit.service_commands import pursuits
 from doit.service_commands import review
 from doit.service_commands import sources
@@ -65,7 +62,6 @@ ROOT_EXAMPLES = examples(
 )
 
 WHAT_TO_DO_NOW = 'What to do now'
-WHAT_CAME_OF_IT = 'What came of it'
 WHAT_YOU_DECLARED = 'What you declared'
 THIS_MACHINE = 'This machine'
 
@@ -90,8 +86,8 @@ ROOT_ORDER = (
 class RootGroup(TyperGroup):
     """The root group, which lists its commands by panel and says where an option a command refused is accepted.
 
-    `--no-input` belongs to the root, so `doit dashboard --no-input` is refused by
-    `dashboard`. click's "No such option" alone sends the reader to `--help` to find
+    `--no-input` belongs to the root, so `doit sources list --no-input` is refused by
+    `list`. click's "No such option" alone sends the reader to `--help` to find
     where the option goes, so the refusal names the placement that works.
     """
 
@@ -151,10 +147,7 @@ app = typer.Typer(
 )
 
 
-app.command('dashboard', rich_help_panel=WHAT_TO_DO_NOW, epilog=dashboard.DASHBOARD_EXAMPLES)(dashboard.dashboard_command)
 app.command('tui', rich_help_panel=WHAT_TO_DO_NOW, epilog=tui.TUI_EXAMPLES)(tui.tui_command)
-app.command('happened', rich_help_panel=WHAT_CAME_OF_IT, epilog=happened.HAPPENED_EXAMPLES)(happened.happened_command)
-app.add_typer(forecast.app, name='forecast', rich_help_panel=WHAT_CAME_OF_IT)
 app.add_typer(pursuits.app, name='pursuits', rich_help_panel=WHAT_YOU_DECLARED)
 app.add_typer(review.app, name='review', rich_help_panel=WHAT_YOU_DECLARED)
 app.add_typer(sources.app, name='sources', rich_help_panel=WHAT_YOU_DECLARED)

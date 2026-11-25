@@ -1,0 +1,287 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T12:00:00-05:00",
+  "since": "2026-10-26T13:00:00-04:00",
+  "until": "2026-11-02T12:00:00-05:00",
+  "days": 8,
+  "asked": [
+    "pursuits",
+    "review",
+    "practice",
+    "habits",
+    "tasks",
+    "issues",
+    "learning",
+    "books",
+    "training"
+  ],
+  "unavailable": [
+    "books"
+  ],
+  "partial": [
+    "learning"
+  ],
+  "groups": [
+    {
+      "name": "pursuits",
+      "title": "PURSUITS",
+      "meta": "4 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "stretch · 12 min",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-10-27T07:30:00-04:00",
+          "done_on": "2026-10-27",
+          "actor": "sam@desk",
+          "actor_kind": "by hand"
+        },
+        {
+          "text": "piano · 30 min",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-10-29T19:05:00-04:00",
+          "done_on": "2026-10-29",
+          "actor": "claude-code/5f1c2d",
+          "actor_kind": "session"
+        },
+        {
+          "text": "garden",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-10-31",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "errands · posted the parcel at the corner office before it closed for the weekend",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T09:15:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "sam@desk",
+          "actor_kind": "by hand"
+        }
+      ],
+      "total": 4,
+      "in_flight": 0,
+      "hints": [
+        "doit next --explain"
+      ]
+    },
+    {
+      "name": "review",
+      "title": "REVIEW",
+      "meta": "2 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Swap the offsite backup drive",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-10-28",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Press the test button on each smoke alarm",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-11-01",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 2,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "practice",
+      "title": "PRACTICE",
+      "meta": "0 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "habits",
+      "title": "HABITS",
+      "meta": "2 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Make the bed",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-01T07:05:00-05:00",
+          "done_on": "2026-11-01",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Vitamins",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T08:30:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 2,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "tasks",
+      "title": "TASKS",
+      "meta": "0 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "issues",
+      "title": "ISSUES",
+      "meta": "3 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Fix the flaky clock test",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-10-30T14:00:00-04:00",
+          "done_on": "2026-10-30",
+          "actor": "claude-code-unattended/nightly/a1b2",
+          "actor_kind": "unattended"
+        },
+        {
+          "text": "Rename the sources flag",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-10-31T10:12:00-04:00",
+          "done_on": "2026-10-31",
+          "actor": "sam@desk",
+          "actor_kind": "by hand"
+        },
+        {
+          "text": "Drop the legacy importer",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-01T16:40:00-05:00",
+          "done_on": "2026-11-01",
+          "actor": "runner/nightly/c3d4",
+          "actor_kind": "unknown"
+        }
+      ],
+      "total": 3,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "learning",
+      "title": "LEARNING",
+      "meta": "1 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "100 newest completed item(s), cut by --limit; older ones exist.",
+      "rows": [],
+      "grid": [
+        {
+          "text": "Structured concurrency in practice",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-10-29T21:00:00-04:00",
+          "done_on": "2026-10-29",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 1,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "books",
+      "title": "BOOKS",
+      "meta": "",
+      "status": "unavailable",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "life-books: life is not configured on the service: DOIT_API_LIFE_URL unset",
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "training",
+      "title": "TRAINING",
+      "meta": "2 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Session A — Loaded Lower",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-10-27",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "calm",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-10-28",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 2,
+      "in_flight": 0,
+      "hints": []
+    }
+  ],
+  "problems": []
+}

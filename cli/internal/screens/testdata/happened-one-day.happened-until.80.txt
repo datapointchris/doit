@@ -1,0 +1,12 @@
+Happened · Mon 02 Nov 00:00 to Tue 03 Nov 00:00 ────────────────────────────────
+  asked pursuits, review, practice, habits, issues
+  3 of 5 answered · no actor recorded
+
+  pursuits
+    unavailable — the pursuits register would not load: line 3 is not a mapping
+  review
+           Renew the library card before it lapses
+  habits
+    21:45  Read twenty pages of something that is not a screen, then write down…
+  issues
+    unavailable — slate-issues: slate answered 503 to GET /issues: restarting

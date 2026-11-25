@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T12:00:00-05:00",
+  "since": "2026-11-02T00:00:00-05:00",
+  "until": "2026-11-03T00:00:00-05:00",
+  "days": 1,
+  "asked": [
+    "pursuits",
+    "review",
+    "practice",
+    "habits",
+    "issues"
+  ],
+  "unavailable": [
+    "pursuits",
+    "issues"
+  ],
+  "partial": [],
+  "groups": [
+    {
+      "name": "pursuits",
+      "title": "PURSUITS",
+      "meta": "",
+      "status": "unavailable",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "the pursuits register would not load: line 3 is not a mapping",
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "review",
+      "title": "REVIEW",
+      "meta": "1 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Renew the library card before it lapses",
+          "done": true,
+          "handle": "",
+          "done_at": "",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 1,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "practice",
+      "title": "PRACTICE",
+      "meta": "0 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "habits",
+      "title": "HABITS",
+      "meta": "1 done",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Read twenty pages of something that is not a screen, then write down one line",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T21:45:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 1,
+      "in_flight": 0,
+      "hints": []
+    },
+    {
+      "name": "issues",
+      "title": "ISSUES",
+      "meta": "",
+      "status": "unavailable",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "slate-issues: slate answered 503 to GET /issues: restarting",
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": []
+    }
+  ],
+  "problems": []
+}

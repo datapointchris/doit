@@ -1,0 +1,437 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T12:00:00-05:00",
+  "lanes": [
+    {
+      "name": "problems",
+      "title": "PROBLEMS",
+      "meta": "2 open",
+      "status": "ok",
+      "alert": true,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "5d",
+          "text": "The nightly backup did not finish",
+          "note": "archlinux",
+          "urgency": "overdue",
+          "handle": "fleet problems show 12"
+        },
+        {
+          "label": "2d",
+          "text": "The NAS disk is 91% full",
+          "note": "nas",
+          "urgency": "due",
+          "handle": ""
+        }
+      ],
+      "grid": [],
+      "total": 2,
+      "in_flight": 1,
+      "hints": [
+        "fleet problems list"
+      ],
+      "row_cap": 3,
+      "quiet": false
+    },
+    {
+      "name": "drift",
+      "title": "DRIFT",
+      "meta": "",
+      "status": "ok",
+      "alert": true,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": [],
+      "row_cap": 3,
+      "quiet": true
+    },
+    {
+      "name": "tasks",
+      "title": "TASKS",
+      "meta": "7 open",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "#1",
+          "text": "Return the hoodies to the shop on the high street",
+          "note": "due today",
+          "urgency": "due",
+          "handle": "life tasks complete 501"
+        },
+        {
+          "label": "#2",
+          "text": "Book the boiler service",
+          "note": "3d overdue",
+          "urgency": "overdue",
+          "handle": "life tasks complete 502"
+        },
+        {
+          "label": "#3",
+          "text": "Call the bank about the card",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 503"
+        },
+        {
+          "label": "#4",
+          "text": "Sharpen the kitchen knives",
+          "note": "in 2d",
+          "urgency": "none",
+          "handle": "life tasks complete 504"
+        },
+        {
+          "label": "#5",
+          "text": "Order more printer paper",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 505"
+        },
+        {
+          "label": "#6",
+          "text": "Fix the squeaky hinge",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 506"
+        },
+        {
+          "label": "#7",
+          "text": "Plan the allotment beds",
+          "note": "",
+          "urgency": "none",
+          "handle": "life tasks complete 507"
+        }
+      ],
+      "grid": [],
+      "total": 7,
+      "in_flight": 0,
+      "hints": [
+        "life tasks list"
+      ],
+      "row_cap": 5,
+      "quiet": false
+    },
+    {
+      "name": "habits",
+      "title": "HABITS",
+      "meta": "3 of 7 done today",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [
+        {
+          "text": "Make the bed",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T07:05:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Vitamins",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T08:30:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Floss",
+          "done": false,
+          "handle": "14",
+          "done_at": "",
+          "done_on": "",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Read twenty pages of something that is not a screen",
+          "done": false,
+          "handle": "15",
+          "done_at": "",
+          "done_on": "",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Walk around the block",
+          "done": false,
+          "handle": "9",
+          "done_at": "",
+          "done_on": "",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Water the plants",
+          "done": false,
+          "handle": "102",
+          "done_at": "",
+          "done_on": "",
+          "actor": "",
+          "actor_kind": ""
+        },
+        {
+          "text": "Journal",
+          "done": true,
+          "handle": "",
+          "done_at": "2026-11-02T09:00:00-05:00",
+          "done_on": "2026-11-02",
+          "actor": "",
+          "actor_kind": ""
+        }
+      ],
+      "total": 0,
+      "in_flight": 0,
+      "hints": [
+        "life habits complete <id>"
+      ],
+      "row_cap": 3,
+      "quiet": false
+    },
+    {
+      "name": "books",
+      "title": "BOOKS",
+      "meta": "1 reading · 3 queued",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "articles: life answered 503 to GET /articles: restarting",
+      "rows": [
+        {
+          "label": "reading",
+          "text": "The Long Way to a Small, Angry Planet — a crew of misfits tunnels through space",
+          "note": "62%",
+          "urgency": "none",
+          "handle": ""
+        },
+        {
+          "label": "next",
+          "text": "A Memory Called Empire",
+          "note": "",
+          "urgency": "none",
+          "handle": "life books start 77"
+        },
+        {
+          "label": "next",
+          "text": "Piranesi",
+          "note": "",
+          "urgency": "none",
+          "handle": "life books start 78"
+        },
+        {
+          "label": "next",
+          "text": "The Dispossessed",
+          "note": "",
+          "urgency": "none",
+          "handle": "life books start 79"
+        }
+      ],
+      "grid": [],
+      "total": 4,
+      "in_flight": 0,
+      "hints": [
+        "life books list"
+      ],
+      "row_cap": 3,
+      "quiet": false
+    },
+    {
+      "name": "upcoming",
+      "title": "UPCOMING",
+      "meta": "3 ahead",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "Mon 02",
+          "text": "Dentist on Elm Street",
+          "note": "today 15:30",
+          "urgency": "due",
+          "handle": "life events show 88"
+        },
+        {
+          "label": "Thu 05",
+          "text": "Pick up the parcel",
+          "note": "in 3d",
+          "urgency": "none",
+          "handle": ""
+        },
+        {
+          "label": "Apr",
+          "text": "Portland",
+          "note": "7mo owed",
+          "urgency": "overdue",
+          "handle": "nomad trips show trip-1"
+        }
+      ],
+      "grid": [],
+      "total": 3,
+      "in_flight": 0,
+      "hints": [],
+      "row_cap": 8,
+      "quiet": false
+    },
+    {
+      "name": "meso - feedback",
+      "title": "MESO - FEEDBACK",
+      "meta": "1 open",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": true,
+      "reason": null,
+      "rows": [
+        {
+          "label": "",
+          "text": "The rest timer is too small to read from across the room",
+          "note": "13d",
+          "urgency": "none",
+          "handle": ""
+        }
+      ],
+      "grid": [],
+      "total": 1,
+      "in_flight": 0,
+      "hints": [],
+      "row_cap": 3,
+      "quiet": false
+    },
+    {
+      "name": "learning",
+      "title": "LEARNING",
+      "meta": "",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": [],
+      "row_cap": 5,
+      "quiet": false
+    },
+    {
+      "name": "prs",
+      "title": "PRS",
+      "meta": "2 open",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "a-long-repo-name",
+          "text": "feat(list): add a sectioned shopping list built for the phone",
+          "note": "0d",
+          "urgency": "none",
+          "handle": "prs"
+        },
+        {
+          "label": "short",
+          "text": "feat(cli): point a scan flag given at the root to the check verb",
+          "note": "4d",
+          "urgency": "due",
+          "handle": "prs"
+        }
+      ],
+      "grid": [],
+      "total": 2,
+      "in_flight": 0,
+      "hints": [],
+      "row_cap": 3,
+      "quiet": false
+    },
+    {
+      "name": "dotfiles",
+      "title": "DOTFILES",
+      "meta": "",
+      "status": "unavailable",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": "dotfiles: ClickHouse answered 401, so the desk checks could not be read this round",
+      "rows": [],
+      "grid": [],
+      "total": 0,
+      "in_flight": 0,
+      "hints": [],
+      "row_cap": 3,
+      "quiet": false
+    },
+    {
+      "name": "maintenance",
+      "title": "MAINTENANCE",
+      "meta": "3 due",
+      "status": "ok",
+      "alert": false,
+      "omit_when_empty": false,
+      "reason": null,
+      "rows": [
+        {
+          "label": "review",
+          "text": "Swap the offsite backup drive",
+          "note": "12d overdue",
+          "urgency": "overdue",
+          "handle": "doit review done rotate-the-offsite-backup-drives"
+        },
+        {
+          "label": "practice",
+          "text": "Search code with ripgrep",
+          "note": "never run",
+          "urgency": "due",
+          "handle": "doit review done practice-searching-code-with-ripgrep"
+        },
+        {
+          "label": "review",
+          "text": "Press the test button",
+          "note": "due today",
+          "urgency": "due",
+          "handle": "doit review done check-smoke-alarms"
+        }
+      ],
+      "grid": [],
+      "total": 3,
+      "in_flight": 0,
+      "hints": [
+        "doit review due",
+        "doit review list"
+      ],
+      "row_cap": 3,
+      "quiet": false
+    }
+  ],
+  "lane_names": [
+    "problems",
+    "drift",
+    "tasks",
+    "habits",
+    "books",
+    "upcoming",
+    "meso - feedback",
+    "learning",
+    "prs",
+    "dotfiles",
+    "maintenance"
+  ],
+  "problems": [],
+  "configured": 6,
+  "pursuit_standing": {
+    "text": "behind · piano · garden · letters  ·  doit pursuits list",
+    "unavailable": false
+  }
+}

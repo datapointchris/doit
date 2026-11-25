@@ -56,13 +56,10 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from dataclasses import field
 
-from rich.text import Text
-
 from doit import journal
 from doit import pursuits
 from doit.allocate import balance
 from doit.paths import machine_name
-from doit.render import console
 
 # Horizons a reading reports. A week is the shortest span over which a weekly
 # goal can express itself at all, and a month is long enough for every cadence a
@@ -465,44 +462,3 @@ def trend_rows(verdicts: list[Verdict]) -> list[dict]:
         }
         for verdict in verdicts
     ]
-
-
-def emit(reading: Reading) -> None:
-    """One reading, as occasions and hours against what each goal asks for in a month."""
-    month = reading.horizons.get('30', {})
-    week = reading.horizons.get('7', {})
-    goals = max((len(text) for text in reading.goals.values()), default=4)
-
-    console.rule(f'[cyan]Forecast · {reading.budget_minutes} min a day', align='left')
-    header = Text('  ')
-    header.append(f'{"pursuit":<9} {"/wk":>5} {"/mo":>6} {"h/mo":>6}  {"goal":<{goals}} {"of goal":>8}  {"est":<9}', style='dim')
-    console.print(header)
-    for name in sorted(month, key=lambda row: -month[row]['occasions']):
-        met = goal_met(month[name])
-        estimate = reading.durations.get(name, {})
-        row = Text('  ')
-        row.append(f'{name:<9} ', style='white')
-        row.append(f'{week.get(name, {}).get("occasions", 0):>5.1f} {month[name]["occasions"]:>6.1f} ')
-        row.append(f'{month[name]["minutes"] / 60:>6.1f}  ')
-        row.append(f'{reading.goals.get(name, "—"):<{goals}} ')
-        row.append(f'{"—" if met is None else f"{met:.0f}%":>8}  ', style='yellow' if met is not None and met < 90 else '')
-        row.append(f'{int(estimate.get("minutes", 0))}m {estimate.get("source", "")}', style='dim')
-        console.print(row)
-
-    console.print(f'\n  {reading.unspent_minutes_per_day:.0f} min/day left unspent · {reading.replicates} runs')
-    console.print(f'  estimates: {source_summary(reading)} · [cyan]doit pursuits log --minutes[/] measures them')
-
-
-def emit_trend(verdicts: list[Verdict], days: int, readings: int) -> None:
-    console.rule(f'[cyan]Trend · {days}-day predictions against the journal', align='left')
-    header = Text('  ')
-    header.append(f'{"pursuit":<9} {"said":>7} {"did":>7} {"error":>8}', style='dim')
-    console.print(header)
-    for verdict in verdicts:
-        row = Text('  ')
-        row.append(f'{verdict.pursuit:<9} ', style='white')
-        row.append(f'{verdict.predicted:>7.1f} {verdict.actual:>7.1f} ')
-        row.append(f'{verdict.error:>+8.1f}', style='yellow' if abs(verdict.error) >= 1 else 'dim')
-        console.print(row)
-    console.print(f'\n  averaged over {readings} readings whose {days}-day window has closed')
-    console.print('  error is what the journal recorded minus what the forecast predicted')

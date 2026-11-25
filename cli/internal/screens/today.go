@@ -5,7 +5,6 @@ import (
 	"io"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/datapointchris/gotermstyle"
 
@@ -13,12 +12,6 @@ import (
 )
 
 const (
-	groupIndent = "  "
-	itemIndent  = "    "
-	columnGap   = 2
-	clockWidth  = len("00:00")
-	// actorWidth fits the service's longest actor kind, and unrecorded, the word for none.
-	actorWidth = max(len("unattended"), len("unrecorded"))
 	// dueLabelMax fits a review slug or a Lab id, and clips a longer one.
 	dueLabelMax = 20
 	// dueTextMin is what a row's text keeps beside the widest label before a
@@ -26,9 +19,6 @@ const (
 	// line under its row.
 	dueTextMin = 16
 )
-
-// noteCodes color a due row's note by how late it is.
-var noteCodes = map[string]string{"due": gotermstyle.CodeYellow, "overdue": gotermstyle.CodeRed}
 
 // Today prints the day: the figures, what it still owes, then what it has had.
 //
@@ -69,13 +59,9 @@ func Today(w io.Writer, answer service.Today, widths Widths, p gotermstyle.Palet
 			pr.blank()
 		}
 		pr.wrap(line{}.add("DONE", gotermstyle.CodeCyan))
-		doneGroups(pr, done)
+		doneGroups(pr, done, false)
 	}
 	return pr.written
-}
-
-func hasSomething(lane service.Lane) bool {
-	return !lane.Available() || lane.Reason != "" || len(lane.Grid) > 0 || len(lane.Rows) > 0
 }
 
 // quotaLines are today's ask, the checklists, what is behind, and each
@@ -280,79 +266,4 @@ func dueGroups(pr *printer, groups []service.DueLane) {
 			pr.wrap(line{}.add(itemIndent+"partial — "+lane.Reason, gotermstyle.CodeYellow))
 		}
 	}
-}
-
-// gapAfter is a column's width with the space after it, or nothing for a column with no width.
-func gapAfter(width int) int {
-	if width == 0 {
-		return 0
-	}
-	return width + 1
-}
-
-// columnWidth is what a column needs, bounded by its share of the line.
-func columnWidth(width int, values []string, share float64, minimum int) int {
-	needed := 0
-	for _, value := range values {
-		needed = max(needed, runes(value))
-	}
-	return min(needed, max(minimum, int(float64(width)*share)))
-}
-
-func unavailable(pr *printer, lane service.Lane) {
-	pr.cut(line{}.add(itemIndent, "").add("unavailable — "+lane.Reason, gotermstyle.CodeRed))
-}
-
-// doneGroups prints each group under its name, one line per thing done: its
-// hour, who did it where its group records that, then what it was. An entry
-// whose record kept only the day leaves the hour blank rather than guess one.
-func doneGroups(pr *printer, groups []service.Lane) {
-	width := pr.widths.Layout
-	for _, lane := range groups {
-		pr.wrap(line{}.add(groupIndent+lane.Name, codeGroup))
-		if !lane.Available() {
-			unavailable(pr, lane)
-			continue
-		}
-		if lane.Reason != "" {
-			pr.cut(line{}.add(itemIndent, "").add("partial — "+lane.Reason, gotermstyle.CodeYellow))
-		}
-		actors := 0
-		for _, cell := range lane.Grid {
-			if cell.ActorKind != "" {
-				actors = actorWidth
-			}
-		}
-		used := len(itemIndent) + clockWidth + columnGap
-		if actors > 0 {
-			used += actors + columnGap
-		}
-		textWidth := max(10, width-used)
-		for _, cell := range lane.Grid {
-			hour := ""
-			if at, ok := instant(cell.DoneAt); ok {
-				hour = at.Format("15:04")
-			}
-			printed := line{}.add(itemIndent, "").add(hour, gotermstyle.CodeGreen).
-				add(strings.Repeat(" ", clockWidth-len(hour)+columnGap), "")
-			if actors > 0 {
-				who, code := cell.ActorKind, ""
-				if who == "" {
-					who, code = "unrecorded", codeDim
-				}
-				printed = printed.add(fitted(who, actors, true), code).add(strings.Repeat(" ", columnGap), "")
-			}
-			pr.cut(printed.add(fitted(cell.Text, textWidth, false), ""))
-		}
-	}
-}
-
-// instant reads an ISO 8601 time as Python's fromisoformat does, keeping its own offset.
-func instant(text string) (time.Time, bool) {
-	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05.999999999", "2006-01-02 15:04:05.999999999Z07:00", "2006-01-02"} {
-		if parsed, err := time.Parse(layout, text); err == nil {
-			return parsed, true
-		}
-	}
-	return time.Time{}, false
 }

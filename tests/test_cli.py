@@ -48,7 +48,7 @@ def test_version_flag_prints_one_line(flag):
     assert result.output.strip() == f'doit {__version__}'
 
 
-@pytest.mark.parametrize('argv', [[], ['review'], ['forecast']])
+@pytest.mark.parametrize('argv', [[], ['review']])
 def test_every_node_shows_help_bare(argv):
     """cli-design.md: a node with no bare default shows help."""
     result = runner.invoke(app, argv)
@@ -211,11 +211,11 @@ def test_unknown_command_exits_2(argv):
 
 
 def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
-    """`doit dashboard --no-input` is refused by `dashboard`; the root is where it goes."""
+    """`doit sources list --no-input` is refused by `list`; the root is where it goes."""
     with pytest.raises(NoSuchOption) as refused:
-        get_command(app).main(['dashboard', '--no-input'], prog_name='doit', standalone_mode=False)
+        get_command(app).main(['sources', 'list', '--no-input'], prog_name='doit', standalone_mode=False)
 
-    assert accepted_placements(refused.value) == ['doit --no-input dashboard']
+    assert accepted_placements(refused.value) == ['doit --no-input sources list']
 
 
 def test_a_command_the_go_doit_hands_on_is_listed_under_its_parent_and_runs_nothing(monkeypatch):
