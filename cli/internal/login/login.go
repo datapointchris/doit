@@ -46,9 +46,8 @@ func DefaultClientID() string { return goclilogin.ClientID(Product) }
 // Config is the goclilogin view of a deployment.
 //
 // StateDir is pyclilogin's, $XDG_STATE_HOME/doit, rather than goclilogin's
-// default under the keyring service's name. Two directories would mean two
-// refresh locks, and a refresh token rotated by one side would then fail on
-// the other.
+// default under the keyring service's name. A desk with no keyring keeps its
+// token file and refresh lock there, so another directory would log it out.
 func Config(d goclilogin.Deployment) goclilogin.Config {
 	return goclilogin.Config{
 		Issuer:         d.Issuer.Value,
