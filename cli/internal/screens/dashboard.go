@@ -15,17 +15,18 @@ const (
 	handleMark     = "↳ "
 	// laneLabelMin is the narrowest label gutter, which a wider label widens for its whole lane.
 	laneLabelMin = 8
-	// A row's text keeps 30% of the line and never fewer than 20 cells. Its
-	// note grows to 40%, or to 22 cells where 40% is less, and only as wide as
-	// its widest value. Beside an inline handle the note keeps 12 cells. A
-	// handle that would take the text or the note below those goes on the
-	// line under its row.
+	// A row's text and note are sized as a share of the line, each with a
+	// floor, because a fixed count is too tight on a wide terminal and crowds
+	// out the text on a narrow one. A note grows only as wide as its widest
+	// value, and keeps laneNoteFloor beside an inline handle. A handle that
+	// would take the text or the note below its floor goes on the line under
+	// its row.
 	laneTextShare = 0.3
 	laneTextMin   = 20
 	laneNoteShare = 0.4
 	laneNoteMin   = 22
 	laneNoteFloor = 12
-	// A grid lays its set out in two columns where each gets 24 cells, and in one where they would not.
+	// A grid takes gridColumns columns where each still gets gridMinColumnWidth, and one column where they would not.
 	gridColumns        = 2
 	gridGutter         = "   "
 	gridMinColumnWidth = 24
