@@ -17,8 +17,8 @@ const (
 	itemIndent  = "    "
 	columnGap   = 2
 	clockWidth  = len("00:00")
-	// actorWidth fits the longest actor kind, unattended, and the word for none, unrecorded.
-	actorWidth = len("unattended")
+	// actorWidth fits the service's longest actor kind, and unrecorded, the word for none.
+	actorWidth = max(len("unattended"), len("unrecorded"))
 	// dueLabelMax fits a review slug or a Lab id, and clips a longer one.
 	dueLabelMax = 20
 	// dueTextMin is what a row's text keeps beside the widest label before a
@@ -183,8 +183,7 @@ func checkoffsText(count float64) string {
 	return "1 checkoff"
 }
 
-// pyRound rounds half to even, as Python's round does, so 22.5 minutes reads
-// 22m here as on the screens doit-python draws.
+// pyRound rounds half to even, as Python's round does, so 22.5 minutes reads 22m.
 func pyRound(value float64) int { return int(math.RoundToEven(value)) }
 
 // dueRow is one row of the due list, with the row that counts the rest among them.

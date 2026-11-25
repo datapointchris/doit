@@ -20,11 +20,12 @@ import (
 var update = flag.Bool("update", false, "rewrite each recorded screen in testdata from what this package prints")
 
 // Each testdata/<answer>.<screen>.<width>.txt is what the screen prints for
-// testdata/<answer>.json at that terminal width. The recordings were taken
-// from doit-python's rich screens, and the answers hold invented rows in the
-// shape the service answers. A screen replays when it prints the same text,
-// with its escapes and each line's trailing spaces stripped. A change meant
-// to alter a screen rewrites them with `go test ./internal/screens -update`.
+// testdata/<answer>.json at that terminal width. Each recording is the text
+// rich printed for that answer, so a replay holds the Go screen to rich's
+// layout. The answers hold invented rows in the shape the service answers. A
+// screen replays when it prints the same text, with its escapes and each
+// line's trailing spaces stripped. A change meant to alter a screen rewrites
+// them with `go test ./internal/screens -update`.
 func TestEachScreenPrintsWhatItsRecordingHolds(t *testing.T) {
 	printed, err := filepath.Glob("testdata/*.*.*.txt")
 	if err != nil || len(printed) == 0 {

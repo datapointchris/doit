@@ -55,8 +55,8 @@ type GridCell struct {
 	Text string `json:"text"`
 	// DoneAt is the instant it was done, or "" where its record kept only the day.
 	DoneAt string `json:"done_at"`
-	// ActorKind is who did it: by hand, session, unattended or unknown, or ""
-	// where its record names nobody.
+	// ActorKind is the kind of actor the service names for the cell, as
+	// printed, or "" where its record names nobody.
 	ActorKind string `json:"actor_kind"`
 }
 
