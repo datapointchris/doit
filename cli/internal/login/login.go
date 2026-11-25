@@ -1,11 +1,9 @@
 // Package login is doit's view of goclilogin: where the service is, which
 // client this machine logs in as, and where its token and refresh lock live.
 //
-// The Python doit wrote this machine's login, and still reads it for each
-// unported verb. So each identifier below matches pyclilogin's for the product
-// "doit": the config file, the keychain entry, the fallback token file and the
-// refresh lock. Both sides then take one lock. After either side refreshes, the
-// other reads the new token rather than replaying the rotated one.
+// Each identifier below matches pyclilogin's for the product "doit": the
+// config file, the keychain entry, the fallback token file and the refresh
+// lock. A desk's login lives under them, so renaming any one logs that desk out.
 package login
 
 import (
@@ -22,6 +20,10 @@ const Product = "doit"
 // KeyringService namespaces doit's entries in the OS keychain. It is a deployed
 // identifier: renaming it orphans every stored token.
 const KeyringService = "doit-cli"
+
+// ClientSecretVariable is pyclilogin's name for a service client's secret,
+// `<PRODUCT>_CLIENT_SECRET`.
+const ClientSecretVariable = "DOIT_CLIENT_SECRET"
 
 // Load reads the service's deployment from the config file.
 func Load(ctx context.Context) (goclilogin.Deployment, error) {

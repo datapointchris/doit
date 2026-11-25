@@ -24,7 +24,6 @@ func newIngestionCommand() *cobra.Command {
 			"  doit ingestion items drop reddit/t3_1hb0qa --cause subreddit  drop one, naming what decided it",
 		GroupID: whatToDoNow,
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(newIngestionItemsCommand())
 	return cmd
 }
@@ -36,7 +35,6 @@ func newIngestionItemsCommand() *cobra.Command {
 		Example: "  doit ingestion items place reddit/t3_1h9xk2 life-articles\n" +
 			"  doit ingestion items drop reddit/t3_1hb0qa --cause subreddit",
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(newIngestionItemsPlaceCommand(), newIngestionItemsDropCommand())
 	return cmd
 }

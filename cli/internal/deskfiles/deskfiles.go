@@ -25,13 +25,24 @@ func base(variable, fallback string) string {
 	return filepath.Join(home, fallback)
 }
 
-// CompletionNamesPath is next-names.txt, which the zsh completion that
-// `doit shell completion zsh` prints reads with no process started.
+// CompletionNamesPath is next-names.txt, which `doit __complete` reads on each
+// Tab after `doit pursuits log` or `skip`, so a Tab asks no service.
 func CompletionNamesPath() string { return filepath.Join(CacheDir(), "next-names.txt") }
 
 // NudgeIntervalPath holds the shell nudge's interval in whole minutes, which
 // the gate that `doit shell init` prints reads before it starts any process.
 func NudgeIntervalPath() string { return filepath.Join(CacheDir(), "nudge-interval-minutes") }
+
+// DefaultNudgeMinutes is the gate's interval until a nudge writes the interval
+// file. It equals the service's own default, and the contract test fails where
+// the two differ.
+const DefaultNudgeMinutes = 240
+
+// NudgeMarkerPath is the file whose mtime is when the gate last asked for a nudge on this desk.
+func NudgeMarkerPath() string { return filepath.Join(CacheDir(), "nudge") }
+
+// NudgeShowingPath holds what the last nudge printed, for the next shell's gate to print once.
+func NudgeShowingPath() string { return filepath.Join(CacheDir(), "nudge-showing.txt") }
 
 // WriteNudgeInterval replaces the interval file with minutes.
 func WriteNudgeInterval(minutes int) error {

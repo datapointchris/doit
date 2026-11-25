@@ -15,7 +15,7 @@ from conftest import client_for
 from conftest import stand_in
 from fastapi.testclient import TestClient
 
-from doit import paths
+from doit import actor
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'tests' / 'fixtures'
 TASKS = [{'name': 'Water the plants', 'id': 501}, {'name': 'Return the parcel', 'id': 512}, {'name': 'Sort the mail', 'id': 474}]
@@ -66,7 +66,7 @@ def test_a_log_check_resolves_again_past_a_draw_whose_read_failed(store):
     """A cached failure carries no id, so on_log would complete nothing and nothing on screen would say so."""
     down = [True]
     client = tasks_from(store, lambda: httpx2.Response(500, json={'message': 'down'}) if down[0] else TASKS[:1])
-    client.get('/api/v1/next', params={'machine': paths.machine_name()}).raise_for_status()
+    client.get('/api/v1/next', params={'machine': actor.machine_name()}).raise_for_status()
     down[0] = False
 
     check = client.post('/api/v1/journal/done', json={'pursuit': 'chores', 'check': True}).json()

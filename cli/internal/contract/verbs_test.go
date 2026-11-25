@@ -8,13 +8,16 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/datapointchris/doit/cli/internal/deskfiles"
 )
 
 // Each verb the Go doit runs, against the service it ships beside.
-func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
+func TestEachVerbReadsTheServiceFromThisCommit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts the Python service, which the commit hook's -short run leaves to CI")
 	}
@@ -25,7 +28,7 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 	served := startService(t, root)
 	served.write(t, "pursuits", filepath.Join(root, "tests", "fixtures", "pursuits", "pursuits.yml"))
 	served.write(t, "review", filepath.Join(root, "tests", "fixtures", "review", "register.yml"))
-	on := newDesk(t, served.url, root)
+	on := newDesk(t, served.url)
 
 	t.Run("today prints the day the service answers", func(t *testing.T) {
 		printed, stderr, exit := on.run(t, "today")
@@ -303,16 +306,20 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 				t.Errorf("doit review nudge exited %d without %q, printing:\n%s%s", exit, wanted, printed, stderr)
 			}
 		}
+		gate, stderr, exit := on.run(t, "shell", "init", "zsh")
+		read := regexp.MustCompile(`_doit_mins="\$\(cat "([^"]+)"`).FindStringSubmatch(gate)
+		if exit != 0 || read == nil {
+			t.Fatalf("doit shell init zsh exited %d, naming no interval file:\n%s%s", exit, gate, stderr)
+		}
+		// The gate falls back to its own default, which has to be the service's.
+		if held, err := os.ReadFile(read[1]); err != nil || string(held) != strconv.Itoa(deskfiles.DefaultNudgeMinutes)+"\n" {
+			t.Errorf("the service's default interval reached %s as %q (%v), and the gate's is %d", read[1], held, err, deskfiles.DefaultNudgeMinutes)
+		}
 		if again, stderr, exit := on.run(t, "review", "nudge"); exit != 0 || again != "" {
 			t.Errorf("a second nudge inside the interval exited %d, printing:\n%s%s", exit, again, stderr)
 		}
 		if printed, stderr, exit := on.run(t, "review", "nudge-every", "90m"); exit != 0 {
 			t.Errorf("doit review nudge-every 90m exited %d, printing:\n%s%s", exit, printed, stderr)
-		}
-		gate, stderr, exit := on.run(t, "shell", "init", "zsh")
-		read := regexp.MustCompile(`_doit_mins="\$\(cat "([^"]+)"`).FindStringSubmatch(gate)
-		if exit != 0 || read == nil {
-			t.Fatalf("doit shell init zsh exited %d, naming no interval file:\n%s%s", exit, gate, stderr)
 		}
 		if held, err := os.ReadFile(read[1]); err != nil || string(held) != "90\n" {
 			t.Errorf("the shell gate reads %s, which holds %q (%v)", read[1], held, err)
@@ -334,15 +341,10 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 		}
 	})
 
-	t.Run("the shell completion reads the names file next wrote", func(t *testing.T) {
-		completion, stderr, exit := on.run(t, "shell", "completion", "zsh")
-		read := regexp.MustCompile(`local cache="([^"]+)"`).FindStringSubmatch(completion)
-		if exit != 0 || read == nil {
-			t.Fatalf("doit shell completion zsh exited %d, naming no names file:\n%s%s", exit, completion, stderr)
-		}
-		names, err := os.ReadFile(read[1])
-		if err != nil || !strings.Contains(string(names), "chores\tThe maintenance list\n") {
-			t.Errorf("the completion reads %s, which holds %q (%v)", read[1], names, err)
+	t.Run("a Tab after pursuits log offers the names next wrote", func(t *testing.T) {
+		offered, stderr, exit := on.run(t, "__complete", "pursuits", "log", "")
+		if exit != 0 || !strings.Contains(offered, "chores\tThe maintenance list\n") {
+			t.Errorf("doit __complete pursuits log '' exited %d without the chores pursuit, printing:\n%s%s", exit, offered, stderr)
 		}
 	})
 

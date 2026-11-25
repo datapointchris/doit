@@ -112,7 +112,7 @@ func TestIngestionReviewLaneListsItemsAndPlacesThemThroughIngestion(t *testing.T
 	ingestion := newIngestionStandIn(t)
 	served := startService(t, root, "DOIT_API_INGESTION_URL="+ingestion.URL)
 	served.writeText(t, "sources", "sources:\n  ingestion-review:\n    adapter: ingestion-review\n")
-	on := newDesk(t, served.url, root)
+	on := newDesk(t, served.url)
 
 	t.Run("each row shows the guess only below the floor, and a child's key quoted for zsh's extendedglob", func(t *testing.T) {
 		lane := laneRead(t, on)

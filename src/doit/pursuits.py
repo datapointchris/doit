@@ -55,9 +55,9 @@ from typing import NamedTuple
 import typer
 import yaml
 
-from doit import actor
 from doit import evidence
 from doit import journal
+from doit.actor import machine_name
 from doit.allocate import WEEK_DAYS
 from doit.allocate import balance
 from doit.allocate import candidates
@@ -69,16 +69,11 @@ from doit.journal import checkoff_equivalent
 from doit.journal import days_since
 from doit.journal import latest_occurrence
 from doit.journal import new_id
-from doit.paths import cache_dir
-from doit.paths import machine_name
 from doit.render import first_sentence
 from doit.render import join_context
 from doit.render import span_text
 from doit.window import first_instant
 from doit.window import span
-
-CACHE_DIR = cache_dir()
-NAMES_CACHE = CACHE_DIR / 'next-names.txt'
 
 # How many of its own intervals a pursuit goes quiet for before it reads as dormant.
 DORMANT_INTERVALS = 3
@@ -1873,9 +1868,11 @@ def new_record(
     vector describes the whole register, so a run writing several records would
     otherwise put the same payload in each of them.
 
-    ``machine`` and ``identity`` default to this process's own, so a caller
-    writing on someone else's behalf names both. ``record_id`` is the id a
-    client made for the write, so the same write sent twice is one entry.
+    ``machine`` defaults to this process's own, so a caller writing on someone
+    else's behalf names it. ``identity`` is who did the thing, and a record the
+    service derives on its own, such as a first sighting, names nobody.
+    ``record_id`` is the id a client made for the write, so the same write sent
+    twice is one entry.
     """
     now = now or (state['now'] if state else dt.datetime.now().astimezone())
     record = {
@@ -1886,7 +1883,7 @@ def new_record(
         'occurred_at': extra.pop('occurred_at', now.isoformat()),
         'tz': str(now.tzinfo),
         'machine': machine or machine_name(),
-        'actor': identity or actor.identity(),
+        'actor': identity,
         **extra,
     }
     if state is not None:

@@ -146,10 +146,8 @@ type desk struct {
 	env    []string
 }
 
-// newDesk builds this commit's doit and points a temporary home at url. Its
-// PATH leads with the workspace's venv, which startService filled, so a verb
-// the Go doit hands on reaches this commit's doit-python.
-func newDesk(t *testing.T, url, root string) desk {
+// newDesk builds this commit's doit and points a temporary home at url.
+func newDesk(t *testing.T, url string) desk {
 	t.Helper()
 	home := t.TempDir()
 	binary := filepath.Join(home, "doit")
@@ -170,7 +168,7 @@ func newDesk(t *testing.T, url, root string) desk {
 		home:   home,
 		env: []string{
 			"HOME=" + home,
-			"PATH=" + filepath.Join(root, ".venv", "bin") + string(os.PathListSeparator) + os.Getenv("PATH"),
+			"PATH=" + os.Getenv("PATH"),
 			"XDG_CONFIG_HOME=" + filepath.Join(home, "config"),
 			"XDG_CACHE_HOME=" + filepath.Join(home, "cache"),
 			"XDG_STATE_HOME=" + filepath.Join(home, "state"),

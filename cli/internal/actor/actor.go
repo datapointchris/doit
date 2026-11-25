@@ -20,23 +20,30 @@ func MachineName() string {
 // Identity is who a journal write names: a Claude session, a scheduled job, or
 // the user at this host.
 func Identity() string {
+	identity, _ := IdentityAndSource()
+	return identity
+}
+
+// IdentityAndSource is Identity, and the variables that decided it as a person
+// reads them.
+func IdentityAndSource() (identity, source string) {
 	job, session := os.Getenv("SLATE_ACTOR"), os.Getenv("CLAUDE_CODE_SESSION_ID")
 	switch {
 	case session != "" && job != "":
-		return "claude-code-unattended/" + job + "/" + session
+		return "claude-code-unattended/" + job + "/" + session, "$SLATE_ACTOR and $CLAUDE_CODE_SESSION_ID"
 	case session != "" && os.Getenv("CLAUDE_CODE_SESSION_ATTENDED") == "0":
-		return "claude-code-unattended/" + session
+		return "claude-code-unattended/" + session, "$CLAUDE_CODE_SESSION_ID and $CLAUDE_CODE_SESSION_ATTENDED"
 	case session != "":
-		return "claude-code/" + session
+		return "claude-code/" + session, "$CLAUDE_CODE_SESSION_ID"
 	case job != "":
-		return "worker/" + job
+		return "worker/" + job, "$SLATE_ACTOR"
 	}
 	user := os.Getenv("USER")
 	if user == "" {
 		user = "unknown"
 	}
 	if host, _ := os.Hostname(); host != "" {
-		return user + "@" + host
+		return user + "@" + host, "$USER and the hostname"
 	}
-	return user
+	return user, "$USER"
 }

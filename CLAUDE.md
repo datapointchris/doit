@@ -15,34 +15,33 @@ to do, not build tasks that claude is going to do".
 howto carries the cards, the Labs and the tool registry, and doit reads nothing from it. A practice
 entry's `command` is text in the review document, which doit shows and never runs.
 
-## `doit` is the Go binary, and doit-python runs each verb it has not ported
+## `doit` is the Go binary, and doit-python runs only `doit tui`
 
-The CLI is moving to Go one verb at a time, as a strangler fig. `cli/cmd/doit` builds `doit`, and
-`owns` in its `root.go` decides which command lines it runs. It execs `doit-python`, the Python
-console script, with the same argv for everything else: an unported verb, a flag Go does not parse,
-bare `doit` and `doit --help`. A port adds its verb to cobra's tree and deletes the Python command
-in the same change, so no verb has two implementations.
+`cli/cmd/doit` builds `doit`, which runs every command line itself, bare `doit` and `doit --help`
+among them. `tui` is the one verb doit-python runs. It is a cobra command that parses no flags and
+execs `doit-python tui` with its arguments, so the help lists it and a Tab completes it.
+`doit tui --help` and `doit help tui` both print doit-python's help for it.
 
-- **The cobra tree is the one list of what Go runs.** The exec hands it to `doit-python` in
-  `DOIT_GO_COMMANDS`, and `list_go_commands` in `cli.py` adds an entry that runs nothing for each
-  command the Python tree lacks, so the help Python prints names every verb. Nothing in Python lists
-  a Go verb by hand. `cli/cmd/doit/testdata/tree-handed-to-doit-python.json` is that list as Go
-  hands it, which the Go scenario test checks and the Python tests read.
-- **A namespace that Go runs whole carries the `portedWhole` annotation.** Its bare and `--help`
-  lines stay in Go. A partly ported namespace carries none, so those lines reach Python, whose
-  group lists the Go commands beside its own.
+- **The cobra tree is the one list of verbs.** doit-python's tree holds `tui` alone.
+  `TestEveryCommandTheRepoPrintsIsInTheCommandTree` in `cli/cmd/doit` walks each `doit` command
+  that the README and the Python source print through the cobra tree.
+- **A Tab runs `doit __complete`, and starts no Python and asks no service.** The zsh script is
+  cobra's, printed by `doit shell completion zsh`. A pursuit's name after `pursuits log` or `skip` is
+  read from `next-names.txt` by `completePursuitNames` in `cli/cmd/doit/pursuits.go`. goclikit
+  starts no self-update check on a Tab. `tui` and `shell` carry goclikit's `StartsNoUpdateCheck`
+  mark: `tui`'s exec would cut a check off, and a shell's startup runs `shell`.
 
 - **`cli/internal/login` holds pyclilogin's identifiers for the product `doit`**: the config file,
   the keychain service `doit-cli`, and `$XDG_STATE_HOME/doit` for the fallback token file and the
-  refresh lock. Changing any one logs every desk out of one side.
-- **`cli/internal/deskfiles` writes two files in `$XDG_CACHE_HOME/doit/`, and the shell reads each
-  with no process started.**
+  refresh lock. Changing any one logs every desk out.
+- **`cli/internal/deskfiles` writes two files in `$XDG_CACHE_HOME/doit/` that a Tab or a new shell
+  reads without asking the service.**
   - `next-names.txt` holds one `name<TAB>description` line per pursuit, sorted by name. Each command
-    that fetches the pursuits rewrites it, through `saveCompletionNames`. The zsh completion that
-    `doit shell completion zsh` prints reads it.
+    that fetches the pursuits rewrites it. `doit __complete` reads it on each Tab after
+    `pursuits log` or `pursuits skip`.
   - `nudge-interval-minutes` holds the shell nudge's interval in whole minutes. Each command that
     reads the interval rewrites it, through `keepNudgeInterval`. The gate that
-    `doit shell init zsh` prints reads it.
+    `doit shell init zsh` prints reads it with no process started.
 
   The contract test fails where either reader looks at another path.
 - **`cli/internal/service` is the Go client of the service.** A route's call is a method that names
@@ -132,8 +131,7 @@ learns from another program arrives over HTTP through the wrappers below.
 
 The Go binary starts these:
 
-- **`doit-python`**, in `passthrough.Exec`, which replaces the process with it for every command line
-  that `owns` turns down.
+- **`doit-python tui`**, in `passthrough.Exec`, which replaces the process with it at `doit tui`.
 - **The editor**, by `openInEditor` in `cli/cmd/doit/document_edit.go`, for every `edit` verb, with
   no bound, because it waits as long as the person edits. gotermboard's `EditorCommand` names it:
   `$VISUAL`, then `$EDITOR`, then `vi`, split on whitespace.

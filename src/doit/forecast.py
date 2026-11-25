@@ -58,8 +58,8 @@ from dataclasses import field
 
 from doit import journal
 from doit import pursuits
+from doit.actor import machine_name
 from doit.allocate import balance
-from doit.paths import machine_name
 
 # Horizons a reading reports. A week is the shortest span over which a weekly
 # goal can express itself at all, and a month is long enough for every cadence a
