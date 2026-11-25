@@ -31,7 +31,6 @@ func newDeskNudgeCommand() *cobra.Command {
 			"  doit desk-nudge pause            hold the clock until resumed",
 		GroupID: thisMachine,
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(newWatchCommand(), newStatusCommand(), newAnswerCommand(), newPauseCommand(), newResumeCommand(), newPanelCommand())
 	return cmd
 }
@@ -175,7 +174,6 @@ func newPanelCommand() *cobra.Command {
 			"  doit desk-nudge panel show           today's rows with the key that picks each\n" +
 			"  doit desk-nudge panel pick habit:17  complete habit 17 through life",
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(newPanelOpenCommand(), newPanelShowCommand(), newPanelPickCommand())
 	return cmd
 }

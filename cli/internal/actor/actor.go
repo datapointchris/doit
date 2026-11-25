@@ -40,3 +40,14 @@ func Identity() string {
 	}
 	return user
 }
+
+// IdentitySource is the variable that decided Identity, as a person reads it.
+func IdentitySource() string {
+	switch {
+	case os.Getenv("CLAUDE_CODE_SESSION_ID") != "":
+		return "$CLAUDE_CODE_SESSION_ID"
+	case os.Getenv("SLATE_ACTOR") != "":
+		return "$SLATE_ACTOR"
+	}
+	return "$USER and the hostname"
+}

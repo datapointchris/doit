@@ -23,6 +23,11 @@ const Product = "doit"
 // identifier: renaming it orphans every stored token.
 const KeyringService = "doit-cli"
 
+// ClientSecretVariable is pyclilogin's name for a service client's secret,
+// `<PRODUCT>_CLIENT_SECRET`. This binary logs in as a person or through
+// token_command, and only `doit config show` reads it, to say whether it is set.
+const ClientSecretVariable = "DOIT_CLIENT_SECRET"
+
 // Load reads the service's deployment from the config file.
 func Load(ctx context.Context) (goclilogin.Deployment, error) {
 	return goclilogin.LoadDeployment(ctx, Product, "")

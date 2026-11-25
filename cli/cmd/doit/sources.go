@@ -25,7 +25,6 @@ func newSourcesCommand() *cobra.Command {
 			"  doit sources edit  turn one on or off",
 		GroupID: whatYouDeclared,
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(newSourcesListCommand(), newSourcesExampleCommand(), newSourcesEditCommand(), newSourcesContractCommand())
 	return cmd
 }

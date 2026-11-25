@@ -26,7 +26,6 @@ func newForecastCommand() *cobra.Command {
 			"  doit forecast trend  how earlier forecasts held up",
 		GroupID: whatCameOfIt,
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(newForecastRunCommand(), newForecastShowCommand(), newForecastListCommand(), newForecastTrendCommand())
 	return cmd
 }

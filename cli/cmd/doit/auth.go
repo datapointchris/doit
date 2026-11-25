@@ -37,7 +37,6 @@ func newAuthCommand() *cobra.Command {
 			"  doit auth logout                          forget this machine's token",
 		GroupID: thisMachine,
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(newAuthStatusCommand(), newAuthLoginCommand(), newAuthLogoutCommand(), newAuthTokenCommand())
 	return cmd
 }

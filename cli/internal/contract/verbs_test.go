@@ -25,7 +25,7 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 	served := startService(t, root)
 	served.write(t, "pursuits", filepath.Join(root, "tests", "fixtures", "pursuits", "pursuits.yml"))
 	served.write(t, "review", filepath.Join(root, "tests", "fixtures", "review", "register.yml"))
-	on := newDesk(t, served.url, root)
+	on := newDesk(t, served.url)
 
 	t.Run("today prints the day the service answers", func(t *testing.T) {
 		printed, stderr, exit := on.run(t, "today")
@@ -334,15 +334,10 @@ func TestEachPortedVerbReadsTheServiceFromThisCommit(t *testing.T) {
 		}
 	})
 
-	t.Run("the shell completion reads the names file next wrote", func(t *testing.T) {
-		completion, stderr, exit := on.run(t, "shell", "completion", "zsh")
-		read := regexp.MustCompile(`local cache="([^"]+)"`).FindStringSubmatch(completion)
-		if exit != 0 || read == nil {
-			t.Fatalf("doit shell completion zsh exited %d, naming no names file:\n%s%s", exit, completion, stderr)
-		}
-		names, err := os.ReadFile(read[1])
-		if err != nil || !strings.Contains(string(names), "chores\tThe maintenance list\n") {
-			t.Errorf("the completion reads %s, which holds %q (%v)", read[1], names, err)
+	t.Run("a Tab after pursuits log offers the names next wrote", func(t *testing.T) {
+		offered, stderr, exit := on.run(t, "__complete", "pursuits", "log", "")
+		if exit != 0 || !strings.Contains(offered, "chores\tThe maintenance list\n") {
+			t.Errorf("doit __complete pursuits log '' exited %d without the chores pursuit, printing:\n%s%s", exit, offered, stderr)
 		}
 	})
 

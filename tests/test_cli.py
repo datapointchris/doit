@@ -13,7 +13,6 @@ from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft7Validator
 from typer._click.exceptions import NoSuchOption
 from typer.core import TyperCommand
 from typer.core import TyperGroup
@@ -27,10 +26,8 @@ from doit.cli import ROOT_ORDER
 from doit.cli import accepted_placements
 from doit.cli import app
 from doit.cli import list_go_commands
-from doit.shell import app as shell_app
 
 runner = CliRunner()
-SCHEMAS = Path(__file__).resolve().parents[1] / 'schemas'
 
 
 @pytest.mark.parametrize('flag', ['-V', '--version'])
@@ -41,10 +38,9 @@ def test_version_flag_prints_one_line(flag):
     assert result.output.strip() == f'doit {__version__}'
 
 
-@pytest.mark.parametrize('argv', [[], ['shell']])
-def test_every_node_shows_help_bare(argv):
+def test_the_bare_root_shows_help():
     """cli-design.md: a node with no bare default shows help."""
-    result = runner.invoke(app, argv)
+    result = runner.invoke(app, [])
 
     assert 'Usage:' in result.output
     assert 'Options' in result.output
@@ -92,7 +88,7 @@ def test_every_screen_carries_examples_that_parse(monkeypatch):
     monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
     list_go_commands({GO_COMMANDS_VARIABLE: HANDED_GO_TREE.read_text()})
 
-    assert runner.invoke(app, ['config', 'show', '--jsn', '--help']).exit_code == 2, 'a bad flag must fail through --help'
+    assert runner.invoke(app, ['tui', '--tabb', '--help']).exit_code == 2, 'a bad flag must fail through --help'
     for example in runnable:
         result = runner.invoke(app, [*shlex.split(example)[1:], '--help'])
         assert result.exit_code == 0, f'{example}: {result.output}'
@@ -107,15 +103,12 @@ PRINTED_IN_SOURCE = re.compile(rf"(?:\]|`|')doit{WORDS}")
 SHELL_FENCE = re.compile(r'^```(?:bash|sh)\n(.*?)^```', re.MULTILINE | re.DOTALL)
 PRINTED_IN_FENCE = re.compile(rf'^doit{WORDS}', re.MULTILINE)
 HANDED_GO_TREE = REPO / 'cli' / 'cmd' / 'doit' / 'testdata' / 'tree-handed-to-doit-python.json'
-# Text that a screen shows and nobody runs: the zsh completion's heading over the verb list.
-NOT_A_COMMAND = {('shell.py', ' command')}
 
 
 def printed_commands():
     for source in sorted((REPO / 'src' / 'doit').rglob('*.py')):
         for match in PRINTED_IN_SOURCE.finditer(source.read_text()):
-            if (source.name, match.group(1)) not in NOT_A_COMMAND:
-                yield source.name, match.group(1).split()
+            yield source.name, match.group(1).split()
     readme = (REPO / 'README.md').read_text()
     for fence in SHELL_FENCE.finditer(readme):
         for match in PRINTED_IN_FENCE.finditer(fence.group(1)):
@@ -151,67 +144,30 @@ def test_every_command_it_prints_is_in_the_command_tree(monkeypatch):
     assert missing == []
 
 
-def test_config_show_says_where_each_setting_came_from(tmp_path, monkeypatch):
-    """A plausible value is the failure this read exists to expose, so the layer sits beside it."""
-    (tmp_path / 'doit').mkdir()
-    (tmp_path / 'doit' / 'config.toml').write_text('api = "https://doit.example.com"\nissuer = "https://id.example.com"\nclient_id = "c"\n')
-    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
-    monkeypatch.delenv('XDG_STATE_HOME', raising=False)
-    monkeypatch.setenv('DOIT_CLIENT_SECRET', 'never-print-this')
-
-    result = runner.invoke(app, ['config', 'show', '--json'])
-
-    document = json.loads(result.output)
-    Draft7Validator(json.loads((SCHEMAS / 'config-show.schema.json').read_text())).validate(document)
-    settings = document['settings']
-    assert (settings['api']['value'], settings['api']['source']) == ('https://doit.example.com', 'file')
-    assert (settings['config_file']['source'], settings['config_file']['from']) == ('environment', '$XDG_CONFIG_HOME')
-    assert settings['state_dir']['source'] == 'default'
-    assert settings['client_secret']['value'] == 'set'
-    assert 'never-print-this' not in result.output
-
-
-def test_config_show_answers_on_a_machine_with_no_config_and_names_the_login(tmp_path, monkeypatch):
-    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
-
-    result = runner.invoke(app, ['config', 'show'])
-
-    assert result.exit_code == 0
-    assert 'doit auth login' in result.output
-
-
-@pytest.mark.parametrize('argv', [['nonsense'], ['shell', 'nonsense']])
-def test_unknown_command_exits_2(argv):
+def test_unknown_command_exits_2():
     """A caller has to tell "you typed it wrong" from "it ran and failed"."""
-    result = runner.invoke(app, argv)
+    result = runner.invoke(app, ['nonsense'])
 
     assert result.exit_code == 2
 
 
 def test_a_root_option_refused_by_a_subcommand_names_the_root_placement():
-    """`doit config show --no-input` is refused by `show`; the root is where it goes."""
+    """`doit-python tui --no-input` is refused by `tui`; the root is where it goes."""
     with pytest.raises(NoSuchOption) as refused:
-        get_command(app).main(['config', 'show', '--no-input'], prog_name='doit', standalone_mode=False)
+        get_command(app).main(['tui', '--no-input'], prog_name='doit', standalone_mode=False)
 
-    assert accepted_placements(refused.value) == ['doit --no-input config show']
+    assert accepted_placements(refused.value) == ['doit --no-input tui']
 
 
-def test_a_command_the_go_doit_hands_on_is_listed_under_its_parent_and_runs_nothing(monkeypatch):
-    """The Go doit hands its tree on with each line it passes, and Python has no copy of those verbs to run."""
+def test_a_command_the_go_doit_hands_on_is_listed_and_runs_nothing(monkeypatch):
+    """The Go doit hands its tree on as it execs `doit-python tui`, and Python has no copy of those verbs to run."""
     monkeypatch.setattr(app, 'registered_commands', list(app.registered_commands))
-    monkeypatch.setattr(shell_app, 'registered_commands', list(shell_app.registered_commands))
-    handed = [
-        {'path': ['update'], 'summary': 'Update doit', 'group': 'This machine'},
-        {'path': ['shell', 'board'], 'summary': 'Open the shell board'},
-    ]
+    handed = [{'path': ['update'], 'summary': 'Update doit', 'group': 'This machine'}]
     list_go_commands({GO_COMMANDS_VARIABLE: json.dumps(handed)})
 
     tree = get_command(app)
     assert isinstance(tree, TyperGroup)
-    shell = tree.commands['shell']
-    assert isinstance(shell, TyperGroup)
     assert 'update' in tree.commands
-    assert 'board' in shell.commands
     result = runner.invoke(app, ['update', '--chek'])
     assert result.exit_code == 2
     assert 'doit update --help' in result.output

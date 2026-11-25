@@ -90,25 +90,16 @@ func passedArgv(t *testing.T, argvFile string) ([]string, bool) {
 	return words[:len(words)-1], true
 }
 
-func TestAnUnportedVerbExecsDoitPythonWithTheSameArgvAndExitCodeAndAMissingOneIsNamed(t *testing.T) {
+func TestDoitTuiExecsDoitPythonWithItsArgumentsAndEveryOtherLineStaysInGo(t *testing.T) {
 	fake, argvFile := fakePython(t)
 
-	for _, args := range [][]string{
-		{"config", "show", "--json", "a word with spaces"},
-		{"auth", "status", "--bogus"},
-		{"--no-input", "auth", "bogus"},
-		{},
-		{"--help"},
-	} {
-		_ = os.Remove(argvFile)
-		run := runDoit(t, fake, argvFile, args...)
-		got, reached := passedArgv(t, argvFile)
-		if !reached || !slices.Equal(got, args) {
-			t.Errorf("doit %q: doit-python got %q (reached %v), want the argv unchanged", args, got, reached)
-		}
-		if run.exit != 7 || run.stdout != "python read one line\n" {
-			t.Errorf("doit %q: exit %d, stdout %q; want doit-python's exit 7 and its read of stdin", args, run.exit, run.stdout)
-		}
+	run := runDoit(t, fake, argvFile, "--no-input", "tui", "--tab", "now", "a word with spaces")
+	want := []string{"--no-input", "tui", "--tab", "now", "a word with spaces"}
+	if got, reached := passedArgv(t, argvFile); !reached || !slices.Equal(got, want) {
+		t.Errorf("doit tui: doit-python got %q (reached %v), want %q", got, reached, want)
+	}
+	if run.exit != 7 || run.stdout != "python read one line\n" {
+		t.Errorf("doit tui: exit %d, stdout %q; want doit-python's exit 7 and its read of stdin", run.exit, run.stdout)
 	}
 
 	// doit-python's own tests list the Go commands from this file, so it holds
@@ -130,30 +121,79 @@ func TestAnUnportedVerbExecsDoitPythonWithTheSameArgvAndExitCodeAndAMissingOneIs
 		t.Errorf("doit-python was handed %+v, and %s holds %+v; write the first there", handed, handedTreeFile, committed)
 	}
 
-	for _, args := range [][]string{{"--version"}, {"-V"}, {"--no-input", "--version"}, {"auth", "--help"}} {
+	for _, line := range []struct {
+		args []string
+		exit int
+	}{
+		{nil, 0},
+		{[]string{"--help"}, 0},
+		{[]string{"--version"}, 0},
+		{[]string{"-V"}, 0},
+		{[]string{"--no-input", "--version"}, 0},
+		{[]string{"auth", "--help"}, 0},
+		{[]string{"config", "show", "--jsn"}, 2},
+		{[]string{"bogus"}, 2},
+		{[]string{"shell", "init", "fish"}, 2},
+	} {
 		_ = os.Remove(argvFile)
-		run := runDoit(t, fake, argvFile, args...)
-		if _, reached := passedArgv(t, argvFile); reached || run.exit != 0 {
-			t.Errorf("doit %q: reached doit-python %v, exit %d; want the Go doit to answer: %s", args, reached, run.exit, run.stderr)
+		run := runDoit(t, fake, argvFile, line.args...)
+		if _, reached := passedArgv(t, argvFile); reached || run.exit != line.exit {
+			t.Errorf("doit %q: reached doit-python %v, exit %d; want the Go doit to answer with exit %d: %s",
+				line.args, reached, run.exit, line.exit, run.stderr)
 		}
 	}
 
-	// Without doit-python, the Go doit answers its own help and usage
-	// mistakes, and names a verb only doit-python runs.
-	for _, missing := range []struct {
-		args []string
-		exit int
-		verb string
+	run = runDoit(t, t.TempDir(), argvFile, "tui")
+	if run.exit != 1 || !strings.Contains(run.stderr, "doit-python") {
+		t.Errorf("doit tui with no doit-python on PATH: exit %d, stderr %q; want exit 1 naming doit-python", run.exit, run.stderr)
+	}
+}
+
+// A Tab runs `doit __complete`, which has to answer from this binary and the
+// names file alone. Neither doit-python nor the service may be asked.
+func TestATabCompletesEveryVerbAndThePursuitNamesWithNoPythonAndNoRequest(t *testing.T) {
+	fake, argvFile := fakePython(t)
+	cache := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cache, "doit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names := "chores\tThe maintenance list\nread\tRead a book\n"
+	if err := os.WriteFile(filepath.Join(cache, "doit", "next-names.txt"), []byte(names), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"PATH=" + fake, "FAKE_ARGV=" + argvFile, "XDG_CACHE_HOME=" + cache}
+
+	verbs := runDoitWith(t, env, "__complete", "")
+	for _, verb := range []string{"next", "tui", "pursuits", "config", "shell", "desk-nudge"} {
+		if !strings.Contains(verbs.stdout, "\n"+verb+"\t") && !strings.HasPrefix(verbs.stdout, verb+"\t") {
+			t.Errorf("doit __complete '' offers no %s:\n%s", verb, verbs.stdout)
+		}
+	}
+	for _, verb := range []string{"log", "skip"} {
+		offered := runDoitWith(t, env, "__complete", "pursuits", verb, "")
+		if want := names + ":4\n"; offered.exit != 0 || offered.stdout != want {
+			t.Errorf("doit __complete pursuits %s '' printed %q, want the names file then the no-files directive %q", verb, offered.stdout, want)
+		}
+	}
+	if _, reached := passedArgv(t, argvFile); reached {
+		t.Error("a Tab started doit-python")
+	}
+}
+
+func TestATabAndALineThatReplacesOrFeedsTheShellStartNoUpdateCheck(t *testing.T) {
+	for _, line := range []struct {
+		args   []string
+		checks bool
 	}{
-		{[]string{"shell", "init"}, 1, "shell"},
-		{[]string{"--no-input", "shell", "init"}, 1, "shell"},
-		{[]string{"--help"}, 0, ""},
-		{[]string{"auth", "bogus"}, 2, ""},
+		{[]string{"__complete", "pursuits", "log", ""}, false},
+		{[]string{"__completeNoDesc", ""}, false},
+		{[]string{"--no-input", "tui", "--tab", "now"}, false},
+		{[]string{"shell", "init", "zsh"}, false},
+		{[]string{"config", "show"}, true},
+		{[]string{"next"}, true},
 	} {
-		run := runDoit(t, t.TempDir(), argvFile, missing.args...)
-		if run.exit != missing.exit || !strings.Contains(run.stderr, missing.verb) {
-			t.Errorf("doit %q with no doit-python on PATH: exit %d, stderr %q; want exit %d naming %q",
-				missing.args, run.exit, run.stderr, missing.exit, missing.verb)
+		if got := startsUpdateCheck(newRootCommand(), line.args); got != line.checks {
+			t.Errorf("doit %q starts an update check: %v, want %v", line.args, got, line.checks)
 		}
 	}
 }

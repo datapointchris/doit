@@ -22,6 +22,13 @@
   },
   {
     "path": [
+      "tui"
+    ],
+    "summary": "The screens where a click or a key completes a row",
+    "group": "What to do now"
+  },
+  {
+    "path": [
       "happened"
     ],
     "summary": "What happened over a span of time, from every app and log, and who did it",
@@ -250,6 +257,41 @@
       "token"
     ],
     "summary": "Print a valid access token, for calling the service directly"
+  },
+  {
+    "path": [
+      "config"
+    ],
+    "summary": "Where this machine points doit, and the files it keeps",
+    "group": "This machine"
+  },
+  {
+    "path": [
+      "config",
+      "show"
+    ],
+    "summary": "Every setting this machine resolved, and where each came from"
+  },
+  {
+    "path": [
+      "shell"
+    ],
+    "summary": "What your shell loads from doit: a reminder of due review items, and completion",
+    "group": "This machine"
+  },
+  {
+    "path": [
+      "shell",
+      "init"
+    ],
+    "summary": "Print the startup block that nudges you about due items"
+  },
+  {
+    "path": [
+      "shell",
+      "completion"
+    ],
+    "summary": "Print the completion script for the verbs and your pursuit names"
   },
   {
     "path": [

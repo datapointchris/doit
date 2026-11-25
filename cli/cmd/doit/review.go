@@ -36,7 +36,6 @@ func newReviewCommand() *cobra.Command {
 			"  doit review list                every item and its status, due or not",
 		GroupID: whatYouDeclared,
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(
 		newReviewDueCommand(), newReviewListCommand(), newReviewDoneCommand(), newReviewUndoCommand(),
 		newReviewEditCommand(), newReviewNudgeEveryCommand(), newReviewNudgeCommand(),

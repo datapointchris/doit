@@ -41,7 +41,6 @@ func newPursuitsCommand() *cobra.Command {
 			return listPursuits(cmd, false)
 		},
 	})
-	cmd.Annotations[portedWhole] = "true"
 	cmd.AddCommand(
 		newPursuitsListCommand(), newPursuitsLogCommand(), newPursuitsSkipCommand(), newPursuitsResumeCommand(),
 		newPursuitsResetCommand(), newPursuitsDriftCommand(), newPursuitsDormantCommand(), newPursuitsEvidenceCommand(),
@@ -96,6 +95,27 @@ func saveCompletionNames(errOut io.Writer, register map[string]service.RegisterE
 	}
 }
 
+// completePursuitNames offers each pursuit in the names file as the first
+// argument, with its description. A Tab reads only that file, so it asks no
+// service, and a desk where nothing has written it is offered nothing.
+func completePursuitNames(_ *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	written, err := os.ReadFile(deskfiles.CompletionNamesPath())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var offered []cobra.Completion
+	for line := range strings.Lines(string(written)) {
+		line = strings.TrimSuffix(line, "\n")
+		if line != "" && strings.HasPrefix(line, toComplete) {
+			offered = append(offered, line)
+		}
+	}
+	return offered, cobra.ShellCompDirectiveNoFileComp
+}
+
 func newPursuitsLogCommand() *cobra.Command {
 	var ago, item string
 	var minutes int
@@ -112,7 +132,8 @@ func newPursuitsLogCommand() *cobra.Command {
 			"  doit pursuits log read --ago 3h --minutes 40       something you did earlier\n" +
 			"  doit pursuits log tasks --item 532 --yes           complete the drawn task 532 with no question asked\n" +
 			"  doit pursuits log chore --no-write                 record it without running the pursuit's on_log command",
-		Args: cobra.ArbitraryArgs,
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completePursuitNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			wanted := logWanted{assumeYes: assumeYes, noWrite: noWrite, ago: ago}
 			if cmd.Flags().Changed("minutes") {
@@ -382,7 +403,8 @@ func newPursuitsSkipCommand() *cobra.Command {
 		Short: "Pass on one — out of the draw until it expires, owing nothing meanwhile",
 		Example: "  doit pursuits skip                pick from what is in the draw, and pass for one interval\n" +
 			"  doit pursuits skip chore --for 2w  out of the draw for two weeks, owing nothing meanwhile",
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completePursuitNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, out, errOut := cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr()
 			client, err := service.Open(ctx)

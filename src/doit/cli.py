@@ -18,8 +18,6 @@ from typer.core import TyperGroup
 from typer.main import get_command_name
 
 from doit import __version__
-from doit import config_commands
-from doit import shell
 from doit import tui
 from doit.render import error_console
 from doit.render import examples
@@ -58,7 +56,6 @@ ROOT_EXAMPLES = examples(
 )
 
 WHAT_TO_DO_NOW = 'What to do now'
-THIS_MACHINE = 'This machine'
 
 # Typer lists a group's commands ahead of its sub-apps and draws each panel where
 # its first command falls. Left alone, a command the Go doit runs would put This
@@ -130,7 +127,7 @@ def name_accepted_placements(refused: NoSuchOption) -> None:
         refused.possibilities = None
 
 
-# No typer completion: `doit shell completion` is the one that answers without starting Python.
+# No typer completion: the Go doit's `doit shell completion` completes every verb.
 app = typer.Typer(
     name='doit',
     cls=RootGroup,
@@ -143,8 +140,6 @@ app = typer.Typer(
 
 
 app.command('tui', rich_help_panel=WHAT_TO_DO_NOW, epilog=tui.TUI_EXAMPLES)(tui.tui_command)
-app.add_typer(config_commands.app, name='config', rich_help_panel=THIS_MACHINE)
-app.add_typer(shell.app, name='shell', rich_help_panel=THIS_MACHINE)
 
 # The Go doit hands its command tree here when it passes a line on, as a JSON list
 # of {path, summary, group}. Each command this tree lacks gets an entry that runs
