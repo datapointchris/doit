@@ -37,6 +37,7 @@ a coding session. Same plumbing, different audience.
 """
 
 import datetime as dt
+import shlex
 from dataclasses import dataclass
 from dataclasses import field
 from itertools import chain
@@ -79,6 +80,14 @@ UPCOMING = 'upcoming'
 
 # One feedback lane per app, named for the app, and never one combined across apps.
 MESO_FEEDBACK = 'meso - feedback'
+
+# The lane of items that wait in ingestion on a person's placement, and its adapter.
+INGESTION_REVIEW = 'ingestion-review'
+INGESTION_REVIEW_SCHEMA_VERSION = 1
+
+# How a person decides a waiting item, from the key its row's handle prints.
+INGESTION_PLACE = 'doit ingestion items place <key> <destination>'
+INGESTION_DROP = 'doit ingestion items drop <key>'
 
 # How many of a queue to list; the rest of the pile is a count in the heading.
 QUEUE_ROWS = 3
@@ -750,6 +759,58 @@ def meso_feedback_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
+def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
+    """The items that wait in ingestion on a person's placement, the longest waiting first as ingestion lists them.
+
+    A row is the item's zone, its title, and the quality gate's guess where it
+    fell below the floor, else why the item waits. Its handle is the item's
+    key, which `doit ingestion items place` and `drop` take. A child's key
+    ends in `#<n>`, which zsh's extendedglob reads as a pattern, so the handle
+    is quoted for the shell.
+    """
+    title = INGESTION_REVIEW.upper()
+    payload = result.payload
+    if not isinstance(payload, dict) or not isinstance(payload.get('items'), list):
+        why = sources.reason(INGESTION_REVIEW, result) or 'ingestion answered its review queue in a shape this doit does not read'
+        return [unavailable(INGESTION_REVIEW, title, why)]
+    version = payload.get('schema_version', 0)
+    if version > INGESTION_REVIEW_SCHEMA_VERSION:
+        return [unavailable(INGESTION_REVIEW, title, f'ingestion review schema v{version} is newer than this dashboard — update doit')]
+
+    items = [item for item in payload['items'] if isinstance(item, dict)]
+    rows = [
+        Row(
+            str(item.get('zone') or ''),
+            clean(item.get('title')) or str(item.get('key') or ''),
+            waiting_note(item),
+            handle=shlex.quote(str(item.get('key') or '')),
+        )
+        for item in items
+    ]
+    meta = f'{len(items)} waiting'
+    if items:
+        since = days_away_from(event_date(str(items[0].get('waiting_since_ts') or '')), dt.date.today())
+        meta += f' · oldest {pursuits.format_elapsed(since)}'
+    return [
+        LaneView(
+            name=INGESTION_REVIEW,
+            title=title,
+            meta=meta,
+            rows=rows,
+            total=len(items),
+            hints=['ingestion review list', INGESTION_PLACE, INGESTION_DROP],
+        )
+    ]
+
+
+def waiting_note(item: dict) -> str:
+    """The quality gate's guess where it fell below the floor, as `personal 0.58`, else why the item waits."""
+    guess = item.get('guess')
+    if item.get('reason') == 'below-floor' and isinstance(guess, dict):
+        return f'{guess.get("side", "")} {float(guess.get("confidence") or 0):.2f}'
+    return str(item.get('reason') or '')
+
+
 def nomad_adapter(result: sources.Result) -> list[LaneView]:
     """nomad's planned trips, as the upcoming lane. `source_lanes` joins it with life's where both are asked."""
     return [build_upcoming_lane({'nomad': result}, dt.date.today())]
@@ -999,6 +1060,7 @@ SHIPPED_ADAPTERS = (
     ('learning', learning_adapter, ('learning',)),
     ('meso', meso_adapter, ('training',)),
     ('meso-feedback', meso_feedback_adapter, (MESO_FEEDBACK,)),
+    (INGESTION_REVIEW, ingestion_review_adapter, (INGESTION_REVIEW,)),
     ('nomad', nomad_adapter, (UPCOMING,)),
     ('prs', prs_adapter, ('prs',)),
     ('dotfiles', dotfiles_adapter, ('dotfiles',)),

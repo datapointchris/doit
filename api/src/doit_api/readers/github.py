@@ -80,7 +80,7 @@ class GitHub:
         try:
             response = self.client.request(method, API + path, headers=headers, timeout=TIMEOUT_SECONDS, **keywords)
         except httpx2.TimeoutException as error:
-            raise ReadFailed(f'GitHub did not answer {what} within {TIMEOUT_SECONDS:g}s', timed_out=True) from error
+            raise ReadFailed(f'GitHub did not answer {what} within {TIMEOUT_SECONDS:g}s', transient=True) from error
         except httpx2.HTTPError as error:
             raise ReadFailed(f'GitHub could not be reached for {what}: {error}') from error
         if response.status_code >= 400:

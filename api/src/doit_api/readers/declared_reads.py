@@ -37,6 +37,7 @@ from doit.window import Bounds
 
 from ..settings import ClickHouseSettings
 from . import clickhouse
+from . import ingestion
 from . import learning
 from . import life
 from . import meso
@@ -76,6 +77,7 @@ class Readers:
             'meso-feedback': lambda bounds, now: (meso.open_feedback(self.app('meso')), ''),
             'nomad': lambda bounds, now: (nomad.overview(self.app('nomad')), ''),
             'projects': lambda bounds, now: (projects.focus(self.app('projects')), ''),
+            'ingestion-review': lambda bounds, now: (ingestion.review(self.app('ingestion')), ''),
             'prs': lambda bounds, now: self.github.open_pull_requests(now),
             'dotfiles': lambda bounds, now: (clickhouse.desk_checks_document(self.clickhouse_settings, now, self.clickhouse_client), ''),
             'learning-completed': lambda bounds, now: learning.completed(self.app('learning'), bounds),

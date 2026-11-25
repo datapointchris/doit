@@ -63,7 +63,7 @@ def checks(settings: ClickHouseSettings, client: httpx2.Client | None = None) ->
             timeout=TIMEOUT_SECONDS,
         )
     except httpx2.TimeoutException as error:
-        raise ReadFailed(f'ClickHouse did not answer the desk check read within {TIMEOUT_SECONDS:g}s', timed_out=True) from error
+        raise ReadFailed(f'ClickHouse did not answer the desk check read within {TIMEOUT_SECONDS:g}s', transient=True) from error
     except httpx2.HTTPError as error:
         raise ReadFailed(f'ClickHouse could not be reached for the desk check read: {error}') from error
     if response.status_code >= 400:

@@ -18,7 +18,9 @@ from typer.testing import CliRunner
 
 from doit import pursuits
 from doit import shell
+from doit.cli import GO_COMMANDS_VARIABLE
 from doit.cli import app as cli_app
+from doit.cli import list_go_commands
 
 runner = CliRunner()
 needs_zsh = pytest.mark.skipif(not shutil.which('zsh'), reason='zsh is not installed')
@@ -28,8 +30,12 @@ def parses(script: str) -> bool:
     return subprocess.run(['zsh', '-n'], input=script, text=True, capture_output=True, check=False).returncode == 0
 
 
+def printed_completion() -> str:
+    return runner.invoke(cli_app, ['shell', 'completion', 'zsh']).output
+
+
 @needs_zsh
-@pytest.mark.parametrize('generate', [shell.zsh_init, shell.zsh_completion])
+@pytest.mark.parametrize('generate', [shell.zsh_init, printed_completion])
 def test_the_generated_zsh_parses(generate):
     assert parses(generate())
 
@@ -75,7 +81,7 @@ def test_tab_after_pursuits_log_offers_the_cached_names_without_starting_doit(tm
     environment = {**os.environ, 'PATH': f'{bin_dir}{os.pathsep}{os.environ["PATH"]}'}
 
     tabbed = subprocess.run(
-        ['zsh', '-f', '-c', stubs + shell.zsh_completion() + press_tab],
+        ['zsh', '-f', '-c', stubs + printed_completion() + press_tab],
         env=environment,
         capture_output=True,
         text=True,
@@ -90,9 +96,11 @@ def test_tab_after_pursuits_log_offers_the_cached_names_without_starting_doit(tm
 HANDED_GO_TREE = Path(__file__).resolve().parents[1] / 'cli' / 'cmd' / 'doit' / 'testdata' / 'tree-handed-to-doit-python.json'
 
 
-def test_the_completion_offers_the_verbs_the_cli_has():
-    """Nothing else joins this hand-written list to the command tree, the Go doit's verbs among it."""
-    offered = set(re.findall(r"^\s+'([a-z-]+):", shell.zsh_completion(), re.M))
+def test_the_completion_offers_the_verbs_the_cli_has(monkeypatch):
+    """The Go doit's verbs reach the completion only through the tree that `cli.main` assembles."""
+    monkeypatch.setattr(cli_app, 'registered_commands', list(cli_app.registered_commands))
+    list_go_commands({GO_COMMANDS_VARIABLE: HANDED_GO_TREE.read_text()})
+    offered = set(re.findall(r"^\s+'([a-z-]+):", printed_completion(), re.M))
     registered = {command.name for command in cli_app.registered_commands}
     registered |= {group.name for group in cli_app.registered_groups}
     registered |= {command['path'][0] for command in json.loads(HANDED_GO_TREE.read_text())}

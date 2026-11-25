@@ -64,16 +64,16 @@ def test_every_lane_builds_from_fixtures():
     assert all(lane.available for lane in lanes.values())
 
 
-# The least payload each adapter accepts: a mapping for the two reading an
-# overview document, a list for the four reading a listing. Enough to reach the
-# branch that builds rows, which is a different naming site from the one a
-# failure takes.
+# The least payload each adapter accepts: a mapping for those reading a
+# document, a list for those reading a listing. Enough to reach the branch that
+# builds rows, which is a different naming site from the one a failure takes.
 ADAPTER_PAYLOADS: dict[str, dict | list] = {
     'life': {},
     'projects': {},
     'learning': {},
     'meso': [],
     'meso-feedback': [],
+    'ingestion-review': {'items': []},
     'nomad': {},
     'prs': [],
     'dotfiles': [],

@@ -109,6 +109,7 @@ flag that would have answered.
 | Is each goal getting what it asked for | `pursuits drift` | the journal and how often each pursuit was offered each day |
 | Would this register fit in my days | `forecast run`, `forecast trend` | the register and the journal run through the real draw, then each stored forecast against the journal |
 | What is due to revisit or practice | `review due` | the review register and its completions |
+| Where does each item that ingestion holds for me go | `dashboard --lane ingestion-review`, then `ingestion items place` or `drop` | ingestion's review queue, read and decided through the service |
 | Which apps does doit ask | `sources list` | the sources, each read once by the service |
 | What is this machine set to, and who set it | `config show` | the config file, the environment and the defaults, asking no service |
 | How long have I been at the desk | `desk-nudge status` | this desk's clock, asking no service |
@@ -257,6 +258,21 @@ lane's `status`. `doit sources list` exits 0 too, and names each source whose re
 The dashboard computes no schedule. It mirrors the `overdue` each backend emits, because the backend
 owns due-ness. The MAINTENANCE lane shows three rows of review and practice items, and there are
 usually more. `doit review due` is that lane at full depth.
+
+The INGESTION-REVIEW lane lists each item that ingestion holds for you to place, the longest
+waiting first. A row shows the item's zone and title. Its note is the quality gate's side guess
+where that fell below the floor, and otherwise why the item waits. Its handle is the item's key,
+which both verbs take:
+
+```bash
+doit ingestion items place reddit/t3_1h9xk2 life-articles --cause subreddit
+doit ingestion items drop reddit/t3_1hb0qa --cause subreddit
+```
+
+The service sends each decision to ingestion with your login, and ingestion records it as yours.
+The records stay in ingestion. `--cause` names what decided it, such as the subreddit or the title,
+and ingestion records it with the decision. A destination that ingestion does not declare is refused
+with the ones it does.
 
 The dashboard is the glance across tasks, habits, books and learning. `fleet info` is the other
 pane: the development brief across repos that a coding session reads.
