@@ -44,6 +44,7 @@ func TestTheNowTabDrawsDoitsGroupsAndActsOnlyOnTheRowItShows(t *testing.T) {
 			{Key: ref("pursuit:read"), Kind: "pursuit", Text: "read · A Neutral Book", Group: ref("pursuits"), Suggested: true},
 			{Key: ref("answer:too_soon:n1"), Kind: "answer", Text: "too soon"},
 			{Key: ref("habit:17"), Kind: "habit", Text: "Stretch", Group: ref("habits")},
+			{Key: ref("tick:1"), Kind: "tick", Text: "Exercise · Squat · 2 of 5 sets", Group: ref("habits"), UntickKey: ref("untick:1")},
 		}},
 		picks: map[string]panelStep{
 			"pursuit:read":       open,
@@ -51,6 +52,7 @@ func TestTheNowTabDrawsDoitsGroupsAndActsOnlyOnTheRowItShows(t *testing.T) {
 			*more.Rows[0].Key:    {Step: "done", Message: ref("logged 50 min of read")},
 			"habit:17":           {Step: "done", Message: ref("habit completed")},
 			"answer:too_soon:n1": {Step: "done"},
+			"untick:1":           {Step: "done", Message: ref("set taken back")},
 		},
 	}
 	board := newNowBoard(fake)
@@ -93,7 +95,7 @@ func TestTheNowTabDrawsDoitsGroupsAndActsOnlyOnTheRowItShows(t *testing.T) {
 		}
 		drawn = append(drawn, keys)
 	}
-	if want := [][]string{{"suggested", "pursuit:read"}, {"habits", "habit:17"}}; !slices.EqualFunc(drawn, want, slices.Equal) {
+	if want := [][]string{{"suggested", "pursuit:read"}, {"habits", "habit:17", "tick:1"}}; !slices.EqualFunc(drawn, want, slices.Equal) {
 		t.Errorf("the suggestion should come first, then each row under the group doit names: %v", drawn)
 	}
 	if !slices.ContainsFunc(frame.Strip, func(l gotermboard.Line) bool { return l.Text() == "rows from 14:05 — doit unreachable" }) {
@@ -116,7 +118,9 @@ func TestTheNowTabDrawsDoitsGroupsAndActsOnlyOnTheRowItShows(t *testing.T) {
 	press("enter")
 	press("+")
 	press("enter")
-	want := []string{"answer:too_soon:n1", "pursuit:read", "habit:17", "pursuit:read", *open.Rows[1].Key, *more.Rows[0].Key}
+	on("tick:1")
+	press("u")
+	want := []string{"answer:too_soon:n1", "pursuit:read", "habit:17", "pursuit:read", *open.Rows[1].Key, *more.Rows[0].Key, "untick:1"}
 	if !slices.Equal(fake.picked, want) {
 		t.Errorf("each key should pick only the row the screen shows:\n got %v\nwant %v", fake.picked, want)
 	}

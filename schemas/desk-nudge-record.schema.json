@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "urn:doit:desk-nudge-record:v3",
+  "$id": "urn:doit:desk-nudge-record:v4",
   "title": "doit.desk_nudge",
   "description": "One line of $XDG_STATE_HOME/doit/desk-nudge-events.jsonl, appended and never rotated, for a log shipper to read. This file is the source of the shape, and a Go test validates each line the watch writes against it.",
   "type": "object",
@@ -30,7 +30,7 @@
       "description": "What happened."
     },
     "fleet.schema_version": {
-      "const": 3,
+      "const": 4,
       "description": "This line's shape."
     },
     "doit_version": {
@@ -218,12 +218,15 @@
     "pick": {
       "type": "object",
       "additionalProperties": false,
-      "description": "What a panel pick completed, and whether it went through.",
+      "description": "What a panel pick acted on, what it did, and how it came out. A pending pick taken back writes its line with the action cancel, ok false and no outcome.",
       "required": [
         "kind",
         "ref",
         "item_id",
         "minutes",
+        "action",
+        "outcome",
+        "pending_pick_id",
         "ok",
         "error"
       ],
@@ -240,7 +243,7 @@
             "string",
             "null"
           ],
-          "description": "The pursuit's choice that its on_log completed, where it named one."
+          "description": "The pursuit's choice that its on_log completed, where it named one, or the habit's checklist item that a tick or an untick changed."
         },
         "minutes": {
           "type": [
@@ -248,6 +251,43 @@
             "null"
           ],
           "description": "The minutes logged for a timed pursuit."
+        },
+        "action": {
+          "enum": [
+            "complete",
+            "tick",
+            "untick",
+            "cancel"
+          ],
+          "description": "What the pick did: complete its row, record or take back one set of a checklist item, or take back a pending pick before it committed."
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "enum": [
+                "done",
+                "skipped",
+                "refused",
+                "uncertain"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How it came out. skipped found the habit already done today, refused recorded nothing, and uncertain may have landed. Null on a cancel."
+        },
+        "pending_pick_id": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The pending pick it was, which the panel page's click made. Null on a pick from a terminal, which commits at once."
         },
         "ok": {
           "type": "boolean",

@@ -24,7 +24,7 @@
           "properties": {
             "kind": {"$ref": "#/definitions/completion_kind"},
             "ref": {"type": "string", "description": "A pursuit's name, a habit's id, or a review register entry's id."},
-            "item_id": {"type": ["string", "null"], "description": "The choice that a write-through pursuit's log completes. Null on every other entry."}
+            "item_id": {"type": ["string", "null"], "description": "The choice that a write-through pursuit's log completes, or the checklist item of a habit that a tick names. Null on every other entry."}
           }
         }
       ]
@@ -273,13 +273,16 @@
                 "items": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["id", "name", "target", "ticks", "done"],
+                  "required": ["id", "name", "target", "ticks", "done", "key", "untick_key", "completes"],
                   "properties": {
                     "id": {"type": "integer", "description": "Life's checklist item id, which a tick names."},
                     "name": {"type": "string"},
                     "target": {"type": "integer", "minimum": 1, "description": "Ticks a day that complete it."},
                     "ticks": {"type": "integer", "minimum": 0, "description": "Ticks today."},
-                    "done": {"type": "boolean", "description": "Whether today's ticks reach its target, as life counts it."}
+                    "done": {"type": "boolean", "description": "Whether today's ticks reach its target, as life counts it."},
+                    "key": {"$ref": "#/definitions/key", "description": "What a pick names to tick one set, such as `tick:3`. Null on an item of a row that names no habit."},
+                    "untick_key": {"$ref": "#/definitions/key", "description": "What a pick names to take the latest set back, such as `untick:3`. Null where key is."},
+                    "completes": {"$ref": "#/definitions/completes", "description": "The habit and the item that both keys act on. Null where key is."}
                   }
                 }
               }

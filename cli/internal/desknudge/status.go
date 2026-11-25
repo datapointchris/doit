@@ -12,7 +12,7 @@ func (d *Desk) LabelOf(answer string) string { return d.labelOf(answer) }
 
 // StatusSchemaVersion is the shape of `doit desk-nudge status --json`, which
 // schemas/desk-nudge-status.schema.json describes.
-const StatusSchemaVersion = 2
+const StatusSchemaVersion = 3
 
 // Status is where the clock stands, read from this desk's state file with no request.
 type Status struct {
@@ -29,6 +29,8 @@ type Status struct {
 	AnswerCounts      map[string]int `json:"answer_counts"`
 	QueuedAnswerCount int            `json:"queued_answer_count"`
 	Pill              Pill           `json:"pill"`
+	// PendingPicks are the clicks waiting for their commit_at, or committing.
+	PendingPicks []ShownPick `json:"pending_picks"`
 }
 
 // Status reads the clock from the state file, under no lock and with no request.
@@ -45,6 +47,10 @@ func statusOf(state *State, now time.Time) Status {
 		AnswerCounts:      state.AnswerCounts,
 		QueuedAnswerCount: len(state.QueuedAnswers),
 		Pill:              state.Pill,
+		PendingPicks:      []ShownPick{},
+	}
+	for _, pick := range state.PendingPicks {
+		status.PendingPicks = append(status.PendingPicks, pick.shown())
 	}
 	if stale, ok := instant(state.Pill.StaleAfter); ok {
 		status.WatchRunning = now.Before(stale)

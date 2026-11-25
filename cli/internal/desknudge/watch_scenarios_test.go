@@ -331,7 +331,10 @@ func TestEachProgramTheWatchStartsHasItsArgvAndBound(t *testing.T) {
 		{chimeProgram(), []string{"canberra-gtk-play", "--id", "message-new-instant", "--description", "desk nudge"}, 5 * time.Second},
 		{notifyProgram("doit: logged", "Logged read"), []string{"notify-send", "-a", "doit", "doit: logged", "Logged read"}, 5 * time.Second},
 		{idleHintProgram(), []string{"loginctl", "show-session", "auto", "-p", "IdleHint", "--value"}, 5 * time.Second},
-		{habitProgram("7"), []string{"life", "habits", "complete", "7"}, 30 * time.Second},
+		{habitProgram("7", "2026-11-24"), []string{"life", "habits", "complete", "7", "--date", "2026-11-24"}, 30 * time.Second},
+		{habitsCompletedProgram("2026-11-24"), []string{"life", "habits", "completed", "--since", "2026-11-24", "--until", "2026-11-24", "--json"}, 30 * time.Second},
+		{tickProgram("3", "2026-11-24"), []string{"life", "habits", "tick", "3", "--date", "2026-11-24"}, 30 * time.Second},
+		{untickProgram("3", "2026-11-24"), []string{"life", "habits", "untick", "3", "--date", "2026-11-24"}, 30 * time.Second},
 		{onLog, []string{"tick-task", "532", `File the "receipts" now`, "--minutes=30", "--for", "tasks"}, 30 * time.Second},
 	} {
 		if !slices.Equal(row.program.argv, row.argv) || row.program.bound != row.bound {

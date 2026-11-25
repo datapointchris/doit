@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -25,6 +26,9 @@ const (
 	KindAnswer        = "answer"
 	KindLogMinutes    = "log_minutes"
 	KindAdjustMinutes = "adjust_minutes"
+	// KindTick is a habit's checklist item, whose key records one set and
+	// whose untick_key takes the latest set back.
+	KindTick = "tick"
 )
 
 // The completion kinds that the watch completes by an owner of their own. The
@@ -107,6 +111,8 @@ type Panel struct {
 	Nudge   *ReadyNudge  `json:"nudge"`
 	Picked  []HeldPick   `json:"picked"`
 	Minutes *MinutesStep `json:"minutes"`
+	// Picks are the pending picks, and how each one that ended came out, while the panel shows it.
+	Picks []ShownPick `json:"picks"`
 }
 
 // StaleReason is why the latest read of the view failed.
@@ -183,11 +189,21 @@ type habitsPart struct {
 	Status string  `json:"status"`
 	Reason *string `json:"reason"`
 	Rows   []struct {
-		Name      string     `json:"name"`
-		Done      bool       `json:"done"`
-		Key       *string    `json:"key"`
-		Completes *Completes `json:"completes"`
+		Name      string          `json:"name"`
+		Done      bool            `json:"done"`
+		Key       *string         `json:"key"`
+		Completes *Completes      `json:"completes"`
+		Items     []checklistItem `json:"items"`
 	} `json:"rows"`
+}
+
+type checklistItem struct {
+	Name      string     `json:"name"`
+	Target    int        `json:"target"`
+	Ticks     int        `json:"ticks"`
+	Key       *string    `json:"key"`
+	UntickKey *string    `json:"untick_key"`
+	Completes *Completes `json:"completes"`
 }
 
 type lanePart struct {
@@ -210,15 +226,67 @@ type answerPart struct {
 type entry struct {
 	key       string
 	completes Completes
+	// action is what a pick of the entry does: complete it, or tick or untick a checklist item.
+	action    string
 	text      string
 	group     string
 	unit      string
 	usual     *float64
 	suggested bool
+	// ticks and target are a checklist item's sets today and its daily target.
+	ticks, target *int
+	// untickKey is the key that takes a checklist item's latest set back, on the entry that ticks it.
+	untickKey string
 }
 
 func (e entry) note() bool  { return e.key == "" }
 func (e entry) timed() bool { return e.unit == "minutes" }
+
+// What a pick does, as its picked line names it. A cancel is a pending pick taken back.
+const (
+	ActionComplete = "complete"
+	ActionTick     = "tick"
+	ActionUntick   = "untick"
+	ActionCancel   = "cancel"
+)
+
+// holdsKey is whether a pick of action holds its key from a second pick until
+// the rows are read again. A completion does. A tick or an untick records
+// another set each time, so it holds nothing.
+func holdsKey(action string) bool { return action == ActionComplete }
+
+// setAction is whether action changes one set of a checklist item, which names the item.
+func setAction(action string) bool { return action == ActionTick || action == ActionUntick }
+
+// actionOf is what a pick of an entry does, where the entry names none.
+func (e entry) actionOf() string {
+	if e.action == "" {
+		return ActionComplete
+	}
+	return e.action
+}
+
+// checklistEntries are a habit's checklist items, each as two entries: one
+// ticks a set by the item's key, and one takes it back by the item's
+// untick_key, both as the view names them. They stay listed once the habit is
+// done, so a set can still be taken back.
+func checklistEntries(habit string, items []checklistItem) []entry {
+	var found []entry
+	for _, item := range items {
+		if item.Key == nil || item.UntickKey == nil || item.Completes == nil {
+			continue
+		}
+		ticks, target := item.Ticks, item.Target
+		tick := entry{
+			key: *item.Key, completes: *item.Completes, action: ActionTick, text: habit + " · " + item.Name,
+			group: "habits", ticks: &ticks, target: &target, untickKey: *item.UntickKey,
+		}
+		untick := tick
+		untick.key, untick.action, untick.untickKey = *item.UntickKey, ActionUntick, ""
+		found = append(found, tick, untick)
+	}
+	return found
+}
 
 func noteEntry(text string) entry { return entry{text: text} }
 
@@ -307,6 +375,7 @@ func (p *Panel) entries() []entry {
 			found = append(found, entry{key: *row.Key, completes: *row.Completes, text: row.Name, group: "habits"})
 			completing++
 		}
+		found = append(found, checklistEntries(row.Name, row.Items)...)
 	}
 	for _, lane := range lanes {
 		for _, row := range lane.Rows {
@@ -445,11 +514,19 @@ type Row struct {
 	Group     *string `json:"group"`
 	Minutes   *int    `json:"minutes"`
 	Suggested bool    `json:"suggested"`
+	// Ticks and Target are a checklist item's sets today, as the view was read, and its daily target.
+	Ticks  *int `json:"ticks"`
+	Target *int `json:"target"`
+	// UntickKey takes a checklist item's latest set back.
+	UntickKey *string `json:"untick_key"`
+	// Picks are the pending picks of the row's keys, and how each one that ended came out.
+	Picks []ShownPick `json:"picks"`
 }
 
 // todayRows are what today's step draws, in order: the notes, the suggestion,
-// the answers while a nudge is ready, then each row that a pick completes and
-// that is not picked since the view was read.
+// the answers while a nudge is ready, then each row that a pick completes. A
+// row picked from a terminal leaves until the view is read again, and a row
+// with a pending pick stays, showing how the pick stands.
 func (p *Panel) todayRows() []Row {
 	entries := p.entries()
 	rows := []Row{}
@@ -464,15 +541,17 @@ func (p *Panel) todayRows() []Row {
 	}
 	if p.Nudge != nil {
 		for _, answer := range p.Nudge.Answers {
-			rows = append(rows, Row{Key: &answer.Key, Kind: KindAnswer, Text: answer.Label})
+			rows = append(rows, Row{Key: &answer.Key, Kind: KindAnswer, Text: answer.Label, Picks: []ShownPick{}})
 		}
 	}
 	for _, found := range entries[at:] {
-		rows = append(rows, rowOf(found, p))
+		if found.action != ActionUntick {
+			rows = append(rows, rowOf(found, p))
+		}
 	}
 	kept := rows[:0]
 	for _, row := range rows {
-		if row.Key == nil || row.Kind == KindAnswer || !p.held(*row.Key) {
+		if row.Key == nil || row.Kind == KindAnswer || !p.held(*row.Key) || len(row.Picks) > 0 {
 			kept = append(kept, row)
 		}
 	}
@@ -481,10 +560,25 @@ func (p *Panel) todayRows() []Row {
 
 func rowOf(found entry, p *Panel) Row {
 	if found.note() {
-		return Row{Kind: KindNote, Text: found.text}
+		return Row{Kind: KindNote, Text: found.text, Picks: []ShownPick{}}
 	}
 	key, group := found.key, found.group
-	return Row{Key: &key, Kind: found.completes.Kind, Text: found.text, Group: &group, Suggested: found.suggested}
+	row := Row{Key: &key, Kind: found.completes.Kind, Text: found.text, Group: &group, Suggested: found.suggested, Ticks: found.ticks, Target: found.target}
+	keys := []string{key}
+	if found.action == ActionTick {
+		row.Kind = KindTick
+		row.Text += fmt.Sprintf(" · %d of %d sets", *found.ticks, *found.target)
+		untick := found.untickKey
+		row.UntickKey = &untick
+		keys = append(keys, untick)
+	}
+	row.Picks = []ShownPick{}
+	for _, pick := range p.Picks {
+		if slices.Contains(keys, pick.Key) {
+			row.Picks = append(row.Picks, pick)
+		}
+	}
+	return row
 }
 
 // readyNudge is the ready nudge with each answer's key, its labels from the
@@ -511,8 +605,8 @@ func readyNudge(state *State, answersRaw json.RawMessage) *ReadyNudge {
 }
 
 // panelFor is today's step or a done step, built over the cached view with what
-// the state says now: the ready nudge and the keys picked since the view was
-// read. A done step draws no row.
+// the state says now: the ready nudge, the keys picked since the view was read,
+// and the pending picks. A done step draws no row.
 func panelFor(cached *Panel, state *State, step string) Panel {
 	built := Panel{}
 	if cached != nil {
@@ -524,6 +618,7 @@ func panelFor(cached *Panel, state *State, step string) Panel {
 	built.Minutes = nil
 	built.Nudge = readyNudge(state, built.view().Answers)
 	built.Picked = state.heldPicks(built.ReadAt)
+	built.Picks = state.shownPicks(built.ReadAt)
 	built.Rows = []Row{}
 	if step == StepToday {
 		built.Rows = built.todayRows()
@@ -591,7 +686,7 @@ func minutesRows(found entry, minutes *int) []Row {
 	}
 	offered := func(kind string, amount int, text string, suggested bool) Row {
 		key := minutesKey(kind, amount, found.key)
-		return Row{Key: &key, Kind: kind, Text: text, Minutes: &amount, Suggested: suggested}
+		return Row{Key: &key, Kind: kind, Text: text, Minutes: &amount, Suggested: suggested, Picks: []ShownPick{}}
 	}
 	rows := []Row{}
 	for _, amount := range amounts {

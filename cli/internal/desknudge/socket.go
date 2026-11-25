@@ -19,13 +19,22 @@ import (
 // The socket speaks HTTP/1.1 with JSON bodies, as tailscaled's LocalAPI does
 // for its CLI. Its directory is 0700, so only this user reaches it.
 //
-//	GET  /panel   200 the today step, as panel show --json prints it
-//	POST /picks   {"key": "...", "minutes": 30 | null}
-//	              200 the step the pick leads to: done, or a timed pursuit's minutes
-//	              409 refused, 502 the completion failed, 504 no answer came,
-//	              each {"exit_code": 2 | 1 | 4, "message": "..."}
+//	GET    /panel                today's step, as panel show --json prints it
+//	POST   /picks                {"key": "...", "minutes": 30 | null}, which commits at once
+//	                             200 the step the pick leads to: done, or a timed pursuit's minutes
+//	                             409 refused, 502 the completion failed, 504 no answer came
+//	POST   /pending-picks        {"key": "...", "minutes": 30 | null}, a click that commits pendingFor later
+//	                             201 the pending pick, state pending
+//	                             200 the pick that key had waiting, taken back instead, state canceled
+//	                             409 refused, 502 the state file could not be written
+//	                             not safe to repeat: a second one is a second click, so a client never resends it
+//	DELETE /pending-picks/{id}   200 the pick taken back, state canceled, again on a resend
+//	                             404 this desk holds no pick by that id now, 409 it is committing or ended otherwise
+//
+// A failure answers {"exit_code": 2 | 1 | 4, "message": "..."}. A pending pick
+// answers as the panel's picks show one.
 
-// pickRequest is what POST /picks takes.
+// pickRequest is what POST /picks and POST /pending-picks take.
 type pickRequest struct {
 	Key     string `json:"key"`
 	Minutes *int   `json:"minutes"`
@@ -73,6 +82,35 @@ func (w *Watch) serve(ctx context.Context) (*server, error) {
 			return
 		}
 		answer(response, http.StatusOK, step)
+	})
+	routes.HandleFunc("POST /pending-picks", func(response http.ResponseWriter, request *http.Request) {
+		var asked pickRequest
+		if err := json.NewDecoder(io.LimitReader(request.Body, 1<<16)).Decode(&asked); err != nil || asked.Key == "" {
+			answer(response, http.StatusBadRequest, PickError{ExitCode: PickRefused, Message: "a pending pick names its key, as {\"key\": \"...\"}"})
+			return
+		}
+		pick, err := w.CreatePending(asked.Key, asked.Minutes)
+		switch {
+		case err != nil:
+			failure := pickFailure(err)
+			answer(response, statusFor(failure.ExitCode), failure)
+		case pick.State == OutcomeCanceled:
+			answer(response, http.StatusOK, pick)
+		default:
+			answer(response, http.StatusCreated, pick)
+		}
+	})
+	routes.HandleFunc("DELETE /pending-picks/{id}", func(response http.ResponseWriter, request *http.Request) {
+		pick, err := w.CancelPending(request.PathValue("id"))
+		switch {
+		case errors.Is(err, ErrNoPendingPick):
+			answer(response, http.StatusNotFound, PickError{ExitCode: PickRefused, Message: err.Error()})
+		case err != nil:
+			failure := pickFailure(err)
+			answer(response, statusFor(failure.ExitCode), failure)
+		default:
+			answer(response, http.StatusOK, pick)
+		}
 	})
 	served := &server{http: &http.Server{Handler: routes, ReadHeaderTimeout: 5 * time.Second}}
 	go func() {

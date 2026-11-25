@@ -19,14 +19,17 @@ import (
 const (
 	// programBound is how long claude-sessions, hyprctl, loginctl, the chime and notify-send may each take.
 	programBound = 5 * time.Second
-	// habitBound is how long life habits complete may take.
-	habitBound = 30 * time.Second
 	// onLogBound is how long a pursuit's on_log may take. It completes one item
 	// in another app, as a habit's completion does in life.
 	onLogBound = 30 * time.Second
 	// chimeSound is the XDG sound theme's event that a firing plays, named so the desk's own theme chooses the sound.
 	chimeSound = "message-new-instant"
 )
+
+// habitBound is how long each life habits call may take: the re-read of a
+// day's completions, complete, tick and untick. A test shortens it to reach a
+// timeout.
+var habitBound = 30 * time.Second
 
 // program is one argv the desk nudge starts, with its bound.
 type program struct {
@@ -60,9 +63,36 @@ func idleHintProgram() program {
 	return program{[]string{"loginctl", "show-session", "auto", "-p", "IdleHint", "--value"}, programBound}
 }
 
-// habitProgram completes one habit in life. Its id is all digits, which the pick checks first.
-func habitProgram(habitID string) program {
-	return program{[]string{"life", "habits", "complete", habitID}, habitBound}
+// habitProgram completes one habit in life on day, the desk's day when it was
+// picked. Its id is all digits, which the pick checks first.
+func habitProgram(habitID, day string) program {
+	return program{[]string{"life", "habits", "complete", habitID, "--date", day}, habitBound}
+}
+
+// habitsCompletedProgram is life's list of the habits completed on day, which
+// a pending habit pick reads again at its commit, because life accepts a
+// second completion.
+func habitsCompletedProgram(day string) program {
+	return program{[]string{"life", "habits", "completed", "--since", day, "--until", day, "--json"}, habitBound}
+}
+
+// tickProgram records one set of a checklist item on day, and untickProgram
+// takes that day's latest one back. The item's id is all digits, which the
+// pick checks first.
+func tickProgram(itemID, day string) program {
+	return program{[]string{"life", "habits", "tick", itemID, "--date", day}, habitBound}
+}
+
+func untickProgram(itemID, day string) program {
+	return program{[]string{"life", "habits", "untick", itemID, "--date", day}, habitBound}
+}
+
+// setProgram is the call that a tick or an untick of itemID runs on day.
+func setProgram(action, itemID, day string) program {
+	if action == ActionUntick {
+		return untickProgram(itemID, day)
+	}
+	return tickProgram(itemID, day)
 }
 
 // programFailed is a program that was missing, timed out or exited non-zero.
