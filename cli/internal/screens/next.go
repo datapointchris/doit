@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -18,8 +19,6 @@ const (
 	readableChoiceWidth = 30
 	// minChoiceWidth is what a choice keeps once every column that can give way has.
 	minChoiceWidth = 12
-	// drawSize is how many rows a draw fills, as doit.pursuits.DRAW_SIZE sets it.
-	drawSize = "5"
 )
 
 // offerColumn is one column of `doit next` before the item.
@@ -217,7 +216,7 @@ func Explain(w io.Writer, answer service.Next, widths Widths, p gotermstyle.Pale
 	}
 	reasons(pr, answer.ExplainRows)
 	pr.blank()
-	pr.wrap(line{}.add("  every owed row is shown, heaviest first · the rest is drawn by weight to fill "+drawSize+" rows", ""))
+	pr.wrap(line{}.add(fmt.Sprintf("  every owed row is shown, heaviest first · the rest is drawn by weight to fill %d rows", answer.DrawSize), ""))
 	pr.wrap(line{}.add("  pick is the chance of being drawn ", "").add("first", gotermstyle.CodeBold).
 		add(" · ", "").add("yellow", gotermstyle.CodeYellow).add(" is skipped", ""))
 	pr.wrap(line{}.add("  ", "").add("doit next --json", gotermstyle.CodeCyan).

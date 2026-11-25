@@ -15,6 +15,8 @@ type Next struct {
 	OfferRows []OfferRow `json:"offer_rows"`
 	// ExplainRows are every active pursuit, owed first.
 	ExplainRows []ExplainRow `json:"explain_rows"`
+	// DrawSize is how many rows a draw fills, owed rows aside.
+	DrawSize int `json:"draw_size"`
 	// Context is today's events and near countdowns, one line each.
 	Context []string `json:"context"`
 	// ContextError is why the events could not be read, or null.

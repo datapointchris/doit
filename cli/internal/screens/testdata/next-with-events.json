@@ -465,5 +465,6 @@
       "cadence": "14d",
       "paused": true
     }
-  }
+  },
+  "draw_size": 5
 }
