@@ -679,6 +679,24 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash "$RUNNER_TEMP/run-hook" go-mod-tidy-repo
 
+      - name: pre-commit run vue-eslint
+        if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/run-hook" vue-eslint
+
+      - name: pre-commit run vue-prettier
+        if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/run-hook" vue-prettier
+
+      - name: pre-commit run vue-typecheck
+        if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash "$RUNNER_TEMP/run-hook" vue-typecheck
+
       - name: pre-commit run jactionlint
         if: ${{ !cancelled() && steps.hook-scope.outcome == 'success' }}
         env:
