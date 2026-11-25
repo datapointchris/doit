@@ -288,22 +288,12 @@ func newPanelPickCommand() *cobra.Command {
 				}
 				logged = &minutes
 			}
-			paths := desknudge.DeskPaths()
-			step, err := paths.AskPick(cmd.Context(), args[0], logged)
-			var failed *desknudge.PickError
-			switch {
-			case errors.Is(err, desknudge.ErrWatchServesNoPicks):
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-					"doit desk-nudge panel pick: %v. That watch is likely an older doit's. Restarting the user service that runs `doit desk-nudge watch` starts this doit's watch.\n", err)
-				return exitCode(service.NoAnswerExit)
-			case errors.Is(err, desknudge.ErrNoWatch):
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
-					"doit desk-nudge panel pick: %v. Start the user service that runs `doit desk-nudge watch`, or run it in a terminal.\n", err)
-				return exitCode(service.NoAnswerExit)
-			case errors.As(err, &failed):
-				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "doit desk-nudge panel pick:", failed.Message)
-				return exitCode(failed.ExitCode)
-			case err != nil:
+			step, err := desknudge.DeskPaths().AskPick(cmd.Context(), args[0], logged)
+			if said, code, ok := desknudge.PickFailure(err); ok {
+				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "doit desk-nudge panel pick:", said)
+				return exitCode(code)
+			}
+			if err != nil {
 				return err
 			}
 			if step.Step == desknudge.StepMinutes && noInput {

@@ -39,8 +39,8 @@ github.com/datapointchris/goclilogin v0.10.0 h1:ZAPgTNAYa5HJmrZhSz9v1JZllyk2Z2gj
 github.com/datapointchris/goclilogin v0.10.0/go.mod h1:v5c/6tsdaSJWZTvdAmFWBn9IIj6L7vwYiz5LwS/Fdic=
 github.com/datapointchris/goselfupdate v0.11.0 h1:aUJ27Cm9ZNGMfC7+kKChBsnm8offBE99wwUa10lFo2w=
 github.com/datapointchris/goselfupdate v0.11.0/go.mod h1:YcgyvM+wH6nh9zo9xioUqTHeH5HTYeCHevv4U+G7INc=
-github.com/datapointchris/gotermboard v0.61.1 h1:A3IRpNlvN1ZmiVBWDgxa42E6XFWZRio7g3UWDVh8JOk=
-github.com/datapointchris/gotermboard v0.61.1/go.mod h1:sk5NlyWE8nJunBgcOgfk0M+ENJN81nP9GVFRX1zivTk=
+github.com/datapointchris/gotermboard v0.65.0 h1:ZDGnM9n4BWF2xKqwMszVucCq/L1yPUGIaRdL3GgBXmg=
+github.com/datapointchris/gotermboard v0.65.0/go.mod h1:sk5NlyWE8nJunBgcOgfk0M+ENJN81nP9GVFRX1zivTk=
 github.com/datapointchris/gotermstyle v0.7.0 h1:AGKwqCqfzQMJq17hntQ42BIrHo8Z2UiGYGqf5GCHERM=
 github.com/datapointchris/gotermstyle v0.7.0/go.mod h1:pKINTy5wt7+1No+qXub+BoyOeZiLC/MYunXL/l9i1j4=
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=

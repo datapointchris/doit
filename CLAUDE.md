@@ -15,21 +15,20 @@ to do, not build tasks that claude is going to do".
 howto carries the cards, the Labs and the tool registry, and doit reads nothing from it. A practice
 entry's `command` is text in the review document, which doit shows and never runs.
 
-## `doit` is the Go binary, and doit-python runs only `doit tui`
+## `doit` is the Go binary, and runs every command line
 
-`cli/cmd/doit` builds `doit`, which runs every command line itself, bare `doit` and `doit --help`
-among them. `tui` is the one verb doit-python runs. It is a cobra command that parses no flags and
-execs `doit-python tui` with its arguments, so the help lists it and a Tab completes it.
-`doit tui --help` and `doit help tui` both print doit-python's help for it.
+`cli/cmd/doit` builds `doit`, which runs every command line itself, bare `doit`, `doit --help` and
+`doit tui` among them. `doit tui` draws the boards in `cli/internal/tui`, one per tab, in process.
+doit-python's tree holds no verb, and nothing runs it.
 
-- **The cobra tree is the one list of verbs.** doit-python's tree holds `tui` alone.
+- **The cobra tree is the one list of verbs.**
   `TestEveryCommandTheRepoPrintsIsInTheCommandTree` in `cli/cmd/doit` walks each `doit` command
   that the README and the Python source print through the cobra tree.
-- **A Tab runs `doit __complete`, and starts no Python and asks no service.** The zsh script is
-  cobra's, printed by `doit shell completion zsh`. A pursuit's name after `pursuits log` or `skip` is
-  read from `next-names.txt` by `completePursuitNames` in `cli/cmd/doit/pursuits.go`. goclikit
-  starts no self-update check on a Tab. `tui` and `shell` carry goclikit's `StartsNoUpdateCheck`
-  mark: `tui`'s exec would cut a check off, and a shell's startup runs `shell`.
+- **A Tab runs `doit __complete`, and starts no other program and asks no service.** The zsh script
+  is cobra's, printed by `doit shell completion zsh`. A pursuit's name after `pursuits log` or `skip`
+  is read from `next-names.txt` by `completePursuitNames` in `cli/cmd/doit/pursuits.go`. goclikit
+  starts no self-update check on a Tab. `shell` carries goclikit's `StartsNoUpdateCheck` mark,
+  because a shell's startup runs it.
 
 - **`cli/internal/login` holds pyclilogin's identifiers for the product `doit`**: the config file,
   the keychain service `doit-cli`, and `$XDG_STATE_HOME/doit` for the fallback token file and the
@@ -49,7 +48,7 @@ execs `doit-python tui` with its arguments, so the help lists it and a Tab compl
   the verb needs, and an answer lacking it is refused with the service's version, never drawn empty.
 - **The `cli/` release stream** builds `doit_<version>_<os>_<arch>.tar.gz` for each platform in
   `cli-build`'s matrix, with `checksums.txt`. `doit update` installs from it, and so does a
-  machine's own package manager. `doit-tui` installs with `go install` from these tags.
+  machine's own package manager.
 
 ## What will look like a bug and is not
 
@@ -99,11 +98,13 @@ a second run records a second set. A tick that the watch stopped inside is recor
 the person ticks again where it did not land. A started habit, log or review does run again,
 because life's re-read, the journal entry's id and the review's day each stop a second record.
 
-**Keep `doit-tui` reading the desk nudge panel through `doit desk-nudge panel`.** It draws the
-`rows` that the panel document carries, the rows that `panel show` prints, and the watch writes
-them, so no reader holds the rule that lists them. The board parses no key and lists no kind. Where it needs another fact about a row, the row carries it, as
-`group`, `minutes`, `suggested` and `untick_key` do. Only the panel has this reason, so a tab over the service's
-data reads the service's API.
+**Keep `doit tui`'s now tab reading the desk nudge panel with the code of `panel show` and `panel
+pick`.** `tui.DeskPanel` in `cli/internal/tui/now_tab.go` calls `Desk.Show` and `Paths.AskPick`,
+as those two commands do. The tab draws the `rows` that the panel document carries, the rows that
+`panel show` prints, and the watch writes them, so no reader holds the rule that lists them. The
+board parses no key and lists no kind. Where it needs another fact about a row, the row carries it,
+as `group`, `minutes`, `suggested` and `untick_key` do. Only the panel has this reason, so a tab
+over the service's data reads the service's API.
 
 **Let the panel page draw the panel document's `view`, not its `rows`.** The page places each part
 of the view on a card of its own, the suggestion, the habits, the pursuits and each lane, which a
@@ -119,19 +120,11 @@ The release builds the page and fails where the build wrote no script under `dis
 
 ## The service runs no command, and the CLI's own code starts the processes below
 
-doit-python starts these:
-
-- **`doit-tui`**, in `tui.tui_command`, which replaces the process with it. `doit-tui` is the Go
-  program in `cli/`. It starts `doit desk-nudge panel show --json` on a timer and `panel pick <key>
-  --json` for each pick, each in a session of its own, so every rule about a row stays in
-  `cli/internal/desknudge`.
-
 A pursuit's `view` is printed for the reader to run, and nothing starts it. Everything else doit
 learns from another program arrives over HTTP through the wrappers below.
 
 The Go binary starts these:
 
-- **`doit-python tui`**, in `passthrough.Exec`, which replaces the process with it at `doit tui`.
 - **The editor**, by `openInEditor` in `cli/cmd/doit/document_edit.go`, for every `edit` verb, with
   no bound, because it waits as long as the person edits. gotermboard's `EditorCommand` names it:
   `$VISUAL`, then `$EDITOR`, then `vi`, split on whitespace.
@@ -186,7 +179,8 @@ The libraries start processes of their own. pyclilogin and goclilogin each run a
 - **A machine's own** — `$XDG_CONFIG_HOME/doit/config.toml` names the service, its issuer and the
   machine's client. `$XDG_CACHE_HOME/doit/` holds what the shell reads with no Python and no request,
   each file rewritten by the command that fetches it, and the desk nudge panel's rows, which the
-  watch rewrites and `panel show` reads. `doit config show` prints each of these with
+  watch rewrites and `panel show` reads. `$XDG_STATE_HOME/doit/tui-display.json` keeps the tab
+  and display that `doit tui` was left on. `doit config show` prints each of these with
   where it came from, and a value doit newly resolves gets a row there.
 - **Held logs** — `$XDG_STATE_HOME/doit/held-logs/` keeps each pursuit log from just before its
   post until the service answers it, one file per entry, named by its id. Where the answer is lost,

@@ -17,13 +17,10 @@ those agents read, and no pursuit or daily list carries it.
 
 ## Install
 
-doit installs as two programs. `doit` is a Go binary, and runs every command line. `doit tui` alone
-needs `doit-python`, the Python CLI: it execs `doit-python tui` with the arguments typed after it,
-so stdin, stdout and the exit code are the Python CLI's. Update `doit` before `doit-python`, because
-a `doit-python` release relies on the Go binary released beside it.
+`doit` is one Go binary, and runs every command line.
 
 ```bash
-# doit, the Go binary, from the newest cli/vX.Y.Z release, into a directory on PATH
+# doit, from the newest cli/vX.Y.Z release, into a directory on PATH
 os=$(uname -s | tr '[:upper:]' '[:lower:]')                  # linux or darwin
 arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')   # amd64 or arm64
 tag=$(gh release list --repo datapointchris/doit --limit 30 --json tagName \
@@ -31,20 +28,12 @@ tag=$(gh release list --repo datapointchris/doit --limit 30 --json tagName \
 gh release download "$tag" --repo datapointchris/doit --pattern "doit_*_${os}_${arch}.tar.gz" --output - |
   tar -xz -C ~/.local/bin doit
 
-# doit-python, the Python CLI
-uv tool install --index https://pypi.ichrisbirch.com/simple/ doit
-
-doit --version        # the Go binary's release
-doit update --check   # whether a newer Go release exists
+doit --version        # the installed release
+doit update --check   # whether a newer release exists
 ```
 
 Each `cli/` release carries one `doit_<version>_<os>_<arch>.tar.gz` for each platform it builds,
-with `doit` at the archive's root, and `checksums.txt`. Without `doit-python` on `PATH`, every verb
-but `doit tui` works, and `doit tui` exits 1 naming `doit-python`.
-
-Every Python release is published to that package index. Name it on the install: without it uv asks
-PyPI, where `doit` is a different project. `uv tool upgrade doit` updates `doit-python`, and uv
-fetches the Python it needs.
+with `doit` at the archive's root, and `checksums.txt`.
 
 `doit update` replaces the Go binary with its newest release, checked against the release's
 checksums. It refuses a local build, which carries no release version to compare. The Go binary
@@ -432,8 +421,8 @@ watch runs. `watch` exits 1 where another watch already runs. It exits 0 once an
 
 ### The panel completes any of today's rows in one pick
 
-`doit tui` draws the rows that `panel show --json` prints, and hands the picked row's key to `panel
-pick`. The service computes every part of the panel, and the watch builds every completion, so the
+`doit tui` draws the rows that `panel show` reads, and hands the picked row's key to the watch as
+`panel pick` does. The service computes every part of the panel, and the watch builds every completion, so the
 screen holds no rule. The suggestion comes first, then the four answers while a nudge is ready, then
 every row of `doit today` that something completes, in each lane's own order:
 
@@ -588,29 +577,34 @@ entry is marked done again on the day it was picked, which the service stores on
 untick is recorded `uncertain` and never run again, because `life habits tick` carries no key that
 would stop a second set.
 
-### `doit tui` draws the panel as a page that a click drives
+### `doit tui` draws the panel in the terminal, where a click or a key completes a row
 
 ```bash
-doit tui                                  # open doit's screens
-doit tui --tab now                        # open on the panel by name
-COLUMNS=120 LINES=30 doit tui --once      # print the screen it opens on, then exit
+doit tui                                  # open on the tab last moved to
+doit tui --view now                       # open on the now tab
+COLUMNS=120 LINES=30 doit tui --once      # print the opening tab's frame, then exit
+doit tui --view now --json                # print the now tab's snapshot
 ```
 
-`doit tui` hands the terminal to `doit-tui`, a Go program on Bubble Tea built from this
-repository's `cli/` module. Install it with
-`go install github.com/datapointchris/doit/cli/cmd/doit-tui@latest`, which takes the newest
-`cli/vX.Y.Z` tag. Its `now` tab draws the suggestion under `up next`, then each row under the `doit
-today` lane it came from. A click puts the cursor on a row, and a second click or enter completes
-it. A timed pursuit opens its minutes under its row, where `+` and `-` take the step that doit
-offers above or below, and enter logs them. Enter on another row closes those minutes first and
-completes nothing. While a nudge is ready, each answer sits on a number key and a footer hint that a
-click also runs. A note, such as why the rows are old, draws above the table.
+`doit tui` is one program on Bubble Tea with a tab per view. Its `now` tab draws the suggestion
+under `up next`, then each row under the `doit today` lane it came from. A click puts the cursor on
+a row, and a second click or enter completes it. A timed pursuit opens its minutes under its row,
+where `+` and `-` take the step that doit offers above or below, and enter logs them. Enter on
+another row closes those minutes first and completes nothing. While a nudge is ready, each answer
+sits on a number key and a footer hint that a click also runs. A note, such as why the rows are
+old, draws above the table.
 
-It reruns `doit desk-nudge panel show --json` on a timer and runs `panel pick <key> --json` for each
-pick. It lists the rows of each step with the same Go code that `panel show` prints them with, so
-the board parses no key and doit keeps every rule about what a row is and what a pick does. The
-board refuses a step whose `schema_version` it does not read, and names whether doit or `doit-tui`
-needs upgrading.
+The tab reads the rows again on a timer, with the same code as `doit desk-nudge panel show`, from
+the files the watch writes. It hands each pick to the watch over its socket, as `panel pick` does.
+So the board parses no key, and doit keeps every rule about what a row is and what a pick does.
+
+The next run opens on the tab last moved to, unless `--view` names one. Each tab keeps its panel,
+its summaries, and the groups folded and rows opened, in `$XDG_STATE_HOME/doit/tui-display.json`.
+
+`--once` prints one frame at `COLUMNS` by `LINES`, and `--json` the tab's snapshot, so an agent
+reads what a person reads. A snapshot follows what its tab draws. A program that reads the panel's
+rows reads `doit desk-nudge panel show --json`, whose shape `schemas/desk-nudge-panel.schema.json`
+defines. With no terminal and neither flag, `doit tui` refuses with exit 2 and names both.
 
 ## The service — one store, and every view computed behind it
 

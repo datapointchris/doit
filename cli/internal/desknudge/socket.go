@@ -208,6 +208,23 @@ func (p Paths) AskPick(ctx context.Context, key string, minutes *int) (Panel, er
 	return step, nil
 }
 
+// PickFailure is what a person reads for an error from AskPick, and the exit
+// code for it. ok is false for an error that is none of no watch, a watch that
+// answers no pick, or a *PickError.
+func PickFailure(err error) (said string, exitCode int, ok bool) {
+	var failed *PickError
+	switch {
+	case errors.Is(err, ErrWatchServesNoPicks):
+		return err.Error() + ". That watch is likely an older doit's. Restarting the user service that runs `doit desk-nudge watch` starts this doit's watch.",
+			service.NoAnswerExit, true
+	case errors.Is(err, ErrNoWatch):
+		return err.Error() + ". Start the user service that runs `doit desk-nudge watch`, or run it in a terminal.", service.NoAnswerExit, true
+	case errors.As(err, &failed):
+		return failed.Message, failed.ExitCode, true
+	}
+	return "", 0, false
+}
+
 // ErrWatchServesNoPage is a watch that answers on the socket and mints no
 // code for the panel page, such as an older doit's Go watch still running
 // through an upgrade.
