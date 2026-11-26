@@ -238,7 +238,7 @@
               "usual_minutes": {"$ref": "#/definitions/nullable_number"},
               "key": {"$ref": "#/definitions/key", "description": "What its log picks. Null on a pursuit that writes through, whose log is an item's."},
               "completes": {"$ref": "#/definitions/completes"},
-              "items": {"type": "array", "items": {"$ref": "#/definitions/choice"}, "description": "The choices its resolve answered, such as its tasks or the next chapters of a course. A choice carries a key only where the pursuit writes through. Empty on a pursuit with no resolve."},
+              "items": {"type": "array", "items": {"$ref": "#/definitions/choice"}, "description": "A write-through pursuit's choices, such as its tasks. Empty on every other pursuit."},
               "items_error": {"type": ["string", "null"], "description": "Why its items could not be read."}
             }
           }

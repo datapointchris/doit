@@ -625,7 +625,7 @@ class Views:
         day, results, kept = self.day(config, now)
         selection, reason = self.panel_draw(config, kept.state, now, machine, draw)
         suggested = ((selection or {}).get('offered') or [])[:1]
-        items = self.choices(list(dict.fromkeys([*desk_panel.resolved_pursuits(day, config.pursuits), *suggested])), config, selection)
+        items = self.choices(list(dict.fromkeys([*desk_panel.item_pursuits(day, config.pursuits), *suggested])), config, selection)
         life_source = next((source.id for source in config.registry.sources.values() if source.adapter == 'life'), None)
         return desk_panel.view(
             now=now,
