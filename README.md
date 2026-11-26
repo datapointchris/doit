@@ -199,7 +199,8 @@ walks top-down, and what `rank_offered` counts in a journal entry. The draw is c
 minutes, so running `next` again while deciding does not reshuffle the list underneath you.
 
 A pursuit whose `resolve` read matches several rows offers the first three, stacked under its
-name. One row is a decision the register made. Several are a choice you make, so `doit pursuits log` asks
+name. Its `choices_shown` raises or lowers that count, so `choices_shown: 5` with `query: {limit: 5}`
+offers five tasks. One row is a decision the register made. Several are a choice you make, so `doit pursuits log` asks
 which one wherever the pursuit's `on_log` would complete it. Enter names none, and so does a log
 with nobody there to ask. `--item <id>` names one without asking, and is refused, naming the ids it
 holds, where no current choice carries that id.

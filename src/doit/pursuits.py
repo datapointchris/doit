@@ -100,8 +100,8 @@ STANDING_NAMES = 4
 # reads naturally and invites `1w2d` and `3.5d`, which no reader checks twice.
 DAYS_CADENCE = re.compile(r'[1-9]\d*d')
 
-# How many of a resolve's rows a pursuit offers — enough to choose between, few
-# enough that five pursuits stay one screen.
+# How many of a resolve's rows a pursuit offers where it declares no
+# `choices_shown` — enough to choose between, few enough that five pursuits stay one screen.
 CANDIDATE_ROWS = 3
 
 # The window `pursuits drift` reads when given neither --since nor --until.
@@ -118,6 +118,7 @@ KNOWN_FIELDS = {
     'paused',
     'resolve',
     'resolve_where',
+    'choices_shown',
     'items',
     'label',
     'id',
@@ -194,6 +195,10 @@ TEMPLATE = """\
 # `doit pursuits log` asks which one you did wherever `on_log` would act on it. Enter, or
 # nobody there to ask, names none — an hour of reading is not a claim about
 # which book. Narrow the read to one where you mean one.
+#
+#   choices_shown  optional; how many choices to show where three is not the
+#                  number, such as 5 for the top of a task list. A limit in the
+#                  read's query still decides how many the app answers
 #
 # No rows is shown in red, as `<app>: matched nothing` followed by the
 # description. Either the read has drifted from its app or there is nothing to
@@ -360,6 +365,11 @@ def pursuits_from_document(document: dict, where: object) -> dict:
             raise RegisterError(f'{name}: cadence is a whole number of days, like 3d or 9d')
         if minutes is not None and (not isinstance(minutes, int) or isinstance(minutes, bool) or minutes <= 0):
             raise RegisterError(f'{name}: weekly_minutes must be a positive whole number')
+        shown = config.get('choices_shown')
+        if shown is not None and (not isinstance(shown, int) or isinstance(shown, bool) or shown <= 0):
+            raise RegisterError(f'{name}: choices_shown must be a positive whole number')
+        if shown is not None and not config.get('resolve'):
+            raise RegisterError(f'{name}: choices_shown needs resolve — there are no choices to show without it')
         if minutes is not None and config.get('evidence'):
             raise RegisterError(
                 f'{name}: weekly_minutes is paid by `doit pursuits log --minutes` only — an app reports days, never how long'
@@ -1369,7 +1379,7 @@ def choices_from(name: str, config: dict, document: object, backend: str) -> dic
         # anything. Everything downstream reads this before claiming a pick.
         'candidates': len(rows),
         'backend': backend,
-        'choices': [one_choice(row, config, label_field) for row in rows[:CANDIDATE_ROWS]],
+        'choices': [one_choice(row, config, label_field) for row in rows[: config.get('choices_shown') or CANDIDATE_ROWS]],
     }
 
 

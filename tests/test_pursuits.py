@@ -431,11 +431,13 @@ def test_a_resolve_counts_the_rows_that_matched():
 
 
 def test_a_resolve_offers_a_handful_however_many_matched():
-    """Fifty-four open tasks are a list, not a choice. The count still says fifty-four."""
-    resolved = resolution('tasks', {'label': 'name'}, [{'name': f'task {number}'} for number in range(54)])
+    """Fifty-four open tasks are a list, not a choice. The count still says fifty-four, and `choices_shown` sets the handful."""
+    rows = [{'name': f'task {number}'} for number in range(54)]
+    resolved = resolution('tasks', {'label': 'name'}, rows)
 
     assert len(resolved['choices']) == pursuits.CANDIDATE_ROWS
     assert resolved['candidates'] == 54
+    assert len(resolution('tasks', {'label': 'name', 'choices_shown': 5}, rows)['choices']) == 5
 
 
 def test_a_resolve_counts_after_the_register_narrows_the_rows():
