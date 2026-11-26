@@ -144,8 +144,8 @@ The Go binary starts these:
   - `hyprctl instances -j`, then `hyprctl -i <instance> activewindow -j`, at the same moments. A
     unit started at login never has `HYPRLAND_INSTANCE_SIGNATURE`, so the instance is always named.
   - `hyprctl -i <instance> monitors -j`, as a nudge turns ready.
-  - `canberra-gtk-play --id <chimeSound>`, by `chimeProgram`, once as a nudge turns ready,
-    unless every display is off. A firing opens nothing else.
+  - `canberra-gtk-play --id <chimeSound> --volume <chimeVolumeDB>`, by `chimeProgram`, once as a
+    nudge turns ready, unless every display is off. A firing opens nothing else.
   - `notify-send -a doit`, by `notifyProgram`, for a passing notice after an answer or a pick,
     and through `Notify` where `panel open` finds no watch to answer it.
   - `loginctl show-session auto -p IdleHint --value`, by `idleHintProgram`, before each timed read

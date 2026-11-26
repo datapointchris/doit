@@ -380,7 +380,8 @@ doit desk-nudge panel pick habit:17 --json # complete one row, and print the nex
 The watch ticks every 15 seconds and counts the time since the last nudge ended. When that reaches
 the interval, it reads the service's desk panel view with a draw, as `doit next` draws. It turns the
 pill to `ready` with the first pursuit offered, and plays the sound theme's `message-new-instant`
-through `canberra-gtk-play`. While every display is
+through `canberra-gtk-play`, raised by `chimeVolumeDB` in `cli/internal/desknudge/programs.go`.
+While every display is
 off, as an idle daemon leaves them overnight, it fires without the sound. A status bar flashes the
 pill while its class is `ready`. Nothing opens and nothing takes focus. The nudge stays ready for
 10 minutes. An answer, a completing panel pick, those 10 minutes or `pause` ends it, and the clock

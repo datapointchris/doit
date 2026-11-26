@@ -20,6 +20,8 @@ const (
 	programBound = 5 * time.Second
 	// chimeSound is the XDG sound theme's event that a firing plays, named so the desk's own theme chooses the sound.
 	chimeSound = "message-new-instant"
+	// chimeVolumeDB raises the chime above the theme's level, in decibels, because at 0 it was too quiet to notice.
+	chimeVolumeDB = "6.0"
 )
 
 // habitBound is how long each life habits call may take: the re-read of a
@@ -42,7 +44,7 @@ func hyprctlProgram(instance, query string) programs.Program {
 }
 
 func chimeProgram() programs.Program {
-	return programs.Program{Argv: []string{"canberra-gtk-play", "--id", chimeSound, "--description", "desk nudge"}, Bound: programBound}
+	return programs.Program{Argv: []string{"canberra-gtk-play", "--id", chimeSound, "--volume", chimeVolumeDB, "--description", "desk nudge"}, Bound: programBound}
 }
 
 func notifyProgram(summary, body string) programs.Program {

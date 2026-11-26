@@ -330,7 +330,7 @@ func TestEachProgramTheWatchStartsHasItsArgvAndBound(t *testing.T) {
 		{hyprctlInstancesProgram(), []string{"hyprctl", "instances", "-j"}, 5 * time.Second},
 		{hyprctlProgram("instance-1", "activewindow"), []string{"hyprctl", "-i", "instance-1", "activewindow", "-j"}, 5 * time.Second},
 		{hyprctlProgram("instance-1", "monitors"), []string{"hyprctl", "-i", "instance-1", "monitors", "-j"}, 5 * time.Second},
-		{chimeProgram(), []string{"canberra-gtk-play", "--id", "message-new-instant", "--description", "desk nudge"}, 5 * time.Second},
+		{chimeProgram(), []string{"canberra-gtk-play", "--id", "message-new-instant", "--volume", "6.0", "--description", "desk nudge"}, 5 * time.Second},
 		{notifyProgram("doit: logged", "Logged read"), []string{"notify-send", "-a", "doit", "doit: logged", "Logged read"}, 5 * time.Second},
 		{idleHintProgram(), []string{"loginctl", "show-session", "auto", "-p", "IdleHint", "--value"}, 5 * time.Second},
 		{habitProgram("7", "2026-11-24"), []string{"life", "habits", "complete", "7", "--date", "2026-11-24"}, 30 * time.Second},
