@@ -28,6 +28,14 @@ class Answer(StrEnum):
     BOTHERED = 'bothered'
 
 
+TIMING_ANSWERS = (Answer.GOOD_TIMING, Answer.TOO_SOON, Answer.TOO_LATE)
+
+
+def replaced_by(answer: str) -> list[str]:
+    """The answers that `answer` replaces on its nudge, because a nudge holds one timing answer. bothered replaces none."""
+    return [str(other) for other in TIMING_ANSWERS if other != answer] if answer in TIMING_ANSWERS else []
+
+
 ANSWER_LABELS = {
     Answer.GOOD_TIMING: 'good timing',
     Answer.TOO_SOON: 'too soon',

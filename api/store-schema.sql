@@ -5,9 +5,18 @@ CREATE TABLE desk_nudge_answers (
     answered_at TEXT NOT NULL,
     machine TEXT NOT NULL,
     recorded_by TEXT NOT NULL,
-    stored_at TEXT NOT NULL,
+    stored_at TEXT NOT NULL, valid_from TEXT GENERATED ALWAYS AS (stored_at) VIRTUAL,
     PRIMARY KEY (nudge_id, answer)
 );
+CREATE TABLE desk_nudge_answers_history (
+        nudge_id TEXT NOT NULL,
+        answer TEXT NOT NULL CHECK (answer IN ('good_timing', 'too_soon', 'too_late', 'bothered')),
+        fired_at TEXT NOT NULL,
+        answered_at TEXT NOT NULL,
+        machine TEXT NOT NULL,
+        recorded_by TEXT NOT NULL,
+        stored_at TEXT NOT NULL,
+     valid_from TEXT NOT NULL, valid_to TEXT NOT NULL, CHECK (valid_from <= valid_to), UNIQUE (nudge_id, valid_from, valid_to));
 CREATE TABLE documents (
         name TEXT PRIMARY KEY CHECK (name IN ('pursuits', 'review', 'sources')),
         text TEXT NOT NULL,
@@ -151,6 +160,16 @@ CREATE TABLE sources_history (
         timeout REAL,
         lanes TEXT CHECK (lanes IS NULL OR json_valid(lanes)),
      valid_from TEXT NOT NULL, valid_to TEXT NOT NULL, CHECK (valid_from <= valid_to), UNIQUE (id, valid_from, valid_to));
+CREATE INDEX desk_nudge_answers_history_by_key ON desk_nudge_answers_history (nudge_id, valid_from);
+CREATE TRIGGER desk_nudge_answers_keeps_what_a_delete_removed AFTER DELETE ON desk_nudge_answers
+    BEGIN
+        INSERT INTO desk_nudge_answers_history (nudge_id, answer, fired_at, answered_at, machine, recorded_by, stored_at, valid_from, valid_to)
+        VALUES (OLD.nudge_id, OLD.answer, OLD.fired_at, OLD.answered_at, OLD.machine, OLD.recorded_by, OLD.stored_at, OLD.valid_from, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+    END;
+CREATE TRIGGER desk_nudge_answers_keeps_what_an_update_replaced AFTER UPDATE ON desk_nudge_answers
+    BEGIN
+        INSERT INTO desk_nudge_answers_history (nudge_id, answer, fired_at, answered_at, machine, recorded_by, stored_at, valid_from, valid_to) VALUES (OLD.nudge_id, OLD.answer, OLD.fired_at, OLD.answered_at, OLD.machine, OLD.recorded_by, OLD.stored_at, OLD.valid_from, NEW.valid_from);
+    END;
 CREATE INDEX documents_history_by_key ON documents_history (name, valid_from);
 CREATE TRIGGER documents_keeps_what_a_delete_removed AFTER DELETE ON documents
     BEGIN

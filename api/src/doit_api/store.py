@@ -16,11 +16,13 @@ are events. Each is keyed on what identifies it: a journal entry's UUIDv7, a
 reading's machine and moment, and an answer's nudge and answer. So a write sent
 again adds nothing.
 
-**Review completions, appended and versioned.** A completion is an event a person
-can get wrong, so one can be taken back. Its table carries the same triggers as the
-config tables, and a completion is valid from the moment it was stored. A delete
-leaves the row in `review_completions_history`. `done_on` is the day it says the
-thing happened, which an entry recorded late sets apart from when it was stored.
+**Review completions and desk nudge answers, appended and versioned.** Each is
+an event a person can get wrong, so one can be taken back. A nudge's timing
+answer is taken back by the answer that replaces it. Both tables carry the same
+triggers as the config tables, and a row is valid from the moment it was stored.
+A delete leaves the row in the table's `_history`. A completion's `done_on` is the
+day it says the thing happened, which an entry recorded late sets apart from when
+it was stored.
 
 **State the service keeps.** The offered counts, the standing draw, the evidence
 cache and the nudge are small rows the service rewrites. Offers are counted twice,
@@ -43,6 +45,7 @@ import datetime as dt
 import json
 import sqlite3
 import threading
+from collections.abc import Iterable
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +63,7 @@ VERSIONED: dict[str, tuple[str, tuple[str, ...]]] = {
     'sources': ('id', ('block', 'adapter', 'command', 'timeout', 'lanes')),
     # Read by entry, which holds one row a day, so nothing writes it through `put`.
     'review_completions': ('entry', ('done_on', 'recorded_by', 'stored_at')),
+    'desk_nudge_answers': ('nudge_id', ('answer', 'fired_at', 'answered_at', 'machine', 'recorded_by', 'stored_at')),
 }
 
 FIRST_VERSIONED_TABLES = ('documents', 'pursuits', 'pursuit_cycles', 'forecast_settings', 'review_entries', 'sources')
@@ -113,6 +117,15 @@ TABLE_COLUMNS = {
     'review_completions': """
         entry TEXT NOT NULL,
         done_on TEXT NOT NULL CHECK (done_on GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+        recorded_by TEXT NOT NULL,
+        stored_at TEXT NOT NULL,
+    """,
+    'desk_nudge_answers': """
+        nudge_id TEXT NOT NULL,
+        answer TEXT NOT NULL CHECK (answer IN ('good_timing', 'too_soon', 'too_late', 'bothered')),
+        fired_at TEXT NOT NULL,
+        answered_at TEXT NOT NULL,
+        machine TEXT NOT NULL,
         recorded_by TEXT NOT NULL,
         stored_at TEXT NOT NULL,
     """,
@@ -249,6 +262,11 @@ CREATE TABLE desk_nudge_answers (
 );
 """
 
+# A nudge holds one timing answer, so a second one deletes the first, and the trigger keeps it in history.
+DESK_NUDGE_ANSWER_HISTORY_SCHEMA = """
+ALTER TABLE desk_nudge_answers ADD COLUMN valid_from TEXT GENERATED ALWAYS AS (stored_at) VIRTUAL;
+""" + history_schema('desk_nudge_answers')
+
 # Applied in order, each once. `PRAGMA user_version` holds how many have run. A
 # change to the schema is appended here, never made to an entry a database has run.
 MIGRATIONS = (
@@ -256,6 +274,7 @@ MIGRATIONS = (
     COMPLETION_HISTORY_SCHEMA,
     OFFERS_BY_DAY_SCHEMA,
     DESK_NUDGE_ANSWERS_SCHEMA,
+    DESK_NUDGE_ANSWER_HISTORY_SCHEMA,
 )
 
 
@@ -598,8 +617,23 @@ class Store:
         return [row['answer'] for row in rows]
 
     @staticmethod
-    def add_desk_nudge_answer(connection: sqlite3.Connection, row: dict) -> tuple[dict, bool]:
-        """Store one answer unless its nudge already holds it, and return the row that the store holds and whether this added it."""
+    def add_desk_nudge_answer(connection: sqlite3.Connection, row: dict, replaces: Iterable[str]) -> tuple[dict, bool, list[str]]:
+        """Store one answer unless its nudge already holds it, deleting each of `replaces` the nudge holds.
+
+        It returns the row that the store holds, whether this added it, and the
+        answers it deleted, which the delete trigger keeps in history.
+        """
+        others = [answer for answer in replaces if answer != row['answer']]
+        replaced = [
+            found['answer']
+            for found in connection.execute(
+                f'SELECT answer FROM desk_nudge_answers WHERE nudge_id = ? AND answer IN ({", ".join("?" * len(others))}) ORDER BY answer',
+                (row['nudge_id'], *others),
+            )
+        ]
+        connection.executemany(
+            'DELETE FROM desk_nudge_answers WHERE nudge_id = ? AND answer = ?', [(row['nudge_id'], answer) for answer in replaced]
+        )
         cursor = connection.execute(
             """
             INSERT INTO desk_nudge_answers (nudge_id, answer, fired_at, answered_at, machine, recorded_by, stored_at)
@@ -609,9 +643,11 @@ class Store:
             row,
         )
         held = connection.execute(
-            'SELECT * FROM desk_nudge_answers WHERE nudge_id = ? AND answer = ?', (row['nudge_id'], row['answer'])
+            'SELECT nudge_id, answer, fired_at, answered_at, machine, recorded_by, stored_at'
+            ' FROM desk_nudge_answers WHERE nudge_id = ? AND answer = ?',
+            (row['nudge_id'], row['answer']),
         ).fetchone()
-        return dict(held), cursor.rowcount == 1
+        return dict(held), cursor.rowcount == 1, replaced
 
     # --- the nudge ------------------------------------------------------------
 

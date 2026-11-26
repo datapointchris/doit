@@ -518,7 +518,11 @@ class Views:
         return {'interval_minutes': desk_nudge.interval_minutes(given), 'answer_counts': desk_nudge.answer_counts(given)}
 
     def answer_desk_nudge(self, body: dict, recorded_by: str) -> dict:
-        """Store one answer to a nudge, and say the interval that follows. An answer sent again answers the row first stored."""
+        """Store one answer to a nudge, and say the interval that follows. An answer sent again answers the row first stored.
+
+        A timing answer replaces the nudge's other timing answer, which history
+        keeps, so a misclicked answer is changed by giving the right one.
+        """
         now = self.now()
         instant(body['fired_at'], 'fired_at')
         answered = instant(body.get('answered_at'), 'answered_at') or now
@@ -534,8 +538,8 @@ class Views:
             'stored_at': stamp(now),
         }
         with self.store.write() as connection:
-            stored, added = self.store.add_desk_nudge_answer(connection, row)
-        return {**self.desk_nudge_interval(), 'stored': stored, 'added': added}
+            stored, added, replaced = self.store.add_desk_nudge_answer(connection, row, desk_nudge.replaced_by(row['answer']))
+        return {**self.desk_nudge_interval(), 'stored': stored, 'added': added, 'replaced': replaced}
 
     # --- the lanes ------------------------------------------------------------
 

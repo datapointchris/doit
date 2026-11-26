@@ -123,9 +123,16 @@ class NudgeBody(Strict):
 
 
 class DeskNudgeAnswerBody(Strict):
-    """One answer to one desk nudge. Sent again with the same nudge and answer, it is stored once."""
+    """One answer to one desk nudge. Sent again with the same nudge and answer, it is stored once.
 
-    nudge_id: uuid.UUID = Field(description="The firing's UUIDv7, minted by the desk when the nudge fired.")
+    A nudge holds one timing answer: good_timing, too_soon or too_late. Another
+    one replaces it, and the reply's `replaced` names what it replaced, which the
+    store keeps in history. bothered replaces nothing.
+    """
+
+    nudge_id: uuid.UUID = Field(
+        description="The firing's UUIDv7, minted by the desk when the nudge fired, or when a person called it early."
+    )
     answer: Answer
     fired_at: str = Field(description='When the nudge fired, ISO 8601 with an offset.')
     answered_at: str | None = Field(None, description='When the answer was picked, ISO 8601 with an offset. Now when omitted.')
