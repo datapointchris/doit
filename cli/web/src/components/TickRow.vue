@@ -8,9 +8,19 @@
     @click="emit('pick')">
     <span class="box"></span>
     <span class="label">
-      <template v-if="sub">
+      <template v-if="sub || command">
         <div>{{ label }}</div>
-        <div class="sub">{{ sub }}</div>
+        <div
+          v-if="sub"
+          class="sub">
+          {{ sub }}
+        </div>
+        <code
+          v-if="command"
+          class="command"
+          :title="command">
+          {{ command }}
+        </code>
       </template>
       <template v-else>{{ label }}</template>
     </span>
@@ -39,6 +49,8 @@ const props = defineProps<{
   pick: ShownPick | null
   done?: boolean
   sub?: string
+  /** What to run to do the row, shown under it and never run. */
+  command?: string
   note?: string | null
   noteLate?: boolean
 }>()

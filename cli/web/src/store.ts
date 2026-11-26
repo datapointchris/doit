@@ -113,10 +113,10 @@ export function createPanelStore(now: () => Date = () => new Date()) {
     if (waits.length) timer = setTimeout(() => void load(), Math.min(...waits))
   }
 
-  /** Reads the panel the watch keeps. A second call while one runs shares it. */
-  function load(): Promise<void> {
+  /** Reads the panel through asked. A second read while one runs shares it. */
+  function read(asked: () => Promise<watch.Answered<Panel>>): Promise<void> {
     reading ??= (async () => {
-      const answered = await watch.readPanel()
+      const answered = await asked()
       if (answered.ok) apply(answered.body)
       else {
         state.unanswered = answered.message
@@ -127,6 +127,20 @@ export function createPanelStore(now: () => Date = () => new Date()) {
       reading = null
     })
     return reading
+  }
+
+  /** Reads the panel the watch keeps. */
+  function load(): Promise<void> {
+    return read(watch.readPanel)
+  }
+
+  /**
+   * Shows the panel the watch keeps, then has the watch read the view with a
+   * draw, so the suggestion stands before any nudge fired.
+   */
+  async function open() {
+    await load()
+    await read(watch.readViewNow)
   }
 
   /** Reads again where the desk's day moved past the one shown, starting the day's rows afresh. */
@@ -215,7 +229,7 @@ export function createPanelStore(now: () => Date = () => new Date()) {
     clearTimeout(noticeTimer)
   }
 
-  return { state, load, syncDay, click, answer, steady, stop, now }
+  return { state, load, open, syncDay, click, answer, steady, stop, now }
 }
 
 function endedText(pick: ShownPick): string {

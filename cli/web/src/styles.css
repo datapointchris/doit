@@ -241,11 +241,6 @@ button:disabled {
   font-weight: 700;
 }
 
-.hero .sub {
-  color: var(--text-muted);
-  font-size: 0.95rem;
-}
-
 .choices {
   display: flex;
   flex-direction: column;
@@ -657,21 +652,31 @@ button:disabled {
   flex: none;
 }
 
-.prow .pwhat {
-  flex: 1;
-  min-width: 0;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .prow .pnote {
   flex: none;
+  margin-left: auto;
   font-size: 0.8rem;
   color: var(--late);
   white-space: nowrap;
+}
+
+.prow .pchoices {
+  list-style: none;
+  margin: 0.25rem 0 0 0.4rem;
+  padding: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.prow .pchoices li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0.1rem 0;
+}
+
+.prow .pchoices .by {
+  color: var(--text-faint);
 }
 
 .prow .pact {
@@ -801,6 +806,20 @@ button:disabled {
   margin: -0.2rem 0 0.6rem;
 }
 
-.prow .pwhat.plain {
+.prow .ptext {
   color: var(--text);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

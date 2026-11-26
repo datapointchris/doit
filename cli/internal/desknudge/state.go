@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 )
 
@@ -46,9 +47,22 @@ const (
 // holdsNudge is whether a nudge is in hand, which beginFiring starts and endReady ends.
 func (p Phase) holdsNudge() bool { return p == Firing || p == Ready }
 
+// countsTowardNudge is whether the clock is counting toward a nudge, with none in hand and none paused.
+func (p Phase) countsTowardNudge() bool { return p == Counting || p == NoDesk }
+
 // The answers a person gives a nudge. Timing and bother are separate axes, and
 // the service decides what each does to the interval.
-var answerValues = []string{"good_timing", "too_soon", "too_late", "bothered"}
+const (
+	answerGoodTiming = "good_timing"
+	answerTooSoon    = "too_soon"
+	answerTooLate    = "too_late"
+	answerBothered   = "bothered"
+)
+
+var answerValues = []string{answerGoodTiming, answerTooSoon, answerTooLate, answerBothered}
+
+// timingAnswers are the timing axis. A nudge holds one of them, so a second replaces the first.
+var timingAnswers = []string{answerGoodTiming, answerTooSoon, answerTooLate}
 
 // State is the state file, $XDG_STATE_HOME/doit/desk-nudge.json.
 type State struct {
@@ -167,10 +181,13 @@ type QueuedAnswer struct {
 	Late bool      `json:"late"`
 }
 
-// RecentNudge is a nudge that ended lately, which a late answer can still name.
+// RecentNudge is a nudge that ended lately, which a late answer can still
+// name, with the timing answer this desk gave it.
 type RecentNudge struct {
 	NudgeID string `json:"nudge_id"`
 	FiredAt string `json:"fired_at"`
+	// Timing is its answer on the timing axis, empty where this desk gave none.
+	Timing string `json:"timing,omitempty"`
 }
 
 // PanelState holds each panel key picked, with when its completion ended. A
@@ -272,11 +289,56 @@ func (s *State) endReady() *Nudge {
 	s.Nudge = nil
 	s.CountedSeconds = 0
 	s.Phase = Counting
-	s.RecentNudges = append(s.RecentNudges, RecentNudge{nudge.NudgeID, nudge.FiredAt})
+	s.remember(nudge.NudgeID, nudge.FiredAt)
+	return nudge
+}
+
+// remember keeps an ended nudge among the recent ones, which a late answer can name.
+func (s *State) remember(nudgeID, firedAt string) {
+	s.RecentNudges = append(s.RecentNudges, RecentNudge{NudgeID: nudgeID, FiredAt: firedAt})
 	if extra := len(s.RecentNudges) - rememberedNudges; extra > 0 {
 		s.RecentNudges = s.RecentNudges[extra:]
 	}
-	return nudge
+}
+
+// callEarly ends the count where it stands, as a nudge that the person called
+// before the interval came round, and restarts the clock at zero. A person
+// ready before the nudge found it late, so too late is the one answer it takes.
+func (s *State) callEarly(now time.Time, nudgeID string) Nudge {
+	called := Nudge{
+		NudgeID:         nudgeID,
+		FiredAt:         stamp(now),
+		CountedMinutes:  rounded(s.CountedSeconds/60, 2),
+		IntervalMinutes: s.IntervalMinutes,
+	}
+	s.CountedSeconds = 0
+	s.remember(called.NudgeID, called.FiredAt)
+	return called
+}
+
+// newestNudge is the id of the desk's newest nudge: the one in hand, else the newest that ended. Empty where none is remembered.
+func (s *State) newestNudge() string {
+	if nudge := s.inHand(); nudge != nil {
+		return nudge.NudgeID
+	}
+	if len(s.RecentNudges) == 0 {
+		return ""
+	}
+	return s.RecentNudges[len(s.RecentNudges)-1].NudgeID
+}
+
+// changeable is the newest ended nudge while its timing answer is open to
+// change: no nudge is in hand, and the clock has counted less than readyFor
+// since that answer restarted it. Nil otherwise.
+func (s *State) changeable() *RecentNudge {
+	if s.inHand() != nil || len(s.RecentNudges) == 0 || s.CountedSeconds >= readyFor.Seconds() {
+		return nil
+	}
+	newest := s.RecentNudges[len(s.RecentNudges)-1]
+	if newest.Timing == "" {
+		return nil
+	}
+	return &newest
 }
 
 // tick is one tick of the watch: time counted, a ready nudge expired, the desk
@@ -377,25 +439,33 @@ func (s *State) resume(now time.Time) Change {
 var ErrNothingToAnswer = errors.New("nothing to answer")
 
 // taken is an answer taken on the desk: the row the service stores, whether
-// its nudge had already ended, and the nudge it ends.
+// its nudge had already ended, the nudge it ends, and the nudge it called
+// before the interval, where it called one.
 type taken struct {
 	row    AnswerRow
 	late   bool
 	closes *Nudge
+	called *Nudge
 }
 
 // takeAnswer takes an answer to the nudge in hand, or to a nudge that ended
 // lately, which is late and leaves the clock alone. With no id it answers the
-// nudge in hand.
-func (s *State) takeAnswer(now time.Time, answer, nudgeID, machine string) (taken, error) {
+// nudge in hand. With no id and none in hand, too late calls a nudge now under
+// callID, while the clock counts toward one.
+func (s *State) takeAnswer(now time.Time, answer, nudgeID, machine, callID string) (taken, error) {
 	var t taken
 	nudge := s.inHand()
 	switch {
 	case nudge != nil && (nudgeID == "" || nudgeID == nudge.NudgeID):
 		t.row = AnswerRow{NudgeID: nudge.NudgeID, FiredAt: nudge.FiredAt}
 		t.closes = s.endReady()
+	case nudgeID == "" && answer == answerTooLate && s.Phase.countsTowardNudge():
+		called := s.callEarly(now, callID)
+		t.row = AnswerRow{NudgeID: called.NudgeID, FiredAt: called.FiredAt}
+		t.called = &called
 	case nudgeID == "":
-		return t, fmt.Errorf("%w: no nudge is ready, so name one with --nudge", ErrNothingToAnswer)
+		return t, fmt.Errorf("%w: no nudge is ready, and only too_late answers one before it fires, while the clock counts. "+
+			"Name an ended one with --nudge, or --last for the newest", ErrNothingToAnswer)
 	default:
 		found := false
 		for _, recent := range s.RecentNudges {
@@ -409,6 +479,13 @@ func (s *State) takeAnswer(now time.Time, answer, nudgeID, machine string) (take
 		t.late = true
 	}
 	t.row.Answer, t.row.AnsweredAt, t.row.Machine = answer, stamp(now), machine
+	if slices.Contains(timingAnswers, answer) {
+		for i := range s.RecentNudges {
+			if s.RecentNudges[i].NudgeID == t.row.NudgeID {
+				s.RecentNudges[i].Timing = answer
+			}
+		}
+	}
 	return t, nil
 }
 

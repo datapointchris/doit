@@ -1,10 +1,10 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
-import type { HabitRow, Lane, LaneRow, Panel, ShownPick, View } from './panel'
+import type { Clock, HabitRow, Lane, LaneRow, Panel, ShownPick, View } from './panel'
 
 function laneRow(label: string): LaneRow {
-  return { label, text: `what ${label} does`, note: 'never run', urgency: 'overdue', key: `review:${label}` }
+  return { label, text: `what ${label} does`, note: 'never run', urgency: 'overdue', handle: `claude /${label}`, key: `review:${label}` }
 }
 
 function habit(id: number, name: string): HabitRow {
@@ -13,6 +13,13 @@ function habit(id: number, name: string): HabitRow {
 
 function lane(name: string, rows: LaneRow[]): Lane {
   return { name, title: name.toUpperCase(), status: 'ok', reason: null, rows, total: rows.length }
+}
+
+const counting: Clock = {
+  counted_minutes: 12,
+  interval_minutes: 33,
+  early: { answer: 'too_late', label: 'too late', key: 'answer:too_late:' },
+  answered: null,
 }
 
 function invented(): View {
@@ -48,6 +55,7 @@ class FakeWatch {
   posted: string[] = []
   committed: string[] = []
   reads = 0
+  drawnReads = 0
   private serial = 0
   private unread = false
   private held: Promise<void> | null = null
@@ -66,6 +74,7 @@ class FakeWatch {
       stale_reason: this.staleSince ? { error: 'unreachable', detail: 'no answer from the doit service' } : null,
       view: structuredClone(this.view),
       nudge: null,
+      clock: structuredClone(counting),
       picked: [],
       picks: structuredClone(this.listed()),
     }
@@ -94,6 +103,10 @@ class FakeWatch {
       new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
     if (method === 'GET' && path === '/api/panel') {
       this.reads++
+      return json(200, this.panel())
+    }
+    if (method === 'POST' && path === '/api/panel/reads') {
+      this.drawnReads++
       return json(200, this.panel())
     }
     if (method === 'POST' && path === '/api/picks') {
@@ -163,6 +176,17 @@ describe('the panel page against a fake watch', () => {
     expect(page.findAll('.tick.done').map((done) => done.text())).toContain('Brush teeth')
   })
 
+  it('an open reads the view with a draw, offers too late before the nudge, and shows each command', async () => {
+    await open()
+    expect(watch.drawnReads).toBe(1)
+    expect(page.get('.feedback .label').text()).toBe('Nudge in 21m')
+
+    await row('answer:too_late:').trigger('click')
+    await flushPromises()
+    expect(watch.posted).toEqual(['answer:too_late:'])
+    expect(page.get('[data-lane="review"] .command').text()).toBe('claude /prune-images')
+  })
+
   it('a fold shows its count, and a ticked row stays put', async () => {
     await open()
     const fold = page.get('[data-lane="review"] .more.fold')
@@ -191,6 +215,7 @@ describe('the panel page against a fake watch', () => {
       stale_reason: { error: 'login', detail },
       view: null,
       nudge: null,
+      clock: counting,
       picked: [],
       picks: [],
     }))

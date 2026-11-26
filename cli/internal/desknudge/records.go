@@ -12,8 +12,10 @@ const RecordSchemaVersion = 5
 
 // Each moment the nudge records, one line each.
 const (
-	eventStarted  = "started"
-	eventFired    = "fired"
+	eventStarted = "started"
+	eventFired   = "fired"
+	// eventCalled is a nudge that the person called before the interval, by answering too late.
+	eventCalled   = "called"
 	eventAnswered = "answered"
 	eventExpired  = "expired"
 	eventPicked   = "picked"
@@ -94,9 +96,12 @@ func marshalPlain(value any) ([]byte, error) {
 
 // answeredRecord is the answered line. A resend that stores or drops a queued
 // answer carries no snapshot, because its moment has passed.
-func answeredRecord(now time.Time, row AnswerRow, late, saved, queued bool, seen *snapshot) Record {
+func answeredRecord(now time.Time, row AnswerRow, late, saved, queued bool, replaced []string, seen *snapshot) Record {
 	fired, _ := instant(&row.FiredAt)
 	answered, _ := instant(&row.AnsweredAt)
+	if replaced == nil {
+		replaced = []string{}
+	}
 	r := newRecord(eventAnswered, now,
 		"nudge_id", row.NudgeID,
 		"answer", row.Answer,
@@ -104,6 +109,19 @@ func answeredRecord(now time.Time, row AnswerRow, late, saved, queued bool, seen
 		"saved", saved,
 		"queued", queued,
 		"late", late,
+		"replaced", replaced,
+	)
+	seen.addTo(&r)
+	return r
+}
+
+// calledRecord is the called line: a nudge the person called before the
+// interval, with how far the clock had counted toward it.
+func calledRecord(now time.Time, called Nudge, seen *snapshot) Record {
+	r := newRecord(eventCalled, now,
+		"nudge_id", called.NudgeID,
+		"interval_minutes", called.IntervalMinutes,
+		"counted_minutes", called.CountedMinutes,
 	)
 	seen.addTo(&r)
 	return r

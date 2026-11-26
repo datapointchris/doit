@@ -111,6 +111,11 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 	if _, err := f.desk.Resume(); err != nil {
 		t.Fatal(err)
 	}
+	matches(t, compiler, panelSchema, "panel show offering too late before a nudge", f.desk.Show())
+	if _, err := f.desk.Answer(ctx, "too_late", ""); err != nil {
+		t.Fatal(err)
+	}
+	matches(t, compiler, panelSchema, "panel show with an answer open to change", f.desk.Show())
 	f.down.Store(true)
 	if _, err := f.desk.Answer(ctx, "too_soon", f.state().RecentNudges[0].NudgeID); err != nil {
 		t.Fatal(err)
@@ -126,7 +131,7 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 		events = append(events, record.(map[string]any)["event"].(string))
 		matches(t, compiler, "urn:doit:desk-nudge-record:v5", "the events line "+line, record)
 	}
-	for _, event := range []string{eventStarted, eventFired, eventPicked, eventPaused, eventResumed, eventAnswered} {
+	for _, event := range []string{eventStarted, eventFired, eventCalled, eventPicked, eventPaused, eventResumed, eventAnswered} {
 		if !slices.Contains(events, event) {
 			t.Errorf("the events file holds %v, want a %s line among them", events, event)
 		}

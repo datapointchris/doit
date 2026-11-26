@@ -93,6 +93,8 @@ export interface LaneRow {
   text: string
   note: string
   urgency: (typeof URGENCIES)[number]
+  /** What to type to act on the row, such as a review entry's command. Empty where the lane names none. */
+  handle: string
   key: string | null
 }
 
@@ -146,6 +148,17 @@ export interface NudgeAnswer {
   key: string
 }
 
+/**
+ * Where the nudge's clock stands. While no nudge is ready it offers the newest
+ * nudge's timing answer to change, else the too late that calls a nudge now.
+ */
+export interface Clock {
+  counted_minutes: number
+  interval_minutes: number
+  early: NudgeAnswer | null
+  answered: { nudge_id: string; label: string; changes: NudgeAnswer[] } | null
+}
+
 export interface Panel {
   schema_version: number
   read_at: string | null
@@ -153,6 +166,7 @@ export interface Panel {
   stale_reason: { error: string; detail: string } | null
   view: View | null
   nudge: { nudge_id: string; answers: NudgeAnswer[] } | null
+  clock: Clock
   picked: { key: string; at: string }[]
   picks: ShownPick[]
 }

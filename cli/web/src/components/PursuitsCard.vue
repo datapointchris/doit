@@ -2,7 +2,7 @@
   <section class="card list-card">
     <h2 class="card-title">
       Other pursuits
-      <span class="count">{{ rows.length }} overdue</span>
+      <span class="count">{{ overdue }} overdue</span>
     </h2>
     <p
       v-if="part.status === 'unavailable'"
@@ -16,11 +16,6 @@
       :class="{ done: gone }">
       <div class="phead">
         <span class="pname">{{ row.name }}</span>
-        <span
-          class="pwhat"
-          :title="row.description">
-          {{ row.items.length || row.description === row.name ? '' : row.description }}
-        </span>
         <span class="pnote">{{ gone ? 'done today' : row.note }}</span>
         <PickButton
           v-if="row.unit === 'checkoffs' && !row.writes_through"
@@ -48,6 +43,28 @@
           +{{ amount }}
         </PickButton>
       </div>
+      <template v-if="!row.writes_through">
+        <ul
+          v-if="row.items.length"
+          class="pchoices">
+          <li
+            v-for="item in row.items"
+            :key="item.id ?? item.title"
+            :title="item.by ? `${item.title} · ${item.by}` : item.title">
+            {{ item.title }}
+            <span
+              v-if="item.by"
+              class="by">
+              · {{ item.by }}
+            </span>
+          </li>
+        </ul>
+        <p
+          v-else-if="row.items_error"
+          class="failed">
+          {{ row.items_error }}
+        </p>
+      </template>
       <div
         v-else-if="row.writes_through"
         class="pitems">
@@ -84,15 +101,16 @@ const store = usePanelStore()
 const amounts = [15, 30, 60]
 
 const part = computed(() => props.view.pursuits)
-// Every owed pursuit but the one the suggestion card holds.
+// Every pursuit but the one the suggestion card holds, owed ones first as the view orders them, so any can be logged.
 const rows = computed(() =>
   store.steady(
     'pursuits',
-    part.value.rows.filter((row) => row.owed && row.name !== props.view.suggestion?.pursuit),
+    part.value.rows.filter((row) => row.name !== props.view.suggestion?.pursuit),
     (row) => row.name,
     (row) => [row.key, ...row.items.map((item) => item.key)],
   ),
 )
+const overdue = computed(() => rows.value.filter(({ row, gone }) => row.owed && !gone).length)
 
 const itemsOf = (row: PursuitRow) =>
   store.steady(

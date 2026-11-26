@@ -18,7 +18,15 @@ type Answered struct {
 	// interval is the interval the clock fires on after it.
 	interval float64
 	label    string
+	// called is the nudge the answer called before the interval, where it called one.
+	called *Nudge
+	// replaced are the words of the timing answers the service replaced with this one.
+	replaced []string
 }
+
+// NewestNudge is the id of the desk's newest nudge: the one in hand, else the
+// newest that ended. Empty where none is remembered.
+func (d *Desk) NewestNudge() string { return d.Paths.readState().newestNudge() }
 
 // IsAnswer is whether value is an answer a nudge takes.
 func IsAnswer(value string) bool { return slices.Contains(answerValues, value) }
@@ -30,11 +38,19 @@ func Answers() []string { return slices.Clone(answerValues) }
 // desk-nudge answer` and a panel pick both give.
 func (a Answered) Outcome() (int, string) {
 	if a.saved {
-		late := ""
-		if a.late {
-			late = " It answers a nudge that had already ended, so the clock is left alone."
+		replacing := ""
+		for _, label := range a.replaced {
+			replacing += fmt.Sprintf(", replacing %q", label)
 		}
-		return 0, fmt.Sprintf("%q is saved. The interval is %s minutes.%s", a.label, formatMinutes(a.interval), late)
+		after := ""
+		switch {
+		case a.called != nil:
+			after = fmt.Sprintf(" It called the nudge at %s of %s minutes, and the clock starts again.",
+				formatMinutes(a.called.CountedMinutes), formatMinutes(a.called.IntervalMinutes))
+		case a.late:
+			after = " It answers a nudge that had already ended, so the clock is left alone."
+		}
+		return 0, fmt.Sprintf("%q is saved%s. The interval is %s minutes.%s", a.label, replacing, formatMinutes(a.interval), after)
 	}
 	kept := "It was refused, so nothing sends it again."
 	if a.queued {
@@ -69,9 +85,10 @@ func (d *Desk) labelOf(answer string) string {
 func (d *Desk) Answer(ctx context.Context, answer, nudgeID string) (Answered, error) {
 	var took taken
 	var kept *QueuedAnswer
+	callID := service.NewWriteID(d.Now())
 	err := d.Paths.change(func(state *State) error {
 		var takeErr error
-		took, takeErr = state.takeAnswer(d.Now(), answer, nudgeID, d.Machine)
+		took, takeErr = state.takeAnswer(d.Now(), answer, nudgeID, d.Machine, callID)
 		if takeErr != nil {
 			return takeErr
 		}
@@ -91,6 +108,9 @@ func (d *Desk) Answer(ctx context.Context, answer, nudgeID string) (Answered, er
 	if kept == nil {
 		seen = takeSnapshot(ctx)
 	}
+	if took.called != nil {
+		d.Paths.appendRecords(calledRecord(d.Now(), *took.called, seen))
+	}
 	label := d.labelOf(answer)
 	answered, sendErr := d.sendAnswer(ctx, took.row)
 	if sendErr != nil {
@@ -105,14 +125,14 @@ func (d *Desk) Answer(ctx context.Context, answer, nudgeID string) (Answered, er
 			return nil
 		})
 		if kept == nil || ended {
-			d.Paths.appendRecords(answeredRecord(d.Now(), took.row, took.late, false, queued, seen))
+			d.Paths.appendRecords(answeredRecord(d.Now(), took.row, took.late, false, queued, nil, seen))
 		}
 		if queued {
 			notify(ctx, "doit: answer not saved yet", fmt.Sprintf("%q is kept on this desk, and the watch sends it again.", label))
 		} else {
 			notify(ctx, "doit: answer refused", fmt.Sprintf("%q: %v", label, sendErr))
 		}
-		return Answered{row: took.row, late: took.late, queued: queued, failure: sendErr, label: label}, nil
+		return Answered{row: took.row, late: took.late, queued: queued, failure: sendErr, label: label, called: took.called}, nil
 	}
 	ended := false
 	var interval float64
@@ -124,9 +144,13 @@ func (d *Desk) Answer(ctx context.Context, answer, nudgeID string) (Answered, er
 	})
 	// An answer that the service already held has its line from whoever stored it.
 	if ended || (kept == nil && (answered.Added == nil || *answered.Added)) {
-		d.Paths.appendRecords(answeredRecord(d.Now(), took.row, took.late, true, false, seen))
+		d.Paths.appendRecords(answeredRecord(d.Now(), took.row, took.late, true, false, answered.Replaced, seen))
 	}
-	return Answered{row: took.row, late: took.late, saved: true, interval: interval, label: label}, nil
+	var replaced []string
+	for _, value := range answered.Replaced {
+		replaced = append(replaced, d.labelOf(value))
+	}
+	return Answered{row: took.row, late: took.late, saved: true, interval: interval, label: label, called: took.called, replaced: replaced}, nil
 }
 
 // resendQueued sends each queued answer again, in order, until a send fails in
@@ -159,7 +183,7 @@ func (d *Desk) resendQueued(ctx context.Context) {
 		if err != nil {
 			logger.Error(fmt.Sprintf("the service refused a kept %s answer, so it is dropped: %v", entry.Row.Answer, err))
 		}
-		d.Paths.appendRecords(answeredRecord(d.Now(), entry.Row, entry.Late, err == nil, false, nil))
+		d.Paths.appendRecords(answeredRecord(d.Now(), entry.Row, entry.Late, err == nil, false, answered.Replaced, nil))
 	}
 }
 

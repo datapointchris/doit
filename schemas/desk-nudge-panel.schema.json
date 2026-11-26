@@ -18,7 +18,8 @@
     "nudge",
     "picked",
     "minutes",
-    "picks"
+    "picks",
+    "clock"
   ],
   "definitions": {
     "shown_pick": {
@@ -90,6 +91,33 @@
           "description": "When it ended. Null before."
         }
       }
+    },
+    "nudge_answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "answer",
+        "label",
+        "key"
+      ],
+      "properties": {
+        "answer": {
+          "enum": [
+            "good_timing",
+            "too_soon",
+            "too_late",
+            "bothered"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "description": "What `panel pick` takes to give the answer."
+        }
+      },
+      "description": "One answer to a nudge, and the key that picks it."
     }
   },
   "properties": {
@@ -305,30 +333,7 @@
             "answers": {
               "type": "array",
               "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "answer",
-                  "label",
-                  "key"
-                ],
-                "properties": {
-                  "answer": {
-                    "enum": [
-                      "good_timing",
-                      "too_soon",
-                      "too_late",
-                      "bothered"
-                    ]
-                  },
-                  "label": {
-                    "type": "string"
-                  },
-                  "key": {
-                    "type": "string",
-                    "description": "What `panel pick` takes to answer the nudge."
-                  }
-                }
+                "$ref": "#/definitions/nudge_answer"
               }
             }
           }
@@ -387,6 +392,94 @@
           }
         }
       ]
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the nudge's clock stands as the panel was built. While no nudge is ready it offers one of two things: `answered`, the newest nudge's timing answer while it is open to change, else `early`, the too late that calls a nudge now while the clock counts toward one.",
+      "required": [
+        "phase",
+        "counted_minutes",
+        "interval_minutes",
+        "early",
+        "answered"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "counting",
+            "firing",
+            "ready",
+            "paused",
+            "no_desk"
+          ]
+        },
+        "counted_minutes": {
+          "type": "number",
+          "minimum": 0,
+          "description": "What the clock has counted since the last nudge ended."
+        },
+        "interval_minutes": {
+          "type": "number",
+          "description": "What the clock fires at."
+        },
+        "early": {
+          "description": "Too late, keyed to call a nudge now and answer it, because a person ready before the nudge found it late. Null while a nudge is in hand, the clock is paused, or `answered` is open.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/nudge_answer"
+            }
+          ]
+        },
+        "answered": {
+          "description": "The newest nudge's timing answer, open to change until the clock has counted ten minutes since it. Null where it got none, or once that passed.",
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "nudge_id",
+                "fired_at",
+                "answer",
+                "label",
+                "changes"
+              ],
+              "properties": {
+                "nudge_id": {
+                  "type": "string"
+                },
+                "fired_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "answer": {
+                  "enum": [
+                    "good_timing",
+                    "too_soon",
+                    "too_late"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "changes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/nudge_answer"
+                  },
+                  "description": "Each other timing answer, keyed to replace this one on the same nudge."
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   }
 }

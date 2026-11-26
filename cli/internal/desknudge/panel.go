@@ -113,6 +113,29 @@ type Panel struct {
 	Minutes *MinutesStep `json:"minutes"`
 	// Picks are the running picks, and how each one that ended came out, while the panel shows it.
 	Picks []ShownPick `json:"picks"`
+	// Clock is where the nudge's clock stands, and what a person can say of a nudge while none is ready.
+	Clock Clock `json:"clock"`
+}
+
+// Clock is where the nudge's clock stands as the panel is built. While no
+// nudge is ready it offers one of two things. Answered is the newest nudge's
+// timing answer while it is open to change. Otherwise Early calls the nudge now
+// as too late, while the clock counts toward one.
+type Clock struct {
+	Phase           Phase          `json:"phase"`
+	CountedMinutes  float64        `json:"counted_minutes"`
+	IntervalMinutes float64        `json:"interval_minutes"`
+	Early           *NudgeAnswer   `json:"early"`
+	Answered        *AnsweredNudge `json:"answered"`
+}
+
+// AnsweredNudge is a nudge's timing answer, with the answers that change it.
+type AnsweredNudge struct {
+	NudgeID string        `json:"nudge_id"`
+	FiredAt string        `json:"fired_at"`
+	Answer  string        `json:"answer"`
+	Label   string        `json:"label"`
+	Changes []NudgeAnswer `json:"changes"`
 }
 
 // StaleReason is why the latest read of the view failed.
@@ -307,9 +330,9 @@ func (p *Panel) view() View {
 }
 
 // entries are the parts' rows in the order the panel lists them: why the parts
-// are old, the suggestion, then each owed pursuit, habit and lane row that a
-// pick completes. A part that could not be read is named in a note, because a
-// part dropped without a word reads as nothing owed.
+// are old, the suggestion, then each pursuit, owed ones first, and each owed
+// habit and lane row that a pick completes. A part that could not be read is
+// named in a note, because a part dropped without a word reads as nothing owed.
 func (p *Panel) entries() []entry {
 	var found []entry
 	if banner := p.banner(); banner != "" {
@@ -341,15 +364,16 @@ func (p *Panel) entries() []entry {
 			found = append(found, noteEntry(lane.Name+" unavailable — "+reasonOf(lane.Reason)))
 		}
 	}
-	completing := 0
+	// owed counts the rows still owed today, which decide whether nothing is left.
+	// Every pursuit is listed, so one not owed today can still be logged.
+	owed := 0
 	for _, row := range pursuits.Rows {
-		if !row.Owed {
-			continue
-		}
 		if !row.WritesThrough {
 			if row.Key != nil && row.Completes != nil {
 				found = append(found, entry{key: *row.Key, completes: *row.Completes, text: row.Name, group: "pursuits", unit: row.Unit, usual: row.UsualMinutes})
-				completing++
+				if row.Owed {
+					owed++
+				}
 			}
 			continue
 		}
@@ -364,15 +388,17 @@ func (p *Panel) entries() []entry {
 				listed++
 			}
 		}
-		if listed == 0 {
+		if listed == 0 && row.Owed {
 			found = append(found, noteEntry(row.Name+" has no choice to complete"))
 		}
-		completing += listed
+		if row.Owed {
+			owed += listed
+		}
 	}
 	for _, row := range habits.Rows {
 		if !row.Done && row.Key != nil && row.Completes != nil {
 			found = append(found, entry{key: *row.Key, completes: *row.Completes, text: row.Name, group: "habits"})
-			completing++
+			owed++
 		}
 		found = append(found, checklistEntries(row.Name, row.Items)...)
 	}
@@ -384,11 +410,11 @@ func (p *Panel) entries() []entry {
 					text = row.Completes.Ref
 				}
 				found = append(found, entry{key: *row.Key, completes: *row.Completes, text: text, group: lane.Name})
-				completing++
+				owed++
 			}
 		}
 	}
-	if completing == 0 {
+	if owed == 0 {
 		found = append(found, noteEntry(nothingLeft))
 	}
 	return onceEach(found)
@@ -523,7 +549,7 @@ type Row struct {
 }
 
 // todayRows are what today's step draws, in order: the notes, the suggestion,
-// the answers while a nudge is ready, then each row that a pick completes. A
+// the answers that the clock's state offers, then each row that a pick completes. A
 // row whose key a pick holds leaves until the view is read again, unless its
 // pick still commits, so a reader of rows never draws a row just completed as
 // one to pick.
@@ -539,10 +565,19 @@ func (p *Panel) todayRows() []Row {
 		rows = append(rows, rowOf(entries[at], p))
 		at++
 	}
-	if p.Nudge != nil {
+	answerRow := func(key, text string) Row { return Row{Key: &key, Kind: KindAnswer, Text: text, Picks: []ShownPick{}} }
+	switch {
+	case p.Nudge != nil:
 		for _, answer := range p.Nudge.Answers {
-			rows = append(rows, Row{Key: &answer.Key, Kind: KindAnswer, Text: answer.Label, Picks: []ShownPick{}})
+			rows = append(rows, answerRow(answer.Key, answer.Label))
 		}
+	case p.Clock.Answered != nil:
+		for _, change := range p.Clock.Answered.Changes {
+			rows = append(rows, answerRow(change.Key, fmt.Sprintf("change the last nudge's %s to %s", p.Clock.Answered.Label, change.Label)))
+		}
+	case p.Clock.Early != nil:
+		left := max(p.Clock.IntervalMinutes-p.Clock.CountedMinutes, 0)
+		rows = append(rows, answerRow(p.Clock.Early.Key, fmt.Sprintf("%s · ready before the nudge, %s minutes before it fires", p.Clock.Early.Label, formatMinutes(math.Round(left)))))
 	}
 	for _, found := range entries[at:] {
 		if found.action != ActionUntick {
@@ -582,12 +617,8 @@ func rowOf(found entry, p *Panel) Row {
 	return row
 }
 
-// readyNudge is the ready nudge with each answer's key, its labels from the
-// view's answers part. Before any read it labels each answer by its value.
-func readyNudge(state *State, answersRaw json.RawMessage) *ReadyNudge {
-	if state.Phase != Ready || state.Nudge == nil {
-		return nil
-	}
+// answersOf are the view's answers part, or each answer labeled by its value before any read.
+func answersOf(answersRaw json.RawMessage) []answerPart {
 	var answers []answerPart
 	parts(answersRaw, &answers)
 	if len(answers) == 0 {
@@ -595,14 +626,52 @@ func readyNudge(state *State, answersRaw json.RawMessage) *ReadyNudge {
 			answers = append(answers, answerPart{Answer: value, Label: value})
 		}
 	}
+	return answers
+}
+
+// answerKey picks answer for the nudge nudgeID, or for no nudge named, which an early too late is.
+func answerKey(answer, nudgeID string) string {
+	return strings.Join([]string{KindAnswer, answer, nudgeID}, keySeparator)
+}
+
+// readyNudge is the ready nudge with each answer's key, its labels from the view's answers part.
+func readyNudge(state *State, answersRaw json.RawMessage) *ReadyNudge {
+	if state.Phase != Ready || state.Nudge == nil {
+		return nil
+	}
 	ready := &ReadyNudge{NudgeID: state.Nudge.NudgeID, FiredAt: state.Nudge.FiredAt, ReadyUntil: state.Nudge.ReadyUntil}
-	for _, answer := range answers {
-		ready.Answers = append(ready.Answers, NudgeAnswer{
-			Answer: answer.Answer, Label: answer.Label,
-			Key: strings.Join([]string{KindAnswer, answer.Answer, state.Nudge.NudgeID}, keySeparator),
-		})
+	for _, answer := range answersOf(answersRaw) {
+		ready.Answers = append(ready.Answers, NudgeAnswer{Answer: answer.Answer, Label: answer.Label, Key: answerKey(answer.Answer, state.Nudge.NudgeID)})
 	}
 	return ready
+}
+
+// clockOf is where the clock stands, with the newest nudge's timing answer
+// while it is open to change, else the early too late while the clock counts.
+func clockOf(state *State, answersRaw json.RawMessage) Clock {
+	clock := Clock{Phase: state.Phase, CountedMinutes: rounded(state.CountedSeconds/60, 2), IntervalMinutes: state.IntervalMinutes}
+	answers := answersOf(answersRaw)
+	if open := state.changeable(); open != nil {
+		answered := &AnsweredNudge{NudgeID: open.NudgeID, FiredAt: open.FiredAt, Answer: open.Timing, Label: open.Timing, Changes: []NudgeAnswer{}}
+		for _, answer := range answers {
+			switch {
+			case answer.Answer == open.Timing:
+				answered.Label = answer.Label
+			case slices.Contains(timingAnswers, answer.Answer):
+				answered.Changes = append(answered.Changes, NudgeAnswer{Answer: answer.Answer, Label: answer.Label, Key: answerKey(answer.Answer, open.NudgeID)})
+			}
+		}
+		clock.Answered = answered
+		return clock
+	}
+	if state.Phase.countsTowardNudge() {
+		for _, answer := range answers {
+			if answer.Answer == answerTooLate {
+				clock.Early = &NudgeAnswer{Answer: answer.Answer, Label: answer.Label, Key: answerKey(answer.Answer, "")}
+			}
+		}
+	}
+	return clock
 }
 
 // panelFor is today's step or a done step, built over the cached view with what
@@ -618,6 +687,7 @@ func panelFor(cached *Panel, state *State, step string) Panel {
 	built.Message = nil
 	built.Minutes = nil
 	built.Nudge = readyNudge(state, built.view().Answers)
+	built.Clock = clockOf(state, built.view().Answers)
 	built.Picked = state.heldPicks(built.ReadAt)
 	built.Picks = state.shownPicks(built.ReadAt)
 	built.Rows = []Row{}

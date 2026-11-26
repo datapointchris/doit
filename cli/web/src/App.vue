@@ -42,7 +42,8 @@
       class="wide"
       :view="view"
       :picks="panel.picks"
-      :answers="panel.nudge?.answers ?? []" />
+      :answers="panel.nudge?.answers ?? []"
+      :clock="panel.clock" />
     <TodayCard :view="view" />
     <HabitsCard
       :view="view"
@@ -161,7 +162,7 @@ onMounted(() => {
   // A window that never goes hidden fires no visibility change at midnight.
   rollover = setInterval(() => void store.syncDay(), ROLLOVER_POLL_MS)
   ticking = setInterval(() => (clock.value = store.now()), 30_000)
-  void store.load()
+  void store.open()
 })
 
 onUnmounted(() => {

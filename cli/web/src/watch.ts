@@ -37,6 +37,11 @@ export function readPanel(): Promise<Answered<Panel>> {
   return ask<Panel>('GET', '/panel')
 }
 
+/** Has the watch read the view now, with a draw, as an open of the panel asks what is next, and answers the panel. */
+export function readViewNow(): Promise<Answered<Panel>> {
+  return ask<Panel>('POST', '/panel/reads')
+}
+
 /** A pick, which the watch commits at once, answering the done step it leads to or why it did not go through. */
 export function pick(key: string, minutes: number | null): Promise<Answered<{ message: string | null }>> {
   return ask<{ message: string | null }>('POST', '/picks', { key, minutes })

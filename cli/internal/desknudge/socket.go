@@ -112,6 +112,18 @@ func (w *Watch) pageRoutes(notifyDone bool) *http.ServeMux {
 	routes.HandleFunc("GET /panel", func(response http.ResponseWriter, _ *http.Request) {
 		answer(response, http.StatusOK, panelFor(w.desk.Paths.readPanel(), w.desk.Paths.readState(), StepToday))
 	})
+	// An open of the panel asks what is next, so it reads the view with a draw,
+	// as a firing does. A failed read is the panel's stale_reason, so it answers 200 either way.
+	routes.HandleFunc("POST /panel/reads", func(response http.ResponseWriter, request *http.Request) {
+		done := make(chan struct{})
+		w.work.Go(func() {
+			defer close(done)
+			w.markPanelRead(w.desk.Now())
+			_, _ = w.readPanel(context.WithoutCancel(request.Context()), true)
+		})
+		<-done
+		answer(response, http.StatusOK, panelFor(w.desk.Paths.readPanel(), w.desk.Paths.readState(), StepToday))
+	})
 	routes.HandleFunc("POST /picks", func(response http.ResponseWriter, request *http.Request) {
 		var asked pickRequest
 		if err := json.NewDecoder(io.LimitReader(request.Body, 1<<16)).Decode(&asked); err != nil || asked.Key == "" {

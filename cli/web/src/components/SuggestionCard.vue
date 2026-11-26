@@ -11,11 +11,6 @@
     <template v-if="suggestion">
       <h1>{{ suggestion.pursuit }}</h1>
       <div
-        v-if="suggestion.description && !suggestion.choices.length"
-        class="sub">
-        {{ suggestion.description }}
-      </div>
-      <div
         v-if="suggestion.choices.length"
         class="choices">
         <button
@@ -73,14 +68,15 @@
       <template v-if="view.suggestion_reason">— {{ view.suggestion_reason }}</template>
     </p>
     <div
-      v-if="answers.length"
+      v-if="offered"
       class="feedback">
-      <span class="label">Nudge</span>
+      <span class="label">{{ offered.label }}</span>
       <button
-        v-for="answer in answers"
+        v-for="answer in offered.answers"
         :key="answer.key"
         type="button"
         class="answer"
+        :title="offered.title"
         :data-key="answer.key"
         @click="store.answer(answer.key, answer.label)">
         {{ answer.label }}
@@ -91,12 +87,26 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { minutesText, pickOf, type Look, type NudgeAnswer, type ShownPick, type View } from '../panel'
+import { minutesText, pickOf, type Clock, type Look, type NudgeAnswer, type ShownPick, type View } from '../panel'
 import { usePanelStore } from '../store'
 import PickButton from './PickButton.vue'
 
-const props = defineProps<{ view: View; picks: ShownPick[]; answers: NudgeAnswer[] }>()
+const props = defineProps<{ view: View; picks: ShownPick[]; answers: NudgeAnswer[]; clock: Clock }>()
 const store = usePanelStore()
+
+// The ready nudge's answers, else the newest answer to change, else the too late that calls the nudge now.
+const offered = computed(() => {
+  if (props.answers.length) return { label: 'Nudge', answers: props.answers, title: undefined }
+  const { answered, early, interval_minutes, counted_minutes } = props.clock
+  if (answered) return { label: `Answered ${answered.label} · change to`, answers: answered.changes, title: undefined }
+  if (early)
+    return {
+      label: `Nudge in ${minutesText(Math.max(interval_minutes - counted_minutes, 0))}`,
+      answers: [early],
+      title: 'Ready before it fired: calls the nudge now and answers it too late',
+    }
+  return null
+})
 
 /** The fixed amounts a timed pursuit's Log offers as chips, beside its usual one. */
 const amounts = [15, 30, 45, 60]

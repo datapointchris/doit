@@ -83,23 +83,37 @@ func newStatusCommand() *cobra.Command {
 
 func newAnswerCommand() *cobra.Command {
 	var nudgeID string
+	var last bool
 	cmd := &cobra.Command{
 		Use:   "answer <answer>",
 		Short: "Answer a nudge, which ends it and restarts the clock",
 		Long: "Answer a nudge, which ends it and restarts the clock. The answer is one of\n" +
 			fmt.Sprint(desknudge.Answers()) + ".\n\n" +
+			"good_timing, too_soon and too_late say when it came, and a nudge holds one of them. A\n" +
+			"second replaces the first, which the service keeps in its history, so --last changes a\n" +
+			"misclicked answer. bothered is said apart from them.\n\n" +
+			"With no nudge ready, too_late calls one now and answers it: you were ready before it\n" +
+			"fired. It restarts the clock, and every other answer needs --nudge or --last.\n\n" +
 			"Exits 0 once the service stores the answer. Exits 4 where no answer came, and 1 where the\n" +
 			"login or the service failed: the answer is then kept on this desk, and the watch sends it\n" +
 			"again. Exits 1 where the service refuses the answer itself, which keeps nothing. Exits 2\n" +
 			"where there is no nudge to answer.",
 		Example: "  doit desk-nudge answer too_soon              the ready nudge came too soon, so the interval grows\n" +
+			"  doit desk-nudge answer too_late              with none ready, you were ready before it fired\n" +
+			"  doit desk-nudge answer too_late --last        change the newest nudge's answer to too late\n" +
 			"  doit desk-nudge answer bothered --nudge <id>  answer a nudge that has already ended",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !desknudge.IsAnswer(args[0]) {
 				return goclikit.UsageError(fmt.Errorf("%q is not an answer; give one of %v", args[0], desknudge.Answers()))
 			}
-			answered, err := desknudge.ThisDesk(version).Answer(cmd.Context(), args[0], nudgeID)
+			desk := desknudge.ThisDesk(version)
+			if last {
+				if nudgeID = desk.NewestNudge(); nudgeID == "" {
+					return goclikit.UsageError(fmt.Errorf("--last: %w: this desk remembers no nudge", desknudge.ErrNothingToAnswer))
+				}
+			}
+			answered, err := desk.Answer(cmd.Context(), args[0], nudgeID)
 			if errors.Is(err, desknudge.ErrNothingToAnswer) {
 				return goclikit.UsageError(fmt.Errorf("--nudge: %w", err))
 			}
@@ -116,6 +130,8 @@ func newAnswerCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&nudgeID, "nudge", "", "The nudge to answer, where it is not the ready one")
+	cmd.Flags().BoolVar(&last, "last", false, "Answer this desk's newest nudge, to change a misclicked answer")
+	cmd.MarkFlagsMutuallyExclusive("nudge", "last")
 	return cmd
 }
 

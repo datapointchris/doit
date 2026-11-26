@@ -3,6 +3,7 @@ package desknudge
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -311,6 +312,46 @@ func TestStatusPauseResumeAndAnswerWorkWithNoWatchAndPanelShowReadsTheCache(t *t
 	}
 	if _, err := f.desk.Paths.AskPick(ctx, "review:prune-images", nil); !errors.Is(err, ErrNoWatch) {
 		t.Errorf("a pick with no watch answered %v, want %v", err, ErrNoWatch)
+	}
+}
+
+func TestTooLateBeforeTheNudgeCallsOneAndThePanelOffersToChangeItsAnswer(t *testing.T) {
+	f := newFakeDesk(t)
+	ctx := context.Background()
+
+	early := f.desk.Show().Clock.Early
+	if early == nil || early.Key != "answer:too_late:" {
+		t.Fatalf("panel show offered %+v while the clock counts, want too late keyed to call a nudge", early)
+	}
+	answered, err := f.desk.Answer(ctx, "too_late", "")
+	if code, said := answered.Outcome(); err != nil || code != 0 || answered.called == nil || answered.late {
+		t.Fatalf("too late before a nudge came out %d %q, %v; want it to call a nudge and save the answer", code, said, err)
+	}
+	called := answered.called.NudgeID
+	clock := f.desk.Show().Clock
+	if clock.Early != nil || clock.Answered == nil || clock.Answered.NudgeID != called || clock.Answered.Answer != "too_late" ||
+		len(clock.Answered.Changes) != 2 || clock.Answered.Changes[1].Key != "answer:too_soon:"+called {
+		t.Fatalf("panel show's clock is %+v, want the called nudge's too late open to change, and no early answer", clock)
+	}
+
+	if _, err := f.desk.Answer(ctx, "too_soon", f.desk.NewestNudge()); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ := f.posted()
+	if len(rows) != 2 || rows[0].NudgeID != called || rows[1].NudgeID != called || rows[1].Answer != "too_soon" {
+		t.Errorf("the service took %+v, want too late then too soon, both on the called nudge", rows)
+	}
+	if changed := f.desk.Show().Clock.Answered; changed == nil || changed.Answer != "too_soon" {
+		t.Errorf("after the change the panel offers %+v, want too soon open to change", changed)
+	}
+	var events []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(must(os.ReadFile(f.desk.Paths.Records)))), "\n") {
+		var record map[string]any
+		_ = json.Unmarshal([]byte(line), &record)
+		events = append(events, record["event"].(string))
+	}
+	if !slices.Equal(events, []string{eventCalled, eventAnswered, eventAnswered}) {
+		t.Errorf("the events file holds %v, want called, then each answer", events)
 	}
 }
 

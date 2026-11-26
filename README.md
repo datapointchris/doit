@@ -371,6 +371,8 @@ practice:
 doit desk-nudge watch                      # the loop that a desk's user service runs
 doit desk-nudge status                     # where the clock stands, and what the nudge suggests
 doit desk-nudge answer too_soon            # answer the nudge that is showing
+doit desk-nudge answer too_late            # with none showing: you were ready before it fired
+doit desk-nudge answer too_late --last     # change this desk's newest nudge's answer
 doit desk-nudge pause                      # hold the clock until resume
 doit desk-nudge panel open                 # the panel as a page in a window, where a click completes a row
 doit desk-nudge panel show --json          # the panel's rows, read with no request
@@ -393,6 +395,16 @@ by 1.1. The service stores every answer and computes the interval from all of th
 the login to any desk. An answer that the service could store later is kept on the desk, and the
 watch sends it again each tick. One that the service refuses is recorded and dropped.
 
+Too late can come before the nudge does. Answering `too_late` while the clock counts calls a nudge
+at that moment and answers it, and the clock starts again. The panel offers it as `too late · ready
+before the nudge`.
+
+Good timing, too soon and too late say when a nudge came, so a nudge holds one of them. A second
+replaces the first, and the service keeps the replaced answer in the `desk_nudge_answers` history.
+Bothered me is a separate question, so it replaces nothing. For 10 counted minutes after a timing
+answer, the panel offers to change it. `answer <answer> --last` changes the newest nudge's answer at
+any time, and `--nudge <id>` changes any nudge's.
+
 The clock does not watch for input, so stepping away neither pauses nor resets it:
 
 - A tick adds at most 30 seconds, so a suspend or a stopped watch goes uncounted.
@@ -407,7 +419,7 @@ The rest of the file is the watch's own. `status --json` carries the same `pill`
 cannot be read is moved aside, with `.unreadable-` and the time added to its name, and the clock
 starts fresh.
 
-Each firing, answer, pick, expiry, gap, pause and resume appends one JSON line to
+Each firing, early call, answer, pick, expiry, gap, pause and resume appends one JSON line to
 `$XDG_STATE_HOME/doit/desk-nudge-events.jsonl`, which `schemas/desk-nudge-record.schema.json`
 describes. A firing's line carries every row that `claude-sessions --json` prints and the focused
 window that `hyprctl` names, so a later rule can learn when a nudge lands well. The record, status
@@ -425,10 +437,12 @@ watch runs. `watch` exits 1 where another watch already runs. It exits 0 once an
 
 `doit tui` draws the rows that `panel show` reads, and hands the picked row's key to the watch as
 `panel pick` does. The service computes every part of the panel, and the watch builds every completion, so the
-screen holds no rule. The suggestion comes first, then the four answers while a nudge is ready, then
-every row of `doit today` that something completes, in each lane's own order:
+screen holds no rule. The suggestion comes first. The four answers follow while a nudge is ready.
+After a timing answer, the change to it follows instead, and otherwise too late. Then come every
+pursuit and every row of `doit today` that something completes, in each lane's own order:
 
-- **A pursuit** is logged to the service's journal, as `doit pursuits log` logs it. Its `on_log`
+- **A pursuit** is listed whether or not it is owed today, owed ones first, so any can be logged.
+  It is logged to the service's journal, as `doit pursuits log` logs it. Its `on_log`
   runs unasked, because the pick is the asking. The template is split into arguments before the
   item's fields are put in, so a label holding a quote or a space stays one argument. A pursuit
   whose `on_log` completes one of its choices lists each choice as its own row, such as
@@ -449,9 +463,9 @@ every row of `doit today` that something completes, in each lane's own order:
 - **`upcoming` is left out**, because nothing completes a trip or a countdown.
 
 The watch reads the service's desk panel view into `$XDG_CACHE_HOME/doit/desk-nudge-panel.json`,
-so the panel opens with no request. It reads the view at each firing, after each pick, and every
-`panelReadEvery` in `cli/internal/desknudge/watch.go`. Only the reads at a firing and after a pick
-draw. The timed read leaves the standing draw
+so the panel opens with no request. It reads the view at each firing, after each pick, when the
+panel page opens, and every `panelReadEvery` in `cli/internal/desknudge/watch.go`. All but the timed
+read draw, so the page opens on a suggestion even before a nudge fires. The timed read leaves the standing draw
 alone, and counts nothing as offered. That read waits while logind marks the session idle, as
 hypridle's 10-minute listener sets it, and the first tick back reads the view. The cache holds what
 each row completes, never a command. The draw after a pick leaves out what was just logged, so the
@@ -517,12 +531,14 @@ A restarted watch listens on a new port and admits no earlier cookie. So a windo
 restart can reach nothing, and says so: Esc closes it, and the next `panel open` starts a fresh one.
 
 The page draws the suggestion first. Its Log button starts from the pursuit's usual minutes, and
-chips offer a few fixed amounts. Beside it are today's figures, the habits with a circle per set,
-the pursuits owed, and each lane. A click commits at once, and a row ticked done stays in its
+chips offer a few fixed amounts. Beside it are today's figures and the habits with a circle per set.
+Every other pursuit follows, owed ones first, each with the choices from its `resolve`. Then
+comes each lane, with a review or practice row's command under its text. A click commits at once, and a row ticked done stays in its
 place for the rest of the day. A lane that failed draws its reason, and rows read before the service stopped answering are marked stale. A
 watch that has not read the view yet shows why, such as a desk with no login, and the page asks
-again every few seconds. The page reads the panel again whenever its window shows, and starts
-afresh when the desk's day changes. Every control takes Tab and Space.
+again every few seconds. On opening, the page asks the watch to read the view with a draw through
+`POST /api/panel/reads`. It reads the panel again whenever its window shows, and starts afresh when
+the desk's day changes. Every control takes Tab and Space.
 
 The page is Vue, in `cli/web`. `npm run build` there writes it into
 `cli/internal/panelpage/dist/`, which the binary embeds. A checkout holds only a placeholder page
@@ -536,7 +552,7 @@ A click on the panel page posts its key to `POST /api/picks`, the route that `pa
 the answer says how the pick ended. The watch runs the pick under a context that the request cannot
 cancel, so a window that closes on blur mid-pick still lets the pick finish.
 
-The panel takes back only a set, by its untick. A misclicked habit is taken back on life's own
+The panel takes back a set by its untick, and changes a timing answer by offering the others. A misclicked habit is taken back on life's own
 page, and a review entry with `doit review undo`. A pursuit log stays in the journal.
 
 `POST /picks` takes `{"key": "habit:17", "minutes": null}`. It answers the step the pick leads to,

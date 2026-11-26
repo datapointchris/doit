@@ -116,6 +116,8 @@ func (d *Desk) readInterval(ctx context.Context) (Interval, error) {
 type storedAnswer struct {
 	Interval
 	Added *bool `json:"added,omitempty"`
+	// Replaced are the nudge's other timing answers, which the service moved to its history for this one.
+	Replaced []string `json:"replaced,omitempty"`
 }
 
 // sendAnswer stores one answer. It is repeatable, because the service stores a

@@ -24,6 +24,7 @@
           v-if="row.key"
           :label="row.label.replaceAll('-', ' ')"
           :sub="row.text"
+          :command="row.handle"
           :note="row.note"
           :note-late="row.urgency === 'overdue'"
           :pick-key="row.key"
@@ -34,7 +35,12 @@
           v-else
           class="prow"
           :title="row.text">
-          <div class="pwhat plain">{{ row.text || row.label }}</div>
+          <div class="ptext">{{ row.text || row.label }}</div>
+          <code
+            v-if="row.handle"
+            class="command">
+            {{ row.handle }}
+          </code>
           <div class="pnote">{{ row.note }}</div>
         </div>
       </div>

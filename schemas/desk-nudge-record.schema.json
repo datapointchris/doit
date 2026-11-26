@@ -20,6 +20,7 @@
       "enum": [
         "started",
         "fired",
+        "called",
         "answered",
         "expired",
         "picked",
@@ -215,6 +216,17 @@
       "type": "boolean",
       "description": "Whether its nudge had already ended, which leaves the clock alone."
     },
+    "replaced": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "good_timing",
+          "too_soon",
+          "too_late"
+        ]
+      },
+      "description": "The nudge's other timing answers, which the service moved to its history for this one, because a nudge holds one timing answer. Empty where it held none."
+    },
     "pick": {
       "type": "object",
       "additionalProperties": false,
@@ -318,6 +330,24 @@
           "interval_minutes",
           "counted_minutes",
           "suggestion",
+          "sessions",
+          "focused_window"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event": {
+            "const": "called"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "nudge_id",
+          "interval_minutes",
+          "counted_minutes",
           "sessions",
           "focused_window"
         ]
