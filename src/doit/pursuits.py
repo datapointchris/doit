@@ -198,7 +198,9 @@ TEMPLATE = """\
 #
 #   choices_shown  optional; how many choices to show where three is not the
 #                  number, such as 5 for the top of a task list. A limit in the
-#                  read's query still decides how many the app answers
+#                  read's query still decides how many the app answers. It
+#                  also lists the choices under the pursuit on the desk panel,
+#                  which otherwise lists only a pursuit whose log completes one
 #
 # No rows is shown in red, as `<app>: matched nothing` followed by the
 # description. Either the read has drifted from its app or there is nothing to

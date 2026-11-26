@@ -146,13 +146,24 @@ def listed_pursuits(day: today.Day) -> list[str]:
     return list(dict.fromkeys([*owed, *counted]))
 
 
+def lists_choices(config: dict) -> bool:
+    """Whether the panel lists a pursuit's choices under it.
+
+    A pursuit that writes through lists them, because a pick of one completes
+    it. Any other lists them only where it declares `choices_shown`, such as a
+    course whose next chapters say what a sitting would be on. A resolve kept
+    only to place `doit next`'s row lists nothing.
+    """
+    return writes_through(config) or bool(config.get('resolve') and config.get('choices_shown'))
+
+
 def item_pursuits(day: today.Day, register: dict) -> list[str]:
-    """The listed pursuits whose choices are read, because a log of one completes the choice it names."""
-    return [name for name in listed_pursuits(day) if writes_through(register.get(name) or {})]
+    """The listed pursuits whose choices are read, because the panel lists them."""
+    return [name for name in listed_pursuits(day) if lists_choices(register.get(name) or {})]
 
 
 def pursuits_part(day: today.Day, register: dict, usual: dict, days: dict[str, dict], items: dict[str, dict]) -> dict:
-    """Each pursuit in its own unit, owed ones first: what today asks of it, what is behind, and the choices that its log completes."""
+    """Each pursuit in its own unit, owed ones first: what today asks of it, what is behind, and the choices the panel lists."""
     lane = due_lane(day, lanes.PURSUITS)
     if lane is not None and not lane.available:
         return {'status': 'unavailable', 'reason': lane.reason or None, 'rows': []}
@@ -161,7 +172,7 @@ def pursuits_part(day: today.Day, register: dict, usual: dict, days: dict[str, d
     for name in listed_pursuits(day):
         config = register.get(name) or {}
         through = writes_through(config)
-        choices, choices_error = choices_of(name, config, items.get(name)) if through else ([], None)
+        choices, choices_error = choices_of(name, config, items.get(name)) if lists_choices(config) else ([], None)
         rows.append(
             {
                 'name': name,

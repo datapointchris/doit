@@ -43,8 +43,30 @@
           +{{ amount }}
         </PickButton>
       </div>
+      <template v-if="!row.writes_through">
+        <ul
+          v-if="row.items.length"
+          class="pchoices">
+          <li
+            v-for="item in row.items"
+            :key="item.id ?? item.title"
+            :title="item.by ? `${item.title} · ${item.by}` : item.title">
+            {{ item.title }}
+            <span
+              v-if="item.by"
+              class="by">
+              · {{ item.by }}
+            </span>
+          </li>
+        </ul>
+        <p
+          v-else-if="row.items_error"
+          class="failed">
+          {{ row.items_error }}
+        </p>
+      </template>
       <div
-        v-if="row.writes_through"
+        v-else
         class="pitems">
         <p
           v-if="row.items_error"

@@ -532,8 +532,9 @@ restart can reach nothing, and says so: Esc closes it, and the next `panel open`
 
 The page draws the suggestion first. Its Log button starts from the pursuit's usual minutes, and
 chips offer a few fixed amounts. Beside it are today's figures and the habits with a circle per set.
-Every other pursuit follows, owed ones first. Only a pursuit whose log completes a choice, such as
-tasks, lists its choices, because only those can be picked. Then
+Every other pursuit follows, owed ones first. A pursuit whose log completes a choice, such as
+tasks, lists its choices to pick. One that declares `choices_shown`, such as a course, lists them
+as text, saying what a sitting would be on. Then
 comes each lane, with a review or practice row's command under its text. A click commits at once, and a row ticked done stays in its
 place for the rest of the day. A lane that failed draws its reason, and rows read before the service stopped answering are marked stale. A
 watch that has not read the view yet shows why, such as a desk with no login, and the page asks
