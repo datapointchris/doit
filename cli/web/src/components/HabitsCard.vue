@@ -40,7 +40,6 @@
           :aria-expanded="isOpen(row)"
           :aria-label="`${row.name}'s sets`"
           @click="toggle(row)">
-          <span class="sets-total">{{ setsDone(row) }} of {{ setsTarget(row) }} sets</span>
           <span class="chev">▸</span>
         </button>
       </div>
@@ -60,7 +59,7 @@
 
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
-import { pickOf, setsCounted, type HabitRow, type Panel, type ShownPick, type View } from '../panel'
+import { pickOf, type HabitRow, type Panel, type ShownPick, type View } from '../panel'
 import { usePanelStore } from '../store'
 import SetCircles from './SetCircles.vue'
 import TickRow from './TickRow.vue'
@@ -77,8 +76,6 @@ const lists = computed(() => placed.value.filter(({ row }) => row.items.length >
 const doneCount = computed(() => part.value.rows.filter((row) => row.done).length)
 
 const held = (key: string | null) => key !== null && props.picked.some((pick) => pick.key === key)
-const setsDone = (row: HabitRow) => row.items.reduce((sum, item) => sum + Math.min(setsCounted(item, props.picks), item.target), 0)
-const setsTarget = (row: HabitRow) => row.items.reduce((sum, item) => sum + item.target, 0)
 
 // Each checklist's sets start open, so a set takes one click.
 const closed = reactive(new Set<string>())

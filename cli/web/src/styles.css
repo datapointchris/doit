@@ -560,13 +560,6 @@ button:disabled {
   flex: 1;
 }
 
-.sets-total {
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
 .sets {
   padding: 0.2rem 0.7rem 0.5rem 2.8rem;
   display: flex;
