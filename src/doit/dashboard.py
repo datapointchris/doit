@@ -804,7 +804,7 @@ def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
 
 
 def waiting_note(item: dict) -> str:
-    """The quality gate's guess where it fell below the floor, as `personal 0.58`, else why the item waits."""
+    """The quality gate's guess where it held the item in review, as `fleet 0.92`, else why the item waits."""
     guess = item.get('guess')
     if item.get('reason') == 'below-floor' and isinstance(guess, dict):
         return f'{guess.get("side", "")} {float(guess.get("confidence") or 0):.2f}'
