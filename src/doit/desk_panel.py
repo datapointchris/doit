@@ -146,13 +146,17 @@ def listed_pursuits(day: today.Day) -> list[str]:
     return list(dict.fromkeys([*owed, *counted]))
 
 
-def item_pursuits(day: today.Day, register: dict) -> list[str]:
-    """The listed pursuits whose choices are read, because a log of one completes the choice it names."""
-    return [name for name in listed_pursuits(day) if writes_through(register.get(name) or {})]
+def resolved_pursuits(day: today.Day, register: dict) -> list[str]:
+    """The listed pursuits that declare a resolve, whose choices the panel shows under each.
+
+    A choice of one that writes through is what its log completes. A choice of
+    any other, such as the next chapter of a course, says what a sitting would be on.
+    """
+    return [name for name in listed_pursuits(day) if (register.get(name) or {}).get('resolve')]
 
 
 def pursuits_part(day: today.Day, register: dict, usual: dict, days: dict[str, dict], items: dict[str, dict]) -> dict:
-    """Each pursuit in its own unit, owed ones first: what today asks of it, what is behind, and the choices that its log completes."""
+    """Each pursuit in its own unit, owed ones first: what today asks of it, what is behind, and its choices where it declares a resolve."""
     lane = due_lane(day, lanes.PURSUITS)
     if lane is not None and not lane.available:
         return {'status': 'unavailable', 'reason': lane.reason or None, 'rows': []}
@@ -161,7 +165,7 @@ def pursuits_part(day: today.Day, register: dict, usual: dict, days: dict[str, d
     for name in listed_pursuits(day):
         config = register.get(name) or {}
         through = writes_through(config)
-        choices, choices_error = choices_of(name, config, items.get(name)) if through else ([], None)
+        choices, choices_error = choices_of(name, config, items.get(name))
         rows.append(
             {
                 'name': name,
