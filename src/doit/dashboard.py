@@ -804,11 +804,16 @@ def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
 
 
 def waiting_note(item: dict) -> str:
-    """The quality gate's guess wherever ingestion gives one, under any reason, as `personal 0.58`, else why the item waits."""
+    """The quality gate's guess wherever ingestion gives one, as `personal 0.58`, else why the item waits.
+
+    A guess under `gate-would-drop` keeps that reason before it, as `gate-would-drop · personal 0.40`.
+    """
+    reason = str(item.get('reason') or '')
     guess = item.get('guess')
-    if isinstance(guess, dict):
-        return f'{guess.get("side", "")} {float(guess.get("confidence") or 0):.2f}'
-    return str(item.get('reason') or '')
+    if not isinstance(guess, dict):
+        return reason
+    shown = f'{guess.get("side", "")} {float(guess.get("confidence") or 0):.2f}'
+    return f'{reason} · {shown}' if reason == 'gate-would-drop' else shown
 
 
 def nomad_adapter(result: sources.Result) -> list[LaneView]:

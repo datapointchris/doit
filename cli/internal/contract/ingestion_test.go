@@ -17,14 +17,18 @@ import (
 // schemas/review-list.schema.json describes it. The first item waits for a
 // person to sort it, with the guess beside it. The second key holds the / and
 // # that a path segment has to carry escaped, and has no guess, so the lane
-// shows why it waits instead.
+// shows why it waits instead. The quality gate would drop the third, so the
+// lane names that reason beside its guess.
 const reviewQueue = `{"schema_version": 1, "items": [
   {"key": "reddit/t3_1h9xk2", "zone": "outside", "title": "r/productivity: Anyone read Deep Work by Cal Newport?",
    "url": "https://www.reddit.com/r/productivity/comments/1h9xk2/", "reason": "person-sorts",
    "guess": {"side": "personal", "confidence": 0.58}, "connectors": ["reddit-exports"], "waiting_since_ts": "2026-11-20T21:44:00Z"},
   {"key": "memo/7c41e09a2b3d55f1#2", "zone": "owner", "title": "voice 18:02, topic 2 of 3", "url": null,
    "reason": "no-guess", "guess": null, "connectors": ["phone"],
-   "waiting_since_ts": "2026-11-22T18:02:00Z"}
+   "waiting_since_ts": "2026-11-22T18:02:00Z"},
+  {"key": "reddit/t3_1hb04q", "zone": "outside", "title": "r/productivity: Weekly wins thread", "url": null,
+   "reason": "gate-would-drop", "guess": {"side": "personal", "confidence": 0.4}, "connectors": ["reddit-exports"],
+   "waiting_since_ts": "2026-11-23T09:10:00Z"}
 ]}`
 
 // decided is one placement or drop the ingestion stand-in was sent.
@@ -115,14 +119,15 @@ func TestIngestionReviewLaneListsItemsAndPlacesThemThroughIngestion(t *testing.T
 	served.writeText(t, "sources", "sources:\n  ingestion-review:\n    adapter: ingestion-review\n")
 	on := newDesk(t, served.url)
 
-	t.Run("each row shows the guess whatever the reason, else the reason, and a child's key quoted for zsh's extendedglob", func(t *testing.T) {
+	t.Run("each row shows the guess, led by gate-would-drop where the gate would drop it, else the reason, and a child's key quoted for zsh's extendedglob", func(t *testing.T) {
 		lane := laneRead(t, on)
 		want := []laneRow{
 			{Label: "outside", Note: "personal 0.58", Handle: "reddit/t3_1h9xk2"},
 			{Label: "owner", Note: "no-guess", Handle: "'memo/7c41e09a2b3d55f1#2'"},
+			{Label: "outside", Note: "gate-would-drop · personal 0.40", Handle: "reddit/t3_1hb04q"},
 		}
-		if lane.Total != 2 || !slices.Equal(lane.Rows, want) {
-			t.Errorf("the lane read %+v, wanting total 2 and rows %+v", lane, want)
+		if lane.Total != 3 || !slices.Equal(lane.Rows, want) {
+			t.Errorf("the lane read %+v, wanting total 3 and rows %+v", lane, want)
 		}
 	})
 
