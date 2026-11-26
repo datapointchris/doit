@@ -762,8 +762,8 @@ def meso_feedback_adapter(result: sources.Result) -> list[LaneView]:
 def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
     """The items that wait in ingestion on a person's placement, the longest waiting first as ingestion lists them.
 
-    A row is the item's zone, its title, and the quality gate's guess where it
-    fell below the floor, else why the item waits. Its handle is the item's
+    A row is the item's zone, its title, and the quality gate's guess wherever
+    ingestion gives one, else why the item waits. Its handle is the item's
     key, which `doit ingestion items place` and `drop` take. A child's key
     ends in `#<n>`, which zsh's extendedglob reads as a pattern, so the handle
     is quoted for the shell.
@@ -804,9 +804,9 @@ def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
 
 
 def waiting_note(item: dict) -> str:
-    """The quality gate's guess where it held the item in review, as `fleet 0.92`, else why the item waits."""
+    """The quality gate's guess wherever ingestion gives one, under any reason, as `personal 0.58`, else why the item waits."""
     guess = item.get('guess')
-    if item.get('reason') == 'below-floor' and isinstance(guess, dict):
+    if isinstance(guess, dict):
         return f'{guess.get("side", "")} {float(guess.get("confidence") or 0):.2f}'
     return str(item.get('reason') or '')
 

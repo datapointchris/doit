@@ -249,8 +249,8 @@ usually more. `doit review due` is that lane at full depth.
 
 The INGESTION-REVIEW lane lists each item that ingestion holds for you to place, the longest
 waiting first. A row shows the item's zone and title. Its note is the quality gate's side guess
-where that guess held the item in review, and otherwise why the item waits. Its handle is the item's key,
-which both verbs take:
+wherever ingestion gives one, whatever the reason the item waits, and otherwise that reason. Its
+handle is the item's key, which both verbs take:
 
 ```bash
 doit ingestion items place reddit/t3_1h9xk2 life-articles --cause subreddit

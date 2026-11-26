@@ -14,15 +14,16 @@ import (
 )
 
 // reviewQueue answers GET /api/v1/review as ingestion's
-// schemas/review-list.schema.json describes it. The second key holds the / and
-// # that a path segment has to carry escaped, and its guess cleared the floor,
-// so the lane shows why it waits instead.
+// schemas/review-list.schema.json describes it. The first item waits for a
+// person to sort it, with the guess beside it. The second key holds the / and
+// # that a path segment has to carry escaped, and has no guess, so the lane
+// shows why it waits instead.
 const reviewQueue = `{"schema_version": 1, "items": [
   {"key": "reddit/t3_1h9xk2", "zone": "outside", "title": "r/productivity: Anyone read Deep Work by Cal Newport?",
-   "url": "https://www.reddit.com/r/productivity/comments/1h9xk2/", "reason": "below-floor",
+   "url": "https://www.reddit.com/r/productivity/comments/1h9xk2/", "reason": "person-sorts",
    "guess": {"side": "personal", "confidence": 0.58}, "connectors": ["reddit-exports"], "waiting_since_ts": "2026-11-20T21:44:00Z"},
   {"key": "memo/7c41e09a2b3d55f1#2", "zone": "owner", "title": "voice 18:02, topic 2 of 3", "url": null,
-   "reason": "tags-disagree", "guess": {"side": "fleet", "confidence": 0.86}, "connectors": ["phone"],
+   "reason": "no-guess", "guess": null, "connectors": ["phone"],
    "waiting_since_ts": "2026-11-22T18:02:00Z"}
 ]}`
 
@@ -114,11 +115,11 @@ func TestIngestionReviewLaneListsItemsAndPlacesThemThroughIngestion(t *testing.T
 	served.writeText(t, "sources", "sources:\n  ingestion-review:\n    adapter: ingestion-review\n")
 	on := newDesk(t, served.url)
 
-	t.Run("each row shows the guess only below the floor, and a child's key quoted for zsh's extendedglob", func(t *testing.T) {
+	t.Run("each row shows the guess whatever the reason, else the reason, and a child's key quoted for zsh's extendedglob", func(t *testing.T) {
 		lane := laneRead(t, on)
 		want := []laneRow{
 			{Label: "outside", Note: "personal 0.58", Handle: "reddit/t3_1h9xk2"},
-			{Label: "owner", Note: "tags-disagree", Handle: "'memo/7c41e09a2b3d55f1#2'"},
+			{Label: "owner", Note: "no-guess", Handle: "'memo/7c41e09a2b3d55f1#2'"},
 		}
 		if lane.Total != 2 || !slices.Equal(lane.Rows, want) {
 			t.Errorf("the lane read %+v, wanting total 2 and rows %+v", lane, want)
