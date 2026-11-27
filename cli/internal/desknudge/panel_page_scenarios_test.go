@@ -85,6 +85,8 @@ func TestAForeignHostAMissingCookieAReusedCodeAndAnExpiredCodeAreEachRefused(t *
 	if got := pageRequest(t, http.MethodPost, root+"/api/picks", "", cookie, `{"key": "review:prune-images"}`); got.StatusCode != http.StatusOK {
 		t.Errorf("a click with the cookie answered %d, want the pick done", got.StatusCode)
 	}
+	// The pick runs in a goroutine of its own, and still writes under the test's directory.
+	watch.Wait()
 	// The page's row shows a pick that went through, so no notice repeats it.
 	if notices := f.ran("notify-send"); len(notices) != 0 {
 		t.Errorf("notify-send ran %q for a click that went through, want nothing", notices)
