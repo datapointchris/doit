@@ -86,7 +86,7 @@ INGESTION_REVIEW = 'ingestion-review'
 INGESTION_REVIEW_SCHEMA_VERSION = 2
 
 # The reasons a row names before the guess, because the guess alone reads as a side that only waits on a person's yes.
-INGESTION_LEADING_REASONS = ('gate-would-drop', 'note-unclear')
+INGESTION_LEADING_REASONS = ('gate-would-drop', 'note-unclear', 'rule-would-hide')
 
 # How a person decides a waiting item, from the key its row's handle prints.
 INGESTION_PLACE = 'doit ingestion items place <key> <destination>'
@@ -825,14 +825,20 @@ def review_item_text(item: dict) -> str:
 def waiting_note(item: dict) -> str:
     """The quality gate's guess wherever ingestion gives one, as `personal 0.58`, else why the item waits.
 
-    A guess under `gate-would-drop` or `note-unclear` keeps that reason before it, as `note-unclear · personal 0.40`.
+    A guess under a leading reason keeps that reason before it, as `note-unclear · personal 0.40`. A
+    `rule-would-hide` reason names the routing rule that would drop or place the item, as
+    `rule-would-hide quiet-misc · personal 0.58`.
     """
     reason = str(item.get('reason') or '')
+    named = reason
+    rule = item.get('rule')
+    if reason == 'rule-would-hide' and isinstance(rule, dict) and rule.get('name'):
+        named = f'{reason} {rule["name"]}'
     guess = item.get('guess')
     if not isinstance(guess, dict):
-        return reason
+        return named
     shown = f'{guess.get("side", "")} {float(guess.get("confidence") or 0):.2f}'
-    return f'{reason} · {shown}' if reason in INGESTION_LEADING_REASONS else shown
+    return f'{named} · {shown}' if reason in INGESTION_LEADING_REASONS else shown
 
 
 def nomad_adapter(result: sources.Result) -> list[LaneView]:
