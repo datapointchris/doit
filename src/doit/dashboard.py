@@ -83,7 +83,10 @@ MESO_FEEDBACK = 'meso - feedback'
 
 # The lane of items that wait in ingestion on a person's placement, and its adapter.
 INGESTION_REVIEW = 'ingestion-review'
-INGESTION_REVIEW_SCHEMA_VERSION = 1
+INGESTION_REVIEW_SCHEMA_VERSION = 2
+
+# The reasons a row names before the guess, because the guess alone reads as a side that only waits on a person's yes.
+INGESTION_LEADING_REASONS = ('gate-would-drop', 'note-unclear')
 
 # How a person decides a waiting item, from the key its row's handle prints.
 INGESTION_PLACE = 'doit ingestion items place <key> <destination>'
@@ -767,6 +770,10 @@ def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
     key, which `doit ingestion items place` and `drop` take. A child's key
     ends in `#<n>`, which zsh's extendedglob reads as a pattern, so the handle
     is quoted for the shell.
+
+    Where the item holds a note's draft, its title is followed by the draft's
+    summary and idea, labeled as the draft. A model wrote them over the item's
+    text, and a placement with no note takes them. A v1 answer carries no draft.
     """
     title = INGESTION_REVIEW.upper()
     payload = result.payload
@@ -781,7 +788,7 @@ def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
     rows = [
         Row(
             str(item.get('zone') or ''),
-            clean(item.get('title')) or str(item.get('key') or ''),
+            review_item_text(item),
             waiting_note(item),
             handle=shlex.quote(str(item.get('key') or '')),
         )
@@ -803,17 +810,29 @@ def ingestion_review_adapter(result: sources.Result) -> list[LaneView]:
     ]
 
 
+def review_item_text(item: dict) -> str:
+    """The item's title, then its note's draft as `draft: <summary's first sentence> · idea: <idea>` where it holds one."""
+    title = clean(item.get('title')) or str(item.get('key') or '')
+    draft = item.get('note_draft')
+    if not isinstance(draft, dict):
+        return title
+    summary = first_sentence(str(draft.get('summary') or ''))
+    idea = clean(str(draft.get('idea') or ''))
+    shown = ' · '.join(part for part in (summary, f'idea: {idea}' if idea else '') if part)
+    return f'{title} — draft: {shown}' if shown else title
+
+
 def waiting_note(item: dict) -> str:
     """The quality gate's guess wherever ingestion gives one, as `personal 0.58`, else why the item waits.
 
-    A guess under `gate-would-drop` keeps that reason before it, as `gate-would-drop · personal 0.40`.
+    A guess under `gate-would-drop` or `note-unclear` keeps that reason before it, as `note-unclear · personal 0.40`.
     """
     reason = str(item.get('reason') or '')
     guess = item.get('guess')
     if not isinstance(guess, dict):
         return reason
     shown = f'{guess.get("side", "")} {float(guess.get("confidence") or 0):.2f}'
-    return f'{reason} · {shown}' if reason == 'gate-would-drop' else shown
+    return f'{reason} · {shown}' if reason in INGESTION_LEADING_REASONS else shown
 
 
 def nomad_adapter(result: sources.Result) -> list[LaneView]:

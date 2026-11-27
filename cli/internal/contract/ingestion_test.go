@@ -18,8 +18,9 @@ import (
 // person to sort it, with the guess beside it. The second key holds the / and
 // # that a path segment has to carry escaped, and has no guess, so the lane
 // shows why it waits instead. The quality gate would drop the third, so the
-// lane names that reason beside its guess.
-const reviewQueue = `{"schema_version": 1, "items": [
+// lane names that reason beside its guess. The fourth waits on its note, whose
+// draft fell below the floor, so the lane names that reason and the draft.
+const reviewQueue = `{"schema_version": 2, "items": [
   {"key": "reddit/t3_1h9xk2", "zone": "outside", "title": "r/productivity: Anyone read Deep Work by Cal Newport?",
    "url": "https://www.reddit.com/r/productivity/comments/1h9xk2/", "reason": "person-sorts",
    "guess": {"side": "personal", "confidence": 0.58}, "connectors": ["reddit-exports"], "waiting_since_ts": "2026-11-20T21:44:00Z"},
@@ -28,7 +29,13 @@ const reviewQueue = `{"schema_version": 1, "items": [
    "waiting_since_ts": "2026-11-22T18:02:00Z"},
   {"key": "reddit/t3_1hb04q", "zone": "outside", "title": "r/productivity: Weekly wins thread", "url": null,
    "reason": "gate-would-drop", "guess": {"side": "personal", "confidence": 0.4}, "connectors": ["reddit-exports"],
-   "waiting_since_ts": "2026-11-23T09:10:00Z"}
+   "waiting_since_ts": "2026-11-23T09:10:00Z"},
+  {"key": "web/5d0e2b7a91c4", "zone": "outside", "title": "A field guide to slow mornings", "url": null,
+   "reason": "note-unclear", "guess": {"side": "personal", "confidence": 0.71}, "connectors": ["browser"],
+   "note_draft": {"questions": ["Which of its habits fit a morning with a commute?"], "why_saved": "It reads as a routine to try.",
+     "relation": "It bears on no current work.", "summary": "The guide walks through a morning without screens. It then lists five habits.",
+     "idea": "A morning without screens leaves room to plan the day.", "confidence": 0.32},
+   "waiting_since_ts": "2026-11-24T07:30:00Z"}
 ]}`
 
 // decided is one placement or drop the ingestion stand-in was sent.
@@ -119,15 +126,21 @@ func TestIngestionReviewLaneListsItemsAndPlacesThemThroughIngestion(t *testing.T
 	served.writeText(t, "sources", "sources:\n  ingestion-review:\n    adapter: ingestion-review\n")
 	on := newDesk(t, served.url)
 
-	t.Run("each row shows the guess, led by gate-would-drop where the gate would drop it, else the reason, and a child's key quoted for zsh's extendedglob", func(t *testing.T) {
+	t.Run("each row shows the guess, led by gate-would-drop or note-unclear, else the reason, the note's draft after the title, and a child's key quoted for zsh's extendedglob", func(t *testing.T) {
 		lane := laneRead(t, on)
 		want := []laneRow{
-			{Label: "outside", Note: "personal 0.58", Handle: "reddit/t3_1h9xk2"},
-			{Label: "owner", Note: "no-guess", Handle: "'memo/7c41e09a2b3d55f1#2'"},
-			{Label: "outside", Note: "gate-would-drop · personal 0.40", Handle: "reddit/t3_1hb04q"},
+			{Label: "outside", Text: "r/productivity: Anyone read Deep Work by Cal Newport?", Note: "personal 0.58", Handle: "reddit/t3_1h9xk2"},
+			{Label: "owner", Text: "voice 18:02, topic 2 of 3", Note: "no-guess", Handle: "'memo/7c41e09a2b3d55f1#2'"},
+			{Label: "outside", Text: "r/productivity: Weekly wins thread", Note: "gate-would-drop · personal 0.40", Handle: "reddit/t3_1hb04q"},
+			{
+				Label:  "outside",
+				Text:   "A field guide to slow mornings — draft: The guide walks through a morning without screens. · idea: A morning without screens leaves room to plan the day.",
+				Note:   "note-unclear · personal 0.71",
+				Handle: "web/5d0e2b7a91c4",
+			},
 		}
-		if lane.Total != 3 || !slices.Equal(lane.Rows, want) {
-			t.Errorf("the lane read %+v, wanting total 3 and rows %+v", lane, want)
+		if lane.Total != 4 || !slices.Equal(lane.Rows, want) {
+			t.Errorf("the lane read %+v, wanting total 4 and rows %+v", lane, want)
 		}
 	})
 
@@ -163,7 +176,7 @@ func TestIngestionReviewLaneListsItemsAndPlacesThemThroughIngestion(t *testing.T
 	})
 }
 
-type laneRow struct{ Label, Note, Handle string }
+type laneRow struct{ Label, Text, Note, Handle string }
 
 type ingestionLane struct {
 	Status, Reason string

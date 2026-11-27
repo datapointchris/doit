@@ -45,9 +45,10 @@ type ingestionDecisionFlags struct {
 	asJSON      bool
 }
 
-func (f *ingestionDecisionFlags) bind(cmd *cobra.Command) {
+// bind declares the shared flags, with the note's usage the verb gives.
+func (f *ingestionDecisionFlags) bind(cmd *cobra.Command, noteUsage string) {
 	cmd.Flags().StringVar(&f.cause, "cause", "", "Name what decided it, such as subreddit or title")
-	cmd.Flags().StringVar(&f.note, "note", "", "Add a note that ingestion records with the decision")
+	cmd.Flags().StringVar(&f.note, "note", "", noteUsage)
 	cmd.Flags().BoolVar(&f.asJSON, "json", false, "Output ingestion's answer as JSON to stdout")
 }
 
@@ -69,9 +70,13 @@ func newIngestionItemsPlaceCommand() *cobra.Command {
 		Short: "Place an item on a destination, as your decision",
 		Long: "Place an item on a destination, as your decision.\n\n" +
 			"The destination is one that ingestion declares, and a refusal names them.\n" +
+			"--note holds the questions for a read by a model to answer, and why the item was saved.\n" +
+			"With no --note, the placement takes the note's draft that a model wrote for the item.\n" +
+			"--note replaces that draft.\n" +
 			"`ingestion review place --help` says what a placement does to the item.",
 		Example: "  doit ingestion items place reddit/t3_1h9xk2 life-articles\n" +
-			"  doit ingestion items place reddit/t3_1h9xk2 life-articles --cause subreddit",
+			"  doit ingestion items place reddit/t3_1h9xk2 life-articles --cause subreddit\n" +
+			"  doit ingestion items place reddit/t3_1h9xk2 life-articles --note \"what would this change for my mornings?\"",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := service.Open(cmd.Context())
@@ -82,7 +87,7 @@ func newIngestionItemsPlaceCommand() *cobra.Command {
 			return printIngestionDecisions(cmd, raw, answer, flags.asJSON, err)
 		},
 	}
-	flags.bind(cmd)
+	flags.bind(cmd, "Write the item's note yourself, replacing the draft a model wrote")
 	return cmd
 }
 
@@ -104,7 +109,7 @@ func newIngestionItemsDropCommand() *cobra.Command {
 			return printIngestionDecisions(cmd, raw, answer, flags.asJSON, err)
 		},
 	}
-	flags.bind(cmd)
+	flags.bind(cmd, "Add a note that ingestion records with the decision")
 	return cmd
 }
 
