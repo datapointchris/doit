@@ -1,7 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
-import type { Clock, HabitRow, Lane, LaneRow, Panel, ShownPick, View } from './panel'
+import type { Clock, HabitRow, Lane, LaneRow, Panel, PursuitRow, ShownPick, View } from './panel'
 
 function laneRow(label: string): LaneRow {
   return { label, text: `what ${label} does`, note: 'never run', urgency: 'overdue', handle: `claude /${label}`, key: `review:${label}` }
@@ -9,6 +9,21 @@ function laneRow(label: string): LaneRow {
 
 function habit(id: number, name: string): HabitRow {
   return { id, name, done: false, key: `habit:${id}`, items: [] }
+}
+
+const chore: PursuitRow = {
+  name: 'chore',
+  description: '',
+  unit: 'checkoffs',
+  owed: true,
+  note: 'owed 2',
+  need: 1,
+  done: 0,
+  writes_through: false,
+  usual_minutes: null,
+  key: 'pursuit:chore',
+  items: [],
+  items_error: null,
 }
 
 function lane(name: string, rows: LaneRow[]): Lane {
@@ -33,7 +48,7 @@ function invented(): View {
       checklists: [{ name: 'habits', done: 0, total: 3, unavailable: '' }],
       unavailable: '',
     },
-    pursuits: { status: 'ok', reason: null, rows: [] },
+    pursuits: { status: 'ok', reason: null, rows: [structuredClone(chore)] },
     habits: { status: 'ok', reason: null, rows: [habit(1, 'Brush teeth'), habit(3, 'Drink water'), habit(4, 'Stretch')] },
     lanes: [lane('review', ['prune-images', 'check-disks', 'rotate-keys', 'renew-certs', 'read-logs'].map(laneRow))],
     problems: [],
@@ -53,6 +68,7 @@ class FakeWatch {
   staleSince: string | null = null
   picks: ShownPick[] = []
   posted: string[] = []
+  notes: (string | undefined)[] = []
   committed: string[] = []
   reads = 0
   drawnReads = 0
@@ -110,8 +126,9 @@ class FakeWatch {
       return json(200, this.panel())
     }
     if (method === 'POST' && path === '/api/picks') {
-      const { key, minutes } = JSON.parse(String(init?.body)) as { key: string; minutes: number | null }
+      const { key, minutes, note } = JSON.parse(String(init?.body)) as { key: string; minutes: number | null; note?: string }
       this.posted.push(key)
+      this.notes.push(note)
       const pick: ShownPick = {
         id: `pick-${++this.serial}`,
         key,
@@ -185,6 +202,17 @@ describe('the panel page against a fake watch', () => {
     await flushPromises()
     expect(watch.posted).toEqual(['answer:too_late:'])
     expect(page.get('[data-lane="review"] .command').text()).toBe('claude /prune-images')
+  })
+
+  it('a pursuit logs with the note typed beside it, which clears once the log goes through', async () => {
+    await open()
+    const field = page.get('input[aria-label="what the chore log was"]')
+    await field.setValue('  vacuumed the house ')
+    await row('pursuit:chore').trigger('click')
+    await flushPromises()
+    expect(watch.posted).toEqual(['pursuit:chore'])
+    expect(watch.notes).toEqual(['vacuumed the house'])
+    expect((field.element as HTMLInputElement).value).toBe('')
   })
 
   it('a fold shows its count, and a ticked row stays put', async () => {

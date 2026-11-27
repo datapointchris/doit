@@ -77,7 +77,7 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 	matches(t, compiler, "urn:doit:desk-nudge-status:v4", "status under a ready nudge", f.desk.Status())
 
 	ctx := context.Background()
-	minutes, err := watch.Pick(ctx, "pursuit:read", nil, true)
+	minutes, err := watch.Pick(ctx, "pursuit:read", nil, "", true)
 	if err != nil || minutes.Step != StepMinutes || minutes.Minutes == nil ||
 		!slices.ContainsFunc(minutes.Rows, func(row Row) bool {
 			return row.Key != nil && *row.Key == "log_minutes:45:pursuit:read" && row.Suggested
@@ -85,19 +85,21 @@ func TestEachDocumentTheWatchWritesMatchesItsSchemaFile(t *testing.T) {
 		t.Fatalf("picking a timed pursuit answered %+v, %v; want its minutes step offering its usual 45 first", minutes.Rows, err)
 	}
 	matches(t, compiler, panelSchema, "a timed pursuit's minutes step", minutes)
+	notes := map[string]string{"log_minutes:45:pursuit:read": " chapter four "}
 	for _, key := range []string{"log_minutes:45:pursuit:read", "pursuit:tasks:532", "habit:1"} {
-		done, err := watch.Pick(ctx, key, nil, true)
+		done, err := watch.Pick(ctx, key, nil, notes[key], true)
 		if err != nil || done.Step != StepDone {
 			t.Fatalf("picking %s answered %+v, %v; want a done step", key, done, err)
 		}
 		matches(t, compiler, panelSchema, "the done step of "+key, done)
 	}
-	if _, logs := f.posted(); len(logs) != 2 || logs[0]["duration_minutes"] != 45.0 || logs[1]["item"].(map[string]any)["label"] != `File the "receipts" now` {
-		t.Errorf("the journal took %v, want read logged at 45 minutes, then the task naming its item", logs)
+	if _, logs := f.posted(); len(logs) != 2 || logs[0]["duration_minutes"] != 45.0 || logs[0]["note"] != "chapter four" ||
+		logs[1]["item"].(map[string]any)["label"] != `File the "receipts" now` {
+		t.Errorf("the journal took %v, want read logged at 45 minutes with its note, then the task naming its item", logs)
 	}
 
 	f.lifeHolds("tick")
-	go func() { _, _ = watch.Pick(ctx, "tick:1", nil, false) }()
+	go func() { _, _ = watch.Pick(ctx, "tick:1", nil, "", false) }()
 	f.waitFor("the tick running", func() bool { return f.running("tick:1") })
 	matches(t, compiler, panelSchema, "panel show with a pick running", f.desk.Show())
 	f.releaseLife()

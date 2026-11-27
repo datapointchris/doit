@@ -73,7 +73,7 @@ func TestTheNudgeFiresAtTheIntervalChimesOnceAsItTurnsReadyAndAPickNotifies(t *t
 		t.Fatal(err)
 	}
 	defer serving.stop(ctx)
-	step, err := f.desk.Paths.AskPick(ctx, "review:prune-images", nil)
+	step, err := f.desk.Paths.AskPick(ctx, "review:prune-images", nil, "")
 	watch.Wait()
 	if err != nil || step.Step != StepDone || step.Message == nil || !strings.HasPrefix(*step.Message, "prune-images (2026-11-24)") {
 		t.Fatalf("the pick over the socket answered %+v, %v; want a done step marking prune-images done today", step, err)
@@ -310,7 +310,7 @@ func TestStatusPauseResumeAndAnswerWorkWithNoWatchAndPanelShowReadsTheCache(t *t
 	if code, said := answered.Outcome(); err != nil || code != 0 || !answered.saved || !answered.late {
 		t.Errorf("a late answer came out %d %q, %v; want it saved and the clock left alone", code, said, err)
 	}
-	if _, err := f.desk.Paths.AskPick(ctx, "review:prune-images", nil); !errors.Is(err, ErrNoWatch) {
+	if _, err := f.desk.Paths.AskPick(ctx, "review:prune-images", nil, ""); !errors.Is(err, ErrNoWatch) {
 		t.Errorf("a pick with no watch answered %v, want %v", err, ErrNoWatch)
 	}
 }

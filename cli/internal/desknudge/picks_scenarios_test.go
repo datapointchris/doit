@@ -81,7 +81,7 @@ func (f *fakeDesk) picks() []map[string]any {
 
 // picked picks key as the page does, and answers the pick's error once everything it began has ended.
 func (f *fakeDesk) picked(watch *Watch, key string, minutes *int) error {
-	_, err := watch.Pick(context.Background(), key, minutes, false)
+	_, err := watch.Pick(context.Background(), key, minutes, "", false)
 	watch.Wait()
 	return err
 }
@@ -152,7 +152,7 @@ func TestTicksAndUnticksRunInClickOrder(t *testing.T) {
 	watch := f.started()
 	f.lifeHolds("tick")
 	for _, key := range []string{"tick:1", "untick:1", "tick:2"} {
-		go func() { _, _ = watch.Pick(context.Background(), key, nil, false) }()
+		go func() { _, _ = watch.Pick(context.Background(), key, nil, "", false) }()
 		f.waitFor(key+" taking its turn", func() bool { return watch.turns.waiting(key) })
 	}
 	f.releaseLife()
@@ -279,7 +279,7 @@ func TestAnExitWaitsForARunningPickInsideItsDeadline(t *testing.T) {
 	go func() { exited <- watch.Run(ctx) }()
 	f.waitFor("the view read", func() bool { return f.desk.Paths.readPanel() != nil })
 	f.lifeHolds("complete")
-	go func() { _, _ = watch.Pick(context.Background(), "habit:1", nil, false) }()
+	go func() { _, _ = watch.Pick(context.Background(), "habit:1", nil, "", false) }()
 	f.waitFor("habit 1 running", func() bool { return f.running("habit:1") })
 
 	began := time.Now()

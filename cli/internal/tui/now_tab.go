@@ -35,7 +35,7 @@ func (p DeskPanel) Show() desknudge.Panel { return p.Desk.Show() }
 
 // Pick sets no bound of its own, and takes the one AskPick sets.
 func (p DeskPanel) Pick(ctx context.Context, key string) (desknudge.Panel, error) {
-	step, err := p.Desk.Paths.AskPick(ctx, key, nil)
+	step, err := p.Desk.Paths.AskPick(ctx, key, nil, "")
 	if said, _, ok := desknudge.PickFailure(err); ok {
 		return step, errors.New(said)
 	}

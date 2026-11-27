@@ -282,18 +282,22 @@ func newPanelShowCommand() *cobra.Command {
 func newPanelPickCommand() *cobra.Command {
 	var asJSON bool
 	var minutes int
+	var note string
 	cmd := &cobra.Command{
 		Use:   "pick <key>",
 		Short: "Act on one row: answer the nudge, open a timed pursuit's minutes, or complete the row",
 		Long: "Act on one row: answer the nudge, open a timed pursuit's minutes, or complete the row\n" +
 			"through its owner. The watch runs the pick, so it needs the desk nudge watch.\n\n" +
 			"Prints the next step, or a done step once something is completed, and exits 0 for\n" +
-			"either. A timed pursuit opens its minutes, unless --minutes names them. Exits 2 where the\n" +
-			"panel will not act on the key, such as a row picked already, and nothing ran. Exits 1\n" +
-			"where the completion did not go through, and 4 where the service or the watch gave no\n" +
-			"answer. A notification names the error in each case, because a board shows no stderr.",
+			"either. A timed pursuit opens its minutes, unless --minutes names them. --note says what\n" +
+			"a pursuit's log was, as `doit pursuits log` takes one, and is refused on any other pick.\n" +
+			"Exits 2 where the panel will not act on the key, such as a row picked already, and\n" +
+			"nothing ran. Exits 1 where the completion did not go through, and 4 where the service\n" +
+			"or the watch gave no answer. A notification names the error in each case, because a\n" +
+			"board shows no stderr.",
 		Example: "  doit desk-nudge panel pick pursuit:read               open read's minutes, starting on its usual amount\n" +
 			"  doit desk-nudge panel pick pursuit:read --minutes 40  log 40 minutes of read\n" +
+			"  doit desk-nudge panel pick pursuit:chore --note 'vacuumed the house'  log a chore, saying which\n" +
 			"  doit desk-nudge panel pick review:prune-docker --json mark a review entry done, and print the done step as data",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -304,7 +308,7 @@ func newPanelPickCommand() *cobra.Command {
 				}
 				logged = &minutes
 			}
-			step, err := desknudge.DeskPaths().AskPick(cmd.Context(), args[0], logged)
+			step, err := desknudge.DeskPaths().AskPick(cmd.Context(), args[0], logged, note)
 			if said, code, ok := desknudge.PickFailure(err); ok {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "doit desk-nudge panel pick:", said)
 				return exitCode(code)
@@ -321,6 +325,7 @@ func newPanelPickCommand() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the next step as JSON to stdout")
 	cmd.Flags().IntVar(&minutes, "minutes", 0, "Log a timed pursuit's minutes at once, rather than opening its minutes step")
+	cmd.Flags().StringVar(&note, "note", "", "Say what a pursuit's log was, such as which chore")
 	return cmd
 }
 

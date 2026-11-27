@@ -134,6 +134,7 @@ type pickedFields struct {
 	Ref     string  `json:"ref"`
 	ItemID  *string `json:"item_id"`
 	Minutes *int    `json:"minutes"`
+	Note    *string `json:"note"`
 	Action  string  `json:"action"`
 	Outcome string  `json:"outcome"`
 	OK      bool    `json:"ok"`

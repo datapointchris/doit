@@ -44,7 +44,7 @@
           kind="btn-primary"
           :pick-key="logKey"
           :pick="logPick"
-          @pick="logKey && store.click(logKey, timed ? minutes : null)">
+          @pick="log">
           <template #default="{ look }">{{ logText(look) }}</template>
         </PickButton>
         <template v-if="timed">
@@ -59,6 +59,13 @@
             {{ amount }}
           </button>
         </template>
+        <input
+          v-model="note"
+          class="log-note"
+          type="text"
+          placeholder="what was it?"
+          :aria-label="`what the ${suggestion.pursuit} log was`"
+          @keydown.enter="log" />
       </div>
     </template>
     <p
@@ -117,8 +124,10 @@ const suggestion = computed(() => props.view.suggestion)
 const timed = computed(() => suggestion.value?.unit === 'minutes')
 const chosen = ref(0)
 const minutes = ref(UNUSUAL_START)
+/** What the log was, as typed beside Log. */
+const note = ref('')
 
-// A new suggestion starts on the choice its draw settled and on its usual minutes.
+// A new suggestion starts on the choice its draw settled, on its usual minutes, and with no note.
 watch(
   () => suggestion.value?.pursuit,
   () => {
@@ -126,12 +135,17 @@ watch(
     const settled = current?.choices.findIndex((choice) => choice.id !== null && choice.id === current.item_id) ?? -1
     chosen.value = Math.max(settled, 0)
     minutes.value = current?.usual_minutes ? Math.round(current.usual_minutes) : UNUSUAL_START
+    note.value = ''
   },
   { immediate: true },
 )
 
 const logKey = computed(() => suggestion.value?.key ?? suggestion.value?.choices[chosen.value]?.key ?? null)
 const logPick = computed(() => pickOf(props.picks, logKey.value))
+
+async function log() {
+  if (logKey.value && (await store.click(logKey.value, timed.value ? minutes.value : null, note.value))) note.value = ''
+}
 
 const why = computed(() => {
   const current = suggestion.value

@@ -322,14 +322,15 @@ func suggestionFrom(view *View, err error) *Suggestion {
 
 // Pick runs one pick for the socket or the page, and asks for the parts to be
 // read again once it ran. notifyDone is whether a pick that went through is
-// notified, which the page's own row says already.
-func (w *Watch) Pick(ctx context.Context, key string, minutes *int, notifyDone bool) (Panel, error) {
+// notified, which the page's own row says already. note says what a pursuit's
+// log was, and is refused on any other pick.
+func (w *Watch) Pick(ctx context.Context, key string, minutes *int, note string, notifyDone bool) (Panel, error) {
 	var answered Panel
 	var err error
 	done := make(chan struct{})
 	w.work.Go(func() {
 		defer close(done)
-		answered, err = w.pick(ctx, key, minutes, notifyDone)
+		answered, err = w.pick(ctx, key, minutes, note, notifyDone)
 		w.readPanelWhenDue(ctx)
 	})
 	<-done

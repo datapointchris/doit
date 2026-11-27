@@ -38,6 +38,8 @@ import (
 type pickRequest struct {
 	Key     string `json:"key"`
 	Minutes *int   `json:"minutes"`
+	// Note says what a pursuit's log was, such as which chore. Empty logs none.
+	Note string `json:"note,omitempty"`
 }
 
 // PageCode is the panel page's URL carrying a one-use code, which opens the page until ExpiresAt.
@@ -131,7 +133,7 @@ func (w *Watch) pageRoutes(notifyDone bool) *http.ServeMux {
 			return
 		}
 		// A pick that started runs to its end, though the asker leaves.
-		step, err := w.Pick(context.WithoutCancel(request.Context()), asked.Key, asked.Minutes, notifyDone)
+		step, err := w.Pick(context.WithoutCancel(request.Context()), asked.Key, asked.Minutes, asked.Note, notifyDone)
 		if err != nil {
 			failure := pickFailure(err)
 			answer(response, statusFor(failure.ExitCode), failure)
@@ -189,10 +191,10 @@ func socketClient(path string) *http.Client {
 // *PickError where the pick did nothing or did not go through, or ErrNoWatch.
 // Where nothing answers and another process holds the watch lock, it is
 // ErrWatchServesNoPicks.
-func (p Paths) AskPick(ctx context.Context, key string, minutes *int) (Panel, error) {
+func (p Paths) AskPick(ctx context.Context, key string, minutes *int, note string) (Panel, error) {
 	ctx, cancel := context.WithTimeout(ctx, pickWithin)
 	defer cancel()
-	body, err := json.Marshal(pickRequest{Key: key, Minutes: minutes})
+	body, err := json.Marshal(pickRequest{Key: key, Minutes: minutes, Note: note})
 	if err != nil {
 		return Panel{}, err
 	}

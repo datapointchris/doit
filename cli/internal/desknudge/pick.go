@@ -73,11 +73,16 @@ var habitID = regexp.MustCompile(`^[0-9]+$`)
 
 // pick acts on one panel row by its key, and answers the next step: a done
 // step once something is completed, or a timed pursuit's minutes. minutes
-// logs a timed pursuit at once.
-func (w *Watch) pick(ctx context.Context, key string, minutes *int, notifyDone bool) (Panel, error) {
+// logs a timed pursuit at once. note goes into a pursuit's journal entry, so
+// it is refused on a pick that logs no pursuit, such as one opening the minutes.
+func (w *Watch) pick(ctx context.Context, key string, minutes *int, note string, notifyDone bool) (Panel, error) {
 	d := w.desk
 	panel := panelFor(d.Paths.readPanel(), d.Paths.readState(), StepToday)
 	resolved, refusal := d.resolveKey(&panel, key, minutes)
+	note = strings.TrimSpace(note)
+	if refusal == nil && note != "" && (resolved.verb != verbComplete || resolved.found.completes.Kind != KindPursuit) {
+		refusal = refused("a note goes only with a pick that logs a pursuit, and %s logs none", key)
+	}
 	if refusal != nil {
 		return d.refuse(ctx, refusal)
 	}
@@ -89,7 +94,7 @@ func (w *Watch) pick(ctx context.Context, key string, minutes *int, notifyDone b
 	case verbMinutes:
 		return minutesPanel(panel, resolved.found, nil), nil
 	}
-	return w.complete(ctx, resolved.found, resolved.minutes, notifyDone)
+	return w.complete(ctx, resolved.found, resolved.minutes, note, notifyDone)
 }
 
 // keyVerb is what a picked key asks for.
@@ -195,7 +200,7 @@ func (d *Desk) listed(panel *Panel, key string) (entry, *PickError) {
 // it ended, and one that recorded nothing frees it at once. A tick or an
 // untick holds nothing, because each one records another set. The pick
 // supersedes how the key's earlier picks were refused or skipped.
-func (w *Watch) complete(ctx context.Context, found entry, minutes *int, notifyDone bool) (Panel, error) {
+func (w *Watch) complete(ctx context.Context, found entry, minutes *int, note string, notifyDone bool) (Panel, error) {
 	d := w.desk
 	before, leave, ok := w.turns.enter(commitGroup(found.completes, found.key), found.key)
 	if !ok {
@@ -207,7 +212,7 @@ func (w *Watch) complete(ctx context.Context, found entry, minutes *int, notifyD
 	moment := d.Now()
 	pick := RunningPick{
 		ID: service.NewWriteID(moment), Key: found.key, Text: found.text, Action: found.actionOf(), Completes: found.completes,
-		Minutes: minutes, PickedAt: stamp(picked), StartedAt: stamp(moment),
+		Minutes: minutes, Note: note, PickedAt: stamp(picked), StartedAt: stamp(moment),
 	}
 	readAt := d.Paths.panelReadAt()
 	took := false
@@ -240,6 +245,7 @@ type pickEnd struct {
 	target  Completes
 	action  string
 	minutes *int
+	note    string
 	// holds is whether the pick holds its key, which its outcome frees or keeps.
 	holds bool
 	// at is the moment its picked line carries.
@@ -279,18 +285,21 @@ func (d *Desk) finishPick(ctx context.Context, end pickEnd, outcome completion) 
 	if ended != nil {
 		nudgeID = &ended.NudgeID
 	}
-	d.Paths.appendRecords(pickedRecord(end.at, nudgeID, outcome.fields(end.target, end.action, end.minutes), end.seen))
+	d.Paths.appendRecords(pickedRecord(end.at, nudgeID, outcome.fields(end.target, end.action, end.minutes, end.note), end.seen))
 	return outcome
 }
 
 // fields are what a picked line says of a pick that ran.
-func (c completion) fields(target Completes, action string, minutes *int) pickedFields {
-	var failure *string
+func (c completion) fields(target Completes, action string, minutes *int, note string) pickedFields {
+	var failure, noted *string
 	if !c.ok {
 		failure = &c.body
 	}
+	if note != "" {
+		noted = &note
+	}
 	return pickedFields{
-		Kind: target.Kind, Ref: target.Ref, ItemID: target.ItemID, Minutes: minutes,
+		Kind: target.Kind, Ref: target.Ref, ItemID: target.ItemID, Minutes: minutes, Note: noted,
 		Action: action, Outcome: c.outcome(), OK: c.ok, Error: failure,
 	}
 }
@@ -404,7 +413,7 @@ func pursuitNotLogged(name string, err error) completion {
 // Otherwise the service's check names the choice: the one the row names, or
 // with none named the only one the resolve offers. on_log runs against that
 // choice, then the log posts what on_log did.
-func (d *Desk) loggedPursuit(ctx context.Context, target Completes, minutes *int, journal logWrite) completion {
+func (d *Desk) loggedPursuit(ctx context.Context, target Completes, minutes *int, note string, journal logWrite) completion {
 	name := target.Ref
 	ctx, cancel := context.WithTimeout(ctx, pursuits.OnLogBound+2*writeBound)
 	defer cancel()
@@ -430,7 +439,7 @@ func (d *Desk) loggedPursuit(ctx context.Context, target Completes, minutes *int
 	}
 	run := pursuits.Run{
 		Check: check, Chosen: check.Chosen, Held: held,
-		Entry: pursuits.Entry{ID: journal.id, Minutes: minutes, Machine: d.Machine, Actor: d.Actor},
+		Entry: pursuits.Entry{ID: journal.id, Minutes: minutes, Note: note, Machine: d.Machine, Actor: d.Actor},
 	}
 	if journal.save != nil {
 		run.Started = journal.save

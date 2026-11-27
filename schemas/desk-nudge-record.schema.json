@@ -263,6 +263,13 @@
           ],
           "description": "The minutes logged for a timed pursuit."
         },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What a pursuit's log was, such as which chore, as typed with the pick. Null where none was, and absent from a line written before picks carried one."
+        },
         "action": {
           "enum": [
             "complete",

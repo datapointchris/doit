@@ -22,6 +22,7 @@ type RunningPick struct {
 	Action    string    `json:"action"`
 	Completes Completes `json:"completes"`
 	Minutes   *int      `json:"minutes"`
+	Note      string    `json:"note,omitempty"`
 	// PickedAt is when it was picked, whose day on the desk the commit lands on.
 	PickedAt  string `json:"picked_at"`
 	StartedAt string `json:"started_at"`
@@ -256,7 +257,7 @@ func (d *Desk) committed(ctx context.Context, pick RunningPick, resumed bool) co
 			if resumed && pick.Log != nil {
 				return resentLog(d.postedLog(ctx, pick.Log), pick.Log)
 			}
-			return d.loggedPursuit(ctx, pick.Completes, pick.Minutes, logWrite{id: pick.ID, save: func(body map[string]any) error {
+			return d.loggedPursuit(ctx, pick.Completes, pick.Minutes, pick.Note, logWrite{id: pick.ID, save: func(body map[string]any) error {
 				return d.Paths.change(func(state *State) error {
 					if saved := state.runningPick(pick.ID); saved != nil {
 						saved.Log = body
@@ -294,7 +295,7 @@ func (d *Desk) endRunning(ctx context.Context, pick RunningPick, outcome complet
 	readAt := d.Paths.panelReadAt()
 	moment := d.Now()
 	return d.finishPick(ctx, pickEnd{
-		key: pick.Key, target: pick.Completes, action: pick.Action, minutes: pick.Minutes,
+		key: pick.Key, target: pick.Completes, action: pick.Action, minutes: pick.Minutes, note: pick.Note,
 		holds: holdsKey(pick.Action), at: at, seen: seen, notifyDone: notifyDone,
 		unwritten: "it stays marked started, and the watch takes it up again when it next starts",
 		keep: func(state *State) {

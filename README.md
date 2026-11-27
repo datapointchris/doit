@@ -377,6 +377,7 @@ doit desk-nudge pause                      # hold the clock until resume
 doit desk-nudge panel open                 # the panel as a page in a window, where a click completes a row
 doit desk-nudge panel show --json          # the panel's rows, read with no request
 doit desk-nudge panel pick habit:17 --json # complete one row, and print the next step
+doit desk-nudge panel pick pursuit:chore --note 'vacuumed the house'   # log a pursuit, saying what it was
 ```
 
 The watch ticks every 15 seconds and counts the time since the last nudge ended. When that reaches
@@ -448,6 +449,9 @@ pursuit and every row of `doit today` that something completes, in each lane's o
   whose `on_log` completes one of its choices lists each choice as its own row, such as
   `tasks · Bathe Dingo`, and the pick names it as `--item` does. Where those choices could not be
   read, or there are none, the pursuit is a note, because a log naming no choice completes nothing.
+  A pick may carry a note saying what the log was, such as which chore, as `doit pursuits log chore
+  <note>` does. `panel pick --note` sends one, and so does the field beside each pursuit on the
+  panel page and beside Up next's Log. The watch refuses a note on a pick that logs no pursuit.
 - **A pursuit counted in minutes** opens one more step: log its usual amount, the one most often
   logged, or step up or down by `minutesStep`. With nothing logged in minutes yet, it offers
   `minutesWithoutUsual`, both in `cli/internal/desknudge/panel.go`, and calls none of them usual.
@@ -557,7 +561,8 @@ cancel, so a window that closes on blur mid-pick still lets the pick finish.
 The panel takes back a set by its untick, and changes a timing answer by offering the others. A misclicked habit is taken back on life's own
 page, and a review entry with `doit review undo`. A pursuit log stays in the journal.
 
-`POST /picks` takes `{"key": "habit:17", "minutes": null}`. It answers the step the pick leads to,
+`POST /picks` takes `{"key": "habit:17", "minutes": null}`, and a pursuit's log may add `"note"`.
+It answers the step the pick leads to,
 or a refusal as `{"exit_code", "message"}`. The route table at the top of
 `cli/internal/desknudge/socket.go` lists each status it answers.
 

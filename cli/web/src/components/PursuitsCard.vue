@@ -16,6 +16,14 @@
       :class="{ done: gone }">
       <div class="phead">
         <span class="pname">{{ row.name }}</span>
+        <input
+          v-if="!row.writes_through && !gone"
+          v-model="notes[row.name]"
+          class="log-note"
+          type="text"
+          placeholder="what was it?"
+          :aria-label="`what the ${row.name} log was`"
+          @keydown.enter="row.unit === 'checkoffs' && log(row)" />
         <span class="pnote">{{ gone ? 'done today' : row.note }}</span>
         <PickButton
           v-if="row.unit === 'checkoffs' && !row.writes_through"
@@ -23,7 +31,7 @@
           :pick-key="row.key"
           :pick="pickOf(picks, row.key)"
           :done="gone"
-          @pick="row.key && store.click(row.key)">
+          @pick="log(row)">
           done
         </PickButton>
       </div>
@@ -39,7 +47,7 @@
           :pick-key="row.key"
           :pick="pickAt(row, amount)"
           :done="gone"
-          @pick="row.key && store.click(row.key, amount)">
+          @pick="log(row, amount)">
           +{{ amount }}
         </PickButton>
       </div>
@@ -88,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, reactive } from 'vue'
 import { minutesText, pickOf, type PursuitRow, type ShownPick, type View } from '../panel'
 import { usePanelStore } from '../store'
 import PickButton from './PickButton.vue'
@@ -123,6 +131,14 @@ const itemsOf = (row: PursuitRow) =>
 const share = (row: PursuitRow) => `${row.need ? Math.min(100, ((row.done ?? 0) / row.need) * 100) : 0}%`
 
 const usual = (row: PursuitRow) => (row.usual_minutes ? Math.round(row.usual_minutes) : 30)
+
+/** What each pursuit's next log was, as typed beside it, by pursuit name. */
+const notes = reactive<Record<string, string>>({})
+
+// A log that went through clears its note, and one that did not keeps it for another try.
+async function log(row: PursuitRow, minutes: number | null = null) {
+  if (row.key && (await store.click(row.key, minutes, notes[row.name] ?? ''))) notes[row.name] = ''
+}
 
 // A timed pursuit's three buttons share its key, so its pick shows on the amount it logs.
 function pickAt(row: PursuitRow, amount: number): ShownPick | null {

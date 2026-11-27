@@ -347,6 +347,42 @@ button:disabled {
   color: var(--up-next);
 }
 
+.log-note {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.5rem 0.8rem;
+}
+
+.log-note::placeholder {
+  color: var(--text-faint);
+}
+
+.log-note:focus {
+  outline: none;
+  border-color: var(--focus);
+}
+
+.phead .log-note {
+  font-size: 0.82rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.45rem;
+  border-color: transparent;
+}
+
+.prow:hover .phead .log-note {
+  border-color: var(--border);
+}
+
+.prow .phead .log-note:focus {
+  border-color: var(--focus);
+}
+
 .feedback {
   display: flex;
   flex-wrap: wrap;

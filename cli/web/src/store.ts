@@ -157,10 +157,11 @@ export function createPanelStore(now: () => Date = () => new Date()) {
    * One click on a row of key, which the watch commits in the request. A click
    * on a row whose pick still runs does nothing, so a double click is one pick.
    * No answer leaves whether it landed unknown, so the page reads the panel and
-   * never sends the click again.
+   * never sends the click again. A note says what a pursuit's log was. It
+   * answers whether the pick went through.
    */
-  async function click(key: string, minutes: number | null = null) {
-    if (clicks.has(key) || pickOf(picks(), key)?.state === 'committing') return
+  async function click(key: string, minutes: number | null = null, note = ''): Promise<boolean> {
+    if (clicks.has(key) || pickOf(picks(), key)?.state === 'committing') return false
     clicks.set(key, {
       id: `click-${++clicked}`,
       key,
@@ -172,7 +173,7 @@ export function createPanelStore(now: () => Date = () => new Date()) {
       ended_at: null,
     })
     redraw()
-    const answered = await watch.pick(key, minutes)
+    const answered = await watch.pick(key, minutes, note)
     clicks.delete(key)
     redraw()
     if (answered.ok) markDone(key)
@@ -180,6 +181,7 @@ export function createPanelStore(now: () => Date = () => new Date()) {
     const ended = pickOf(picks(), key)
     if (ended && !underWay(ended)) tell(endedText(ended))
     else tell(answered.ok ? `Done: ${answered.body.message ?? key}.` : answered.message)
+    return answered.ok
   }
 
   /** An answer to the nudge, which acts at once. */
